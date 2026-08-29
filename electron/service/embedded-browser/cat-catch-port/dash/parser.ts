@@ -372,6 +372,7 @@ function expandSegmentTemplate(input: {
   nowMs?: number
   representationId: string
   periodStartSeconds?: number
+  timeShiftBufferDepthSeconds?: number
   bandwidth?: number
   reasons: string[]
 }) {
@@ -438,32 +439,59 @@ function expandSegmentTemplate(input: {
     addReason(input.reasons, 'segment-template-duration-missing')
     return { initializationRange, initializationUrl, segments: [] as DashSegment[] }
   }
-  if (input.durationSeconds === undefined) {
-    addReason(input.reasons, 'segment-template-duration-unbounded')
-    return { initializationRange, initializationUrl, segments: [] as DashSegment[] }
-  }
   const segmentDuration = duration / timescale
-  const count = Math.min(MAX_EXPANDED_SEGMENTS, Math.ceil(input.durationSeconds / segmentDuration))
+  let startIndex = 0
+  let count = 0
+  if (input.dynamic) {
+    if (input.availabilityStartTimeSeconds === undefined) {
+      addReason(input.reasons, 'segment-template-duration-unbounded')
+      return { initializationRange, initializationUrl, segments: [] as DashSegment[] }
+    }
+    const nowMs = Number(input.nowMs ?? Date.now())
+    const nowSeconds = Number.isFinite(nowMs) ? nowMs / 1000 : Date.now() / 1000
+    const periodStartSeconds = input.periodStartSeconds || 0
+    const elapsedSeconds = nowSeconds
+      - (input.availabilityStartTimeSeconds + periodStartSeconds)
+    const availableStart = Number.isFinite(input.timeShiftBufferDepthSeconds)
+      ? Math.floor((elapsedSeconds - Number(input.timeShiftBufferDepthSeconds)) * timescale / duration)
+      : 0
+    const availableEnd = Math.min(
+      Math.ceil((elapsedSeconds + (input.minimumUpdatePeriodSeconds || 0)) * timescale / duration),
+      Math.floor(elapsedSeconds * timescale / duration),
+    )
+    startIndex = Math.max(0, availableStart)
+    count = Math.max(0, availableEnd - startIndex)
+  } else {
+    if (input.durationSeconds === undefined) {
+      addReason(input.reasons, 'segment-template-duration-unbounded')
+      return { initializationRange, initializationUrl, segments: [] as DashSegment[] }
+    }
+    count = Math.ceil(input.durationSeconds / segmentDuration)
+  }
+  count = Math.min(MAX_EXPANDED_SEGMENTS, count)
   if (count >= MAX_EXPANDED_SEGMENTS) addReason(input.reasons, 'segment-expansion-limit')
   return {
     initializationRange,
     initializationUrl,
     segments: Array.from({ length: count }, (_item, index) => {
-      const number = (Number.isFinite(startNumber) ? startNumber : 1) + index
-      const durationForSegment = input.durationSeconds === undefined
+      const segmentIndex = startIndex + index
+      const number = (Number.isFinite(startNumber) ? startNumber : 1) + segmentIndex
+      const durationForSegment = input.dynamic
         ? segmentDuration
         : Math.max(0, Math.min(
-            segmentDuration,
-            input.durationSeconds - index * segmentDuration,
-          ))
+          segmentDuration,
+          (input.durationSeconds || 0) - index * segmentDuration,
+        ))
       return {
         duration: durationForSegment,
         index,
         number,
+        ...(input.dynamic ? { time: segmentIndex * duration } : {}),
         url: resolveUrl(replaceTemplateTokens(media, {
           bandwidth: input.bandwidth,
           number,
           representationId: input.representationId,
+          time: input.dynamic ? segmentIndex * duration : undefined,
         }), input.baseUrl),
       } satisfies DashSegment
     }),
@@ -639,6 +667,7 @@ function parseRepresentation(input: {
   periodSegmentList?: DashXmlElement
   periodSegmentTemplate?: DashXmlElement
   periodStartSeconds?: number
+  timeShiftBufferDepthSeconds?: number
   representation: DashXmlElement
 }) {
   const representationId = attribute(input.representation, 'id') || String(input.index + 1)
@@ -673,6 +702,7 @@ function parseRepresentation(input: {
     nowMs: input.nowMs,
     periodStartSeconds: input.periodStartSeconds,
     representationId,
+    timeShiftBufferDepthSeconds: input.timeShiftBufferDepthSeconds,
     reasons,
   })
   const representationList = firstChild(input.representation, 'SegmentList')
@@ -877,6 +907,7 @@ export function parseDashManifest(input: {
   const dynamic = String(attribute(root, 'type') || 'static').toLowerCase() === 'dynamic'
   const minimumUpdatePeriodSeconds = parseIsoDurationSeconds(attribute(root, 'minimumUpdatePeriod'))
   const availabilityStartTimeSeconds = parseIsoDateSeconds(attribute(root, 'availabilityStartTime'))
+  const timeShiftBufferDepthSeconds = parseIsoDurationSeconds(attribute(root, 'timeShiftBufferDepth'))
   const baseUrls = resolveBaseUrls([String(input.baseUrl || '')], root)
   const protections = collectContentProtections(root)
   const unsupportedReasons: string[] = []
@@ -918,6 +949,7 @@ export function parseDashManifest(input: {
           periodSegmentList,
           periodSegmentTemplate,
           periodStartSeconds,
+          timeShiftBufferDepthSeconds,
           representation,
         })
         parsed.unsupportedReasons.forEach(reason => addReason(unsupportedReasons, reason))

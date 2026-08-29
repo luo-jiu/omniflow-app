@@ -1696,6 +1696,20 @@
 - legacy cleanup: 无新增删除；现有 target parser/task/output adapter 继续作为唯一 production owner。
 - validation: DASH parser 定向 `11/11`，全量 Vitest（排除 Node 专用同步 runner）`212 files / 1410 passed / 3 skipped`，全量 `npm run lint`、应用 TypeScript `--noEmit`、metadata validator 和同步 runner `16/16` 均通过；完整 build 与真实页面验证未执行，build 仍避免触碰其他 agent 的 dirty `dist-electron/**`。
 
+## 2026-08-29: same target (DASH dynamic duration-only window)
+
+- observedHead / migrationTarget: 均为 `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本步补固定 `mpd-parser@1.4.0` 对 dynamic MPD duration-only `SegmentTemplate` 的时间窗口语义。
+- reviewedThrough / portedThrough: 均保持 `null`；`dash.parser-planner` 与 `dash.timeline-download-merge` 继续 `porting`，`dash-engine` unit 仍开放。
+- change groups: `dynamic-duration-window`、`time-shift-buffer-boundary` 与 `fixture-contract`。
+- affected capability IDs: `dash.parser-planner`；metadata 为 `7 units / 32 capabilities / 210 anchors / 99 cleanup entries / 199 planned IDs / 178 active refs`。
+- fixtures/tests: `dash.dynamic-duration-availability` 注入固定 `nowMs`，覆盖 `availabilityStartTime`、`minimumUpdatePeriod`、`timeShiftBufferDepth` 计算出的 live 窗口，并验证起始 number/time、结束边界和 URL；DASH parser 定向为 `1 file / 12 passed`。
+- accepted differences: 动态 duration-only 结果只用于解析计划展示，`DashTaskExecutor` 仍拒绝 dynamic MPD；不实现 `endNumber`、UTC timing/client offset 或动态清单刷新，缺少 availability 证据时保持 `segment-template-duration-unbounded` 拒绝。
+- excluded changes and reasons: 未修改 dynamic task/live refresh、复杂嵌套 SIDX、SegmentBase 递归、renderer UI、HLS、MSE、transfer 或 output；没有真实直播 MPD/ffprobe 场景，未宣称 DASH unit 已关闭。
+- unresolved gaps: dynamic task/refresh、UTC timing/client offset、`endNumber`/其他 availability 属性、复杂嵌套 SIDX、多轨道跨 Period init/discontinuity 语义、真实 MPD/ffprobe 输出和 unit 关闭条件仍待完成。
+- runtime changes: `expandSegmentTemplate` 在 dynamic duration-only 模式按上游 start/end 公式计算窗口，应用 `timeShiftBufferDepth` 截断起点，按 `$Number$`/`$Time$` 物化有限 segments；static duration-only 路径继续使用原有 MPD/Period duration 和最后一片裁剪。
+- legacy cleanup: 无新增删除；现有 target parser/task/output adapter 继续作为唯一 production owner。
+- validation: DASH parser 定向 `12/12`，DASH parser/task/output/renderer 定向 `5 files / 21 passed`，全量 Vitest（排除 Node 专用同步 runner）`212 files / 1411 passed / 3 skipped`，全量 `npm run lint`、应用 TypeScript `--noEmit`、metadata validator 和同步 runner `16/16` 均通过；完整 build 与真实页面验证未执行，build 仍避免触碰其他 agent 的 dirty `dist-electron/**`。
+
 ## Template
 
 ```markdown

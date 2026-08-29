@@ -303,6 +303,48 @@ describe('DASH parser', () => {
     expect(notYetAvailable.representations[0].segments).toEqual([])
   })
 
+  it('dash.dynamic-duration-availability', () => {
+    const root = node('MPD', {
+      availabilityStartTime: '2026-08-29T12:00:00Z',
+      minimumUpdatePeriod: 'PT2S',
+      timeShiftBufferDepth: 'PT4S',
+      type: 'dynamic',
+    }, [
+      node('Period', {}, [node('AdaptationSet', { contentType: 'video' }, [
+        node('SegmentTemplate', {
+          duration: '2',
+          media: 'segment-$Number$.m4s',
+          startNumber: '1',
+          timescale: '1',
+        }),
+        node('Representation', { id: 'duration-live' }),
+      ])]),
+    ])
+    const manifest = parseDashManifest({
+      baseUrl: 'https://cdn.example/live/manifest.mpd',
+      nowMs: Date.parse('2026-08-29T12:00:10Z'),
+      root,
+      text: '',
+    })
+    expect(manifest.unsupportedReasons).toEqual([])
+    expect(manifest.representations[0].segments).toEqual([
+      {
+        duration: 2,
+        index: 0,
+        number: 4,
+        time: 6,
+        url: 'https://cdn.example/live/segment-4.m4s',
+      },
+      {
+        duration: 2,
+        index: 1,
+        number: 5,
+        time: 8,
+        url: 'https://cdn.example/live/segment-5.m4s',
+      },
+    ])
+  })
+
   it('dash.segment-base-and-period-boundary', () => {
     const singleFileRoot = node('MPD', {}, [
       node('Period', {}, [
