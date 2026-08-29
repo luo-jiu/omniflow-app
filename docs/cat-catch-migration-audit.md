@@ -29,6 +29,8 @@
 
 本轮补充：DASH 静态计划也已经通过 `publishStagedOutput` 完成 lease 内下载/合并和单次最终发布；其 active task 由 `EmbeddedBrowserDashLiveSessionOwner` 负责取消。DASH live recorder 的 workdir、停止导出和更广泛的 registry / 资料库交付仍未切换，因此 `dash.timeline-download-merge` 与 output integration 继续保持 `porting`。
 
+本轮继续：DASH live 停止后的冻结轨道合并也通过同一 lease 完成，成功发布后才结束 live session 并清理 workdir；直播轮询期间的 active recorder workdir、持续输出恢复和更广泛的 registry / 资料库交付仍未切换。
+
 HLS master 现已按固定 level identity 与 resolved URI 合并重复 variant；即使相同 URI 被其他 URI 隔开，parser、download plan 与工具区仍保留完整且有序去重的 AUDIO/SUBTITLES group 集合，单值字段只作为兼容首组。固定 hls.js 的 `MANIFEST_LOADED` 会保留跨 URI 声明，但 Cat Catch 生成选择项所消费的 `MANIFEST_PARSED` 只暴露首 URI；显式相同 `PATHWAY-ID` 时还会把后续 URI 的 group 合到首 URI。OmniFlow 接受数据保留差异：每个 identity/URI 继续独立可选，不增加 fallback 顺序或 failover 执行语义。
 
 固定 hls.js 会先用 `isMediaPlaylist` 选择 master 或 media parser：出现 `EXTINF` / `TARGETDURATION` 后，混入的 `STREAM-INF` / `MEDIA` 不能再生成 variant/rendition。对应 URI 仍由 media URI alternative 物化为 fragment，并贯穿 sequence、MAP、key、implicit IV 与 Cat Catch 下载计划；pure parser 不允许 master-only 分支反向改变已确定的 media 模式。

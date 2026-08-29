@@ -146,6 +146,8 @@ unit 是生产切换与删除旧实现的最小边界。可以在 unit 内逐项
 
 本轮继续收口 DASH 输出：静态 MPD 计划的分片下载和单/双轨 ffmpeg 合并现在只写入 main-only lease，成功后才发布到最终 `outputPath`；DASH active task 由 DASH session owner 负责取消。DASH live recorder 的工作目录和停止导出仍是独立生命周期，不能据此宣称 DASH unit 或 output integration 已完成。
 
+DASH live 的停止导出现在也遵守同一 lease 规则：冻结轨道先在暂存路径合并，发布成功后才结束 session 并删除 workdir；持续录制和跨卸载恢复仍不在本轮范围内。
+
 旧代码中存在网络捕捉、MSE、HLS、DASH、下载、ffmpeg 和资料库导入入口，只能说明有 characterization 输入，不能据此宣称已经迁移。完成一项能力至少需要：
 
 1. 固定上游来源和行为依赖。

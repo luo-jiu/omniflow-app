@@ -3116,20 +3116,33 @@ export function createEmbeddedBrowserMainController(
         tabId: normalizedTabId,
         totalSegments: stopped.totalSegments,
       })
-      const result = await mergeDashTaskTracksToOutput({
-        audio: audioRepresentation ? { path: path.join(session.workDirectoryPath || '', 'audio-track.bin'), representation: audioRepresentation } : undefined,
-        durationSeconds: plan.durationSeconds,
-        ffmpegPath: session.ffmpegPath,
-        outputPath: session.outputPath,
-        signal: activeTask.signal,
-        video: videoRepresentation ? { path: path.join(session.workDirectoryPath || '', 'video-track.bin'), representation: videoRepresentation } : undefined,
+      const activeSignal = activeTask.signal
+      let ffmpegPath: string | undefined
+      const published = await publishStagedOutput({
+        fileName: path.basename(session.outputPath),
+        mimeType: 'video/mp4',
+        ownerTaskId: `dash-live-output-${randomUUID()}`,
+        purpose: 'mpd-live-recording',
+        store: getEmbeddedBrowserStagedOutputLeaseStore(),
+        targetPath: session.outputPath,
+        write: async (stagedPath) => {
+          const result = await mergeDashTaskTracksToOutput({
+            audio: audioRepresentation ? { path: path.join(session.workDirectoryPath || '', 'audio-track.bin'), representation: audioRepresentation } : undefined,
+            durationSeconds: plan.durationSeconds,
+            ffmpegPath: session.ffmpegPath,
+            outputPath: stagedPath,
+            signal: activeSignal,
+            video: videoRepresentation ? { path: path.join(session.workDirectoryPath || '', 'video-track.bin'), representation: videoRepresentation } : undefined,
+          })
+          ffmpegPath = result.ffmpegPath
+        },
       })
       emitEmbeddedBrowserDashTask({
         completedSegments: stopped.totalSegments,
         durationSeconds: plan.durationSeconds,
         manifestUrl: session.manifestUrl,
         message: 'DASH 直播录制文件已完成',
-        outputPath: result.outputPath,
+        outputPath: published.outputPath,
         requestId,
         stage: 'completed',
         status: 'success',
@@ -3138,7 +3151,7 @@ export function createEmbeddedBrowserMainController(
       })
       embeddedBrowserDashSessionOwner.takeLive(requestId, normalizedTabId)
       await rm(session.workDirectoryPath || '', { force: true, recursive: true }).catch(() => undefined)
-      return { ffmpegPath: result.ffmpegPath, ok: true, outputPath: result.outputPath }
+      return { ffmpegPath, ok: true, outputPath: published.outputPath }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       emitEmbeddedBrowserDashTask({
