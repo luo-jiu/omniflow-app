@@ -46,6 +46,7 @@ describe('DASH output adapter', () => {
       audioManifestUrl: '/tmp/audio-track.bin',
       durationSeconds: 12,
       ffmpegPath: '/custom/ffmpeg',
+      inputKind: 'local-file',
       outputPath: '/tmp/output.mp4',
       signal,
       videoManifestUrl: '/tmp/video-track.bin',
@@ -70,6 +71,7 @@ describe('DASH output adapter', () => {
     expect(manifestDownloadMocks.single).toHaveBeenCalledWith({
       durationSeconds: undefined,
       ffmpegPath: undefined,
+      inputKind: 'local-file',
       kind: 'mpd',
       manifestUrl: '/tmp/audio-track.bin',
       outputPath: '/tmp/audio.m4a',

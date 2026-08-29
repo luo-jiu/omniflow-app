@@ -1823,6 +1823,20 @@
 - legacy cleanup: 无；DASH unit 尚未 cutover，旧实现和 `legacy-cleanup.json` 继续保留。
 - validation: DASH 定向 Vitest `21/21`、应用 TypeScript `--noEmit`、scoped ESLint、metadata validator 和 `git diff --check` 通过；完整 build、完整 Vitest、真实页面/真实 MPD/ffprobe 未执行。
 
+## 2026-08-29: same target (DASH static real output evidence)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片补 DASH 静态双轨的真实 FFmpeg/FFprobe 输出证据。
+- reviewedThrough / portedThrough: 均保持 `null`；`dash.parser-planner` 与 `dash.timeline-download-merge` 继续 `porting`，`dash-engine` unit 仍开放。
+- change groups: `output-integration`（本地轨道输入模式）与 `fixture-contract`（真实生成媒体/探测）。
+- affected capability IDs: `dash.timeline-download-merge`；metadata 为 `7 units / 32 capabilities / 210 anchors / 100 cleanup entries / 211 planned IDs / 190 active refs`。
+- fixtures/tests: `electron/service/embeddedBrowserDashRealOutput.test.ts#dash.real-ffmpeg-ffprobe-output` 在本机可用 ffmpeg/ffprobe 时生成极小静态 DASH fMP4，读取 MPD、下载双轨 init/media、合并并验证 MP4 容器、正时长、H.264 video 和 AAC audio；相关 DASH/output 定向为 `4 files / 12 passed`。
+- accepted differences: 真实输出测试使用临时 FFmpeg 生成的静态 MPD 和 injected local asset fetch，不宣称 dynamic MPD refresh 或真实网站 authority parity；缺失 ffmpeg/ffprobe 时整个测试显式 skip。
+- excluded changes and reasons: 未改 HLS manifest 参数、DASH parser/live 轮询、复杂 SIDX、多 Period、renderer UI、通用 task registry 或资料库交付。
+- unresolved gaps: 动态 MPD/真实 live output、复杂嵌套 SIDX、不完整或初始化冲突的多 Period、renderer workflow 和 `dash-engine` 原子关闭仍待完成。
+- runtime changes: `embeddedBrowserResourceManifestDownloadService` 增加 `inputKind: 'local-file'`，本地输入跳过 HLS 专用 `-protocol_whitelist/-allowed_extensions` 与 HTTP headers；DASH output adapter 显式使用该模式，HLS 默认保持原 `hls-manifest`。
+- legacy cleanup: 无；DASH unit 尚未 cutover，旧实现和 `legacy-cleanup.json` 继续保留。
+- validation: DASH/output 定向 `12/12`、真实 FFmpeg/FFprobe test 通过；此前全仓 lint、排除 Node runner 的 Vitest `217 files / 1434 passed / 3 skipped`、TypeScript、metadata validator、sync runner `16/16` 均通过；完整 build、真实网站/动态 MPD 未执行。
+
 ```markdown
 ## YYYY-MM-DD: <from> -> <to>
 

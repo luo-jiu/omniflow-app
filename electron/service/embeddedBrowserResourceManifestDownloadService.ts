@@ -5,11 +5,13 @@ import { terminateDesktopProcessTree } from '../platform/processTree'
 import { resolveEmbeddedBrowserFfmpegPath } from './embeddedBrowserResourceMergeService'
 
 export type EmbeddedBrowserManifestDownloadKind = 'hls' | 'mpd'
+export type EmbeddedBrowserManifestInputKind = 'hls-manifest' | 'local-file'
 
 export type EmbeddedBrowserManifestDownloadRequest = {
   durationSeconds?: number
   ffmpegPath?: string
   headers?: Record<string, string>
+  inputKind?: EmbeddedBrowserManifestInputKind
   kind: EmbeddedBrowserManifestDownloadKind
   manifestUrl: string
   onProgress?: (payload: {
@@ -33,6 +35,7 @@ export type EmbeddedBrowserManifestTrackMergeRequest = {
   audioManifestUrl: string
   durationSeconds?: number
   ffmpegPath?: string
+  inputKind?: EmbeddedBrowserManifestInputKind
   onProgress?: (payload: {
     processedSeconds?: number
     speedText?: string
@@ -94,11 +97,12 @@ export function deriveEmbeddedBrowserManifestOutputFileName(input: string, kind:
 }
 
 export function buildEmbeddedBrowserManifestDownloadArgs(request: EmbeddedBrowserManifestDownloadRequest) {
+  const isLocalFile = request.inputKind === 'local-file'
   return [
     '-y',
     '-nostats',
-    ...FFMPEG_MANIFEST_INPUT_POLICY_ARGS,
-    ...buildFfmpegHttpHeaderArgs(request.headers),
+    ...(isLocalFile ? [] : FFMPEG_MANIFEST_INPUT_POLICY_ARGS),
+    ...(isLocalFile ? [] : buildFfmpegHttpHeaderArgs(request.headers)),
     '-progress',
     'pipe:1',
     '-i',
@@ -116,17 +120,21 @@ export function buildEmbeddedBrowserManifestDownloadArgs(request: EmbeddedBrowse
 }
 
 export function buildEmbeddedBrowserManifestTrackMergeArgs(request: EmbeddedBrowserManifestTrackMergeRequest) {
+  const isLocalFile = request.inputKind === 'local-file'
+  const inputPolicyArgs = isLocalFile ? [] : FFMPEG_MANIFEST_INPUT_POLICY_ARGS
+  const videoHeaderArgs = isLocalFile ? [] : buildFfmpegHttpHeaderArgs(request.videoHeaders)
+  const audioHeaderArgs = isLocalFile ? [] : buildFfmpegHttpHeaderArgs(request.audioHeaders)
   return [
     '-y',
     '-nostats',
-    ...FFMPEG_MANIFEST_INPUT_POLICY_ARGS,
-    ...buildFfmpegHttpHeaderArgs(request.videoHeaders),
+    ...inputPolicyArgs,
+    ...videoHeaderArgs,
     '-progress',
     'pipe:1',
     '-i',
     request.videoManifestUrl,
-    ...FFMPEG_MANIFEST_INPUT_POLICY_ARGS,
-    ...buildFfmpegHttpHeaderArgs(request.audioHeaders),
+    ...inputPolicyArgs,
+    ...audioHeaderArgs,
     '-i',
     request.audioManifestUrl,
     '-map',

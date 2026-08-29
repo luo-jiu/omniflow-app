@@ -1473,7 +1473,8 @@
         "dash.dynamic-live-append",
         "dash.dynamic-session-owner",
         "dash.renderer-task-snapshot-ipc",
-        "dash.live-manifest-authority"
+        "dash.live-manifest-authority",
+        "dash.real-ffmpeg-ffprobe-output"
       ],
       "testRefs": [
         "electron/service/embedded-browser/processing/dash-task.test.ts#dash.negative-repeat",
@@ -1488,6 +1489,7 @@
     "electron/service/embedded-browser/processing/dash-live-session-owner.test.ts#dash.dynamic-session-owner",
     "electron/service/embeddedBrowserMainIpc.test.ts#dash.renderer-task-snapshot-ipc",
     "electron/service/embedded-browser/integrations/dash-manifest-authority.test.ts#dash.live-manifest-authority",
+    "electron/service/embeddedBrowserDashRealOutput.test.ts#dash.real-ffmpeg-ffprobe-output",
         "electron/service/embedded-browser/processing/dash-live-adapter.test.ts#dash.main-xml-adapter",
         "electron/service/embedded-browser/processing/dash-output.test.ts#merges independent local video and audio tracks through the shared runner",
         "electron/service/embedded-browser/processing/dash-output.test.ts#keeps single-track output on the same cancellable runner"

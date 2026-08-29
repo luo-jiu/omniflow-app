@@ -20,6 +20,7 @@ export async function mergeDashTaskTracksToOutput(
       audioManifestUrl: input.audio.path,
       durationSeconds: input.durationSeconds,
       ffmpegPath: input.ffmpegPath,
+      inputKind: 'local-file',
       outputPath: input.outputPath,
       signal: input.signal,
       videoManifestUrl: input.video.path,
@@ -37,6 +38,7 @@ export async function mergeDashTaskTracksToOutput(
   const result = await downloadEmbeddedBrowserManifestResource({
     durationSeconds: input.durationSeconds,
     ffmpegPath: input.ffmpegPath,
+    inputKind: 'local-file',
     kind: 'mpd',
     manifestUrl: track.path,
     outputPath: input.outputPath,
