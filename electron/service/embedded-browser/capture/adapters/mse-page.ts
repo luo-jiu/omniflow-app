@@ -378,7 +378,7 @@ export function installMsePageAdapter(input: InstallMsePageAdapterInput): MsePag
       if (!input.preferences.autoSeekToBufferedEnd) return
       try {
         if (!element.buffered?.length) return
-        const bufferedEnd = element.buffered.end(element.buffered.length - 1)
+        const bufferedEnd = element.buffered.end(0)
         const duration = Number.isFinite(element.duration) ? element.duration : 0
         if (duration > 0 && bufferedEnd >= duration) return
         const targetTime = Math.max(bufferedEnd - 5, 0)

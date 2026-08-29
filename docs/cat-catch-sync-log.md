@@ -1965,3 +1965,17 @@
 - runtime changes: `mse/runtime.ts` 在 `endOfStream` 后仅于捕获开关开启时设置 `isComplete` 并发出完成事件；`clear()` 在无轨道但已完成时继续执行上游的完成清理分支。
 - legacy cleanup: 无新增删除；旧 Cat Catch 页面实现继续保留至 MSE parity 和真实回归完成。
 - validation: MSE 关联集合 `7 files / 17 passed`、TypeScript `--noEmit`、scoped ESLint、`npm run cat-catch:validate`（`7 units / 32 capabilities / 17 open / 100 cleanup / 218 planned`）、同步 runner `16/16` 和非 `dist-electron/**` 的 `git diff --check` 均通过；完整 build、全仓 lint/test 与真实页面验证仍因共享 dirty 生成物和当前无测试场景不执行。
+
+## 2026-08-29: same target (MSE sparse-buffer auto-seek)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片补齐固定 `catch.js` 自动缓冲尾使用首个 range 的语义。
+- reviewedThrough / portedThrough: 均保持 `null`；`mse.page-capture-runtime` 继续 `porting`，`mse.main-spool-lifecycle` 继续 `ported-unverified`，`mse-runtime` unit 仍开放。
+- change groups: `upstream-diff`、`page-media-control` 与 `fixture-contract`。
+- affected capability IDs: `mse.page-capture-runtime`；metadata 当前为 `7 units / 32 capabilities / 210 anchors / 100 cleanup entries / 219 planned IDs / 198 active refs`，状态为 `15 verified / 5 porting / 1 ported-unverified / 11 pending`。
+- fixtures/tests: `electron/service/embedded-browser/capture/adapters/mse-page.test.ts#mse.auto-buffer-seek-uses-first-range` 构造两个 buffered ranges，验证 progress 时读取 `end(0)` 并将 currentTime 定位到首段末尾前 5 秒；page-adapter 定向 `1 file / 4 passed`。
+- accepted differences: 保留 OmniFlow 对稀疏 range 的异常保护和 `max(bufferedEnd - 5, 0)` 防负值；首段选择与固定上游一致，未把最后一段当作默认跳转目标。
+- excluded changes and reasons: 未修改 MSE runtime/spool、周期输出、HLS/DASH、transfer、renderer UI、真实网站或 `dist-electron/**`；真实页面多 range seek 和播放状态仍需环境验证。
+- unresolved gaps: 固定上游 MSE 头部裁剪、长时间大媒体、双轨输出失败恢复、真实下载导入和 MSE unit 原子关闭仍待完成。
+- runtime changes: `mse-page.ts` 的 auto-seek progress handler 改用 `element.buffered.end(0)`，保持页面 adapter 其余生命周期和 listener owner 不变。
+- legacy cleanup: 无新增删除；旧 Cat Catch 页面实现继续保留至 MSE parity 和真实回归完成。
+- validation: MSE 关联集合 `7 files / 18 passed`、TypeScript `--noEmit`、scoped ESLint、metadata validator（`7 units / 32 capabilities / 17 open / 100 cleanup / 219 planned`）、同步 runner `16/16` 和非 `dist-electron/**` diff check 均通过；完整 build、全仓 lint/test 与真实页面验证仍因共享 dirty 生成物和当前无测试场景不执行。

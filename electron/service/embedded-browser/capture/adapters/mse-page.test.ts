@@ -20,6 +20,38 @@ class FakeMediaSource {
   endOfStream() {}
 }
 
+class FakeMediaElement {
+  readonly listeners = new Map<string, () => void>()
+  readonly endCalls: number[] = []
+  readonly buffered = {
+    length: 2,
+    end: (index: number) => {
+      this.endCalls.push(index)
+      return index === 0 ? 10 : 100
+    },
+  }
+  duration = 200
+  currentTime = 0
+
+  addEventListener(type: string, listener: () => void) {
+    this.listeners.set(type, listener)
+  }
+
+  trigger(type: string) {
+    this.listeners.get(type)?.()
+  }
+}
+
+class FakeMutationObserver {
+  constructor(callback: () => void) {
+    void callback
+  }
+
+  disconnect() {}
+
+  observe() {}
+}
+
 describe('MSE page adapter', () => {
   it('mse.auto-download-after-flush', () => {
     const controls: Array<Record<string, unknown>> = []
@@ -83,6 +115,68 @@ describe('MSE page adapter', () => {
       expect.objectContaining({ event: 'mse-complete', resourceKey: expect.stringMatching(/^mse-stream:/) }),
     ])
     expect(timers).not.toHaveBeenCalledWith(expect.anything(), 500)
+    adapter.dispose()
+  })
+
+  it('mse.auto-buffer-seek-uses-first-range', () => {
+    const mediaElement = new FakeMediaElement()
+    const adapter = installMsePageAdapter({
+      arrayBufferToBase64: (buffer) => Buffer.from(buffer).toString('base64'),
+      combineArrayBuffers: (buffers) => {
+        const combined = new Uint8Array(buffers.reduce((total, buffer) => total + buffer.byteLength, 0))
+        let offset = 0
+        for (const buffer of buffers) {
+          const bytes = new Uint8Array(buffer)
+          combined.set(bytes, offset)
+          offset += bytes.byteLength
+        }
+        return combined.buffer
+      },
+      document: {
+        body: {},
+        documentElement: {},
+        querySelectorAll: () => [mediaElement],
+      } as unknown as Document,
+      emitCapture: vi.fn(),
+      emitControl: vi.fn(),
+      guessExtension: () => 'mp4',
+      hostProbe: {},
+      installRuntime: (runtimeInput) => installMseRuntime(runtimeInput),
+      preferences: {
+        autoDownloadOnComplete: false,
+        autoSeekToBufferedEnd: true,
+        clearCacheOnComplete: false,
+        manualFileName: '',
+        regexRule: '',
+        regexWarning: '',
+        restartAlwaysFromBeginning: false,
+        saveEveryGigabyte: false,
+        selectorRule: '',
+        selectorWarning: '',
+        trimExtraMediaHeaders: true,
+      },
+      resolveFileName: () => 'fixture',
+      scope: {
+        ArrayBuffer,
+        Blob,
+        Element: class FakeElement {},
+        HTMLMediaElement: FakeMediaElement,
+        MediaSource: FakeMediaSource,
+        MutationObserver: FakeMutationObserver,
+        URL: {
+          createObjectURL: () => 'blob:fixture',
+          revokeObjectURL: vi.fn(),
+        },
+        Uint8Array,
+        location: { href: 'https://page.example/watch' },
+        setTimeout: vi.fn(),
+      } as unknown as InstallMsePageAdapterInput['scope'],
+    })
+
+    mediaElement.trigger('progress')
+
+    expect(mediaElement.endCalls).toEqual([0])
+    expect(mediaElement.currentTime).toBe(5)
     adapter.dispose()
   })
 
