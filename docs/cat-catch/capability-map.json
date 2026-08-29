@@ -1377,7 +1377,8 @@
       ],
       "targetRefs": [
         "electron/service/embedded-browser/cat-catch-port/dash/parser.ts#parseDashManifest",
-        "electron/service/embedded-browser/cat-catch-port/dash/sidx.ts#parseDashSidx"
+        "electron/service/embedded-browser/cat-catch-port/dash/sidx.ts#parseDashSidx",
+        "electron/service/embedded-browser/processing/dash-live-adapter.ts#loadDashLiveSnapshot"
       ],
       "relationToUpstream": "semantic-equivalent",
       "syncState": "porting",
@@ -1396,7 +1397,8 @@
         "dash.dynamic-negative-repeat-availability",
         "dash.dynamic-duration-availability",
         "dash.dynamic-client-offset",
-        "dash.segment-template-end-number"
+        "dash.segment-template-end-number",
+        "dash.main-xml-adapter"
       ],
       "testRefs": [
         "electron/service/embedded-browser/cat-catch-port/dash/parser.test.ts#dash.parser-core",
@@ -1413,12 +1415,13 @@
         "electron/service/embedded-browser/cat-catch-port/dash/parser.test.ts#dash.dynamic-duration-availability",
         "electron/service/embedded-browser/cat-catch-port/dash/parser.test.ts#dash.dynamic-client-offset",
         "electron/service/embedded-browser/cat-catch-port/dash/parser.test.ts#dash.segment-template-end-number",
+        "electron/service/embedded-browser/processing/dash-live-adapter.test.ts#dash.main-xml-adapter",
         "src/features/embedded-browser/resources/model/embedded-browser-mpd-manifest.test.ts#dash.renderer-dom-adapter"
       ],
       "acceptedDifferences": [
         "OmniFlow only concatenates static Periods when every Period has the same content type/id/language/primary BaseURL identity and a reusable initialization URL/range; incomplete identities, SegmentBase tracks and init conflicts remain explicit unsupported plans instead of silently switching initialization at a discontinuity."
       ],
-      "notes": "The pure target parser now covers inherited BaseURL alternatives and Period/AdaptationSet/Representation SegmentTemplate, SegmentList and SegmentBase values, static SegmentBase SIDX expansion metadata, SegmentList timeline expansion, static final-segment duration correction, SegmentTemplate endNumber bounds, finite and availability-bounded dynamic SegmentTimeline r=-1, dynamic duration-only SegmentTemplate windows with client clock offset, validated SegmentList ranges, same-identity static multi-Period concatenation, single-file SegmentBase and DRM evidence through a platform-neutral XML AST. Incomplete or incompatible multi-Period sets, invalid or structurally ambiguous SegmentList inputs and malformed SIDX responses are explicit rejects; dynamic task execution, init-range splitting and unbounded dynamic repeats without availability evidence remain open; the bundled mpd-parser/jQuery vendor-version discrepancy, real MPD/ffprobe output evidence and complex cross-level array semantics are still open."
+      "notes": "The pure target parser now covers inherited BaseURL alternatives and Period/AdaptationSet/Representation SegmentTemplate, SegmentList and SegmentBase values, static SegmentBase SIDX expansion metadata, SegmentList timeline expansion, static final-segment duration correction, SegmentTemplate endNumber bounds, finite and availability-bounded dynamic SegmentTimeline r=-1, dynamic duration-only SegmentTemplate windows with client clock offset, validated SegmentList ranges, same-identity static multi-Period concatenation, single-file SegmentBase and DRM evidence through a platform-neutral XML AST. The main-side dash-live-adapter now bounds MPD reads, rejects DTD/entity declarations, parses real XML into that AST and maps the result to the task plan. Incomplete or incompatible multi-Period sets, invalid or structurally ambiguous SegmentList inputs and malformed SIDX responses are explicit rejects; dynamic task execution, init-range splitting and unbounded dynamic repeats without availability evidence remain open; the bundled mpd-parser/jQuery vendor-version discrepancy, real MPD/ffprobe output evidence and complex cross-level array semantics are still open."
     },
     {
       "id": "dash.timeline-download-merge",
@@ -1449,7 +1452,8 @@
       ],
       "targetRefs": [
         "electron/service/embedded-browser/processing/dash-task.ts#DashTaskExecutor",
-        "electron/service/embedded-browser/cat-catch-port/dash/sidx.ts#parseDashSidx"
+        "electron/service/embedded-browser/cat-catch-port/dash/sidx.ts#parseDashSidx",
+        "electron/service/embedded-browser/processing/dash-live-adapter.ts#createDashLiveSnapshotLoader"
       ],
       "relationToUpstream": "platform-substitute",
       "syncState": "porting",
@@ -1471,11 +1475,12 @@
         "electron/service/embedded-browser/processing/dash-task.test.ts#dash.dynamic-snapshot-download",
         "electron/service/embedded-browser/processing/dash-live-task.test.ts#dash.dynamic-refresh-dedupe",
         "electron/service/embedded-browser/processing/dash-live-task.test.ts#dash.dynamic-refresh-cancel",
+        "electron/service/embedded-browser/processing/dash-live-adapter.test.ts#dash.main-xml-adapter",
         "electron/service/embedded-browser/processing/dash-output.test.ts#merges independent local video and audio tracks through the shared runner",
         "electron/service/embedded-browser/processing/dash-output.test.ts#keeps single-track output on the same cancellable runner"
       ],
       "acceptedDifferences": [],
-      "notes": "DashTaskExecutor now owns bounded plan preflight, range-aware parallel fragment transfer, SIDX index-range fetch and expansion, ordered file writes, external cancellation and temp cleanup. A dynamic plan with a finite current segment window is accepted as a snapshot and uses the same transfer/merge path; empty dynamic windows remain an explicit reject. DashLiveTask now owns injected-snapshot polling, minimumUpdatePeriod clamping, per-representation segment-key dedupe, new-segment delta delivery and abort/stop lifecycle; its deterministic tests do not claim production MPD parsing or real media output. The production MPD plan dispatch converts the renderer DTO into the main-side plan, redeems captured-resource authority for fragments and routes local single- or dual-track output through the shared cancellable ffmpeg runner. Main XML/fetch adapter wiring, continuous output delivery, DRM, parser unsupported reasons, complex nested SIDX chains and real media output evidence remain open."
+      "notes": "DashTaskExecutor now owns bounded plan preflight, range-aware parallel fragment transfer, SIDX index-range fetch and expansion, ordered file writes, external cancellation and temp cleanup. A dynamic plan with a finite current segment window is accepted as a snapshot and uses the same transfer/merge path; empty dynamic windows remain an explicit reject. DashLiveTask now owns injected-snapshot polling, minimumUpdatePeriod clamping, per-representation segment-key dedupe, new-segment delta delivery and abort/stop lifecycle. The main-side dash-live-adapter now supplies bounded, DTD/entity-free XML snapshots through an injected fetch and maps them to DashTaskPlan; adapter and task tests cover the handoff. The production MPD plan dispatch converts the renderer DTO into the main-side plan, redeems captured-resource authority for fragments and routes local single- or dual-track output through the shared cancellable ffmpeg runner. Continuous live IPC/output delivery, DRM, parser unsupported reasons, complex nested SIDX chains and real media output evidence remain open."
     },
     {
       "id": "transfer.concurrent-retry-abort-order",

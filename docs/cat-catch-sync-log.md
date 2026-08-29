@@ -1765,6 +1765,20 @@
 - legacy cleanup: 无；DASH unit 仍未 cutover，旧实现不能删除。
 - validation: DASH 定向 Vitest 8/8、TypeScript、Cat Catch 相关 ESLint 通过；未运行完整 build，未做真实页面和真实 MPD/ffprobe 验证。
 
+## 2026-08-29: same target (DASH main MPD XML adapter)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动。
+- reviewedThrough / portedThrough: 均保持 `null`；本切片补齐 main-owned MPD snapshot 读取和 XML AST 转换，不宣称 `dash-engine` unit 完成。
+- change groups: `main-mpd-adapter`、`bounded-xml-input` 与 `fixture-contract`。
+- affected capability IDs: `dash.parser-planner`、`dash.timeline-download-merge`，继续 `porting`。
+- fixtures/tests: `dash-live-adapter.test.ts#dash.main-xml-adapter` 使用真实 dynamic MPD XML 覆盖 namespace、BaseURL、SegmentTemplate、minimumUpdatePeriod 和 client clock；同文件另覆盖 loader URL 保持、非 2xx、malformed XML、DOCTYPE/ENTITY、MPD 大小限制和 AbortSignal；adapter、live task、parser 定向共 `3 files / 25 passed`。
+- accepted differences: `@xmldom/xmldom` 仅在 main adapter 使用，纯 parser 仍只消费平台中立 AST；MPD 文本默认限制为 8 MiB，DTD/ENTITY 直接拒绝，renderer DOM 和 renderer headers 不进入 adapter。
+- excluded changes and reasons: 未新增 preload/IPC 或持续 live 输出协议；动态任务仍由注入式 `DashLiveTask` 管理，真实 captured-resource production 接线、导航/tab close cleanup 和真实 MPD/ffprobe 输出仍待完成。
+- unresolved gaps: dynamic refresh/live IPC、增量输出交付、复杂嵌套 SIDX、不完整或初始化冲突的多 Period 集合、真实媒体输出和 unit 关闭条件仍开放。
+- runtime changes: 新增 `processing/dash-live-adapter.ts`，通过注入的 main fetch 读取 bounded MPD response，拒绝 DTD/ENTITY，以 `@xmldom/xmldom` 构建 `DashXmlElement`，调用 `parseDashManifest` 并映射为 `DashTaskPlan`；`createDashLiveSnapshotLoader` 可直接供 `DashLiveTask` 使用。
+- legacy cleanup: 无；DASH unit 尚未 cutover，旧实现继续保留。
+- validation: adapter/live/parser 定向 Vitest `25/25`、应用 TypeScript `--noEmit` 通过；未运行完整 build，未做真实页面/真实 MPD/ffprobe 验证。
+
 ## Template
 
 ```markdown
