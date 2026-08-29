@@ -2008,7 +2008,7 @@
       ],
       "testRefs": [],
       "acceptedDifferences": [],
-      "notes": "The current main-process file-save service copies or writes extracted resource bytes to a user-selected path, but delivery terminal state and staged-output release are not yet owned by the planned adapter."
+      "notes": "Manual local-save and the MSE resource export entry now use a main-controller helper that registers the tab task and writes through the staged-output lease before publishing to the user-selected path. Delivery terminal state, UploadManager handoff, crash quarantine, and a dedicated adapter test remain open."
     },
     {
       "id": "output.normal-download-handoff",

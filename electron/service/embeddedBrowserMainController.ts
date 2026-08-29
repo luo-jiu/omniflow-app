@@ -255,6 +255,12 @@ function toDashTaskPlan(
   }
 }
 
+function createEmbeddedBrowserAbortError() {
+  const error = new Error('embedded browser output delivery aborted')
+  error.name = 'AbortError'
+  return error
+}
+
 async function runRegisteredEmbeddedBrowserTransfer<Result>(
   tabId: string,
   operation: (signal: AbortSignal, taskId: string) => Promise<Result>,
@@ -1527,6 +1533,34 @@ export function createEmbeddedBrowserMainController(
     return saveResult.filePath
   }
 
+  async function publishEmbeddedBrowserExtractedResource(
+    tabId: string,
+    resource: EmbeddedBrowserExtractedResourceFile,
+    targetPath: string,
+    purpose: string,
+  ) {
+    return runRegisteredEmbeddedBrowserTransfer(tabId, async (signal, taskId) => {
+      const published = await publishStagedOutput({
+        fileName: path.basename(targetPath),
+        mimeType: resource.mimeType,
+        ownerTaskId: taskId,
+        purpose,
+        store: getEmbeddedBrowserStagedOutputLeaseStore(),
+        targetPath,
+        write: async (stagedPath) => {
+          if (signal.aborted) {
+            throw createEmbeddedBrowserAbortError()
+          }
+          await saveEmbeddedBrowserExtractedResourceFile(resource, stagedPath)
+          if (signal.aborted) {
+            throw createEmbeddedBrowserAbortError()
+          }
+        },
+      })
+      return published.outputPath
+    })
+  }
+
   function deriveEmbeddedBrowserDirectFileName(url: string, fallbackName: string) {
     try {
       const fileName = decodeURIComponent(path.basename(new URL(url).pathname)).trim()
@@ -1785,7 +1819,12 @@ export function createEmbeddedBrowserMainController(
         }
       }
 
-      const outputPath = await saveEmbeddedBrowserExtractedResourceFile(resource, saveResult.filePath)
+      const outputPath = await publishEmbeddedBrowserExtractedResource(
+        normalizedTabId,
+        resource,
+        saveResult.filePath,
+        'captured-resource-local-save',
+      )
       return {
         ok: true,
         outputPath,
@@ -3958,8 +3997,13 @@ export function createEmbeddedBrowserMainController(
             if (saveResult.canceled || !saveResult.filePath) {
               return false
             }
-            await saveEmbeddedBrowserExtractedResourceFile(resource, saveResult.filePath)
-            return true
+            const outputPath = await publishEmbeddedBrowserExtractedResource(
+              normalizedTabId,
+              resource,
+              saveResult.filePath,
+              'captured-resource-local-export',
+            )
+            return Boolean(outputPath)
           }
         }
         const frames = getEmbeddedBrowserFrameList(view)

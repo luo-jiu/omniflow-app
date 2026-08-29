@@ -2257,3 +2257,17 @@
 - runtime changes: `mergeEmbeddedBrowserCapturedMseResources` 现在在 lease path 上执行 `mergeEmbeddedBrowserResourceTracks`，成功后单次 claim 并发布；ffmpeg 失败或取消时释放 lease，不覆盖已有目标。
 - legacy cleanup: 新增 `node.output.mse-merge-dispatch` retain-or-adapt 条目；保留 MSE page/spool 和最终 `outputPath` 合同，未引入第二套合并算法或长期 fallback。
 - validation: MSE/merge/ffmpeg/lease 定向集合、TypeScript `--noEmit`、scoped ESLint、metadata validator 和非 `dist-electron/**` diff check 通过；完整 build、全仓 lint/test、真实页面与真实下载沿用前序记录。
+
+## 2026-08-29: same target (manual local-save staged output wiring)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片把手动捕获资源保存和 MSE 资源导出的用户目标写盘接入 staged output lease。
+- reviewedThrough / portedThrough: 均保持 `null`；`output.local-save-delivery` 与 `output.staged-output-lease` 继续 `pending/porting`，output-integration unit 仍开放。
+- change groups: `main-authority-wiring`、`output-ownership`、`task-lifecycle` 与 `partial-output-cleanup`。
+- affected capability IDs: `output.local-save-delivery`、`output.staged-output-lease`；metadata 保持 `7 units / 32 capabilities / 104 cleanup entries / 229 planned IDs / 226 active refs`，状态为 `15 verified / 11 porting / 1 ported-unverified / 5 pending`。
+- fixtures/tests: 复用 staged lease/publisher 合同测试；本切片新增控制器内 `publishEmbeddedBrowserExtractedResource` wiring，未虚增 `output.local-save-terminal` test ref。
+- accepted differences: 保存对话框、默认文件名、renderer 的最终 `outputPath` 和右键导出的布尔结果保持不变；lease id、claim token 和暂存路径只在 main 内部使用。
+- excluded changes and reasons: 未接入 UploadManager handoff/delivery terminal、MSE 自动下载/import、跨入口用户取消、crash quarantine、预算 accounting、renderer UI、`dist-electron/**` 或 upstream 游标；这些需要独立 application workflow owner。
+- unresolved gaps: local-save 的 dedicated adapter test、资料库交付终态、崩溃残留回收、真实大媒体和真实页面仍待补齐。
+- runtime changes: `saveEmbeddedBrowserCapturedResourceForRenderer` 与 `handleExportResource` 的 MSE 手动保存现在登记 tab-scoped processing task，在 lease path 写入 extracted resource，成功后单次 claim 并发布到用户目标；写入失败或任务取消时释放 lease，不覆盖已有目标。
+- legacy cleanup: 无新增删除；`embeddedBrowserResourceFileSaveService.ts` 仍保留给 MSE 自动 staging 等旧交付链，待 output-integration unit 完成后再处理。
+- validation: TypeScript `--noEmit`、全仓 lint、非 `dist-electron/**` diff check 已通过；publisher/lease 定向测试待本轮提交前重跑，完整 build、全仓 test、真实页面与真实下载仍未执行。
