@@ -85,11 +85,11 @@ OmniFlow 不运行 Cat Catch 浏览器扩展，而是把与产品目标相关的
 - 手动 AES-128 key 会替换已有媒体 key，或在清单完全没有 key 信号时恢复未识别的加密媒体；如果只有 MAP 明确加密，则保持其后的明文媒体不变，避免把 MAP-only override 扩散成错误的媒体解密。
 - HLS 分片失败重试会保持原 URL 与 byte `Range`；取消活动 retry 时同时清空待执行队列，只产生一次 aborted 终态，且不再进入 processor、completed 或有序输出。与 Cat Catch 的递增延迟不同，当前 adapter 使用有界立即重排队。
 - HLS 真实输出门禁已覆盖 clear/AES-128 AAC、AES-256 CBC/CTR AAC，以及加密 fMP4/H264 视频与独立 AES-128/AAC 音轨的双本地 playlist 合并；ffmpeg 的 protocol/extension 策略按 input 重复声明，避免第二轨本地 key 被默认扩展名策略拒绝。ffmpeg HLS demuxer 不识别 AES-256 METHOD，因而 AES-256 的 key/MAP/media 先按固定 hls.js Web Crypto 模式在本地工作目录解密，再以 clear playlist 进入同一 ffmpeg owner。CBC 加密 MAP 的 BYTERANGE 还会按固定 FragmentLoader 以明文 length 补齐 cipher request，并在非零 offset 前取一个 ciphertext block 重置 IV；AES-128/256 都会产出精确声明长度的 clear MAP，避免把原始 range 直接交给 ffmpeg。
-- DASH target parser/task 已建立继承 BaseURL、Period/AdaptationSet/Representation segment info、模板 token、SegmentTemplate/SegmentList timeline、SegmentBase SIDX index-range expansion、静态最后一片 duration 修正、有限 `r=-1`、SegmentList range、DRM 投影、range-aware transfer、顺序写入、取消和失败清理的纯基座；动态无界 repeat、复杂嵌套 SIDX、复杂跨层数组合并、完整 `mpd-parser` 差分、ffmpeg 取消与真实生产输出仍不完整。
+- DASH target parser/task 已建立继承 BaseURL、Period/AdaptationSet/Representation segment info、模板 token、SegmentTemplate/SegmentList timeline、SegmentBase SIDX index-range expansion、静态最后一片 duration 修正、有限及 availability-bounded `r=-1`、dynamic duration-only availability window、同身份静态多 Period 串接、SegmentList range、DRM 投影、range-aware transfer、顺序写入、取消和失败清理的纯基座；dynamic task/live refresh、复杂嵌套 SIDX、复杂跨层数组合并、完整 `mpd-parser` 差分、ffmpeg 取消与真实生产输出仍不完整。
 - HLS、DASH、MSE、ffmpeg、临时文件和输出交付尚无统一 task/cleanup 合同；MSE spool 已有独立 bounded owner，但还未纳入统一 task registry。
 - network、Deep 和 MSE page/spool chain 已在 production target chain 形成唯一 owner；data/blob 与未捕获拖拽、DASH 直拉/track、MSE parity 和其他 unit 仍按各自边界迁移，不保留第二套已切换算法。
 
-因此当前 32 项能力中有 15 项 `verified`、3 项 `porting`、1 项 `ported-unverified`、13 项 `pending`；`network-capture`、`deep-search-runtime` 与 `hls-engine` 已完成 production cutover，MSE 仍不能因为局部 target 测试通过就提前关闭，其余 unit 也仍开放。
+因此当前 32 项能力中有 15 项 `verified`、5 项 `porting`、1 项 `ported-unverified`、11 项 `pending`；`network-capture`、`deep-search-runtime` 与 `hls-engine` 已完成 production cutover，MSE 仍不能因为局部 target 测试通过就提前关闭，其余 unit 也仍开放。
 
 ## 4. 长期事实文件
 
