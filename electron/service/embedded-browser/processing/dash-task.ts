@@ -21,7 +21,9 @@ import type {
   DashRepresentation,
   DashSegment,
 } from '../cat-catch-port/dash/parser'
-import { parseDashSidx } from '../cat-catch-port/dash/sidx'
+import {
+  parseDashSidxReferences,
+} from '../cat-catch-port/dash/sidx'
 import {
   EmbeddedBrowserFragmentDownloader,
   type EmbeddedBrowserDownloadFragment,
@@ -121,23 +123,29 @@ function createFragments(representation: DashRepresentation): EmbeddedBrowserDow
   return fragments
 }
 
-async function expandSegmentBaseRepresentation(
+const MAX_SIDX_NESTING_DEPTH = 8
+
+function createSidxRange(offset: number, length: number) {
+  const end = offset + length - 1
+  if (!Number.isSafeInteger(offset) || offset < 0
+    || !Number.isSafeInteger(length) || length <= 0
+    || !Number.isSafeInteger(end) || end < offset) {
+    throw new Error('DASH SIDX range 无效')
+  }
+  return { length, offset, raw: `${offset}-${end}` }
+}
+
+async function fetchSidxRange(
   representation: DashRepresentation,
+  range: ReturnType<typeof createSidxRange>,
   options: {
     fetch?: EmbeddedBrowserFragmentFetch
     headers?: Record<string, string>
     signal: AbortSignal
   },
 ) {
-  const segmentBase = representation.segmentBase
-  if (!segmentBase) return representation
-  const range = segmentBase.indexRange
-  const rangeEnd = range.offset + range.length - 1
-  if (!Number.isSafeInteger(rangeEnd) || rangeEnd < range.offset) {
-    throw new Error(`DASH Representation ${representation.id} 的 SIDX range 无效`)
-  }
   const headers = new Headers(options.headers)
-  headers.set('Range', `bytes=${range.offset}-${rangeEnd}`)
+  headers.set('Range', `bytes=${range.offset}-${range.offset + range.length - 1}`)
   const fetchImpl = options.fetch || ((input: string, init?: RequestInit) => fetch(input, init))
   const response = await fetchImpl(representation.baseUrls[0] || '', {
     headers,
@@ -151,20 +159,95 @@ async function expandSegmentBaseRepresentation(
     /^bytes\s+(\d+)-/i.exec(response.headers.get('content-range') || '')?.[1] || '',
     10,
   )
-  let indexBytes = responseBytes
-  if (responseBytes.byteLength > range.length) {
-    const sourceOffset = Number.isFinite(contentRangeStart) && contentRangeStart === range.offset
-      ? 0
-      : range.offset
-    if (sourceOffset + range.length > responseBytes.byteLength) {
-      throw new Error(`DASH Representation ${representation.id} 的 SIDX 响应长度不足`)
-    }
-    indexBytes = responseBytes.slice(sourceOffset, sourceOffset + range.length)
+  if (responseBytes.byteLength <= range.length) return responseBytes
+  const sourceOffset = Number.isFinite(contentRangeStart) && contentRangeStart === range.offset
+    ? 0
+    : range.offset
+  if (sourceOffset + range.length > responseBytes.byteLength) {
+    throw new Error(`DASH Representation ${representation.id} 的 SIDX 响应长度不足`)
   }
-  const segments = parseDashSidx({
+  return responseBytes.slice(sourceOffset, sourceOffset + range.length)
+}
+
+async function expandSidxReferences(
+  representation: DashRepresentation,
+  bytes: Uint8Array,
+  range: ReturnType<typeof createSidxRange>,
+  options: {
+    fetch?: EmbeddedBrowserFragmentFetch
+    headers?: Record<string, string>
+    presentationTimeOffset?: number
+    signal: AbortSignal
+  },
+  depth = 0,
+): Promise<DashSegment[]> {
+  throwIfAborted(options.signal)
+  const parsed = parseDashSidxReferences({
     baseUrl: representation.baseUrls[0] || '',
-    bytes: indexBytes,
+    bytes,
     indexRange: range,
+    presentationTimeOffset: options.presentationTimeOffset,
+  })
+  const segments: DashSegment[] = []
+  for (const reference of parsed.references) {
+    throwIfAborted(options.signal)
+    if (reference.referenceType === 1) {
+      if (depth >= MAX_SIDX_NESTING_DEPTH) {
+        throw new Error(`DASH Representation ${representation.id} 的 SIDX 嵌套层级超过限制`)
+      }
+      const nestedRange = createSidxRange(reference.mediaOffset, reference.referencedSize)
+      const nestedBytes = await fetchSidxRange(representation, nestedRange, options)
+      const nestedSegments = await expandSidxReferences(
+        representation,
+        nestedBytes,
+        nestedRange,
+        options,
+        depth + 1,
+      )
+      const firstNestedTime = nestedSegments[0]?.time
+      const timeOffset = firstNestedTime === undefined
+        ? 0
+        : reference.time - firstNestedTime
+      nestedSegments.forEach(segment => {
+        segments.push({
+          ...segment,
+          index: segments.length,
+          time: segment.time === undefined ? undefined : segment.time + timeOffset,
+        })
+      })
+      continue
+    }
+    const end = reference.mediaOffset + reference.referencedSize - 1
+    segments.push({
+      byteRange: {
+        length: reference.referencedSize,
+        offset: reference.mediaOffset,
+        raw: `${reference.mediaOffset}-${end}`,
+      },
+      duration: reference.subsegmentDuration / parsed.timescale,
+      index: segments.length,
+      time: reference.time,
+      url: representation.baseUrls[0] || '',
+    })
+  }
+  if (!segments.length) throw new Error('DASH SIDX 无法解析：no media references')
+  return segments
+}
+
+async function expandSegmentBaseRepresentation(
+  representation: DashRepresentation,
+  options: {
+    fetch?: EmbeddedBrowserFragmentFetch
+    headers?: Record<string, string>
+    signal: AbortSignal
+  },
+) {
+  const segmentBase = representation.segmentBase
+  if (!segmentBase) return representation
+  const range = createSidxRange(segmentBase.indexRange.offset, segmentBase.indexRange.length)
+  const indexBytes = await fetchSidxRange(representation, range, options)
+  const segments = await expandSidxReferences(representation, indexBytes, range, {
+    ...options,
     presentationTimeOffset: segmentBase.presentationTimeOffset,
   })
   return {

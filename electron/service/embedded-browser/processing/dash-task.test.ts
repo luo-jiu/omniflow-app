@@ -175,6 +175,79 @@ describe('DASH task executor', () => {
     }
   })
 
+  it('dash.segment-base-nested-sidx-task-fetch', async () => {
+    const workDirectoryPath = await mkdtemp(path.join(os.tmpdir(), 'omniflow-dash-nested-sidx-test-'))
+    try {
+      const createSidxBox = (references: Array<{ duration: number; size: number; type?: 0 | 1 }>) => {
+        const bytes = new Uint8Array(32 + references.length * 12)
+        const view = new DataView(bytes.buffer)
+        view.setUint32(0, bytes.byteLength, false)
+        bytes.set([0x73, 0x69, 0x64, 0x78], 4)
+        view.setUint32(12, 1, false)
+        view.setUint32(16, 1000, false)
+        view.setUint32(20, 0, false)
+        view.setUint32(24, 0, false)
+        view.setUint16(28, 0, false)
+        view.setUint16(30, references.length, false)
+        references.forEach((reference, index) => {
+          const offset = 32 + index * 12
+          view.setUint32(offset, (reference.type ? 0x80000000 : 0) | reference.size, false)
+          view.setUint32(offset + 4, reference.duration, false)
+          view.setUint32(offset + 8, 0x90000000, false)
+        })
+        return bytes
+      }
+      const nestedSidx = createSidxBox([
+        { duration: 1000, size: 3 },
+        { duration: 1000, size: 2 },
+      ])
+      const topSidx = createSidxBox([{ duration: 2000, size: nestedSidx.byteLength, type: 1 }])
+      const outputPath = path.join(workDirectoryPath, 'output.mp4')
+      const calls: string[] = []
+      const video = representation({
+        baseUrls: ['https://cdn.example/nested-video.mp4'],
+        id: 'nested-sidx-video',
+        segmentBase: {
+          indexRange: { length: topSidx.byteLength, offset: 0, raw: `0-${topSidx.byteLength - 1}` },
+        },
+        segmentCount: 0,
+        segments: [],
+      })
+      const executor = new DashTaskExecutor({
+        fetch: async (_url, init) => {
+          const range = new Headers(init?.headers).get('Range') || ''
+          calls.push(range)
+          if (range === `bytes=0-${topSidx.byteLength - 1}`) return new Response(topSidx)
+          if (range === `bytes=${topSidx.byteLength}-${topSidx.byteLength + nestedSidx.byteLength - 1}`) {
+            return new Response(nestedSidx)
+          }
+          if (range === 'bytes=100-102') return new Response(new Uint8Array([7, 8, 9]))
+          if (range === 'bytes=103-104') return new Response(new Uint8Array([10, 11]))
+          throw new Error(`unexpected range ${range}`)
+        },
+        mergeTracks: async ({ outputPath: targetPath, video: track }) => {
+          await writeFile(targetPath, track ? await readFile(track.path) : Buffer.alloc(0))
+          return { outputPath: targetPath }
+        },
+        outputPath,
+        plan: plan([video]),
+        selectedVideoRepresentation: video,
+      })
+
+      await executor.run()
+
+      expect(await readFile(outputPath)).toEqual(Buffer.from([7, 8, 9, 10, 11]))
+      expect(calls).toEqual(expect.arrayContaining([
+        `bytes=0-${topSidx.byteLength - 1}`,
+        `bytes=${topSidx.byteLength}-${topSidx.byteLength + nestedSidx.byteLength - 1}`,
+        'bytes=100-102',
+        'bytes=103-104',
+      ]))
+    } finally {
+      await rm(workDirectoryPath, { force: true, recursive: true })
+    }
+  })
+
   it('dash.dynamic-drm-rejection', async () => {
     const workDirectoryPath = await mkdtemp(path.join(os.tmpdir(), 'omniflow-dash-test-'))
     try {

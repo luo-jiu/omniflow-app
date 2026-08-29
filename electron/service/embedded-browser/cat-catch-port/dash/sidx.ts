@@ -10,6 +10,22 @@ export type DashSidxParseInput = {
   presentationTimeOffset?: number
 }
 
+export type DashSidxReference = {
+  mediaOffset: number
+  referenceType: 0 | 1
+  referencedSize: number
+  subsegmentDuration: number
+  time: number
+}
+
+export type DashSidxParseResult = {
+  boxSize: number
+  earliestPresentationTime: number
+  firstOffset: number
+  references: DashSidxReference[]
+  timescale: number
+}
+
 function asBytes(input: ArrayBuffer | Uint8Array) {
   return input instanceof Uint8Array ? input : new Uint8Array(input)
 }
@@ -37,10 +53,11 @@ function invalidSidx(message: string): never {
  *
  * The MPD indexRange is an absolute byte range in the media resource. Each
  * SIDX reference points to a media subsegment relative to the end of the SIDX
- * box plus first_offset; reference_type=1 is another (nested) SIDX and is not
- * a downloadable media fragment.
+ * box plus first_offset. `parseDashSidxReferences` exposes nested references
+ * so the main task can fetch them under a bounded recursion policy; the flat
+ * `parseDashSidx` facade intentionally returns only direct media references.
  */
-export function parseDashSidx(input: DashSidxParseInput): DashSegment[] {
+export function parseDashSidxReferences(input: DashSidxParseInput): DashSidxParseResult {
   const bytes = asBytes(input.bytes)
   const range = input.indexRange
   if (!Number.isSafeInteger(range.offset) || range.offset < 0
@@ -98,33 +115,54 @@ export function parseDashSidx(input: DashSidxParseInput): DashSegment[] {
     invalidSidx('first media offset invalid')
   }
   let mediaTime = earliestPresentationTime
-  const segments: DashSegment[] = []
+  const references: DashSidxReference[] = []
   for (let referenceIndex = 0; referenceIndex < referenceCount; referenceIndex += 1) {
     const reference = view.getUint32(cursor, false)
     const referenceType = reference >>> 31
     const referencedSize = reference & 0x7fffffff
     const subsegmentDuration = view.getUint32(cursor + 4, false)
     cursor += 12
-    if (referenceType === 1) continue
     if (!referencedSize) invalidSidx(`reference ${referenceIndex} has an empty size`)
     const end = mediaOffset + referencedSize - 1
     if (!Number.isSafeInteger(end) || end < mediaOffset) {
       invalidSidx(`reference ${referenceIndex} range invalid`)
     }
-    const relativeTime = mediaTime - Number(input.presentationTimeOffset || 0)
-    segments.push({
-      byteRange: {
-        length: referencedSize,
-        offset: mediaOffset,
-        raw: `${mediaOffset}-${end}`,
-      },
-      duration: subsegmentDuration / timescale,
-      index: segments.length,
-      time: relativeTime,
-      url: input.baseUrl,
+    references.push({
+      mediaOffset,
+      referenceType: referenceType as 0 | 1,
+      referencedSize,
+      subsegmentDuration,
+      time: mediaTime - Number(input.presentationTimeOffset || 0),
     })
     mediaOffset += referencedSize
     mediaTime += subsegmentDuration
+  }
+  return {
+    boxSize,
+    earliestPresentationTime,
+    firstOffset,
+    references,
+    timescale,
+  }
+}
+
+export function parseDashSidx(input: DashSidxParseInput): DashSegment[] {
+  const parsed = parseDashSidxReferences(input)
+  const segments: DashSegment[] = []
+  for (const reference of parsed.references) {
+    if (reference.referenceType === 1) continue
+    const end = reference.mediaOffset + reference.referencedSize - 1
+    segments.push({
+      byteRange: {
+        length: reference.referencedSize,
+        offset: reference.mediaOffset,
+        raw: `${reference.mediaOffset}-${end}`,
+      },
+      duration: reference.subsegmentDuration / parsed.timescale,
+      index: segments.length,
+      time: reference.time,
+      url: input.baseUrl,
+    })
   }
   if (!segments.length) invalidSidx('no media references')
   return segments

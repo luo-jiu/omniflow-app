@@ -1851,6 +1851,20 @@
 - legacy cleanup: 无；DASH unit 尚未 cutover，旧实现和 `legacy-cleanup.json` 继续保留。
 - validation: `embeddedBrowserDashRealOutput.test.ts` `2/2` 通过；本切片后需重跑 TypeScript、scoped/full lint、metadata validator、sync runner 与相关 DASH 集合，完整 build 仍因共享 `dist-electron/**` dirty 生成物暂不执行。
 
+## 2026-08-29: same target (DASH nested SIDX range expansion)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片补 SegmentBase 嵌套 SIDX 的主 task 逐层 range fetch。
+- reviewedThrough / portedThrough: 均保持 `null`；`dash.parser-planner` 与 `dash.timeline-download-merge` 继续 `porting`，`dash-engine` unit 仍开放。
+- change groups: `parser-planner`（SIDX reference metadata）与 `transfer`（nested range owner）。
+- affected capability IDs: `dash.timeline-download-merge`；metadata 为 `7 units / 32 capabilities / 210 anchors / 100 cleanup entries / 213 planned IDs / 192 active refs`。
+- fixtures/tests: `electron/service/embedded-browser/processing/dash-task.test.ts#dash.segment-base-nested-sidx-task-fetch` 构造顶层 SIDX -> 子 SIDX -> 两个媒体 range，验证请求 `0-43`、`44-99`、`100-102`、`103-104`，最终轨道字节按索引顺序输出；SIDX/task 定向 `2 files / 8 passed`（含此前单层 SIDX、取消和 dynamic 相关测试）。
+- accepted differences: task 侧递归最多 8 层；超过深度、空引用、非法 range 或子索引无媒体引用时显式失败，避免无限递归和静默丢片；单层 `parseDashSidx` 对外行为保持不变。
+- excluded changes and reasons: 未改 MPD parser、live polling、authority、renderer UI、HLS、资料库交付或旧实现清理。
+- unresolved gaps: 超过 8 层的极端 SIDX、复杂多 Period、真实网站 live、renderer workflow 和 `dash-engine` 原子关闭仍待完成。
+- runtime changes: `dash/sidx.ts` 新增纯 `parseDashSidxReferences` 元数据投影；`dash-task.ts` 新增受限递归 SIDX range fetch，并沿用已有 headers、AbortSignal、ordered downloader 和 cleanup。
+- legacy cleanup: 无；DASH unit 尚未 cutover，旧实现和 `legacy-cleanup.json` 继续保留。
+- validation: SIDX/parser/task 定向测试、TypeScript、scoped ESLint、metadata validator、sync runner 需在本切片提交前重跑；完整 build 仍因共享 `dist-electron/**` dirty 生成物暂不执行。
+
 ```markdown
 ## YYYY-MM-DD: <from> -> <to>
 

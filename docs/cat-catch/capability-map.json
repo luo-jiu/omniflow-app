@@ -1466,7 +1466,8 @@
         "dash.segment-base-sidx-task-fetch",
         "dash.download-merge-cancel",
     "dash.dynamic-drm-rejection",
-    "dash.dynamic-snapshot-download",
+        "dash.dynamic-snapshot-download",
+        "dash.segment-base-nested-sidx-task-fetch",
         "dash.dynamic-refresh-dedupe",
         "dash.dynamic-refresh-terminal-error",
         "dash.dynamic-refresh-cancel",
@@ -1483,6 +1484,7 @@
         "electron/service/embedded-browser/processing/dash-task.test.ts#dash.download-merge-cancel",
         "electron/service/embedded-browser/processing/dash-task.test.ts#dash.dynamic-drm-rejection",
         "electron/service/embedded-browser/processing/dash-task.test.ts#dash.dynamic-snapshot-download",
+        "electron/service/embedded-browser/processing/dash-task.test.ts#dash.segment-base-nested-sidx-task-fetch",
     "electron/service/embedded-browser/processing/dash-live-task.test.ts#dash.dynamic-refresh-dedupe",
     "electron/service/embedded-browser/processing/dash-live-task.test.ts#dash.dynamic-refresh-terminal-error",
     "electron/service/embedded-browser/processing/dash-live-task.test.ts#dash.dynamic-refresh-cancel",
@@ -1497,7 +1499,7 @@
         "electron/service/embedded-browser/processing/dash-output.test.ts#keeps single-track output on the same cancellable runner"
       ],
       "acceptedDifferences": [],
-  "notes": "DashTaskExecutor now owns bounded plan preflight, range-aware parallel fragment transfer, SIDX index-range fetch and expansion, ordered file writes, external cancellation and temp cleanup. A dynamic plan with a finite current segment window is accepted as a snapshot and uses the same transfer/merge path; empty dynamic windows remain an explicit reject. DashLiveTask now owns injected-snapshot polling, minimumUpdatePeriod clamping, per-representation segment-key dedupe, new-segment delta delivery and abort/stop lifecycle. The main-side dash-live-adapter supplies bounded, DTD/entity-free XML snapshots through an injected fetch and maps the result to DashTaskPlan; appendDashRepresentationSegments writes only new init/media bytes to main-owned track files. EmbeddedBrowserDashLiveSessionOwner keeps live sessions, revisioned task snapshots and tab/view/app cleanup; start/stop/discard are exposed through a separate main/preload IPC contract without renderer UI. The production MPD plan dispatch converts the renderer DTO into the main-side plan, redeems captured-resource authority for fragments and routes local single- or dual-track output through the shared cancellable ffmpeg runner. Generated static and dynamic-refresh fMP4 tracks now have real FFmpeg/FFprobe evidence; complex nested SIDX chains remain open."
+      "notes": "DashTaskExecutor now owns bounded plan preflight, range-aware parallel fragment transfer, SIDX index-range fetch and expansion, ordered file writes, external cancellation and temp cleanup. A dynamic plan with a finite current segment window is accepted as a snapshot and uses the same transfer/merge path; empty dynamic windows remain an explicit reject. DashLiveTask now owns injected-snapshot polling, minimumUpdatePeriod clamping, per-representation segment-key dedupe, new-segment delta delivery and abort/stop lifecycle. The main-side dash-live-adapter supplies bounded, DTD/entity-free XML snapshots through an injected fetch and maps the result to DashTaskPlan; appendDashRepresentationSegments writes only new init/media bytes to main-owned track files. EmbeddedBrowserDashLiveSessionOwner keeps live sessions, revisioned task snapshots and tab/view/app cleanup; start/stop/discard are exposed through a separate main/preload IPC contract without renderer UI. The production MPD plan dispatch converts the renderer DTO into the main-side plan, redeems captured-resource authority for fragments and routes local single- or dual-track output through the shared cancellable ffmpeg runner. Generated static and dynamic-refresh fMP4 tracks now have real FFmpeg/FFprobe evidence; SegmentBase supports nested SIDX fetches up to a fixed depth and rejects deeper chains explicitly."
     },
     {
       "id": "transfer.concurrent-retry-abort-order",
