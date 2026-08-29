@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { constants as fsConstants } from 'node:fs'
-import { access, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { access, mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { Buffer } from 'node:buffer'
@@ -263,12 +263,16 @@ async function prepareResourceMergeInput(
 export async function mergeEmbeddedBrowserResourceTracks(
   request: EmbeddedBrowserResourceMergeRequest,
 ): Promise<EmbeddedBrowserResourceMergeResult> {
+  if (!String(request.outputPath || '').trim()) {
+    throw new Error('输出路径不能为空')
+  }
   const ffmpegPath = await resolveEmbeddedBrowserFfmpegPath(request.ffmpegPath)
   if (!ffmpegPath) {
     throw new Error('未找到可用的 ffmpeg，可在系统环境变量里配置，或确认 /opt/homebrew/bin/ffmpeg 可执行')
   }
 
   const tempDir = await createEmbeddedBrowserResourceMergeTempDir()
+  let ffmpegStarted = false
   try {
     const [audio, video] = await Promise.all([
       prepareResourceMergeInput(tempDir, request.audio),
@@ -280,6 +284,7 @@ export async function mergeEmbeddedBrowserResourceTracks(
       video,
     })
 
+    ffmpegStarted = true
     const result = await new Promise<EmbeddedBrowserResourceMergeResult>((resolve, reject) => {
       const stdout: string[] = []
       const stderr: string[] = []
@@ -311,7 +316,16 @@ export async function mergeEmbeddedBrowserResourceTracks(
       })
     })
 
+    const output = await stat(request.outputPath).catch(() => null)
+    if (!output || !output.isFile() || output.size <= 0) {
+      throw new Error('ffmpeg 已退出，但没有生成可用的输出文件')
+    }
     return result
+  } catch (error) {
+    if (ffmpegStarted) {
+      await rm(request.outputPath, { force: true }).catch(() => undefined)
+    }
+    throw error
   } finally {
     await cleanupEmbeddedBrowserResourceMergeTempDir(tempDir).catch(() => undefined)
   }

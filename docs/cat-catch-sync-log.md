@@ -2021,3 +2021,16 @@
 - runtime changes: `mse-page.ts` 和 page-drain bridge 返回 `trimBeforeHeader`；main 的 drain extraction 在有旧 spool 时先清理对应 resource，再追加 page 尾部。
 - legacy cleanup: 无新增删除；旧 Cat Catch 页面实现继续保留至 MSE parity 和真实回归完成。
 - validation: 本切片 page/drain 定向 `2 files / 7 passed`、TypeScript `--noEmit`、scoped ESLint 均通过；完整 MSE 集合、metadata validator、同步 runner 和非 `dist-electron/**` diff check 将在提交前重跑，完整 build、全仓 lint/test 与真实页面验证仍因共享 dirty 生成物和当前无测试场景不执行。
+## 2026-08-29: same target (MSE merge output failure contract)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片补齐 MSE main merge 的输出终态契约。
+- reviewedThrough / portedThrough: 均保持 `null`；`mse.page-capture-runtime` 继续 `porting`，`mse.main-spool-lifecycle` 继续 `ported-unverified`，`mse-runtime` unit 仍开放。
+- change groups: `large-media-output`、`stability` 与 `fixture-contract`。
+- affected capability IDs: `mse.main-spool-lifecycle`；metadata 当前为 `7 units / 32 capabilities / 210 anchors / 100 cleanup entries / 224 planned IDs / 204 active refs`，状态为 `15 verified / 5 porting / 1 ported-unverified / 11 pending`。
+- fixtures/tests: 新增 `electron/service/embeddedBrowserResourceMerge.test.ts#mse.merge-failure-cleans-partial-output` 与 `#mse.merge-success-requires-output`；fake ffmpeg child 覆盖非零退出删除 partial output，以及零退出但没有非空 output 时拒绝。MSE 关联集合为 `8 files / 21 passed`；既有条件式真实 fragmented-MP4 ffmpeg/ffprobe output 继续通过。
+- accepted differences: 无新增；MSE merge 仍复用 main-owned file-backed tracks 与现有 ffmpeg owner，新增的只是输出终态校验和失败清理。
+- excluded changes and reasons: 未修改 MSE page runtime、spool 写入/预算、HLS/DASH、transfer、renderer UI、`dist-electron/**` 或固定上游游标；真实页面、大媒体、完整下载导入和失败后重试仍需环境验证。
+- unresolved gaps: 固定上游 MSE 头部识别的完整异常样本、长时间大媒体、真实页面提取与资料库导入、MSE unit 原子关闭仍待完成。
+- runtime changes: `mergeEmbeddedBrowserResourceTracks` 拒绝空 output path；ffmpeg 零退出后要求目标为非空文件；merge 失败或产物无效时清理目标文件并重新抛出原始错误。
+- legacy cleanup: 无新增删除；旧 Cat Catch 页面实现继续保留至 MSE parity 和真实回归完成。
+- validation: MSE 关联定向 `8 files / 21 passed`、真实 MSE output `1 passed`、TypeScript `--noEmit`、scoped ESLint、metadata validator（`7 units / 32 capabilities / 17 open / 100 cleanup / 224 planned`）和非 `dist-electron/**` 的 `git diff --check` 均通过；同步 runner、全量 lint/test/build 与真实页面验证仍未执行。

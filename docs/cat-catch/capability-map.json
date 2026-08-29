@@ -829,17 +829,21 @@
         "mse.relay-forgery",
         "mse.spool-budget-recovery",
         "mse.auto-download-output",
-        "mse.real-ffmpeg-ffprobe-output"
+        "mse.real-ffmpeg-ffprobe-output",
+        "mse.merge-failure-cleans-partial-output",
+        "mse.merge-success-requires-output"
       ],
       "testRefs": [
         "electron/service/embedded-browser/processing/mse-spool.test.ts#mse.lifecycle-cleanup",
         "electron/service/embedded-browser/capture/adapters/mse-main-relay.test.ts#mse.relay-forgery",
         "electron/service/embedded-browser/processing/mse-spool.test.ts#mse.spool-budget-recovery",
         "electron/service/embedded-browser/processing/mse-download-output.test.ts#mse.auto-download-output",
-        "electron/service/embeddedBrowserMseRealOutput.test.ts#mse.real-ffmpeg-ffprobe-output"
+        "electron/service/embeddedBrowserMseRealOutput.test.ts#mse.real-ffmpeg-ffprobe-output",
+        "electron/service/embeddedBrowserResourceMerge.test.ts#mse.merge-failure-cleans-partial-output",
+        "electron/service/embeddedBrowserResourceMerge.test.ts#mse.merge-success-requires-output"
       ],
       "acceptedDifferences": [],
-      "notes": "MseSpoolStore is the main-owned spool authority. It serializes per-track writes, reserves bytes before asynchronous append, enforces per-chunk/per-track/global budgets, reaps TTL entries, sweeps stale temp directories at session setup, and clears on reset, navigation, render-process loss, tab close, and controller dispose. Relay authorization binds flush/reset/periodic-save payloads to the current tab's opaque MSE resource key, and the controller serializes those controls per tab so a periodic save observes completed flush writes. Automatic output stages merged or per-track files through the existing browser download completion/import contract and clears page/spool cache only after periodic output succeeds. A conditional real-binary fixture now verifies independent fragmented MP4 video/audio tracks merge into a probeable H.264/AAC MP4; production large-media, full extraction/import and real-site smoke remain open."
+      "notes": "MseSpoolStore is the main-owned spool authority. It serializes per-track writes, reserves bytes before asynchronous append, enforces per-chunk/per-track/global budgets, reaps TTL entries, sweeps stale temp directories at session setup, and clears on reset, navigation, render-process loss, tab close, and controller dispose. Relay authorization binds flush/reset/periodic-save payloads to the current tab's opaque MSE resource key, and the controller serializes those controls per tab so a periodic save observes completed flush writes. Automatic output stages merged or per-track files through the existing browser download completion/import contract and clears page/spool cache only after periodic output succeeds. Merge output now requires a non-empty file after zero-exit ffmpeg and removes partial output on merge failure. A conditional real-binary fixture verifies independent fragmented MP4 video/audio tracks merge into a probeable H.264/AAC MP4; production large-media, full extraction/import and real-site smoke remain open."
     },
     {
       "id": "hls.parser-planner",
