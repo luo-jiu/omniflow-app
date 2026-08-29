@@ -1738,15 +1738,19 @@
         "electron/service/embedded-browser/processing/streaming-transfer.ts#StreamingTransfer"
       ],
       "relationToUpstream": "platform-substitute",
-      "syncState": "pending",
+      "syncState": "porting",
       "syncedThrough": null,
       "plannedTestIds": [
         "transfer.large-response-memory",
         "transfer.temp-budget-backpressure"
       ],
-      "testRefs": [],
+      "testRefs": [
+        "electron/service/embedded-browser/processing/streaming-transfer.test.ts#streams a response without materializing the complete body",
+        "electron/service/embedded-browser/processing/streaming-transfer.test.ts#rejects oversized streamed content and keeps an existing destination",
+        "electron/service/embedded-browser/processing/streaming-transfer.test.ts#cancels an active stream and removes the staged partial file"
+      ],
       "acceptedDifferences": [],
-      "notes": "Known gap: direct downloads and selected HTTP/resource reads materialize complete responses in memory. Vendor provenance blocker: the vendored StreamSaver bundle has no verified immutable upstream artifact binding, self-reports 2.0.5 while lib/third-party-libraries.md declares 2.0.6, and retains remote MITM bindings."
+      "notes": "`StreamingTransfer` now writes direct and captured-resource download responses through a bounded Transform into a sibling temporary directory, then publishes only after the complete body succeeds; declared/observed size limits and AbortSignal failures remove only the temporary partial output. The main controller registers these transfers by tab so app or tab cancellation can abort the response. Remaining HTTP IPC consumers, native BrowserWindow downloader fallback, and StreamSaver provenance still require separate migration evidence."
     },
     {
       "id": "processing.main-task-registry",
@@ -1777,7 +1781,7 @@
         "electron/service/embedded-browser/processing/task-registry.test.ts#rejects new tasks after dispose and remains idempotent"
       ],
       "acceptedDifferences": [],
-      "notes": "`ProcessingTaskRegistry` now owns generic main-side task registration, filtered cancellation, settled-task waiting and idempotent app-exit disposal. The shared ffmpeg executor and the legacy external-command adapter register active processes here, while protocol-specific HLS/DASH/MSE session owners still retain their domain snapshots and workdir cleanup. Renderer-unmount recovery and broader transfer-task registration remain open."
+      "notes": "`ProcessingTaskRegistry` now owns generic main-side task registration, filtered cancellation, settled-task waiting and idempotent app-exit disposal. The shared ffmpeg executor, legacy external-command adapter and streaming direct/captured-resource transfers register active work here, while protocol-specific HLS/DASH/MSE session owners still retain their domain snapshots and workdir cleanup. Renderer-unmount recovery and broader transfer-task registration remain open."
     },
     {
       "id": "output.processing-staged-terminal",

@@ -1,6 +1,6 @@
 import os from 'node:os'
 import path from 'node:path'
-import { access, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, readFile, rm, stat } from 'node:fs/promises'
 import { app, BrowserWindow, dialog, shell, WebContentsView, type WebFrameMain } from 'electron'
 import { runtimeLogger } from '../runtimeLogger'
 import type { EmbeddedBrowserStagePageDragRequest } from '@/features/file-transfer/model/browser-drag-transfer'
@@ -198,6 +198,8 @@ import {
   EmbeddedBrowserHlsSessionOwner,
 } from './embedded-browser/processing/hls-session-owner'
 import { MseSpoolStore } from './embedded-browser/processing/mse-spool'
+import { defaultProcessingTaskRegistry } from './embedded-browser/processing/task-registry'
+import { StreamingTransfer } from './embedded-browser/processing/streaming-transfer'
 import {
   downloadEmbeddedBrowserHlsLocalTracks,
 } from './embedded-browser/processing/hls-local-track-merge'
@@ -247,6 +249,29 @@ function toDashTaskPlan(
       width: representation.width,
     })),
     unsupportedReasons: plan.unsupportedReasons || [],
+  }
+}
+
+async function runRegisteredEmbeddedBrowserTransfer<Result>(
+  tabId: string,
+  operation: (signal: AbortSignal) => Promise<Result>,
+) {
+  const controller = new AbortController()
+  let settleTask: (() => void) | undefined
+  const settled = new Promise<void>((resolve) => {
+    settleTask = resolve
+  })
+  const registration = defaultProcessingTaskRegistry.register({
+    cancel: () => controller.abort(),
+    kind: 'streaming-transfer',
+    settled,
+    tabId,
+  })
+  try {
+    return await operation(controller.signal)
+  } finally {
+    settleTask?.()
+    registration.release()
   }
 }
 
@@ -316,6 +341,7 @@ export function createEmbeddedBrowserMainController(
     embeddedBrowserDashSessionOwner,
   )
   const embeddedBrowserMseSpoolStore = new MseSpoolStore()
+  const embeddedBrowserStreamingTransfer = new StreamingTransfer()
   const embeddedBrowserMseControlQueues = new Map<string, Promise<void>>()
   let activeEmbeddedBrowserTabId: string | null = null
   let selectedEmbeddedBrowserTabId: string | null = null
@@ -1519,18 +1545,17 @@ export function createEmbeddedBrowserMainController(
           ok: false,
         }
       }
-      const response = await fetch(resourceUrl, {
-        headers: payload.headers,
+      return await runRegisteredEmbeddedBrowserTransfer(_tabId, async (signal) => {
+        const response = await fetch(resourceUrl, {
+          headers: payload.headers,
+          signal,
+        })
+        const result = await embeddedBrowserStreamingTransfer.writeResponse(response, outputPath, { signal })
+        return {
+          ok: true,
+          outputPath: result.outputPath,
+        }
       })
-      if (!response.ok) {
-        throw new Error(`下载失败：HTTP ${response.status}`)
-      }
-      const buffer = Buffer.from(await response.arrayBuffer())
-      await writeFile(outputPath, buffer)
-      return {
-        ok: true,
-        outputPath,
-      }
     } catch (error) {
       return {
         error: error instanceof Error ? error.message : String(error),
@@ -1545,33 +1570,37 @@ export function createEmbeddedBrowserMainController(
   ): Promise<EmbeddedBrowserDirectFileDownloadResponse> {
     const normalizedTabId = String(tabId || '').trim()
     const resourceId = String(payload.resourceId || '').trim()
-    if (!normalizedTabId || !resourceId || !captureRuntime) {
+    const runtime = captureRuntime
+    if (!normalizedTabId || !resourceId || !runtime) {
       return { error: '缺少可下载的捕捉资源', ok: false }
     }
     try {
-      const accessResult = await captureRuntime.access.fetch({
-        purpose: 'resource-download',
-        resourceId,
-        tabId: normalizedTabId,
+      return await runRegisteredEmbeddedBrowserTransfer(normalizedTabId, async (signal) => {
+        const accessResult = await runtime.access.fetch({
+          purpose: 'resource-download',
+          resourceId,
+          signal,
+          tabId: normalizedTabId,
+        })
+        const outputPath = await resolveEmbeddedBrowserOutputPath({
+          defaultFileName: deriveEmbeddedBrowserDirectFileName(
+            accessResult.resource.url,
+            String(payload.suggestedFileName || '').trim() || 'resource',
+          ),
+          outputDirectoryPath: payload.outputDirectoryPath,
+          useSystemSaveDialog: payload.useSystemSaveDialog,
+        })
+        if (!outputPath) {
+          await accessResult.response.body?.cancel().catch(() => undefined)
+          return { cancelled: true, ok: false }
+        }
+        const result = await embeddedBrowserStreamingTransfer.writeResponse(
+          accessResult.response,
+          outputPath,
+          { signal },
+        )
+        return { ok: true, outputPath: result.outputPath }
       })
-      const outputPath = await resolveEmbeddedBrowserOutputPath({
-        defaultFileName: deriveEmbeddedBrowserDirectFileName(
-          accessResult.resource.url,
-          String(payload.suggestedFileName || '').trim() || 'resource',
-        ),
-        outputDirectoryPath: payload.outputDirectoryPath,
-        useSystemSaveDialog: payload.useSystemSaveDialog,
-      })
-      if (!outputPath) {
-        await accessResult.response.body?.cancel().catch(() => undefined)
-        return { cancelled: true, ok: false }
-      }
-      if (!accessResult.response.ok) {
-        await accessResult.response.body?.cancel().catch(() => undefined)
-        throw new Error(`下载失败：HTTP ${accessResult.response.status}`)
-      }
-      await writeFile(outputPath, Buffer.from(await accessResult.response.arrayBuffer()))
-      return { ok: true, outputPath }
     } catch (error) {
       return {
         error: error instanceof Error ? error.message : String(error),
@@ -3264,6 +3293,7 @@ export function createEmbeddedBrowserMainController(
       onViewDestroyed: (destroyedTabId) => {
         cancelEmbeddedBrowserLibraryFileDropRequests(destroyedTabId)
         cleanupEmbeddedBrowserDroppedFilesForTab(destroyedTabId)
+        void defaultProcessingTaskRegistry.cancel({ tabId: destroyedTabId })
         void enqueueEmbeddedBrowserMseControl(destroyedTabId, async () => {
           await clearEmbeddedBrowserMseSpoolFiles({ tabId: destroyedTabId })
         })
@@ -3271,6 +3301,7 @@ export function createEmbeddedBrowserMainController(
         void embeddedBrowserDashHostLifecycle.onViewDestroyed(destroyedTabId)
       },
       onViewRenderProcessGone: (crashedTabId) => {
+        void defaultProcessingTaskRegistry.cancel({ tabId: crashedTabId })
         void enqueueEmbeddedBrowserMseControl(crashedTabId, async () => {
           await clearEmbeddedBrowserMseSpoolFiles({ tabId: crashedTabId })
         })
@@ -3399,6 +3430,7 @@ export function createEmbeddedBrowserMainController(
     if (!normalizedTabId) {
       return
     }
+    const transferCleanupPromise = defaultProcessingTaskRegistry.cancel({ tabId: normalizedTabId })
     const hlsCleanupPromise = embeddedBrowserHlsHostLifecycle.onTabClosed(normalizedTabId)
     cancelEmbeddedBrowserLibraryFileDropRequests(normalizedTabId)
     cleanupEmbeddedBrowserDroppedFilesForTab(normalizedTabId)
@@ -3435,6 +3467,7 @@ export function createEmbeddedBrowserMainController(
         view.webContents.close({ waitForBeforeUnload: false })
       }
     }
+    await transferCleanupPromise
     await hlsCleanupPromise
   }
 

@@ -2089,3 +2089,17 @@
 - runtime changes: `EmbeddedBrowserExternalToolProtocolSettings` 新增默认关闭的 `encodePayload`；main 在 `shell.openExternal` 前对第一个 scheme 分隔符后的完整 payload 使用 UTF-8 Base64 编码，保留 scheme 本身。
 - legacy cleanup: 无新增删除；`node.integration.external-tools` 仍保留至 opaque dispatcher 完整切换和 output unit cutover。
 - validation: 外部工具定向 `1 file / 3 passed`、TypeScript `--noEmit`、scoped ESLint 已通过；提交前重跑 metadata validator、sync runner 和非 `dist-electron/**` diff check，完整 build/全仓 lint/test 与真实页面/协议客户端验证仍未执行。
+
+## 2026-08-29: same target (streaming direct-resource transfer)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片把普通直接下载和已捕获资源下载从 `arrayBuffer()` 改为 file-backed streaming transfer。
+- reviewedThrough / portedThrough: 均保持 `null`；`transfer.streaming-memory-budget` 与 `processing.main-task-registry` 继续 `porting`，`transfer-engine` 和 `output-integration` unit 仍开放。
+- change groups: `memory-boundary`、`partial-output-cleanup`、`task-lifecycle` 与 `fixture-contract`。
+- affected capability IDs: `transfer.streaming-memory-budget`、`processing.main-task-registry`；metadata 当前为 `7 units / 32 capabilities / 101 cleanup entries / 229 planned IDs / 217 active refs`，状态为 `15 verified / 7 porting / 1 ported-unverified / 9 pending`。
+- fixtures/tests: 新增 `electron/service/embedded-browser/processing/streaming-transfer.test.ts`，覆盖分块流写盘、声明/实际超限拒绝且保留旧目标、AbortSignal 取消和临时 partial 清理；main controller 两条直接/捕获下载路径已接入该 owner。
+- accepted differences: OmniFlow 使用本地 sibling staging directory 和成功后 rename，不依赖 Cat Catch 的 remote StreamSaver/MITM；默认不增加文件总大小硬上限，Transform/backpressure 只保持流缓冲有界，调用方仍可传入 maxBytes。
+- excluded changes and reasons: 未迁移 native BrowserWindow downloader fallback、Cat Catch downloader session、StreamSaver provenance、分片并发 retry、HLS/DASH/MSE、renderer UI、`dist-electron/**` 或 upstream 游标。
+- unresolved gaps: tab 关闭/崩溃之外的 renderer-unmount recovery、普通下载事件 handoff、staged output lease、应用级交付 terminal、StreamSaver provenance 和真实大媒体压力仍待补齐。
+- runtime changes: 新增 `processing/streaming-transfer.ts#StreamingTransfer`；普通直接/捕获资源下载以 bounded Transform 写临时文件，成功后才替换目标；每个操作登记 `streaming-transfer` 并把 tab close/view loss/render-process loss 与 AbortSignal 连接。
+- legacy cleanup: 无新增删除；旧 HTTP IPC、native downloader fallback 和 `node.transfer.direct-download` 继续保留至 transfer unit 的原子 cutover。
+- validation: streaming transfer 定向 `1 file / 3 passed`、main IPC/authority 关联 `3 files / 9 passed`、TypeScript `--noEmit`、scoped ESLint 已通过；metadata validator、sync runner 和非 `dist-electron/**` diff check 将在提交前重跑，完整 build/全仓 lint/test 与真实大文件验证仍未执行。
