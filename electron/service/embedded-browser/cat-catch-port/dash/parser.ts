@@ -224,16 +224,6 @@ function replaceTemplateTokens(template: string, input: {
     })
 }
 
-function mergeElementAttributes(
-  parent: DashXmlElement | undefined,
-  child: DashXmlElement | undefined,
-) {
-  return {
-    ...(parent?.attributes || {}),
-    ...(child?.attributes || {}),
-  }
-}
-
 function addReason(reasons: string[], reason: string) {
   if (!reasons.includes(reason)) reasons.push(reason)
 }
@@ -585,20 +575,28 @@ function parseRepresentation(input: {
   baseUrls: string[]
   durationSeconds?: number
   index: number
+  periodSegmentTemplate?: DashXmlElement
   representation: DashXmlElement
 }) {
   const representationId = attribute(input.representation, 'id') || String(input.index + 1)
   const reasons: string[] = []
   const representationTemplate = firstChild(input.representation, 'SegmentTemplate')
   const adaptationTemplate = firstChild(input.adaptationSet, 'SegmentTemplate')
-  const templateElement = representationTemplate || adaptationTemplate
+  const periodTemplate = input.periodSegmentTemplate
+  const templateElement = representationTemplate || adaptationTemplate || periodTemplate
   const effectiveTemplate = templateElement
     ? {
         ...templateElement,
-        attributes: mergeElementAttributes(adaptationTemplate, representationTemplate),
+        attributes: {
+          ...(periodTemplate?.attributes || {}),
+          ...(adaptationTemplate?.attributes || {}),
+          ...(representationTemplate?.attributes || {}),
+        },
         children: representationTemplate?.children?.length
           ? representationTemplate.children
-          : adaptationTemplate?.children,
+          : adaptationTemplate?.children?.length
+            ? adaptationTemplate.children
+            : periodTemplate?.children,
       }
     : undefined
   const templateResult = expandSegmentTemplate({
@@ -687,6 +685,7 @@ export function parseDashManifest(input: {
   periods.forEach((period, periodIndex) => {
     const periodBaseUrls = resolveBaseUrls(baseUrls, period)
     const periodDurationSeconds = parseIsoDurationSeconds(attribute(period, 'duration')) ?? durationSeconds
+    const periodSegmentTemplate = firstChild(period, 'SegmentTemplate')
     children(period, 'AdaptationSet').forEach((adaptationSet) => {
       const adaptationBaseUrls = resolveBaseUrls(periodBaseUrls, adaptationSet)
       children(adaptationSet, 'Representation').forEach((representation, representationIndex) => {
@@ -696,6 +695,7 @@ export function parseDashManifest(input: {
           baseUrls: representationBaseUrls,
           durationSeconds: periodDurationSeconds,
           index: representations.length + representationIndex + periodIndex,
+          periodSegmentTemplate,
           representation,
         })
         parsed.unsupportedReasons.forEach(reason => addReason(unsupportedReasons, reason))

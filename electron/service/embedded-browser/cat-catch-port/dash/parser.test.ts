@@ -111,6 +111,39 @@ describe('DASH parser', () => {
     )
   })
 
+  it('dash.period-template-inheritance', () => {
+    const root = node('MPD', {}, [
+      node('Period', { duration: 'PT5S' }, [
+        node('SegmentTemplate', {
+          duration: '2',
+          initialization: 'period-init.mp4',
+          media: 'period-$Number$.m4s',
+          startNumber: '4',
+        }),
+        node('AdaptationSet', { contentType: 'video' }, [
+          node('Representation', { id: 'period-template-video' }),
+        ]),
+      ]),
+    ])
+    const manifest = parseDashManifest({
+      baseUrl: 'https://cdn.example/media/manifest.mpd',
+      root,
+      text: '',
+    })
+    expect(manifest.representations[0]).toMatchObject({
+      initializationUrl: 'https://cdn.example/media/period-init.mp4',
+      segmentCount: 3,
+    })
+    expect(manifest.representations[0].segments.map(segment => segment.url)).toEqual([
+      'https://cdn.example/media/period-4.m4s',
+      'https://cdn.example/media/period-5.m4s',
+      'https://cdn.example/media/period-6.m4s',
+    ])
+    expect(manifest.representations[0].segments.map(segment => segment.duration)).toEqual([
+      2, 2, 1,
+    ])
+  })
+
   it('dash.base-url-timeline-ranges', () => {
     const root = node('MPD', { type: 'dynamic' }, [
       node('BaseURL', {}, [], 'https://cdn-a.example/media/'),
