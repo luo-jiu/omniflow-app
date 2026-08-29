@@ -17,6 +17,10 @@ import type {
   EmbeddedBrowserMpdPlanDownloadPayload,
   EmbeddedBrowserDirectFileDownloadPayload,
   EmbeddedBrowserCapturedResourceDownloadPayload,
+  EmbeddedBrowserDashRecordingDiscardPayload,
+  EmbeddedBrowserDashRecordingStartPayload,
+  EmbeddedBrowserDashRecordingStopPayload,
+  EmbeddedBrowserDashTaskEventPayload,
 } from './embeddedBrowserMainTypes'
 import type {
   EmbeddedBrowserCookie,
@@ -73,6 +77,18 @@ type EmbeddedBrowserMainIpcHandlers = {
     tabId: string,
     payload: EmbeddedBrowserHlsRecordingDiscardPayload,
   ) => Promise<unknown>
+  startDashRecording: (
+    tabId: string,
+    payload: EmbeddedBrowserDashRecordingStartPayload,
+  ) => Promise<unknown>
+  stopDashRecording: (
+    tabId: string,
+    payload: EmbeddedBrowserDashRecordingStopPayload,
+  ) => Promise<unknown>
+  discardDashRecording: (
+    tabId: string,
+    payload: EmbeddedBrowserDashRecordingDiscardPayload,
+  ) => Promise<unknown>
   downloadHlsTracks: (
     tabId: string,
     payload: EmbeddedBrowserHlsTrackMergePayload,
@@ -107,6 +123,7 @@ type EmbeddedBrowserMainIpcHandlers = {
   goForward: (tabId: string) => Promise<void>
   listCapturedResources: (tabId: string) => unknown
   listHlsTaskSnapshots: (tabId: string) => EmbeddedBrowserHlsTaskEventPayload[]
+  listDashTaskSnapshots: (tabId: string) => EmbeddedBrowserDashTaskEventPayload[]
   mergeMseResources: (
     tabId: string,
     payload: EmbeddedBrowserCapturedResourceMergePayload,
@@ -290,6 +307,24 @@ export function registerEmbeddedBrowserMainIpcHandlers(handlers: EmbeddedBrowser
     ),
   )
   ipcMain.handle(
+    'embedded-browser:resource:start-dash-recording',
+    async (_event, tabId: string, payload: EmbeddedBrowserDashRecordingStartPayload) => (
+      handlers.startDashRecording(tabId, payload)
+    ),
+  )
+  ipcMain.handle(
+    'embedded-browser:resource:stop-dash-recording',
+    async (_event, tabId: string, payload: EmbeddedBrowserDashRecordingStopPayload) => (
+      handlers.stopDashRecording(tabId, payload)
+    ),
+  )
+  ipcMain.handle(
+    'embedded-browser:resource:discard-dash-recording',
+    async (_event, tabId: string, payload: EmbeddedBrowserDashRecordingDiscardPayload) => (
+      handlers.discardDashRecording(tabId, payload)
+    ),
+  )
+  ipcMain.handle(
     'embedded-browser:resource:download-hls-tracks',
     async (_event, tabId: string, payload: EmbeddedBrowserHlsTrackMergePayload) => (
       handlers.downloadHlsTracks(tabId, payload)
@@ -318,6 +353,10 @@ export function registerEmbeddedBrowserMainIpcHandlers(handlers: EmbeddedBrowser
     async (_event, tabId: string, payload: EmbeddedBrowserMpdPlanDownloadPayload) => (
       handlers.downloadMpdPlan(tabId, payload)
     ),
+  )
+  ipcMain.handle(
+    'embedded-browser:resource:list-dash-task-snapshots',
+    async (_event, tabId: string) => handlers.listDashTaskSnapshots(tabId),
   )
   ipcMain.handle(
     'embedded-browser:resource:download-direct-file',

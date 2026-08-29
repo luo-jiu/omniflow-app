@@ -1781,6 +1781,48 @@
 
 ## Template
 
+## 2026-08-29: same target (DASH live production lifecycle)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片把 DASH dynamic snapshot 从纯 task/adapter 接入 main 生产生命周期。
+- reviewedThrough / portedThrough: 均保持 `null`；`dash.parser-planner` 与 `dash.timeline-download-merge` 继续 `porting`，`dash-engine` unit 仍开放。
+- change groups: `platform-adaptation`（main-owned captured-resource authority、bounded MPD XML adapter、独立 IPC/preload）与 `behavioral`（只追加 Representation 新 init/media bytes、停止合并、按 tab/view/app 清理）。
+- affected capability IDs: `dash.timeline-download-merge`；metadata 为 `7 units / 32 capabilities / 210 anchors / 100 cleanup entries / 208 planned IDs / 187 active refs`。
+- fixtures/tests: `dash-task-live-append.test.ts#dash.dynamic-live-append` 验证 init 只写一次、media bytes 按顺序追加；同文件 `#dash.dynamic-live-append-cancel` 验证外部 AbortSignal 终止 fragment downloader；`dash-live-session-owner.test.ts#dash.dynamic-session-owner` 与 `#dash.dynamic-session-owner-active-task` 覆盖 tab 清理、revision snapshot 和 active task abort；`embeddedBrowserMainIpc.test.ts#dash.renderer-task-snapshot-ipc` 覆盖 start/stop/discard/list IPC forwarding；DASH live/adapter/task/output 定向测试共 `6 files / 22 passed`。
+- accepted differences: live 录制默认选择首个 video/audio Representation，renderer 可提交 opaque representation id；当前不新增 renderer UI、不把 MPD headers 或 task 真相暴露给页面，live 输出停止后复用现有本地轨道到 ffmpeg adapter。
+- excluded changes and reasons: 未扩展到通用 task registry、复杂嵌套 SIDX、跨 Period discontinuity、DASH DRM 或真实网站/ffprobe；未修改 HLS、MSE、Agent Shell、`dist-electron/**` 或其他 agent 的 dirty 文件。
+- unresolved gaps: 无真实 dynamic MPD/ffprobe output 证据；多 Period/复杂 SIDX、renderer workflow 接入和 `dash-engine` 原子关闭仍待完成。
+- runtime changes: 新增 `dash-live-session-owner.ts`，补 `appendDashRepresentationSegments`；controller 新增 DASH live start/stop/discard 与 `embedded-browser:dash-task` revision snapshot；preload/electron-env/resource API 暴露对应 typed bridge；导航、tab close、view destroyed、render-process-gone 和 dispose 均清理 DASH session/workdir。
+- legacy cleanup: 无；DASH unit 尚未 cutover，旧实现和 `legacy-cleanup.json` 继续保留。
+- validation: `npm run cat-catch:validate`、DASH 定向 Vitest `22/22`、应用 TypeScript `--noEmit` 和 scoped ESLint 通过；完整 build 未运行，避免覆盖其他 agent 的 dirty `dist-electron/**`，真实页面/真实 MPD 验证未执行。
+
+## 2026-08-29: same target (DASH live manifest authority boundary)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片修正 DASH live start 对 captured resource authority 的 URL 绑定。
+- reviewedThrough / portedThrough: 均保持 `null`；`dash.parser-planner` 与 `dash.timeline-download-merge` 继续 `porting`，`dash-engine` unit 仍开放。
+- change groups: `platform-adaptation`（main-only authority resolver）与 `security-contract`（禁止 manifest URL mismatch 退回 browser-session fetch）。
+- affected capability IDs: `dash.timeline-download-merge`；metadata 为 `7 units / 32 capabilities / 210 anchors / 100 cleanup entries / 209 planned IDs / 188 active refs`。
+- fixtures/tests: `electron/service/embedded-browser/integrations/dash-manifest-authority.test.ts#dash.live-manifest-authority` 覆盖精确 URL、URL mismatch 和 stale/missing authority；DASH 定向测试为 `6 files / 20 passed`。
+- accepted differences: DASH live 要求 renderer 提交的 manifest URL 与被兑换 captured resource 的 first-hop URL 完全一致；URL 规范化或跨资源推断不会在该入口隐式发生，避免任务生命周期中出现无 authority 请求。
+- excluded changes and reasons: 未改 HLS live 的既有入口、DASH parser/transfer 算法、renderer UI、通用 task registry 或真实 MPD/ffprobe 输出；这些仍由各自开放能力追踪。
+- unresolved gaps: 复杂嵌套 SIDX、不完整或初始化冲突的多 Period、真实 dynamic MPD/ffprobe、renderer workflow 和 `dash-engine` 原子关闭仍待完成。
+- runtime changes: 新增 `integrations/dash-manifest-authority.ts#resolveDashManifestAuthority`，controller 在创建 live snapshot loader 前严格兑换并比对 URL；失败在保存对话框和网络请求前返回 authority 错误。
+- legacy cleanup: 无；DASH unit 尚未 cutover，旧实现和 `legacy-cleanup.json` 继续保留。
+- validation: 新 authority、DASH live task/adapter/append/session owner/output、IPC 定向 Vitest `20/20`，应用 TypeScript `--noEmit`、scoped ESLint 和 `git diff --check` 通过；完整 build、完整 Vitest、真实页面/真实 MPD/ffprobe 未执行。
+
+## 2026-08-29: same target (DASH live terminal cleanup)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片补齐 DASH live 轮询非 Abort 错误后的 session/workdir 清理。
+- reviewedThrough / portedThrough: 均保持 `null`；`dash.parser-planner` 与 `dash.timeline-download-merge` 继续 `porting`，`dash-engine` unit 仍开放。
+- change groups: `lifecycle`（terminal error callback、live session cleanup）与 `stability`（保留错误 snapshot、避免任务卡死）。
+- affected capability IDs: `dash.timeline-download-merge`；metadata 为 `7 units / 32 capabilities / 210 anchors / 100 cleanup entries / 210 planned IDs / 189 active refs`。
+- fixtures/tests: `dash-live-task.test.ts#dash.dynamic-refresh-terminal-error` 覆盖第二轮 MPD 刷新失败、终止错误回调和保留当前 plan；DASH 定向测试为 `6 files / 21 passed`。
+- accepted differences: 轮询出现非取消错误后，live task 进入终态并由 main owner 清理 workdir；最后一条 error snapshot 仍可供 renderer 恢复显示，之后必须重新开始任务。
+- excluded changes and reasons: 未修改 HLS live、DASH parser/transfer 算法、通用 task registry、renderer UI 或真实 MPD/ffprobe 输出。
+- unresolved gaps: 复杂嵌套 SIDX、不完整或初始化冲突的多 Period、真实 dynamic MPD/ffprobe、renderer workflow 和 `dash-engine` 原子关闭仍待完成。
+- runtime changes: `DashLiveTask` 新增 `onTerminalError`，controller 以 `clearLive` 清理任务资源而不删除错误 snapshot；启动阶段失败仍由 start catch 做完整清理。
+- legacy cleanup: 无；DASH unit 尚未 cutover，旧实现和 `legacy-cleanup.json` 继续保留。
+- validation: DASH 定向 Vitest `21/21`、应用 TypeScript `--noEmit`、scoped ESLint、metadata validator 和 `git diff --check` 通过；完整 build、完整 Vitest、真实页面/真实 MPD/ffprobe 未执行。
+
 ```markdown
 ## YYYY-MM-DD: <from> -> <to>
 

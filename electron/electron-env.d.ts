@@ -535,6 +535,7 @@ interface Window {
     goForward: (tabId: string) => Promise<void>;
     listCapturedResources: (tabId: string) => Promise<import('./service/embedded-browser/contracts/captured-resource').ResourceStateSnapshot | null>;
     listHlsTaskSnapshots: (tabId: string) => Promise<import('./service/embeddedBrowserMainTypes').EmbeddedBrowserHlsTaskEventPayload[]>;
+    listDashTaskSnapshots: (tabId: string) => Promise<import('./service/embeddedBrowserMainTypes').EmbeddedBrowserDashTaskEventPayload[]>;
     navigate: (tabId: string, url: string) => Promise<void>;
     onLibraryFileDropResult: (
       listener: (payload: import('@/features/file-transfer/model/file-transfer').LibraryFileBrowserDropResult) => void,
@@ -613,6 +614,31 @@ interface Window {
       requestId?: string;
     }) => Promise<EmbeddedBrowserCapturedResourceMergeResponse>;
     discardHlsRecording: (tabId: string, payload: {
+      requestId?: string;
+    }) => Promise<{
+      error?: string;
+      ok: boolean;
+    }>;
+    startDashRecording: (tabId: string, payload: {
+      ffmpegPath?: string;
+      manifestUrl: string;
+      outputDirectoryPath?: string;
+      resourceId: string;
+      requestId: string;
+      selectedAudioRepresentationId?: string;
+      selectedVideoRepresentationId?: string;
+      suggestedFileName?: string;
+      useSystemSaveDialog?: boolean;
+    }) => Promise<{
+      cancelled?: boolean;
+      error?: string;
+      ok: boolean;
+      requestId?: string;
+    }>;
+    stopDashRecording: (tabId: string, payload: {
+      requestId?: string;
+    }) => Promise<import('./service/embeddedBrowserMainTypes').EmbeddedBrowserDashRecordingStopResponse>;
+    discardDashRecording: (tabId: string, payload: {
       requestId?: string;
     }) => Promise<{
       error?: string;
@@ -719,6 +745,9 @@ interface Window {
     }) => void) => () => void;
     onHlsTask: (
       listener: (payload: import('./service/embeddedBrowserMainTypes').EmbeddedBrowserHlsTaskEventPayload) => void,
+    ) => () => void;
+    onDashTask: (
+      listener: (payload: import('./service/embeddedBrowserMainTypes').EmbeddedBrowserDashTaskEventPayload) => void,
     ) => () => void;
     onResourceStateChange: (
       listener: (payload: import('./service/embedded-browser/contracts/captured-resource').ResourceStateChange) => void,

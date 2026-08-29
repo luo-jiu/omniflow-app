@@ -13,7 +13,10 @@ import type {
   EmbeddedBrowserStagedPageDragFile,
 } from '@/features/file-transfer/model/browser-drag-transfer'
 import type { LibraryFileBrowserDropResult } from '@/features/file-transfer/model/file-transfer'
-import type { EmbeddedBrowserHlsTaskEventPayload } from './service/embeddedBrowserMainTypes'
+import type {
+  EmbeddedBrowserDashTaskEventPayload,
+  EmbeddedBrowserHlsTaskEventPayload,
+} from './service/embeddedBrowserMainTypes'
 import type {
   AIServiceCompletionInput,
   AIServiceRunSessionHandle,
@@ -602,6 +605,13 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
     ipcRenderer.on('embedded-browser:hls-task', wrapped);
     return () => ipcRenderer.removeListener('embedded-browser:hls-task', wrapped);
   },
+  onDashTask: (listener: (payload: EmbeddedBrowserDashTaskEventPayload) => void) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: EmbeddedBrowserDashTaskEventPayload) => {
+      listener(payload);
+    };
+    ipcRenderer.on('embedded-browser:dash-task', wrapped);
+    return () => ipcRenderer.removeListener('embedded-browser:dash-task', wrapped);
+  },
   onResourceStateChange: (listener: (payload: import('./service/embedded-browser/contracts/captured-resource').ResourceStateChange) => void) => {
     const wrapped = (_event: Electron.IpcRendererEvent, payload: import('./service/embedded-browser/contracts/captured-resource').ResourceStateChange) => {
       listener(payload);
@@ -614,6 +624,7 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
     ipcRenderer.invoke('embedded-browser:resource:export', tabId, resourceId),
   listCapturedResources: (tabId: string) => ipcRenderer.invoke('embedded-browser:resource:list', tabId) as Promise<import('./service/embedded-browser/contracts/captured-resource').ResourceStateSnapshot | null>,
   listHlsTaskSnapshots: (tabId: string) => ipcRenderer.invoke('embedded-browser:resource:list-hls-task-snapshots', tabId) as Promise<EmbeddedBrowserHlsTaskEventPayload[]>,
+  listDashTaskSnapshots: (tabId: string) => ipcRenderer.invoke('embedded-browser:resource:list-dash-task-snapshots', tabId) as Promise<EmbeddedBrowserDashTaskEventPayload[]>,
   openCapturedResource: (tabId: string, resourceId: string) =>
     ipcRenderer.invoke('embedded-browser:resource:open', tabId, resourceId),
   readCapturedResource: (tabId: string, resourceId: string) =>
@@ -693,6 +704,23 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
   discardHlsRecording: (tabId: string, payload: {
     requestId?: string;
   }) => ipcRenderer.invoke('embedded-browser:resource:discard-hls-recording', tabId, payload),
+  startDashRecording: (tabId: string, payload: {
+    ffmpegPath?: string;
+    manifestUrl: string;
+    outputDirectoryPath?: string;
+    resourceId: string;
+    requestId: string;
+    selectedAudioRepresentationId?: string;
+    selectedVideoRepresentationId?: string;
+    suggestedFileName?: string;
+    useSystemSaveDialog?: boolean;
+  }) => ipcRenderer.invoke('embedded-browser:resource:start-dash-recording', tabId, payload),
+  stopDashRecording: (tabId: string, payload: {
+    requestId?: string;
+  }) => ipcRenderer.invoke('embedded-browser:resource:stop-dash-recording', tabId, payload),
+  discardDashRecording: (tabId: string, payload: {
+    requestId?: string;
+  }) => ipcRenderer.invoke('embedded-browser:resource:discard-dash-recording', tabId, payload),
   downloadHlsTracks: (tabId: string, payload: {
     audioResourceId: string;
     durationSeconds?: number;

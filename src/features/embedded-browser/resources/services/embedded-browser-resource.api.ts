@@ -57,6 +57,18 @@ export async function listEmbeddedBrowserHlsTaskSnapshots(tabId: string) {
   return window.electronEmbeddedBrowser.listHlsTaskSnapshots(tabId) as Promise<EmbeddedBrowserHlsTaskProjection[]>;
 }
 
+export function subscribeEmbeddedBrowserDashTask(
+  listener: (payload: import('../../../../../electron/service/embeddedBrowserMainTypes').EmbeddedBrowserDashTaskEventPayload) => void,
+) {
+  assertDesktopSupport();
+  return window.electronEmbeddedBrowser.onDashTask(listener);
+}
+
+export async function listEmbeddedBrowserDashTaskSnapshots(tabId: string) {
+  assertDesktopSupport();
+  return window.electronEmbeddedBrowser.listDashTaskSnapshots(tabId);
+}
+
 export async function startEmbeddedBrowserResourceCapture(tabId: string) {
   assertDesktopSupport();
   return window.electronEmbeddedBrowser.startResourceCapture(tabId) as Promise<EmbeddedBrowserResourceStateSnapshot | null>;
@@ -260,6 +272,40 @@ export async function discardEmbeddedBrowserHlsRecording(
     error?: string;
     ok: boolean;
   }>;
+}
+
+export async function startEmbeddedBrowserDashRecording(
+  tabId: string,
+  payload: {
+    ffmpegPath?: string;
+    manifestUrl: string;
+    outputDirectoryPath?: string;
+    resourceId: string;
+    requestId: string;
+    selectedAudioRepresentationId?: string;
+    selectedVideoRepresentationId?: string;
+    suggestedFileName?: string;
+    useSystemSaveDialog?: boolean;
+  },
+) {
+  assertDesktopSupport();
+  return window.electronEmbeddedBrowser.startDashRecording(tabId, payload);
+}
+
+export async function stopEmbeddedBrowserDashRecording(
+  tabId: string,
+  payload: { requestId?: string },
+) {
+  assertDesktopSupport();
+  return window.electronEmbeddedBrowser.stopDashRecording(tabId, payload);
+}
+
+export async function discardEmbeddedBrowserDashRecording(
+  tabId: string,
+  payload: { requestId?: string },
+) {
+  assertDesktopSupport();
+  return window.electronEmbeddedBrowser.discardDashRecording(tabId, payload);
 }
 
 export async function downloadEmbeddedBrowserHlsTracks(

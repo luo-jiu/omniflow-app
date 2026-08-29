@@ -137,6 +137,29 @@ describe('DASH live task', () => {
     await expect(staticTask.start()).rejects.toThrow('不是 dynamic')
   })
 
+  it('dash.dynamic-refresh-terminal-error', async () => {
+    const callbacks: Array<() => void> = []
+    const onTerminalError = vi.fn()
+    const task = new DashLiveTask({
+      loadSnapshot: vi.fn()
+        .mockResolvedValueOnce(plan([{ index: 0, number: 1, url: 'https://cdn.example/1.m4s' }]))
+        .mockRejectedValueOnce(new Error('MPD refresh failed')),
+      onTerminalError,
+      schedule: (callback) => {
+        callbacks.push(callback)
+        return callback as unknown as ReturnType<typeof setTimeout>
+      },
+    })
+
+    await task.start()
+    callbacks.shift()?.()
+    await vi.waitFor(() => expect(onTerminalError).toHaveBeenCalledWith(expect.objectContaining({
+      message: 'MPD refresh failed',
+    })))
+    expect(task.getCurrentPlan()).toBeDefined()
+    await task.discard()
+  })
+
   it('dash.dynamic-refresh-cancel', async () => {
     let resolveSnapshot: (() => void) | undefined
     let observedSignal: AbortSignal | undefined

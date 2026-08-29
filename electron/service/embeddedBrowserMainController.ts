@@ -65,6 +65,13 @@ import {
   type EmbeddedBrowserDirectFileDownloadPayload,
   type EmbeddedBrowserDirectFileDownloadResponse,
   type EmbeddedBrowserCapturedResourceDownloadPayload,
+  type EmbeddedBrowserDashRecordingDiscardPayload,
+  type EmbeddedBrowserDashRecordingDiscardResponse,
+  type EmbeddedBrowserDashRecordingStartPayload,
+  type EmbeddedBrowserDashRecordingStartResponse,
+  type EmbeddedBrowserDashRecordingStopPayload,
+  type EmbeddedBrowserDashRecordingStopResponse,
+  type EmbeddedBrowserDashTaskEventInput,
   type EmbeddedBrowserMainControllerOptions,
   type EmbeddedBrowserMpdDownloadPayload,
   type EmbeddedBrowserMpdDownloadResponse,
@@ -169,6 +176,7 @@ import {
 import type { EmbeddedBrowserFragmentFetch } from './embeddedBrowserFragmentDownloader'
 import {
   DashTaskExecutor,
+  appendDashRepresentationSegments,
   type DashTaskPlan,
 } from './embedded-browser/processing/dash-task'
 import type { DashRepresentation } from './embedded-browser/cat-catch-port/dash/parser'
@@ -176,6 +184,15 @@ import { mergeDashTaskTracksToOutput } from './embedded-browser/processing/dash-
 import {
   HlsLiveTask,
 } from './embedded-browser/processing/hls-live-task'
+import {
+  createEmbeddedBrowserDashHostLifecycle,
+  EmbeddedBrowserDashLiveSessionOwner,
+} from './embedded-browser/processing/dash-live-session-owner'
+import {
+  createDashLiveSnapshotLoader,
+} from './embedded-browser/processing/dash-live-adapter'
+import { DashLiveTask } from './embedded-browser/processing/dash-live-task'
+import { resolveDashManifestAuthority } from './embedded-browser/integrations/dash-manifest-authority'
 import {
   createEmbeddedBrowserHlsHostLifecycle,
   EmbeddedBrowserHlsSessionOwner,
@@ -258,6 +275,22 @@ export function createEmbeddedBrowserMainController(
     workDirectoryPath?: string
   }
 
+  type EmbeddedBrowserDashLiveRecordingSession = {
+    audioRepresentationId?: string
+    ffmpegPath?: string
+    manifestUrl: string
+    outputPath: string
+    recorder: {
+      discard: () => Promise<void>
+      getCurrentWorkDirectoryPath: () => string
+    }
+    requestId: string
+    task: DashLiveTask
+    tabId: string
+    videoRepresentationId?: string
+    workDirectoryPath?: string
+  }
+
   const embeddedBrowserViews = new Map<string, WebContentsView>()
   const embeddedBrowserLastCommittedUrls = new Map<string, string>()
   const embeddedBrowserIconUrls = new Map<string, string>()
@@ -277,6 +310,10 @@ export function createEmbeddedBrowserMainController(
   >()
   const embeddedBrowserHlsHostLifecycle = createEmbeddedBrowserHlsHostLifecycle(
     embeddedBrowserHlsSessionOwner,
+  )
+  const embeddedBrowserDashSessionOwner = new EmbeddedBrowserDashLiveSessionOwner<EmbeddedBrowserDashLiveRecordingSession>()
+  const embeddedBrowserDashHostLifecycle = createEmbeddedBrowserDashHostLifecycle(
+    embeddedBrowserDashSessionOwner,
   )
   const embeddedBrowserMseSpoolStore = new MseSpoolStore()
   let activeEmbeddedBrowserTabId: string | null = null
@@ -338,6 +375,14 @@ export function createEmbeddedBrowserMainController(
       return
     }
     mainWindow.webContents.send('embedded-browser:hls-task', snapshot)
+  }
+
+  function emitEmbeddedBrowserDashTask(payload: EmbeddedBrowserDashTaskEventInput) {
+    const snapshot = embeddedBrowserDashSessionOwner.recordTaskEvent(payload)
+    if (!snapshot) return
+    const mainWindow = options.getMainWindow()
+    if (!mainWindow || mainWindow.isDestroyed()) return
+    mainWindow.webContents.send('embedded-browser:dash-task', snapshot)
   }
 
   function createEmbeddedBrowserHlsPlanTaskEventForwarder(input: {
@@ -2644,6 +2689,264 @@ export function createEmbeddedBrowserMainController(
     return downloadEmbeddedBrowserManifestResourceForRenderer(tabId, payload, 'mpd')
   }
 
+  async function startEmbeddedBrowserDashRecordingResource(
+    tabId: string,
+    payload: EmbeddedBrowserDashRecordingStartPayload,
+  ): Promise<EmbeddedBrowserDashRecordingStartResponse> {
+    const normalizedTabId = String(tabId || '').trim()
+    const requestedManifestUrl = String(payload.manifestUrl || '').trim()
+    const requestedResourceId = String(payload.resourceId || '').trim()
+    const requestId = String(payload.requestId || '').trim()
+    if (!normalizedTabId || !requestId || !requestedResourceId || !/^https?:\/\//i.test(requestedManifestUrl)) {
+      return { error: '缺少可录制的 DASH 直播 manifest', ok: false }
+    }
+
+    const exactResourceId = captureRuntime?.resolveResourceIdByUrl(normalizedTabId, requestedManifestUrl)
+    const authorityResourceId = exactResourceId || requestedResourceId
+    const manifestAuthority = resolveDashManifestAuthority(captureRuntime?.access || null, {
+      manifestUrl: requestedManifestUrl,
+      resourceId: authorityResourceId,
+      tabId: normalizedTabId,
+    })
+    if (!manifestAuthority) {
+      return { error: 'DASH 直播捕捉资源已过期或不属于当前页面', ok: false }
+    }
+    const manifestUrl = manifestAuthority.manifestUrl
+    const manifestHeaders = manifestAuthority.headers
+    if (embeddedBrowserDashSessionOwner.findLiveByTab(normalizedTabId)) {
+      return { error: '当前 tab 仍有未完成的 DASH 直播录制，请先停止或清理', ok: false }
+    }
+
+    let workDirectoryPath = ''
+    try {
+      const suggestedFileName = String(payload.suggestedFileName || '').trim()
+        || deriveEmbeddedBrowserManifestOutputFileName(manifestUrl, 'mpd')
+      const outputPath = await resolveEmbeddedBrowserOutputPath({
+        defaultFileName: suggestedFileName,
+        filters: [{ extensions: ['mp4', 'm4a', 'webm'], name: '媒体文件' }],
+        outputDirectoryPath: payload.outputDirectoryPath,
+        useSystemSaveDialog: payload.useSystemSaveDialog,
+      })
+      if (!outputPath) return { cancelled: true, ok: false }
+
+      workDirectoryPath = await mkdtemp(path.join(os.tmpdir(), 'omniflow-dash-live-'))
+      const initializedRepresentations = new Set<string>()
+      let selectedVideoId = String(payload.selectedVideoRepresentationId || '').trim() || undefined
+      let selectedAudioId = String(payload.selectedAudioRepresentationId || '').trim() || undefined
+      let trackBytes = 0
+      let trackPromise = Promise.resolve()
+      const task = new DashLiveTask({
+        loadSnapshot: createDashLiveSnapshotLoader({
+          fetch: createEmbeddedBrowserCapturedResourceFetch(normalizedTabId, authorityResourceId),
+          headers: manifestHeaders,
+          manifestUrl,
+        }),
+        onTerminalError: () => {
+          void embeddedBrowserDashSessionOwner.clearLive({ requestId, tabId: normalizedTabId })
+        },
+        onEvent: (event) => emitEmbeddedBrowserDashTask({
+          bytesReceived: trackBytes,
+          completedSegments: event.completedSegments,
+          durationSeconds: event.durationSeconds,
+          error: event.error,
+          manifestUrl,
+          message: event.message,
+          requestId,
+          stage: event.stage,
+          status: event.status,
+          tabId: normalizedTabId,
+          totalSegments: event.totalSegments,
+        }),
+        onNewSegments: async (delta, signal) => {
+          const videoRepresentations = delta.plan.representations.filter(item => item.contentType === 'video')
+          const audioRepresentations = delta.plan.representations.filter(item => item.contentType === 'audio')
+          selectedVideoId = selectedVideoId || videoRepresentations[0]?.id
+          selectedAudioId = selectedAudioId || audioRepresentations[0]?.id
+          if (!selectedVideoId && !selectedAudioId) throw new Error('当前 DASH MPD 没有可录制的音视频轨道')
+          if (selectedVideoId && !videoRepresentations.some(item => item.id === selectedVideoId)) {
+            throw new Error(`请求的 DASH video Representation 不存在：${selectedVideoId}`)
+          }
+          if (selectedAudioId && !audioRepresentations.some(item => item.id === selectedAudioId)) {
+            throw new Error(`请求的 DASH audio Representation 不存在：${selectedAudioId}`)
+          }
+          const selected = delta.representations.filter(item => item.id === selectedVideoId || item.id === selectedAudioId)
+          trackPromise = trackPromise.then(async () => {
+            for (const representation of selected) {
+              const trackPath = path.join(workDirectoryPath, `${representation.contentType}-track.bin`)
+              const result = await appendDashRepresentationSegments(representation, trackPath, {
+                appendInitialization: !initializedRepresentations.has(representation.id),
+                fetch: createEmbeddedBrowserCapturedResourceFetch(normalizedTabId, authorityResourceId),
+                headers: manifestHeaders,
+                signal,
+              })
+              initializedRepresentations.add(representation.id)
+              trackBytes += result.bytesReceived
+            }
+          })
+          await trackPromise
+        },
+      })
+      const recorder = {
+        discard: () => task.discard(),
+        getCurrentWorkDirectoryPath: () => workDirectoryPath,
+      }
+      embeddedBrowserDashSessionOwner.upsertLive({
+        audioRepresentationId: selectedAudioId,
+        ffmpegPath: payload.ffmpegPath,
+        manifestUrl,
+        outputPath,
+        recorder,
+        requestId,
+        task,
+        tabId: normalizedTabId,
+        videoRepresentationId: selectedVideoId,
+        workDirectoryPath,
+      })
+      emitEmbeddedBrowserDashTask({
+        manifestUrl,
+        message: '开始准备 DASH 直播录制任务',
+        requestId,
+        stage: 'preparing',
+        status: 'running',
+        tabId: normalizedTabId,
+      })
+      await task.start()
+      const currentPlan = task.getCurrentPlan()
+      if (!currentPlan || (!selectedVideoId && !selectedAudioId)) {
+        throw new Error('当前 DASH MPD 没有可录制的音视频轨道')
+      }
+      if (selectedVideoId && !currentPlan.representations.some(item => item.id === selectedVideoId && item.contentType === 'video' && item.segments.length > 0)) {
+        throw new Error(`请求的 DASH video Representation 不存在：${selectedVideoId}`)
+      }
+      if (selectedAudioId && !currentPlan.representations.some(item => item.id === selectedAudioId && item.contentType === 'audio' && item.segments.length > 0)) {
+        throw new Error(`请求的 DASH audio Representation 不存在：${selectedAudioId}`)
+      }
+      const session = embeddedBrowserDashSessionOwner.getLive(requestId, normalizedTabId)
+      if (session) {
+        session.audioRepresentationId = selectedAudioId
+        session.videoRepresentationId = selectedVideoId
+      }
+      emitEmbeddedBrowserDashTask({
+        bytesReceived: trackBytes,
+        manifestUrl,
+        message: 'DASH 直播录制已开始，继续等待你手动停止',
+        requestId,
+        stage: 'downloading',
+        status: 'running',
+        tabId: normalizedTabId,
+      })
+      return { ok: true, requestId }
+    } catch (error) {
+      await embeddedBrowserDashSessionOwner.clear({ requestId, tabId: normalizedTabId })
+      if (workDirectoryPath) await rm(workDirectoryPath, { force: true, recursive: true }).catch(() => undefined)
+      const message = error instanceof Error ? error.message : String(error)
+      emitEmbeddedBrowserDashTask({
+        error: message,
+        manifestUrl: requestedManifestUrl,
+        message,
+        requestId,
+        stage: 'error',
+        status: 'error',
+        tabId: normalizedTabId,
+      })
+      return { error: message, ok: false }
+    }
+  }
+
+  async function stopEmbeddedBrowserDashRecordingResource(
+    tabId: string,
+    payload: EmbeddedBrowserDashRecordingStopPayload,
+  ): Promise<EmbeddedBrowserDashRecordingStopResponse> {
+    const normalizedTabId = String(tabId || '').trim()
+    const requestId = String(payload.requestId || '').trim()
+    const session = requestId ? embeddedBrowserDashSessionOwner.getLive(requestId, normalizedTabId) : undefined
+    if (!normalizedTabId || !requestId || !session) return { error: 'DASH 直播录制任务不存在或已结束', ok: false }
+
+    let activeTask: { complete: () => void; signal: AbortSignal } | undefined
+    let stopped: Awaited<ReturnType<DashLiveTask['stop']>> | undefined
+    try {
+      activeTask = embeddedBrowserDashSessionOwner.beginActiveTask({ requestId, tabId: normalizedTabId })
+      emitEmbeddedBrowserDashTask({
+        manifestUrl: session.manifestUrl,
+        message: '正在停止 DASH 直播录制并整理轨道',
+        requestId,
+        stage: 'stopped',
+        status: 'running',
+        tabId: normalizedTabId,
+      })
+      stopped = await session.task.stop()
+      const plan = stopped.plan
+      const videoRepresentation = session.videoRepresentationId
+        ? plan.representations.find(item => item.id === session.videoRepresentationId)
+        : undefined
+      const audioRepresentation = session.audioRepresentationId
+        ? plan.representations.find(item => item.id === session.audioRepresentationId)
+        : undefined
+      if (!videoRepresentation && !audioRepresentation) throw new Error('DASH 录制没有生成可合并的轨道')
+      emitEmbeddedBrowserDashTask({
+        completedSegments: stopped.totalSegments,
+        durationSeconds: plan.durationSeconds,
+        manifestUrl: session.manifestUrl,
+        message: 'DASH 轨道已完成，开始交给 ffmpeg',
+        requestId,
+        stage: 'merging',
+        status: 'running',
+        tabId: normalizedTabId,
+        totalSegments: stopped.totalSegments,
+      })
+      const result = await mergeDashTaskTracksToOutput({
+        audio: audioRepresentation ? { path: path.join(session.workDirectoryPath || '', 'audio-track.bin'), representation: audioRepresentation } : undefined,
+        durationSeconds: plan.durationSeconds,
+        ffmpegPath: session.ffmpegPath,
+        outputPath: session.outputPath,
+        signal: activeTask.signal,
+        video: videoRepresentation ? { path: path.join(session.workDirectoryPath || '', 'video-track.bin'), representation: videoRepresentation } : undefined,
+      })
+      emitEmbeddedBrowserDashTask({
+        completedSegments: stopped.totalSegments,
+        durationSeconds: plan.durationSeconds,
+        manifestUrl: session.manifestUrl,
+        message: 'DASH 直播录制文件已完成',
+        outputPath: result.outputPath,
+        requestId,
+        stage: 'completed',
+        status: 'success',
+        tabId: normalizedTabId,
+        totalSegments: stopped.totalSegments,
+      })
+      embeddedBrowserDashSessionOwner.takeLive(requestId, normalizedTabId)
+      await rm(session.workDirectoryPath || '', { force: true, recursive: true }).catch(() => undefined)
+      return { ffmpegPath: result.ffmpegPath, ok: true, outputPath: result.outputPath }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      emitEmbeddedBrowserDashTask({
+        error: message,
+        manifestUrl: session.manifestUrl,
+        message,
+        requestId,
+        stage: 'error',
+        status: 'error',
+        tabId: normalizedTabId,
+      })
+      if (!stopped) await embeddedBrowserDashSessionOwner.clear({ requestId, tabId: normalizedTabId })
+      if (activeTask?.signal.aborted || (error instanceof Error && error.name === 'AbortError')) return { cancelled: true, ok: false }
+      return { error: message, ok: false }
+    } finally {
+      activeTask?.complete()
+    }
+  }
+
+  async function discardEmbeddedBrowserDashRecordingResource(
+    tabId: string,
+    payload: EmbeddedBrowserDashRecordingDiscardPayload,
+  ): Promise<EmbeddedBrowserDashRecordingDiscardResponse> {
+    const normalizedTabId = String(tabId || '').trim()
+    const requestId = String(payload.requestId || '').trim()
+    if (!normalizedTabId || !requestId) return { error: '缺少可清理的 DASH 直播录制任务', ok: false }
+    await embeddedBrowserDashSessionOwner.clear({ requestId, tabId: normalizedTabId })
+    return { ok: true }
+  }
+
   async function downloadEmbeddedBrowserMpdPlanResource(
     tabId: string,
     payload: EmbeddedBrowserMpdPlanDownloadPayload,
@@ -2861,6 +3164,7 @@ export function createEmbeddedBrowserMainController(
         cleanupEmbeddedBrowserDroppedFilesForTab(navigatedTabId)
         void clearEmbeddedBrowserMseSpoolFiles({ tabId: navigatedTabId })
         void embeddedBrowserHlsHostLifecycle.onDocumentNavigated(navigatedTabId)
+        void embeddedBrowserDashHostLifecycle.onDocumentNavigated(navigatedTabId)
       },
       onLibraryFileDropPayload: (dropTabId, payload) => {
         void handleLibraryFileDropPayload(dropTabId, payload)
@@ -2878,10 +3182,12 @@ export function createEmbeddedBrowserMainController(
         cleanupEmbeddedBrowserDroppedFilesForTab(destroyedTabId)
         void clearEmbeddedBrowserMseSpoolFiles({ tabId: destroyedTabId })
         void embeddedBrowserHlsHostLifecycle.onViewDestroyed(destroyedTabId)
+        void embeddedBrowserDashHostLifecycle.onViewDestroyed(destroyedTabId)
       },
       onViewRenderProcessGone: (crashedTabId) => {
         void clearEmbeddedBrowserMseSpoolFiles({ tabId: crashedTabId })
         void embeddedBrowserHlsHostLifecycle.onViewRenderProcessGone(crashedTabId)
+        void embeddedBrowserDashHostLifecycle.onViewRenderProcessGone(crashedTabId)
       },
       syncBounds: syncEmbeddedBrowserViewBounds,
       tabId,
@@ -3709,6 +4015,9 @@ export function createEmbeddedBrowserMainController(
       startHlsRecording: startEmbeddedBrowserHlsRecordingResource,
       stopHlsRecording: stopEmbeddedBrowserHlsRecordingResource,
       discardHlsRecording: discardEmbeddedBrowserHlsRecordingResource,
+      startDashRecording: startEmbeddedBrowserDashRecordingResource,
+      stopDashRecording: stopEmbeddedBrowserDashRecordingResource,
+      discardDashRecording: discardEmbeddedBrowserDashRecordingResource,
       downloadHlsTracks: downloadEmbeddedBrowserHlsTracksResource,
       downloadHlsPlan: handleEmbeddedBrowserHlsPlanDownload,
       retryHlsPlanFailed: retryEmbeddedBrowserHlsPlanFailedFragments,
@@ -3722,6 +4031,7 @@ export function createEmbeddedBrowserMainController(
       goForward: handleGoForward,
       listCapturedResources: getEmbeddedBrowserCaptureSnapshot,
       listHlsTaskSnapshots: (tabId) => embeddedBrowserHlsSessionOwner.listTaskSnapshots({ tabId }),
+      listDashTaskSnapshots: (tabId) => embeddedBrowserDashSessionOwner.listTaskSnapshots({ tabId }),
       mergeMseResources: mergeEmbeddedBrowserCapturedMseResources,
       navigate: handleNavigate,
       openMappedFile: handleOpenMappedFile,
@@ -3797,6 +4107,7 @@ export function createEmbeddedBrowserMainController(
 
   async function dispose() {
     const hlsCleanupPromise = embeddedBrowserHlsHostLifecycle.dispose()
+    const dashCleanupPromise = embeddedBrowserDashHostLifecycle.dispose()
     captureRuntime?.dispose()
     captureRuntime = null
     await embeddedBrowserMseSpoolStore.dispose()
@@ -3818,6 +4129,7 @@ export function createEmbeddedBrowserMainController(
     embeddedBrowserPendingOpenFiles.clear()
     embeddedBrowserAttachedOpenFiles.clear()
     await hlsCleanupPromise
+    await dashCleanupPromise
   }
 
   return {

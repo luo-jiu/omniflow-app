@@ -257,3 +257,57 @@ export type EmbeddedBrowserMpdPlanDownloadPayload = {
 }
 
 export type EmbeddedBrowserMpdPlanDownloadResponse = EmbeddedBrowserMpdDownloadResponse
+
+export type EmbeddedBrowserDashRecordingStartPayload = {
+  ffmpegPath?: string
+  manifestUrl: string
+  outputDirectoryPath?: string
+  resourceId: string
+  requestId: string
+  selectedAudioRepresentationId?: string
+  selectedVideoRepresentationId?: string
+  suggestedFileName?: string
+  useSystemSaveDialog?: boolean
+}
+
+export type EmbeddedBrowserDashRecordingStartResponse = {
+  cancelled?: boolean
+  error?: string
+  ok: boolean
+  requestId?: string
+}
+
+export type EmbeddedBrowserDashRecordingStopPayload = {
+  requestId?: string
+}
+
+export type EmbeddedBrowserDashRecordingStopResponse = EmbeddedBrowserHlsDownloadResponse
+
+export type EmbeddedBrowserDashRecordingDiscardPayload = {
+  requestId?: string
+}
+
+export type EmbeddedBrowserDashRecordingDiscardResponse = {
+  error?: string
+  ok: boolean
+}
+
+export type EmbeddedBrowserDashTaskEventInput = {
+  bytesReceived?: number
+  completedSegments?: number
+  durationSeconds?: number
+  error?: string
+  manifestUrl: string
+  message: string
+  outputPath?: string
+  requestId?: string
+  stage: 'preparing' | 'refreshing' | 'downloading' | 'stopped' | 'merging' | 'completed' | 'error'
+  status: 'running' | 'success' | 'error'
+  tabId: string
+  totalSegments?: number
+  unsupportedReasons?: string[]
+}
+
+export type EmbeddedBrowserDashTaskEventPayload = EmbeddedBrowserDashTaskEventInput & {
+  revision: number
+}

@@ -20,6 +20,7 @@ export type DashLiveSegmentDelta = {
 
 export type DashLiveTaskEvent = {
   completedSegments?: number
+  durationSeconds?: number
   error?: string
   message: string
   stage: 'preparing' | 'refreshing' | 'downloading' | 'stopped' | 'error'
@@ -38,8 +39,9 @@ export type DashLiveTaskOptions = {
   loadSnapshot: DashLiveTaskSnapshotLoader
   maxPollIntervalMs?: number
   minPollIntervalMs?: number
+  onTerminalError?: (error: Error) => void
   onEvent?: (event: DashLiveTaskEvent) => void
-  onNewSegments?: (delta: DashLiveSegmentDelta) => Promise<void> | void
+  onNewSegments?: (delta: DashLiveSegmentDelta, signal: AbortSignal) => Promise<void> | void
   pollIntervalMs?: number
   schedule?: (callback: () => void, delayMs: number) => TimerHandle
   clearSchedule?: (handle: TimerHandle) => void
@@ -169,6 +171,8 @@ export class DashLiveTask {
 
   private readonly minPollIntervalMs: number
 
+  private readonly onTerminalError?: (error: Error) => void
+
   private readonly onEvent?: (event: DashLiveTaskEvent) => void
 
   private readonly onNewSegments?: DashLiveTaskOptions['onNewSegments']
@@ -182,6 +186,7 @@ export class DashLiveTask {
     this.loadSnapshot = options.loadSnapshot
     this.maxPollIntervalMs = Math.max(1000, Math.floor(options.maxPollIntervalMs || 10000))
     this.minPollIntervalMs = Math.max(250, Math.min(this.maxPollIntervalMs, Math.floor(options.minPollIntervalMs || 1500)))
+    this.onTerminalError = options.onTerminalError
     this.onEvent = options.onEvent
     this.onNewSegments = options.onNewSegments
     this.pollIntervalMs = options.pollIntervalMs
@@ -219,12 +224,14 @@ export class DashLiveTask {
       this.isRunning = false
       this.abortController = null
       if (!(error instanceof Error && error.name === 'AbortError')) {
+        const terminalError = error instanceof Error ? error : new Error(String(error))
         this.onEvent?.({
-          error: error instanceof Error ? error.message : String(error),
-          message: error instanceof Error ? error.message : String(error),
+          error: terminalError.message,
+          message: terminalError.message,
           stage: 'error',
           status: 'error',
         })
+        this.onTerminalError?.(terminalError)
       }
       throw error
     }
@@ -250,6 +257,7 @@ export class DashLiveTask {
     const totalSegments = countSegments(this.cumulativePlan)
     this.onEvent?.({
       completedSegments: totalSegments,
+      durationSeconds: this.cumulativePlan.durationSeconds,
       message: 'DASH 动态任务已停止',
       stage: 'stopped',
       status: 'success',
@@ -282,12 +290,14 @@ export class DashLiveTask {
         .catch((error) => {
           if (!this.isRunning && error instanceof Error && error.name === 'AbortError') return
           this.isRunning = false
+          const terminalError = error instanceof Error ? error : new Error(String(error))
           this.onEvent?.({
-            error: error instanceof Error ? error.message : String(error),
-            message: error instanceof Error ? error.message : String(error),
+            error: terminalError.message,
+            message: terminalError.message,
             stage: 'error',
             status: 'error',
           })
+          this.onTerminalError?.(terminalError)
         })
         .finally(() => {
           if (this.isRunning) this.scheduleNextPoll()
@@ -300,6 +310,7 @@ export class DashLiveTask {
     throwIfAborted(signal)
     this.onEvent?.({
       completedSegments: countSegments(this.cumulativePlan),
+      durationSeconds: this.cumulativePlan?.durationSeconds,
       message: '正在刷新 DASH MPD snapshot',
       stage: 'refreshing',
       status: 'running',
@@ -318,12 +329,13 @@ export class DashLiveTask {
     if (delta.representations.length) {
       this.onEvent?.({
         completedSegments: countSegments(this.cumulativePlan),
+        durationSeconds: this.cumulativePlan.durationSeconds,
         message: `DASH snapshot 发现 ${addedSegments} 个新分片`,
         stage: 'downloading',
         status: 'running',
         totalSegments: countSegments(this.cumulativePlan),
       })
-      await this.onNewSegments?.(delta)
+      await this.onNewSegments?.(delta, signal)
     }
   }
 
