@@ -1810,7 +1810,7 @@
         "electron/service/embedded-browser/contracts/processing-task.ts#ProcessingTaskTerminal"
       ],
       "relationToUpstream": "not-applicable",
-      "syncState": "pending",
+      "syncState": "porting",
       "syncedThrough": null,
       "plannedTestIds": [
         "output.staged-terminal",
@@ -1849,9 +1849,13 @@
         "output.lease-purpose-ttl",
         "output.crash-quarantine"
       ],
-      "testRefs": [],
+      "testRefs": [
+        "electron/service/embedded-browser/processing/staged-output-lease.test.ts#creates an owner-scoped path and permits one delivery claim",
+        "electron/service/embedded-browser/processing/staged-output-lease.test.ts#reaps expired staged and claimed files without exposing their paths in snapshots",
+        "electron/service/embedded-browser/processing/staged-output-lease.test.ts#requires the claim token to release a claimed output"
+      ],
       "acceptedDifferences": [],
-      "notes": "No staged-output lease owner exists in the legacy runtime. Raw paths and temporary directories are returned by protocol task functions and held by renderer workflows; there is no opaque lease, TTL, owner task, reaper, or quarantine."
+      "notes": "`StagedOutputLeaseStore` now provides a main-only opaque lease base with owner-scoped paths, one delivery claim, TTL touch/reap, and release cleanup; snapshots intentionally omit the real path. Production processing/delivery adapters still return raw paths, and crash quarantine, budget accounting, and renderer-safe lease IPC remain open."
     },
     {
       "id": "output.application-workflow-coordinator",

@@ -2131,3 +2131,17 @@
 - runtime changes: `EmbeddedBrowserFragmentDownloader` 新增可选外部 signal，由 downloader 在 `start/stop/destroy/allCompleted` 管理 listener；HLS/DASH 删除重复的外层 abort listener 并把 signal 交给 downloader。
 - legacy cleanup: 无新增删除；现有 fragment downloader 仍是 HLS/DASH 的唯一分片 owner，旧页面 downloader 未切换。
 - validation: fragment/HLS/DASH 定向 `4 files / 25 passed`、TypeScript `--noEmit`、scoped ESLint 已通过；metadata validator、同步 runner 和非 `dist-electron/**` diff check 将在提交前重跑，完整 build/全仓 lint/test 与真实页面仍未执行。
+
+## 2026-08-29: same target (staged output lease foundation)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片建立 main-only staged output lease 基座，不切换现有 processing/delivery IPC。
+- reviewedThrough / portedThrough: 均保持 `null`；`output.staged-output-lease` 继续 `porting`，production wiring、crash quarantine 和 delivery terminal 仍未完成。
+- change groups: `output-ownership`、`claim-lifecycle`、`ttl-cleanup`、`security-boundary`。
+- affected capability IDs: `output.staged-output-lease`；metadata 当前为 `7 units / 32 capabilities / 101 cleanup entries / 229 planned IDs`，状态为 `15 verified / 10 porting / 1 ported-unverified / 6 pending`。
+- fixtures/tests: 新增 `electron/service/embedded-browser/processing/staged-output-lease.test.ts`，覆盖 owner-scoped staging path、单次 claim、claim token、TTL reap 和 snapshot 不暴露真实路径。
+- accepted differences: lease store 只保留必要的 main-side metadata 和 opaque IDs；暂不复制 Cat Catch StreamSaver 或浏览器下载页面，现有输出仍由调用方提供 raw path。
+- excluded changes and reasons: 未接入 HLS/DASH/MSE/普通下载 IPC、UploadManager handoff、local-save adapter、crash quarantine、renderer UI、`dist-electron/**` 或 upstream 游标。
+- unresolved gaps: processing result adoption、delivery claim IPC、大小/磁盘预算、重启残留 quarantine、单 workflow terminal 和真实大媒体压力仍待补齐。
+- runtime changes: 新增 `processing/staged-output-lease.ts#StagedOutputLeaseStore`，提供 owner-scoped path、`claim`/`touch`/`release`/`reapExpired`；真实路径只通过 main-side `resolvePath` 获取。
+- legacy cleanup: 无新增删除；当前 raw outputPath/tempPath 流程继续保留，直到 production lease adapter 与 delivery 终态完成。
+- validation: staged lease 定向 `1 file / 3 passed`、TypeScript `--noEmit`、scoped ESLint 已通过；metadata validator、同步 runner 和非 `dist-electron/**` diff check 将在提交前重跑，完整 build/全仓 lint/test 与真实页面仍未执行。
