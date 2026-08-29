@@ -421,24 +421,47 @@ function parseSegmentList(input: {
       segments: [] as DashSegment[],
     }
   }
+  const rawDuration = attribute(input.element, 'duration')
   const duration = numberAttribute(input.element, 'duration')
-  const timescale = numberAttribute(input.element, 'timescale') || 1
+  const rawTimescale = attribute(input.element, 'timescale')
+  const timescale = rawTimescale === undefined ? 1 : numberAttribute(input.element, 'timescale')
+  if (rawDuration !== undefined && (duration === undefined || duration <= 0)) {
+    addReason(input.reasons, 'segment-list-duration-invalid')
+  }
+  if (rawTimescale !== undefined && (timescale === undefined || timescale <= 0)) {
+    addReason(input.reasons, 'segment-list-timescale-invalid')
+  }
   const initialization = firstChild(input.element, 'Initialization')
   const initializationUrl = attribute(initialization, 'sourceURL')
     ? resolveUrl(attribute(initialization, 'sourceURL') || '', input.baseUrl)
     : undefined
-  const initializationRange = parseByteRange(attribute(initialization, 'range'))
+  const rawInitializationRange = attribute(initialization, 'range')
+  const initializationRange = parseByteRange(rawInitializationRange)
+  if (rawInitializationRange && !initializationRange) {
+    addReason(input.reasons, 'segment-list-initialization-range-invalid')
+  }
   const segmentUrls = children(input.element, 'SegmentURL')
   if (!segmentUrls.length) addReason(input.reasons, 'segment-list-empty')
   return {
     initializationRange,
     initializationUrl,
-    segments: segmentUrls.map((segment, index) => ({
-      byteRange: parseByteRange(attribute(segment, 'mediaRange')),
-      duration: duration && timescale > 0 ? duration / timescale : undefined,
-      index,
-      url: resolveUrl(attribute(segment, 'media') || '', input.baseUrl),
-    } satisfies DashSegment)),
+    segments: segmentUrls.map((segment, index) => {
+      const rawMedia = attribute(segment, 'media')
+      const rawMediaRange = attribute(segment, 'mediaRange')
+      const byteRange = parseByteRange(rawMediaRange)
+      if (!rawMedia || !String(rawMedia).trim()) {
+        addReason(input.reasons, 'segment-list-media-url-missing')
+      }
+      if (rawMediaRange && !byteRange) {
+        addReason(input.reasons, 'segment-list-media-range-invalid')
+      }
+      return {
+        byteRange,
+        duration: duration && timescale && timescale > 0 ? duration / timescale : undefined,
+        index,
+        url: resolveUrl(rawMedia || '', input.baseUrl),
+      } satisfies DashSegment
+    }),
   }
 }
 

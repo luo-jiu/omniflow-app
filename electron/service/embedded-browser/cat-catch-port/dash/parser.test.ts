@@ -232,4 +232,38 @@ describe('DASH parser', () => {
     })
     expect(multiPeriodManifest.unsupportedReasons).toContain('multi-period-not-expanded')
   })
+
+  it('dash.segment-list-boundary', () => {
+    const root = node('MPD', {}, [
+      node('Period', {}, [node('AdaptationSet', { contentType: 'video' }, [
+        node('Representation', { id: 'invalid-list' }, [
+          node('SegmentList', {
+            duration: '0',
+            timescale: 'nope',
+          }, [
+            node('Initialization', { range: 'bad-range' }),
+            node('SegmentURL', { media: '  ', mediaRange: '100-99' }),
+          ]),
+        ]),
+      ])]),
+    ])
+    const manifest = parseDashManifest({
+      baseUrl: 'https://cdn.example/media/manifest.mpd',
+      root,
+      text: '',
+    })
+    expect(manifest.unsupportedReasons).toEqual(expect.arrayContaining([
+      'segment-list-duration-invalid',
+      'segment-list-timescale-invalid',
+      'segment-list-initialization-range-invalid',
+      'segment-list-media-url-missing',
+      'segment-list-media-range-invalid',
+    ]))
+    expect(manifest.representations[0].segments).toEqual([{
+      byteRange: undefined,
+      duration: undefined,
+      index: 0,
+      url: '',
+    }])
+  })
 })
