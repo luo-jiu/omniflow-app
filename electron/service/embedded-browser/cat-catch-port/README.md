@@ -44,12 +44,13 @@ downloader/
 - `hls/parser.ts`：固定 hls.js/Cat Catch 的 manifest 下载相关解析语义。
 - `hls/plan.ts`：把 parser 输出投影为平台 adapter 消费的唯一 HLS 下载计划。
 - `hls/segment-query.ts`：固定 `tsAddArg` 的默认值提取和 fragment-only query 改写。
+- `dash/parser.ts`：固定 MPD 的继承 BaseURL、SegmentTemplate/SegmentTimeline、SegmentList range 与 DRM 投影语义；XML DOM 由平台 adapter 注入。
 
 HLS 的 main/preload/renderer 共享 DTO 由 `../contracts/hls.ts` 唯一定义；生产调用方和测试直接依赖 contract/port。旧 renderer model 已随 `hls-engine` cutover 删除，Electron main 运行时不得反向依赖 renderer model。
 
 平台侧 HLS 执行 owner 位于相邻的 `../processing/`：`HlsTaskExecutor` 负责本地 key/map/segment、playlist 和 local -> ffmpeg 阶段序列，首次计划与 retry 共用同一合同；`HlsLiveTask` 负责直播轮询和累计计划。controller、双轨合并和 output 测试直接依赖这两个 target，旧顶层 downloader/recorder 兼容出口已删除。
 
-逐项状态以 capability map 为准。`network-capture` 与 `hls-engine` 已在固定目标完成验证、dispatch 切换和 legacy symbol 清理；其余 unit 仍按同一协议推进。
+逐项状态以 capability map 为准。`network-capture` 与 `hls-engine` 已在固定目标完成验证、dispatch 切换和 legacy symbol 清理；`dash.parser-planner` 已建立纯 parser 基座但仍未接生产；其余 unit 仍按同一协议推进。
 
 Deep 的 Electron page adapter 位于 `../../capture/adapters/deep-search-page.ts`：它只组合本目录的 runtime/discovery/page factory 与 page-host callback。相邻 `deep-search-toolkit.ts` 把本目录的 toolkit state 接到既有 get/update bridge，并只向 MSE actions 同步运行投影。`page-probe-document.ts` 是唯一 production document-start composition，generated page/Worker、tokenized main ingress 和 toolkit round-trip 由其集成测试锁定。
 

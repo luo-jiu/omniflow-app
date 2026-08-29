@@ -1379,15 +1379,18 @@
         "electron/service/embedded-browser/cat-catch-port/dash/parser.ts#parseDashManifest"
       ],
       "relationToUpstream": "semantic-equivalent",
-      "syncState": "pending",
+      "syncState": "porting",
       "syncedThrough": null,
       "plannedTestIds": [
         "dash.parser-core",
         "dash.base-url-timeline-ranges"
       ],
-      "testRefs": [],
+      "testRefs": [
+        "electron/service/embedded-browser/cat-catch-port/dash/parser.test.ts#dash.parser-core",
+        "electron/service/embedded-browser/cat-catch-port/dash/parser.test.ts#dash.base-url-timeline-ranges"
+      ],
       "acceptedDifferences": [],
-      "notes": "The current hand-written renderer parser is not supported by a mature parser oracle or complete specification fixtures. Vendor provenance blockers: the bundled mpd-parser banner reports 1.4.0 while lib/third-party-libraries.md declares 1.4.1, and the bundled jQuery banner reports 4.0.0 while that document declares 3.7.1."
+      "notes": "The pure target parser now covers inherited BaseURL alternatives, SegmentTemplate token expansion, finite SegmentTimeline r=-1, SegmentList ranges and DRM evidence through a platform-neutral XML AST. Unbounded dynamic repeats and SegmentBase SIDX remain explicit unsupported reasons; the bundled mpd-parser/jQuery vendor-version discrepancy and production parser adapter are still open."
     },
     {
       "id": "dash.timeline-download-merge",

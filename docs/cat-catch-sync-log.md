@@ -1528,6 +1528,20 @@
 - runtime changes: `mse-download-output.ts` 将主进程生成的 merged/per-track 文件桥接为标准下载完成事件；renderer `useEmbeddedBrowserCatchToolkit` 删除重复 auto-export effect，页面 adapter 对同一 capture cycle 的 auto-download 做一次性调度。
 - validation: MSE 定向 `5 files / 9 passed`、scoped ESLint、scoped diff check 与 metadata validator（`7 units / 32 capabilities / 17 open / 99 cleanup / 188 planned`）均通过；全仓 TypeScript 仍受其他 agent 的 `agent-shell-execution-lease.ts` 语法错误影响，完整 build 与真实页面验证继续不执行。
 
+## 2026-08-29: same target (DASH parser-planner foundation)
+
+- observedHead / migrationTarget: 均为 `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本步只建立 DASH pure parser，不切 production dispatch。
+- reviewedThrough / portedThrough: 均保持 `null`；`dash.parser-planner` 进入 `porting`，`dash-engine` unit 仍开放。
+- change groups: `pure-parser-port`、`segment-expansion-boundary`、`xml-adapter-boundary` 与 `documentation-correction`。
+- affected capability IDs: `dash.parser-planner`；metadata 为 `7 units / 32 capabilities / 210 anchors / 99 cleanup entries / 188 planned IDs / 161 active refs`，状态为 `15 verified / 4 porting / 1 ported-unverified / 12 pending`。
+- fixtures/tests: `dash.parser-core`、`dash.base-url-timeline-ranges` 覆盖 MPD/Period/AdaptationSet/Representation 的 BaseURL 继承、模板 token、有限 `r=-1`、SegmentList init/media range、多轨 content type 和 DRM PSSH；额外锁定动态无界 repeat 的显式 unsupported reason；DASH 专项 `1 file / 3 passed`。
+- accepted differences: pure port 保留多个 BaseURL 候选并用首个候选生成具体 URL；XML DOM 由平台注入，避免 `cat-catch-port` 依赖 Electron/React/Node。动态无界 timeline 和 SegmentBase SIDX 不猜测展开，而是保留 unsupported reason，等待固定 `mpd-parser` 差分后决定执行语义。
+- excluded changes and reasons: 未修改 renderer MPD model、main MPD downloader、ffmpeg、DASH IPC 或其他 unit；没有真实 MPD 网站、动态 MPD 下载和大媒体手工场景，未宣称 parser parity 或 production cutover。
+- unresolved gaps: 固定 bundled `mpd-parser` 的 1.4.0/third-party 文档 1.4.1 provenance 差异、SegmentBase/SIDX、dynamic availability、多 Period 合并、真实下载/取消/合并和唯一 dispatch boundary 仍待处理。
+- runtime changes: 新增 `cat-catch-port/dash/parser.ts` 纯 parser 与平台中性的 XML AST contract；旧 parser/downloader 继续是唯一 production owner。
+- legacy cleanup: 无；旧 renderer parser 和 MPD downloader 在 `dash-engine` 原子切换前继续保留。
+- validation: DASH parser `1 file / 3 passed`、应用 TypeScript `--noEmit`、定向 ESLint、metadata validator、sync tests `16/16` 和 scoped diff check 均通过；完整 build 与真实页面验证不执行。
+
 ## Template
 
 ```markdown
