@@ -2,20 +2,14 @@ import { app, session, type DownloadItem, type Session, type WebContents } from 
 import fs from 'node:fs/promises'
 import { existsSync, mkdirSync } from 'node:fs'
 import path from 'node:path'
+import { runtimeLogger } from '../runtimeLogger'
+import { defaultProcessingTaskRegistry } from './embedded-browser/processing/task-registry'
+import {
+  NativeDownloadSession,
+  type NativeDownloadSessionPayload,
+} from './embedded-browser/processing/native-download-session'
 
-export type EmbeddedBrowserDownloadPayload = {
-  downloadId: string
-  error?: string
-  fileName: string
-  mimeType?: string
-  pageUrl?: string
-  receivedBytes: number
-  state: 'started' | 'progress' | 'completed' | 'cancelled' | 'failed'
-  tabId?: string
-  tempPath?: string
-  totalBytes: number
-  url: string
-}
+export type EmbeddedBrowserDownloadPayload = NativeDownloadSessionPayload
 
 export const EMBEDDED_BROWSER_PARTITION = 'persist:omniflow-embedded-browser'
 const EMBEDDED_BROWSER_DOWNLOAD_DIRNAME = 'embedded-browser-downloads'
@@ -44,25 +38,6 @@ function buildStagedDownloadName(fileName: string) {
     .replace(/[/\\]/g, '_')
     .trim() || 'download'
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safeName}`
-}
-
-function toDownloadPayload(
-  item: DownloadItem,
-  overrides: Partial<EmbeddedBrowserDownloadPayload> & Pick<EmbeddedBrowserDownloadPayload, 'downloadId' | 'fileName' | 'state' | 'url'>,
-): EmbeddedBrowserDownloadPayload {
-  return {
-    downloadId: overrides.downloadId,
-    fileName: overrides.fileName,
-    mimeType: overrides.mimeType,
-    pageUrl: overrides.pageUrl,
-    receivedBytes: overrides.receivedBytes ?? Math.max(0, Number(item.getReceivedBytes?.() || 0)),
-    state: overrides.state,
-    tabId: overrides.tabId,
-    tempPath: overrides.tempPath,
-    totalBytes: overrides.totalBytes ?? Math.max(0, Number(item.getTotalBytes?.() || 0)),
-    url: overrides.url,
-    ...(overrides.error ? { error: overrides.error } : {}),
-  }
 }
 
 export function getEmbeddedBrowserSession() {
@@ -107,63 +82,38 @@ export function initializeEmbeddedBrowserDownloadBridge(options: {
     const url = item.getURL() || ''
     const pageUrl = webContents.getURL() || undefined
     const tempPath = path.join(downloadRoot, buildStagedDownloadName(fileName))
-
-    item.setSavePath(tempPath)
-    options.emitDownload(toDownloadPayload(item, {
+    let registration: ReturnType<typeof defaultProcessingTaskRegistry.register> | undefined
+    const downloadSession = new NativeDownloadSession({
+      cleanup: async (stagedPath) => {
+        await cleanupEmbeddedBrowserDownloadFile(stagedPath)
+      },
       downloadId,
+      emit: options.emitDownload,
       fileName,
-      mimeType: item.getMimeType() || undefined,
+      item,
+      onSettled: () => registration?.release(),
       pageUrl,
-      state: 'started',
       tabId,
       tempPath,
       url,
-    }))
-
-    item.on('updated', (_updatedEvent, state) => {
-      if (state !== 'progressing') {
-        return
-      }
-      options.emitDownload(toDownloadPayload(item, {
-        downloadId,
-        fileName,
-        mimeType: item.getMimeType() || undefined,
-        pageUrl,
-        state: 'progress',
-        tabId,
-        tempPath,
-        url,
-      }))
     })
-
-    item.once('done', (_doneEvent, state) => {
-      if (state === 'completed') {
-        options.emitDownload(toDownloadPayload(item, {
-          downloadId,
-          fileName,
-          mimeType: item.getMimeType() || undefined,
-          pageUrl,
-          state: 'completed',
-          tabId,
-          tempPath,
-          url,
-        }))
-        return
-      }
-
+    try {
+      registration = defaultProcessingTaskRegistry.register({
+        cancel: () => downloadSession.cancel(),
+        kind: 'native-download',
+        settled: downloadSession.settled,
+        tabId,
+      })
+      downloadSession.start()
+    } catch (error) {
+      registration?.release()
       void cleanupEmbeddedBrowserDownloadFile(tempPath).catch(() => undefined)
-      options.emitDownload(toDownloadPayload(item, {
-        downloadId,
-        error: state === 'cancelled' ? '下载已取消' : `下载失败：${state}`,
-        fileName,
-        mimeType: item.getMimeType() || undefined,
-        pageUrl,
-        state: state === 'cancelled' ? 'cancelled' : 'failed',
+      runtimeLogger.warn('embedded browser native download session failed to start', {
+        error: error instanceof Error ? error.message : String(error),
         tabId,
-        tempPath,
         url,
-      }))
-    })
+      })
+    }
   }
 
   const handledSessions = new Set<Session>()

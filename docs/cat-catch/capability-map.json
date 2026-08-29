@@ -1649,19 +1649,23 @@
         "electron/service/embeddedBrowserService.ts#handleWillDownload"
       ],
       "targetRefs": [
-        "electron/service/embedded-browser/processing/downloader-session-coordinator.ts#DownloaderSessionCoordinator"
+        "electron/service/embedded-browser/processing/native-download-session.ts#NativeDownloadSession"
       ],
       "relationToUpstream": "platform-substitute",
-      "syncState": "pending",
+      "syncState": "porting",
       "syncedThrough": null,
       "plannedTestIds": [
         "transfer.downloader-failure-fallback",
         "transfer.downloader-session-reuse",
         "transfer.downloader-terminal-cleanup"
       ],
-      "testRefs": [],
+      "testRefs": [
+        "electron/service/embedded-browser/processing/native-download-session.test.ts#owns save path, progress, and one completed terminal event",
+        "electron/service/embedded-browser/processing/native-download-session.test.ts#cancels the item, cleans staging, and emits a single cancelled terminal event",
+        "electron/service/embedded-browser/processing/native-download-session.test.ts#converts a save-path failure into a failed terminal event and releases the session"
+      ],
       "acceptedDifferences": [],
-      "notes": "Pinned upstream defaults catDownload=false, so eligible native download failures enter the Cat Catch downloader; true disables that fallback. The same session shell reuses or creates a downloader tab and closes it after stream, ffmpeg, or browser-download terminal events while guarding unload. OmniFlow currently splits native download events and fragment execution across owners and has no equivalent fallback/session coordinator."
+      "notes": "OmniFlow now has a thin `NativeDownloadSession` owner for Electron `will-download`: it assigns a staging path, emits progress/terminal events, cancels by registry, and removes failed or cancelled staging. This is a platform lifecycle port only; Cat Catch's eligible native-download failure fallback into a downloader page, session reuse, and guarded auto-close still require separate integration evidence."
     },
     {
       "id": "transfer.streaming-memory-budget",
@@ -1781,7 +1785,7 @@
         "electron/service/embedded-browser/processing/task-registry.test.ts#rejects new tasks after dispose and remains idempotent"
       ],
       "acceptedDifferences": [],
-      "notes": "`ProcessingTaskRegistry` now owns generic main-side task registration, filtered cancellation, settled-task waiting and idempotent app-exit disposal. The shared ffmpeg executor, legacy external-command adapter and streaming direct/captured-resource transfers register active work here, while protocol-specific HLS/DASH/MSE session owners still retain their domain snapshots and workdir cleanup. Renderer-unmount recovery and broader transfer-task registration remain open."
+      "notes": "`ProcessingTaskRegistry` now owns generic main-side task registration, filtered cancellation, settled-task waiting and idempotent app-exit disposal. The shared ffmpeg executor, legacy external-command adapter, native browser download sessions, and streaming direct/captured-resource transfers register active work here, while protocol-specific HLS/DASH/MSE session owners still retain their domain snapshots and workdir cleanup. Renderer-unmount recovery and broader transfer-task registration remain open."
     },
     {
       "id": "output.processing-staged-terminal",

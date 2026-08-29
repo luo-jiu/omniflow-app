@@ -2103,3 +2103,17 @@
 - runtime changes: 新增 `processing/streaming-transfer.ts#StreamingTransfer`；普通直接/捕获资源下载以 bounded Transform 写临时文件，成功后才替换目标；每个操作登记 `streaming-transfer` 并把 tab close/view loss/render-process loss 与 AbortSignal 连接。
 - legacy cleanup: 无新增删除；旧 HTTP IPC、native downloader fallback 和 `node.transfer.direct-download` 继续保留至 transfer unit 的原子 cutover。
 - validation: streaming transfer 定向 `1 file / 3 passed`、main IPC/authority 关联 `3 files / 9 passed`、TypeScript `--noEmit`、scoped ESLint 已通过；metadata validator、sync runner 和非 `dist-electron/**` diff check 将在提交前重跑，完整 build/全仓 lint/test 与真实大文件验证仍未执行。
+
+## 2026-08-29: same target (native download session lifecycle)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片只收口现有 Electron `will-download` 的 session owner。
+- reviewedThrough / portedThrough: 均保持 `null`；`transfer.downloader-session-lifecycle` 与 `processing.main-task-registry` 继续 `porting`，Cat Catch native-download fallback 仍未实现。
+- change groups: `task-lifecycle`、`partial-output-cleanup`、`platform-adaptation`。
+- affected capability IDs: `transfer.downloader-session-lifecycle`、`processing.main-task-registry`；metadata 当前为 `7 units / 32 capabilities / 101 cleanup entries / 229 planned IDs`，状态为 `15 verified / 8 porting / 1 ported-unverified / 8 pending`。
+- fixtures/tests: 新增 `electron/service/embedded-browser/processing/native-download-session.test.ts`，覆盖 save path/staging、progress、completed、cancelled cleanup、save-path failure 和 settled release；现有 registry 按 tab 取消会触发 native item cancel。
+- accepted differences: 仅迁移 Electron 平台下载生命周期，不复制 Cat Catch downloader page；Cat Catch 的 `catDownload=false` 默认与失败 fallback 选择仍保留为后续 capability。
+- excluded changes and reasons: 未接入 downloader page/session reuse、StreamSaver provenance、fragment retry、renderer UI、`dist-electron/**` 或 upstream 游标。
+- unresolved gaps: native BrowserWindow 下载失败后的 Cat Catch fallback、session reuse/guarded auto-close、renderer-unmount recovery、staged output lease 和 application delivery terminal 仍待补齐。
+- runtime changes: 新增 `processing/native-download-session.ts#NativeDownloadSession`；`embeddedBrowserService.ts` 的每个 `will-download` 以 `native-download` 登记到 `ProcessingTaskRegistry`，按 tab/view/process/app 取消，失败/取消清理 staging。
+- legacy cleanup: 无新增删除；旧 `will-download` bridge 保留为唯一 native 入口，直到 downloader fallback 和 normal-download handoff 完成。
+- validation: native session/streaming/registry 定向 `3 files / 8 passed`、TypeScript `--noEmit`、scoped ESLint 已通过；metadata validator、同步 runner 和非 `dist-electron/**` diff check 将在提交前重跑，完整 build/全仓 lint/test 与真实浏览器下载仍未执行。
