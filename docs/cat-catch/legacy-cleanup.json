@@ -454,6 +454,16 @@
       "cleanupAction": "remove-after-cutover"
     },
     {
+      "id": "node.ffmpeg.media-tool-adapter",
+      "path": "electron/service/mediaToolFfmpegService.ts",
+      "symbol": "processMediaToolFile",
+      "capabilityId": "output.ffmpeg-process-owner",
+      "cutoverUnitId": "output-integration",
+      "classification": "omniflow-integration",
+      "role": "adapter",
+      "cleanupAction": "retain-or-adapt"
+    },
+    {
       "id": "node.workflow.hls-hook",
       "path": "src/features/tool-workspace/hooks/useHlsDownloadTask.ts",
       "symbol": "useHlsDownloadTask",

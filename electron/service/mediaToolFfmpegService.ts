@@ -1,8 +1,8 @@
-import { spawn } from 'node:child_process'
 import path from 'node:path'
 import { access, mkdir } from 'node:fs/promises'
 import { app } from 'electron'
 import { resolveEmbeddedBrowserFfmpegPath } from './embeddedBrowserResourceMergeService'
+import { defaultFfmpegTaskExecutor } from './embedded-browser/processing/ffmpeg-executor'
 
 export type MediaToolOperation = 'extract-audio' | 'compress-video'
 
@@ -128,41 +128,25 @@ export async function processMediaToolFile(
     outputPath,
   })
 
-  return new Promise<MediaToolProcessFileResponse>((resolve) => {
-    const stderr: string[] = []
-    const child = spawn(ffmpegPath, commandArgs, {
-      stdio: ['ignore', 'ignore', 'pipe'],
+  try {
+    await defaultFfmpegTaskExecutor.execute({
+      commandArgs,
+      ffmpegPath,
+      outputPath,
     })
-
-    child.stderr.on('data', (chunk) => {
-      stderr.push(String(chunk))
-    })
-    child.once('error', (error) => {
-      resolve({
-        commandArgs,
-        error: error.message || '媒体处理失败',
-        ffmpegPath,
-        ok: false,
-        outputPath,
-      })
-    })
-    child.once('exit', (code) => {
-      if (code === 0) {
-        resolve({
-          commandArgs,
-          ffmpegPath,
-          ok: true,
-          outputPath,
-        })
-        return
-      }
-      resolve({
-        commandArgs,
-        error: stderr.join('').trim() || `ffmpeg 退出码异常: ${code}`,
-        ffmpegPath,
-        ok: false,
-        outputPath,
-      })
-    })
-  })
+    return {
+      commandArgs,
+      ffmpegPath,
+      ok: true,
+      outputPath,
+    }
+  } catch (error) {
+    return {
+      commandArgs,
+      error: error instanceof Error ? error.message : String(error),
+      ffmpegPath,
+      ok: false,
+      outputPath,
+    }
+  }
 }
