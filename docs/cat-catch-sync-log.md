@@ -1950,4 +1950,4 @@
 - unresolved gaps: 仍需真实双轨页面确认累计阈值、spool 时序、ffmpeg 输出和失败后重试；MSE unit 不能因 synthetic threshold test 关闭。
 - runtime changes: `mse-page.ts` 以 `runtime.getSnapshot().totalBytes` 判定周期阈值，保持跨轨道全局累计并在 flush 后的 resource projection 完成后发送 `mse-save`。
 - legacy cleanup: 无新增删除；旧 Cat Catch 页面实现继续保留至 MSE parity 和真实回归完成。
-- validation: 本切片后需重跑 MSE 定向 Vitest、TypeScript、scoped ESLint、metadata validator、sync runner 与 `git diff --check`；完整 build 与真实页面验证仍受共享 dirty `dist-electron/**` 和当前无测试场景限制。
+- validation: MSE/Cat Catch 定向 `10 files / 21 passed`、TypeScript `--noEmit`、scoped ESLint、`npm run cat-catch:validate`、同步校验 `16/16` 与非 `dist-electron/**` 的 `git diff --check` 均通过；完整 build、全仓 lint/test 与真实页面验证仍受共享 dirty `dist-electron/**` 和当前无测试场景限制。
