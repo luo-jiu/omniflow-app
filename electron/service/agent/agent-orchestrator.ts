@@ -178,6 +178,20 @@ import {
 import { mediaInspectTool } from './tools/media-inspect-tool';
 import { interactionRequestTool } from './tools/interaction-request-tool';
 import { memoryProposeTool } from './tools/memory-propose-tool';
+import {
+  getAgentShellPermissionModeForRun,
+  getAgentShellProviderSnapshotForRun,
+  releaseAgentShellRun,
+} from './shell/agent-shell-service-runtime';
+import { getAgentShellStorageRuntime } from './shell/agent-shell-storage-runtime';
+import type {
+  AgentShellLogIdentity,
+  AgentShellLogReadRequest,
+} from './shell/agent-shell-log-store';
+import type {
+  AgentShellLogPageRequestV1,
+  AgentShellLogPageV1,
+} from '@/shared/agent/shell/agent-shell.types';
 
 const MAX_TOOL_CALLS = 8;
 // One Skill activation turn, eight serial business Tool turns, then a final answer.
@@ -302,6 +316,7 @@ interface AgentOrchestratorOptions {
   getSessionStore?: () => Promise<AgentSessionStore>;
   inspectMediaSource?: typeof inspectAgentMediaSource;
   interactionTimeoutMs?: number;
+  readShellLogPage?: (request: AgentShellLogReadRequest) => Promise<AgentShellLogPageV1>;
   mediaArtifactStore?: Pick<AgentMediaArtifactStore, 'release' | 'releaseOwner' | 'releaseRun'>
     & Partial<Pick<AgentMediaArtifactStore, 'touchExecution' | 'withOwnedFile'>>;
   mediaArtifactUploadManager?: AgentMediaArtifactUploadManager;
@@ -593,21 +608,30 @@ function createPreparedRuntime(
   result: AgentToolMainPreparationResult | AgentToolPreparationResult,
   expectedToolName: string,
   expectedRisk: AgentToolRisk,
+  preparedRisk: 'dynamic' | undefined,
   preparationMode: AgentPreparedRuntime['preparationMode'],
   options: CreatePreparedRuntimeOptions = {},
 ): AgentPreparedRuntime {
   if (result.decision.behavior !== 'ask' && result.decision.behavior !== 'allow') {
     throw new Error(result.decision.message || 'Agent Tool prepare 已拒绝执行动作');
   }
+  const effectiveRisk = result.decision.risk;
   if (
-    result.decision.risk !== expectedRisk
-    || (result.decision.behavior === 'ask' && result.decision.preview.risk !== expectedRisk)
+    !['read', 'write', 'destructive', 'external'].includes(effectiveRisk)
+    || (preparedRisk !== 'dynamic' && effectiveRisk !== expectedRisk)
+    || (result.decision.behavior === 'ask' && result.decision.preview.risk !== effectiveRisk)
   ) {
     throw new Error('Agent Tool prepare 风险等级与注册定义不匹配');
   }
   let action = Object.freeze(normalizeAgentPreparedActionPublic(result.publicAction));
   if (action.kind !== expectedToolName) {
     throw new Error('Agent prepared action 与 Tool 不匹配');
+  }
+  if (
+    preparedRisk === 'dynamic'
+    && (!('assessment' in action) || action.assessment.risk !== effectiveRisk)
+  ) {
+    throw new Error('Agent Tool dynamic prepared risk 与公开动作不匹配');
   }
   const preview = Object.freeze(normalizeActionPreview(
     result.decision.behavior === 'ask'
@@ -758,6 +782,9 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
   );
   const toolBroker = options.toolBroker || createAgentToolBroker({ normalizePerception });
   const toolPrepareBroker = options.toolPrepareBroker || createAgentToolPrepareBroker();
+  const readShellLogPageFromStore = options.readShellLogPage || (async (
+    request: AgentShellLogReadRequest,
+  ) => (await getAgentShellStorageRuntime()).logStore.readPage(request));
   const activeRuns = new Map<string, ActiveAgentRun>();
   const startingRuns = new Map<string, StartingAgentRun>();
   const startingSessions = new Set<string>();
@@ -1905,7 +1932,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
                     preparationContext,
                   );
                   throwIfAborted(preparationSignal);
-                  return createPreparedRuntime(result, call.name, tool.risk, 'renderer', {
+                  return createPreparedRuntime(result, call.name, tool.risk, tool.preparedRisk, 'renderer', {
                     preparedActionId,
                   });
                 },
@@ -1955,7 +1982,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
                     preparationContext,
                   );
                   throwIfAborted(preparationSignal);
-                  return createPreparedRuntime(result, call.name, tool.risk, 'main', {
+                  return createPreparedRuntime(result, call.name, tool.risk, tool.preparedRisk, 'main', {
                     identity: preparationIdentity,
                     sealMain: sealInput => capabilitySnapshot.sealMainPreparedExecution(
                       call.name,
@@ -1973,8 +2000,8 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
           const prepared = await finalizePrepared();
           throwIfAborted(signal);
           decision = prepared.permissionBehavior === 'ask'
-            ? { behavior: 'ask', preview: prepared.preview, risk: tool.risk }
-            : { behavior: 'allow', risk: tool.risk };
+            ? { behavior: 'ask', preview: prepared.preview, risk: prepared.preview.risk }
+            : { behavior: 'allow', risk: prepared.preview.risk };
           if (preparationMode === 'renderer') {
             rendererExecutionInput = prepared.executionInput;
           }
@@ -2193,7 +2220,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
               };
           result = await toolBroker.executeMain(call.name, call.input, {
             ...mainExecutionContext,
-          }, tool.timeoutMs, runToolRegistry);
+          }, tool.timeoutMs, runToolRegistry, tool.cancellationSettleTimeoutMs);
         }
       } else if ((tool.executor || 'main') === 'renderer') {
         const execution = toolBroker.prepareRendererExecution({
@@ -2228,6 +2255,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
           mainExecutionContext,
           tool.timeoutMs,
           runToolRegistry,
+          tool.cancellationSettleTimeoutMs,
         );
       }
     } catch (error) {
@@ -2822,6 +2850,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       await waitForMediaArtifactSaves(save => save.runId === runId);
       clearMediaArtifactFallbackGrants(grant => grant.runId === runId);
       await mediaArtifactStore.releaseRun(runId).catch(() => undefined);
+      await releaseAgentShellRun(runId).catch(() => undefined);
       const active = activeRuns.get(sessionId);
       if (active?.runId === runId) activeRuns.delete(sessionId);
       runSessionRegistry.end(runId, sender.id);
@@ -2899,8 +2928,11 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         signal: controller.signal,
       });
       throwIfAborted(controller.signal);
+      const shellProviderSnapshot = getAgentShellProviderSnapshotForRun();
       const capabilitySnapshot = createAgentRunCapabilitySnapshot({
         capabilitySnapshot: environmentCapabilitySnapshot,
+        shellPermissionMode: getAgentShellPermissionModeForRun(),
+        ...(shellProviderSnapshot ? { shellProviderSnapshot } : {}),
         skillSnapshot,
         toolSnapshot,
       });
@@ -3179,6 +3211,71 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     return true;
   }
 
+  async function readShellLogPage(input: AgentShellLogPageRequestV1): Promise<AgentShellLogPageV1> {
+    if (!input || typeof input !== 'object' || input.version !== 1) {
+      throw new Error('Agent Shell 日志请求无效');
+    }
+    const ownerScope = normalizeAgentOwnerScope(input.ownerScope);
+    const libraryId = Number(input.libraryId);
+    const sessionId = String(input.sessionId || '').trim();
+    const runId = String(input.runId || '').trim();
+    const toolRunId = String(input.toolRunId || '').trim();
+    if (
+      !Number.isSafeInteger(libraryId)
+      || libraryId <= 0
+      || !sessionId
+      || sessionId.length > MAX_AGENT_SESSION_ID_CHARACTERS
+      || !runId
+      || runId.length > 200
+      || !toolRunId
+      || toolRunId.length > 200
+    ) {
+      throw new Error('Agent Shell 日志请求无效');
+    }
+    const session = await (await resolveSessionStore()).getSession(
+      sessionId,
+      ownerScope,
+      libraryId,
+    );
+    const activity = session?.toolActivities.find(candidate => candidate.id === toolRunId);
+    if (
+      !activity
+      || activity.sessionId !== sessionId
+      || activity.runId !== runId
+      || activity.call.name !== 'shell.run'
+      || !activity.result?.data
+      || typeof activity.result.data !== 'object'
+      || Array.isArray(activity.result.data)
+    ) {
+      throw new Error('Agent Shell 日志不属于当前 Tool Run');
+    }
+    const resultData = activity.result.data as Record<string, unknown>;
+    const executionId = String(resultData.executionId || '');
+    const logRef = String(resultData.logRef || '');
+    if (
+      !executionId
+      || executionId.length > 200
+      || !/^log:v1:[a-f0-9]{64}$/u.test(logRef)
+    ) {
+      throw new Error('Agent Shell Tool Run 没有可读取的详细日志');
+    }
+    const identity: AgentShellLogIdentity = {
+      executionId,
+      owner: { ...ownerScope, sessionId },
+      runId,
+      sessionId,
+      toolRunId,
+    };
+    return readShellLogPageFromStore({
+      ...identity,
+      logRef,
+      ...(input.afterSequence === undefined ? {} : { afterSequence: input.afterSequence }),
+      ...(input.cursor === undefined ? {} : { cursor: input.cursor }),
+      ...(input.maxBytes === undefined ? {} : { maxBytes: input.maxBytes }),
+      ...(input.maxFrames === undefined ? {} : { maxFrames: input.maxFrames }),
+    });
+  }
+
   return {
     completeToolPreparation,
     completeToolExecution,
@@ -3192,6 +3289,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     markToolExecutionCommitted,
     releaseMediaArtifact,
     releaseOwner,
+    readShellLogPage,
     renameSession,
     reportToolExecutionProgress,
     resolveToolApproval,

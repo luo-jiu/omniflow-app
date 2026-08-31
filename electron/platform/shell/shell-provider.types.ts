@@ -78,7 +78,7 @@ export interface AgentShellProviderPublicIdentity {
   readonly encodingRevision: string;
   readonly environmentRevision: string;
   /** Probe success is discovery only; runtime wiring must separately prove readiness. */
-  readonly executionReady: false;
+  readonly executionReady: boolean;
   readonly fixedArgs: readonly string[];
   readonly implementationId: string;
   readonly invocationRevision: string;

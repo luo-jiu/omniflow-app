@@ -67,6 +67,87 @@ describe('Agent local storage quota manager', () => {
     });
   });
 
+  it('atomically settles reserved growth into a committed resource and releases its live lease', async () => {
+    let id = 0;
+    const manager = createManager({
+      createId: () => `growth-${id++}`,
+      maxSingleResourceBytes: 100,
+      maxTotalBytes: 100,
+    });
+    const workspaceReservation = await manager.reserve(
+      OWNER,
+      'workspace',
+      'run-1',
+      40,
+      10_000,
+      'artifact',
+    );
+    await manager.bindResource(workspaceReservation, 'workspace-1', OWNER);
+    await manager.commit(workspaceReservation, 'workspace-1', 40, OWNER);
+    const growthReservation = await manager.reserve(
+      OWNER,
+      'workspace',
+      'run-1',
+      30,
+      10_000,
+      'artifact',
+    );
+    const lease = await manager.acquireLease('workspace-1', 10_000, OWNER);
+
+    await expect(manager.settleReservationIntoResource(
+      growthReservation,
+      'workspace-1',
+      65,
+      OWNER,
+      lease.leaseId,
+    )).resolves.toMatchObject({
+      actualBytes: 65,
+      expectedBytes: 65,
+      resourceRef: 'workspace-1',
+      state: 'committed',
+    });
+    expect(manager.getReservation(growthReservation, OWNER)).toBeNull();
+    expect(manager.getUsage()).toMatchObject({ resourceCount: 1, totalBytes: 65 });
+    await expect(manager.releaseLease('workspace-1', lease.leaseId, OWNER)).resolves.toBe(false);
+  });
+
+  it('keeps both quota records intact when actual growth exceeds the reservation', async () => {
+    let id = 0;
+    const manager = createManager({
+      createId: () => `growth-overflow-${id++}`,
+      maxSingleResourceBytes: 100,
+      maxTotalBytes: 100,
+    });
+    const workspaceReservation = await manager.reserve(
+      OWNER,
+      'workspace',
+      'run-1',
+      40,
+      10_000,
+      'artifact',
+    );
+    await manager.bindResource(workspaceReservation, 'workspace-overflow', OWNER);
+    await manager.commit(workspaceReservation, 'workspace-overflow', 40, OWNER);
+    const growthReservation = await manager.reserve(
+      OWNER,
+      'workspace',
+      'run-1',
+      30,
+      10_000,
+      'artifact',
+    );
+
+    await expect(manager.settleReservationIntoResource(
+      growthReservation,
+      'workspace-overflow',
+      71,
+      OWNER,
+    )).rejects.toThrow('超过预留额度');
+    expect(manager.getResource('workspace-overflow', OWNER)).toMatchObject({ actualBytes: 40 });
+    expect(manager.getReservation(growthReservation, OWNER)).toMatchObject({ expectedBytes: 30 });
+    expect(manager.getUsage()).toMatchObject({ resourceCount: 2, totalBytes: 70 });
+  });
+
   it('enforces global, category and Run limits atomically', async () => {
     const manager = createManager({
       maxTotalBytes: 10,

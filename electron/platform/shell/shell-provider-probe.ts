@@ -53,6 +53,7 @@ interface AgentShellProviderDefinition {
   readonly encodingRevisionForVersion: (version: string) => string;
   readonly encodingForVersion: (version: string) => AgentShellProviderEncoding;
   readonly environmentRevision: string;
+  readonly executionReady: boolean;
   readonly fixedArgs: readonly string[];
   readonly implementationId: string;
   readonly invocationRevision: string;
@@ -303,6 +304,7 @@ function createProvider(input: {
     input.definition.analyzerRevision,
     input.definition.invocationRevision,
     input.definition.environmentRevision,
+    input.definition.executionReady,
     encodingRevision,
     input.definition.terminationRevision,
   ]);
@@ -321,7 +323,7 @@ function createProvider(input: {
     encoding,
     encodingRevision,
     environmentRevision: input.definition.environmentRevision,
-    executionReady: false as const,
+    executionReady: input.definition.executionReady,
     fixedArgs,
     implementationId: input.definition.implementationId,
     invocationRevision: input.definition.invocationRevision,

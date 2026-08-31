@@ -17,6 +17,8 @@ function createDeferred() {
 function createRuntime(close: () => Promise<void>): AgentShellStorageRuntime {
   return {
     close,
+    logFileStore: {} as AgentShellStorageRuntime['logFileStore'],
+    logStore: {} as AgentShellStorageRuntime['logStore'],
     quotaManager: {} as AgentShellStorageRuntime['quotaManager'],
     workspaceStore: {} as AgentShellStorageRuntime['workspaceStore'],
   };
@@ -102,6 +104,8 @@ describe('Agent Shell storage runtime lifecycle', () => {
     });
     const quotaClose = vi.fn(async () => undefined);
     const close = createAgentShellStorageRuntimeCloser(
+      { dispose: vi.fn(async () => undefined) },
+      { dispose: vi.fn(async () => undefined) },
       { dispose: workspaceDispose },
       { close: quotaClose },
     );
@@ -132,6 +136,8 @@ describe('Agent Shell storage runtime lifecycle', () => {
       throw quotaError;
     });
     const close = createAgentShellStorageRuntimeCloser(
+      { dispose: vi.fn(async () => undefined) },
+      { dispose: vi.fn(async () => undefined) },
       { dispose: workspaceDispose },
       { close: quotaClose },
     );

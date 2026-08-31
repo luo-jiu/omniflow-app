@@ -220,12 +220,26 @@ export const AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_KIND = 'media.extractAudi
 
 export const AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_VERSION = 1 as const;
 
+export const AGENT_FILE_STAGE_PREPARED_ACTION_KIND = 'file.stage' as const;
+
+export const AGENT_FILE_STAGE_PREPARED_ACTION_VERSION = 1 as const;
+
+export const AGENT_FILE_PUBLISH_PREPARED_ACTION_KIND = 'file.publish' as const;
+
+export const AGENT_FILE_PUBLISH_PREPARED_ACTION_VERSION = 1 as const;
+
 export const AGENT_PREPARED_ACTION_PUBLIC_IDENTITIES = [{
   kind: AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_KIND,
   version: AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_VERSION,
 }, {
   kind: AGENT_SHELL_RUN_TOOL_NAME,
   version: AGENT_SHELL_PREPARED_ACTION_VERSION,
+}, {
+  kind: AGENT_FILE_STAGE_PREPARED_ACTION_KIND,
+  version: AGENT_FILE_STAGE_PREPARED_ACTION_VERSION,
+}, {
+  kind: AGENT_FILE_PUBLISH_PREPARED_ACTION_KIND,
+  version: AGENT_FILE_PUBLISH_PREPARED_ACTION_VERSION,
 }] as const;
 
 export type AgentMediaExtractAudioOutputFormat = 'm4a' | 'mp3' | 'wav';
@@ -244,7 +258,115 @@ export interface AgentMediaExtractAudioPreparedActionPublicV1 {
   version: typeof AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_VERSION;
 }
 
+export type AgentFileStagePreparedActionPublicV1 = {
+  kind: typeof AGENT_FILE_STAGE_PREPARED_ACTION_KIND;
+  targetLabel: string;
+  version: typeof AGENT_FILE_STAGE_PREPARED_ACTION_VERSION;
+} & (
+  | { sourceKind: 'local-picker' }
+  | {
+      libraryId: number;
+      sourceDisplayName: string;
+      sourceIdentity: string;
+      sourceKind: 'library-node';
+      sourceNodeId: number;
+      sourceSizeBytes: number;
+    }
+);
+
+export type AgentFilePublishPreparedActionPublicV1 = {
+  contentHash: string;
+  displayName: string;
+  kind: typeof AGENT_FILE_PUBLISH_PREPARED_ACTION_KIND;
+  sizeBytes: number;
+  sourcePath: string;
+  suggestedFileName: string;
+  targetLabel: string;
+  version: typeof AGENT_FILE_PUBLISH_PREPARED_ACTION_VERSION;
+} & (
+  | { destinationKind: 'local-save-as' }
+  | {
+      conflictPolicy: 'fail' | 'rename';
+      destinationKind: 'library';
+      libraryId: number;
+      parentId: number;
+      providerId: string;
+    }
+);
+
+export interface AgentFileAuthorityNodeSnapshotV1 {
+  ext?: string;
+  fileSize: number;
+  id: number;
+  libraryId: number;
+  mimeType?: string;
+  name: string;
+  parentId: number;
+  storageKey?: string;
+  storageProvider?: string;
+  type: 'dir' | 'file';
+  updatedAt?: string;
+  version: 1;
+}
+
+interface AgentFileAuthorityRequestBaseV1 {
+  authorityId: string;
+  libraryId: number;
+  ownerScope: AgentOwnerScope;
+  runId: string;
+  sessionId: string;
+  toolRunId: string;
+  version: 1;
+}
+
+export type AgentFileAuthorityRequestV1 = AgentFileAuthorityRequestBaseV1 & (
+  | {
+      includeDownloadUrl: boolean;
+      nodeId: number;
+      operation: 'stage-library-node';
+    }
+  | {
+      contentType?: string;
+      fileName: string;
+      fileSize: number;
+      includeCredentials: boolean;
+      operation: 'publish-library-file';
+      parentId: number;
+      providerId?: string;
+    }
+);
+
+export type AgentFileAuthorityResultV1 =
+  | {
+      downloadUrl?: string;
+      node: AgentFileAuthorityNodeSnapshotV1;
+      operation: 'stage-library-node';
+      version: 1;
+    }
+  | {
+      credentials?: { token: string; username: string };
+      parent: AgentFileAuthorityNodeSnapshotV1;
+      providerId: string;
+      providerLabel: string;
+      operation: 'publish-library-file';
+      version: 1;
+    };
+
+export interface AgentFileAuthorityCompletionV1 {
+  authorityId: string;
+  error?: string;
+  libraryId: number;
+  ownerScope: AgentOwnerScope;
+  result?: AgentFileAuthorityResultV1;
+  runId: string;
+  sessionId: string;
+  toolRunId: string;
+  version: 1;
+}
+
 export type AgentPreparedActionPublic =
+  | AgentFilePublishPreparedActionPublicV1
+  | AgentFileStagePreparedActionPublicV1
   | AgentMediaExtractAudioPreparedActionPublicV1
   | AgentShellPreparedActionPublicV1;
 

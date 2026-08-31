@@ -27,6 +27,7 @@ import {
   getAgentSkillInstructionsHash,
 } from './skills/agent-skill-registry';
 import type { AgentShellProviderRegistrySnapshot } from './shell/agent-shell-provider-registry';
+import type { AgentShellPermissionMode } from './shell/agent-shell-policy-engine';
 
 export type AgentRunCapabilityToolKind = AgentToolKind;
 export type AgentToolReadiness = 'ready' | 'degraded' | 'blocked';
@@ -72,6 +73,7 @@ function stableSerialize(value: unknown): string {
 function createSnapshotIdentity(input: {
   capabilitySnapshot: AgentCapabilitySnapshot;
   omittedSkillCount: number;
+  shellPermissionMode: AgentShellPermissionMode;
   shellProviderSnapshot: AgentShellProviderRegistrySnapshot | null;
   skillReadiness: ReadonlyMap<string, AgentSkillReadinessSnapshot>;
   skillRevision: number;
@@ -114,6 +116,7 @@ function createSnapshotIdentity(input: {
   const payload = stableSerialize({
     capabilityIdentity: input.capabilitySnapshot.identity,
     omittedSkillCount: input.omittedSkillCount,
+    shellPermissionMode: input.shellPermissionMode,
     ...(shellProviderMaterial ? { shellProviderSnapshot: shellProviderMaterial } : {}),
     skillRevision: input.skillRevision,
     skills: normalizedSkills,
@@ -165,6 +168,7 @@ function createEffectiveSkillSnapshot(
 
 export interface AgentRunCapabilitySnapshotOptions {
   readonly capabilitySnapshot?: AgentCapabilitySnapshot;
+  readonly shellPermissionMode?: AgentShellPermissionMode;
   readonly shellProviderSnapshot?: AgentShellProviderRegistrySnapshot;
   readonly skillSnapshot: AgentSkillSnapshotV1;
   readonly toolSnapshot: AgentToolRegistrySnapshot;
@@ -177,6 +181,7 @@ export interface AgentRunCapabilitySnapshot {
   readonly toolSnapshot: AgentToolRegistrySnapshot;
   readonly identity: string;
   readonly shellProviderSnapshotIdentity: string | null;
+  readonly shellPermissionMode: AgentShellPermissionMode;
   readonly defaultShellProviderId: string | null;
   readonly defaultShellProviderRegistrationIdentity: string | null;
   readonly toolRevision: number;
@@ -235,6 +240,12 @@ export function createAgentRunCapabilitySnapshot(
   }
 
   const capabilitySnapshot = options.capabilitySnapshot || createAgentCapabilitySnapshot();
+  const shellPermissionMode = options.shellPermissionMode === undefined
+    ? 'ask'
+    : options.shellPermissionMode;
+  if (!['ask', 'auto', 'full-access'].includes(shellPermissionMode)) {
+    throw new Error('Agent Shell 权限模式无效');
+  }
   const shellProviderSnapshot = options.shellProviderSnapshot || null;
   const shellProviders = Object.freeze([...(shellProviderSnapshot?.providers || [])]);
   const defaultShellProviderId = shellProviderSnapshot?.defaultProviderId || null;
@@ -422,6 +433,7 @@ export function createAgentRunCapabilitySnapshot(
     identity: createSnapshotIdentity({
       capabilitySnapshot,
       omittedSkillCount: options.skillSnapshot.omittedSkillCount,
+      shellPermissionMode,
       shellProviderSnapshot,
       skillReadiness,
       skillRevision: options.skillSnapshot.catalogRevision,
@@ -448,6 +460,7 @@ export function createAgentRunCapabilitySnapshot(
     },
     shellProviderSnapshot,
     shellProviderSnapshotIdentity: shellProviderSnapshot?.snapshotIdentity || null,
+    shellPermissionMode,
     shellProviders,
     skillRevision: options.skillSnapshot.catalogRevision,
     skills: effectiveSkills,

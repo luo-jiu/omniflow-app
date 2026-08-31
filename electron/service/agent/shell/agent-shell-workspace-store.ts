@@ -1,5 +1,16 @@
 import crypto from 'node:crypto';
-import { lstat, mkdir, readdir, realpath } from 'node:fs/promises';
+import { constants, type BigIntStats } from 'node:fs';
+import {
+  link,
+  lstat,
+  mkdir,
+  open,
+  readdir,
+  realpath,
+  rm,
+  unlink,
+  type FileHandle,
+} from 'node:fs/promises';
 import path from 'node:path';
 
 import {
@@ -20,9 +31,16 @@ import { normalizeAgentOwnerScope } from '../../../../src/shared/agent/agent-own
 import { normalizeAgentShellLogicalPath } from '../../../../src/shared/agent/shell/agent-shell.types';
 import {
   AGENT_SHELL_WORKSPACE_CONTENT_SCANNER_REVISION,
+  AGENT_SHELL_WORKSPACE_MAX_FILE_BYTES,
+  AGENT_SHELL_WORKSPACE_MAX_TOTAL_BYTES,
   scanAgentShellWorkspaceContent,
+  scanAgentShellWorkspaceUsage,
   type AgentShellWorkspaceContentSnapshot,
 } from './agent-shell-workspace-content-scanner';
+import {
+  normalizeStagedFileName,
+  STAGED_FILE_NAME_MAX_BYTES,
+} from '../../stagedFilePolicy';
 
 const MAX_WORKSPACE_ID_LENGTH = 200;
 const MAX_RUN_ID_LENGTH = 200;
@@ -97,6 +115,40 @@ export interface AgentShellWorkspacePreparationContext {
   workspaceId: string;
 }
 
+export interface AgentShellWorkspaceExecutionQuota {
+  baselineBytes: number;
+  maximumBytes: number;
+  quotaId: string;
+  reservedGrowthBytes: number;
+  workspaceId: string;
+}
+
+export interface AgentShellWorkspaceFileMetadata {
+  contentHash: string;
+  displayName: string;
+  generation: number;
+  logicalPath: string;
+  sizeBytes: number;
+  workspaceId: string;
+}
+
+export interface AgentShellWorkspaceOwnedFile extends AgentShellWorkspaceFileMetadata {
+  fileHandle: FileHandle;
+  managedRootPath: string;
+  verifyUnchanged: () => Promise<void>;
+}
+
+export interface AgentShellWorkspaceStageFileInput {
+  displayName: string;
+  expectedGeneration: number;
+  expectedRunId: string;
+  owner: AgentShellWorkspaceOwner;
+  provenance: string;
+  signal?: AbortSignal;
+  sourceFileHandle: FileHandle;
+  workspaceId: string;
+}
+
 export interface AgentShellWorkspaceStoreOptions {
   adapterId?: string;
   createId?: () => string;
@@ -134,6 +186,23 @@ interface WorkspaceRecord {
   workspaceId: string;
 }
 
+interface WorkspaceExecutionQuotaRecord extends AgentShellWorkspaceExecutionQuota {
+  owner: AgentShellWorkspaceOwner;
+  quotaLeaseId: string;
+  quotaResourceRef: string;
+  reservationReleased: boolean;
+}
+
+interface WorkspaceFileIdentity {
+  ctimeNs: bigint;
+  device: bigint;
+  inode: bigint;
+  mode: bigint;
+  mtimeNs: bigint;
+  nlink: bigint;
+  size: bigint;
+}
+
 function normalizeString(value: unknown, label: string, maximum: number): string {
   const normalized = String(value ?? '').trim();
   if (!normalized || normalized.length > maximum || normalized.includes('\u0000')) {
@@ -154,6 +223,122 @@ function normalizeBytes(value: unknown): number {
   const bytes = Number(value);
   if (!Number.isSafeInteger(bytes) || bytes < 0) throw new Error('Agent workspace 字节数无效');
   return bytes;
+}
+
+function abortError(message = 'Agent workspace 文件操作已取消'): Error {
+  const error = new Error(message);
+  error.name = 'AbortError';
+  return error;
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw abortError();
+}
+
+function fileIdentity(stat: BigIntStats): WorkspaceFileIdentity {
+  return {
+    ctimeNs: stat.ctimeNs,
+    device: stat.dev,
+    inode: stat.ino,
+    mode: stat.mode,
+    mtimeNs: stat.mtimeNs,
+    nlink: stat.nlink,
+    size: stat.size,
+  };
+}
+
+function sameFileIdentity(left: WorkspaceFileIdentity, right: WorkspaceFileIdentity): boolean {
+  return left.ctimeNs === right.ctimeNs
+    && left.device === right.device
+    && left.inode === right.inode
+    && left.mode === right.mode
+    && left.mtimeNs === right.mtimeNs
+    && left.nlink === right.nlink
+    && left.size === right.size;
+}
+
+function assertRegularSingleLinkFile(stat: BigIntStats, label: string): WorkspaceFileIdentity {
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1n) {
+    throw new Error(`${label}必须是单个普通文件`);
+  }
+  if (stat.size < 0n || stat.size > BigInt(AGENT_SHELL_WORKSPACE_MAX_FILE_BYTES)) {
+    throw new Error(`${label}超过单文件大小上限`);
+  }
+  return fileIdentity(stat);
+}
+
+function safeOpenFlags(): number {
+  const noFollow = process.platform === 'win32' || typeof constants.O_NOFOLLOW !== 'number'
+    ? 0
+    : constants.O_NOFOLLOW;
+  const nonBlocking = process.platform === 'win32' || typeof constants.O_NONBLOCK !== 'number'
+    ? 0
+    : constants.O_NONBLOCK;
+  return constants.O_RDONLY | noFollow | nonBlocking;
+}
+
+function utf8BoundedFileNameWithSuffix(fileName: string, suffix: string): string {
+  const parsed = path.parse(fileName);
+  const extension = parsed.ext;
+  const reservedBytes = Buffer.byteLength(`${suffix}${extension}`, 'utf8');
+  const maximumStemBytes = Math.max(1, STAGED_FILE_NAME_MAX_BYTES - reservedBytes);
+  let stem = '';
+  let stemBytes = 0;
+  for (const character of parsed.name || 'file') {
+    const bytes = Buffer.byteLength(character, 'utf8');
+    if (stemBytes + bytes > maximumStemBytes) break;
+    stem += character;
+    stemBytes += bytes;
+  }
+  return `${stem || 'file'}${suffix}${extension}`;
+}
+
+async function readAndHashFileHandle(input: {
+  destination?: FileHandle;
+  expectedIdentity: WorkspaceFileIdentity;
+  signal?: AbortSignal;
+  source: FileHandle;
+}): Promise<{ contentHash: string; sizeBytes: number }> {
+  const digest = crypto.createHash('sha256');
+  const buffer = Buffer.allocUnsafe(1024 * 1024);
+  let bytesRead = buffer.byteLength;
+  let offset = 0;
+  while (bytesRead > 0) {
+    throwIfAborted(input.signal);
+    ({ bytesRead } = await input.source.read(buffer, 0, buffer.byteLength, offset));
+    if (bytesRead === 0) continue;
+    if (offset > AGENT_SHELL_WORKSPACE_MAX_FILE_BYTES - bytesRead) {
+      throw new Error('Agent workspace 单文件大小超限');
+    }
+    digest.update(buffer.subarray(0, bytesRead));
+    if (input.destination) {
+      let written = 0;
+      while (written < bytesRead) {
+        throwIfAborted(input.signal);
+        const result = await input.destination.write(
+          buffer,
+          written,
+          bytesRead - written,
+          offset + written,
+        );
+        if (result.bytesWritten <= 0) throw new Error('Agent workspace 文件写入未取得进展');
+        written += result.bytesWritten;
+      }
+    }
+    offset += bytesRead;
+  }
+  const finalStat = await input.source.stat({ bigint: true });
+  const finalIdentity = assertRegularSingleLinkFile(finalStat, 'Agent workspace 源文件');
+  if (
+    !sameFileIdentity(input.expectedIdentity, finalIdentity)
+    || BigInt(offset) !== finalIdentity.size
+  ) {
+    throw new Error('Agent workspace 源文件在读取期间发生变化');
+  }
+  return {
+    contentHash: `sha256:${digest.digest('hex')}`,
+    sizeBytes: offset,
+  };
 }
 
 function normalizeWorkspaceId(value: unknown): string {
@@ -234,6 +419,10 @@ function isMissingFileError(error: unknown): boolean {
   return Boolean(error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT');
 }
 
+function isExistingFileError(error: unknown): boolean {
+  return Boolean(error && typeof error === 'object' && 'code' in error && error.code === 'EEXIST');
+}
+
 function toPersistedRecord(record: WorkspaceRecord): AgentShellWorkspacePersistedRecord {
   return {
     generation: record.generation,
@@ -257,6 +446,7 @@ export function createAgentShellWorkspaceStore(options: AgentShellWorkspaceStore
   let rootPath = configuredRootPath;
   let managedRoot: AgentManagedRoot | null = null;
   const records = new Map<string, WorkspaceRecord>();
+  const executionQuotas = new Map<string, WorkspaceExecutionQuotaRecord>();
   const activeAdapterOperations = new Set<Promise<unknown>>();
   const activePublicOperations = new Set<Promise<unknown>>();
   let adapterAdmissionOpen = true;
@@ -597,12 +787,29 @@ export function createAgentShellWorkspaceStore(options: AgentShellWorkspaceStore
     expectedRunIdInput: string,
     ownerInput: AgentShellWorkspaceOwner,
     signal?: AbortSignal,
+    executionQuotaIdInput?: string,
   ): Promise<AgentShellWorkspacePreparationContext> {
     await ready;
     const record = getRecord(workspaceIdInput);
     assertWorkspaceOwner(record, ownerInput);
     const expectedRunId = normalizeRunId(expectedRunIdInput);
     if (record.runId !== expectedRunId) throw new Error('Agent workspace Run 不匹配');
+    const executionQuotaId = executionQuotaIdInput
+      ? normalizeString(executionQuotaIdInput, 'Agent workspace execution quota ID', 256)
+      : undefined;
+    const executionQuota = executionQuotaId
+      ? executionQuotas.get(record.workspaceId)
+      : undefined;
+    if (
+      executionQuotaId
+      && (
+        !executionQuota
+        || executionQuota.quotaId !== executionQuotaId
+        || executionQuota.reservationReleased
+      )
+    ) {
+      throw new Error('Agent workspace execution quota 不存在或已经结束');
+    }
     const quotaLease = await quotaManager.acquireLease(record.quotaResourceRef, ttlMs, record.owner);
     let cleanupRequiredOnFailure = false;
     let contentSnapshot: AgentShellWorkspaceContentSnapshot | undefined;
@@ -686,11 +893,23 @@ export function createAgentShellWorkspaceStore(options: AgentShellWorkspaceStore
         throw new Error('Agent workspace generation 已变化');
       }
       deletionObservedBytes = contentSnapshot.totalBytes;
-      await quotaManager.adjust(
-        record.quotaResourceRef,
-        contentSnapshot.totalBytes,
-        record.owner,
-      );
+      if (executionQuota) {
+        await quotaManager.settleReservationIntoResource(
+          executionQuota.quotaId,
+          record.quotaResourceRef,
+          contentSnapshot.totalBytes,
+          record.owner,
+          executionQuota.quotaLeaseId,
+        );
+        executionQuota.reservationReleased = true;
+        executionQuotas.delete(record.workspaceId);
+      } else {
+        await quotaManager.adjust(
+          record.quotaResourceRef,
+          contentSnapshot.totalBytes,
+          record.owner,
+        );
+      }
       if (records.get(record.workspaceId)?.status === 'deleting') {
         deletionObservedBytes = 'unknown';
         throw new Error('Agent workspace 正在清理');
@@ -789,6 +1008,381 @@ export function createAgentShellWorkspaceStore(options: AgentShellWorkspaceStore
     if (preparationError) throw preparationError;
     if (!preparationContext) throw new Error('Agent workspace preparation context 缺失');
     return preparationContext;
+  }
+
+  async function beginExecutionQuota(
+    workspaceIdInput: string,
+    requestedGrowthBytesInput: number,
+    ownerInput: AgentShellWorkspaceOwner,
+    requestedTtlMsInput: number = ttlMs,
+  ): Promise<AgentShellWorkspaceExecutionQuota> {
+    await ready;
+    const requestedGrowthBytes = normalizeBytes(requestedGrowthBytesInput);
+    const requestedTtlMs = normalizeBytes(requestedTtlMsInput);
+    if (requestedTtlMs <= 0) throw new Error('Agent workspace execution quota TTL 无效');
+    return enqueueMutation(async () => {
+      const record = getRecord(workspaceIdInput);
+      assertWorkspaceOwner(record, ownerInput);
+      if (executionQuotas.has(record.workspaceId)) {
+        throw new Error('Agent workspace 已经存在活跃执行配额');
+      }
+      const resource = quotaManager.getResource(record.quotaResourceRef, record.owner);
+      if (!resource || resource.state !== 'committed' || resource.actualBytes === null) {
+        throw new Error('Agent workspace 配额资源尚未提交');
+      }
+      const baselineBytes = Math.max(resource.actualBytes, resource.expectedBytes);
+      if (baselineBytes > AGENT_SHELL_WORKSPACE_MAX_TOTAL_BYTES) {
+        throw new Error('Agent workspace 已超过执行大小上限');
+      }
+      const reservedGrowthBytes = Math.min(
+        requestedGrowthBytes,
+        AGENT_SHELL_WORKSPACE_MAX_TOTAL_BYTES - baselineBytes,
+      );
+      const quotaId = await quotaManager.reserve(
+        record.owner,
+        'workspace',
+        record.runId,
+        reservedGrowthBytes,
+        Math.max(ttlMs, requestedTtlMs),
+        adapterId,
+      );
+      let quotaLeaseId: string;
+      try {
+        const lease = await quotaManager.acquireLease(
+          record.quotaResourceRef,
+          ttlMs,
+          record.owner,
+        );
+        quotaLeaseId = lease.leaseId;
+      } catch (error) {
+        await quotaManager.cancelReservation(quotaId, record.owner).catch(() => undefined);
+        throw error;
+      }
+      const quota = {
+        baselineBytes,
+        maximumBytes: baselineBytes + reservedGrowthBytes,
+        owner: cloneOwner(record.owner),
+        quotaId,
+        quotaLeaseId,
+        quotaResourceRef: record.quotaResourceRef,
+        reservationReleased: false,
+        reservedGrowthBytes,
+        workspaceId: record.workspaceId,
+      } satisfies WorkspaceExecutionQuotaRecord;
+      executionQuotas.set(record.workspaceId, quota);
+      return Object.freeze({
+        baselineBytes: quota.baselineBytes,
+        maximumBytes: quota.maximumBytes,
+        quotaId: quota.quotaId,
+        reservedGrowthBytes: quota.reservedGrowthBytes,
+        workspaceId: quota.workspaceId,
+      });
+    });
+  }
+
+  async function scanExecutionQuotaUsage(
+    workspaceIdInput: string,
+    quotaIdInput: string,
+    ownerInput: AgentShellWorkspaceOwner,
+    signal?: AbortSignal,
+  ) {
+    await ready;
+    const workspaceId = normalizeWorkspaceId(workspaceIdInput);
+    const quotaId = normalizeString(quotaIdInput, 'Agent workspace execution quota ID', 256);
+    const snapshot = await enqueueMutation(async () => {
+      const record = getRecord(workspaceId);
+      assertWorkspaceOwner(record, ownerInput);
+      const quota = executionQuotas.get(workspaceId);
+      if (!quota || quota.quotaId !== quotaId || quota.reservationReleased) {
+        throw new Error('Agent workspace execution quota 不存在或已经结束');
+      }
+      const rootIdentity = await captureWorkspaceRoot(record);
+      return {
+        maximumBytes: quota.maximumBytes,
+        rootIdentity,
+        rootPath: record.rootPath,
+      };
+    });
+    const usage = await scanAgentShellWorkspaceUsage({
+      expectedRootIdentity: snapshot.rootIdentity,
+      logicalRoots: WORKSPACE_ROOTS,
+      maxTotalBytes: Math.max(1, snapshot.maximumBytes),
+      rootPath: snapshot.rootPath,
+      signal,
+    });
+    const current = executionQuotas.get(workspaceId);
+    if (!current || current.quotaId !== quotaId || current.reservationReleased) {
+      throw new Error('Agent workspace execution quota 已经结束');
+    }
+    return usage;
+  }
+
+  async function cancelExecutionQuota(
+    workspaceIdInput: string,
+    quotaIdInput: string,
+    ownerInput: AgentShellWorkspaceOwner,
+  ): Promise<boolean> {
+    await ready;
+    return enqueueMutation(async () => {
+      const workspaceId = normalizeWorkspaceId(workspaceIdInput);
+      const quotaId = normalizeString(quotaIdInput, 'Agent workspace execution quota ID', 256);
+      const quota = executionQuotas.get(workspaceId);
+      if (!quota || quota.quotaId !== quotaId) return false;
+      const record = records.get(workspaceId);
+      if (record) assertWorkspaceOwner(record, ownerInput);
+      else normalizeOwner(ownerInput);
+      if (!quota.reservationReleased) {
+        await quotaManager.cancelReservation(quota.quotaId, ownerInput);
+        quota.reservationReleased = true;
+      }
+      const released = await quotaManager.releaseLease(
+        quota.quotaResourceRef,
+        quota.quotaLeaseId,
+        ownerInput,
+      );
+      if (!released) throw new Error('Agent workspace execution quota lease 释放失败');
+      executionQuotas.delete(workspaceId);
+      return true;
+    });
+  }
+
+  function resolveExecutionResultContext(
+    workspaceIdInput: string,
+    logicalCwdInput: string,
+    expectedRunIdInput: string,
+    ownerInput: AgentShellWorkspaceOwner,
+    quotaIdInput: string,
+    signal?: AbortSignal,
+  ): Promise<AgentShellWorkspacePreparationContext> {
+    return resolvePreparationContext(
+      workspaceIdInput,
+      logicalCwdInput,
+      expectedRunIdInput,
+      ownerInput,
+      signal,
+      quotaIdInput,
+    );
+  }
+
+  async function stageFileFromHandle(
+    input: AgentShellWorkspaceStageFileInput,
+  ): Promise<AgentShellWorkspaceFileMetadata> {
+    await ready;
+    throwIfAborted(input.signal);
+    const workspaceId = normalizeWorkspaceId(input.workspaceId);
+    const expectedGeneration = normalizeBytes(input.expectedGeneration);
+    if (expectedGeneration <= 0) throw new Error('Agent workspace generation 无效');
+    const expectedRunId = normalizeRunId(input.expectedRunId);
+    const owner = normalizeOwner(input.owner);
+    const provenance = normalizeProvenance(input.provenance);
+    const displayName = normalizeStagedFileName(input.displayName, 'selected-file');
+    const record = getRecord(workspaceId);
+    assertWorkspaceOwner(record, owner);
+    if (record.runId !== expectedRunId) throw new Error('Agent workspace Run 不匹配');
+    if (record.generation !== expectedGeneration) {
+      throw new Error('Agent workspace generation 已变化');
+    }
+
+    const sourceInitialStat = await input.sourceFileHandle.stat({ bigint: true });
+    const sourceIdentity = assertRegularSingleLinkFile(
+      sourceInitialStat,
+      'Agent workspace 源文件',
+    );
+    const sourceSize = Number(sourceIdentity.size);
+    if (!Number.isSafeInteger(sourceSize) || sourceSize < 0) {
+      throw new Error('Agent workspace 源文件大小无效');
+    }
+    const requestedGrowthBytes = Math.min(
+      AGENT_SHELL_WORKSPACE_MAX_TOTAL_BYTES,
+      sourceSize + 4 * 1024,
+    );
+    const quota = await beginExecutionQuota(workspaceId, requestedGrowthBytes, owner);
+    const temporaryName = `.stage-${normalizeWorkspaceId(createId())}.tmp`;
+    const temporaryPath = path.join(record.rootPath, 'tmp', temporaryName);
+    let temporaryHandle: FileHandle | null = null;
+    let finalPhysicalPath = '';
+    let finalLogicalPath = '';
+    let manifestUpdated = false;
+    try {
+      await captureWorkspaceRoot(record);
+      temporaryHandle = await open(temporaryPath, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL, 0o600);
+      const copied = await readAndHashFileHandle({
+        destination: temporaryHandle,
+        expectedIdentity: sourceIdentity,
+        signal: input.signal,
+        source: input.sourceFileHandle,
+      });
+      await temporaryHandle.sync();
+      const temporaryStat = await temporaryHandle.stat({ bigint: true });
+      const temporaryIdentity = assertRegularSingleLinkFile(
+        temporaryStat,
+        'Agent workspace 暂存文件',
+      );
+      if (temporaryIdentity.size !== BigInt(copied.sizeBytes)) {
+        throw new Error('Agent workspace 暂存文件大小校验失败');
+      }
+      await temporaryHandle.close();
+      temporaryHandle = null;
+      throwIfAborted(input.signal);
+
+      for (let suffixIndex = 0; suffixIndex < 10_000; suffixIndex += 1) {
+        const candidateName = suffixIndex === 0
+          ? displayName
+          : utf8BoundedFileNameWithSuffix(displayName, `-${suffixIndex + 1}`);
+        const candidatePath = path.join(record.rootPath, 'input', candidateName);
+        try {
+          await link(temporaryPath, candidatePath);
+          finalPhysicalPath = candidatePath;
+          finalLogicalPath = `input/${candidateName}`;
+          break;
+        } catch (error) {
+          if (!isExistingFileError(error)) throw error;
+        }
+      }
+      if (!finalPhysicalPath || !finalLogicalPath) {
+        throw new Error('Agent workspace 暂存文件名冲突过多');
+      }
+      await unlink(temporaryPath);
+      throwIfAborted(input.signal);
+
+      const current = getRecord(workspaceId);
+      assertWorkspaceOwner(current, owner);
+      if (
+        current !== record
+        || current.runId !== expectedRunId
+        || current.generation !== expectedGeneration
+      ) {
+        throw new Error('Agent workspace generation 已变化');
+      }
+      await updateManifest(workspaceId, {
+        entries: [{
+          contentHash: copied.contentHash,
+          kind: 'file',
+          logicalPath: finalLogicalPath,
+          sizeBytes: copied.sizeBytes,
+        }],
+        expectedGeneration: current.generation,
+        provenance: [provenance],
+      }, owner);
+      manifestUpdated = true;
+      const settled = await resolveExecutionResultContext(
+        workspaceId,
+        'work',
+        expectedRunId,
+        owner,
+        quota.quotaId,
+        input.signal,
+      );
+      return Object.freeze({
+        contentHash: copied.contentHash,
+        displayName: path.basename(finalLogicalPath),
+        generation: settled.generation,
+        logicalPath: finalLogicalPath,
+        sizeBytes: copied.sizeBytes,
+        workspaceId,
+      });
+    } catch (error) {
+      await temporaryHandle?.close().catch(() => undefined);
+      await rm(temporaryPath, { force: true }).catch(() => undefined);
+      if (finalPhysicalPath) await rm(finalPhysicalPath, { force: true }).catch(() => undefined);
+      if (manifestUpdated && finalLogicalPath) {
+        await updateManifest(workspaceId, { remove: [finalLogicalPath] }, owner).catch(() => undefined);
+      }
+      await cancelExecutionQuota(workspaceId, quota.quotaId, owner).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  async function withOwnedFile<T>(
+    workspaceIdInput: string,
+    logicalPathInput: string,
+    expectedRunIdInput: string,
+    ownerInput: AgentShellWorkspaceOwner,
+    consumer: (file: AgentShellWorkspaceOwnedFile) => Promise<T>,
+    signal?: AbortSignal,
+  ): Promise<T> {
+    await ready;
+    throwIfAborted(signal);
+    const workspaceId = normalizeWorkspaceId(workspaceIdInput);
+    const expectedRunId = normalizeRunId(expectedRunIdInput);
+    const owner = normalizeOwner(ownerInput);
+    const preparation = await resolvePreparationContext(
+      workspaceId,
+      'work',
+      expectedRunId,
+      owner,
+      signal,
+    );
+    const resolved = await resolveLogicalPath(workspaceId, logicalPathInput, owner);
+    const record = getRecord(workspaceId);
+    if (record.runId !== expectedRunId || record.generation !== preparation.generation) {
+      throw new Error('Agent workspace generation 已变化');
+    }
+    const physicalPath = path.resolve(record.rootPath, ...resolved.logicalPath.split('/'));
+    const lease = await quotaManager.acquireLease(record.quotaResourceRef, ttlMs, owner);
+    let fileHandle: FileHandle | null = null;
+    try {
+      await captureWorkspaceRoot(record);
+      const pathStat = await lstat(physicalPath, { bigint: true });
+      const pathIdentity = assertRegularSingleLinkFile(pathStat, 'Agent workspace 文件');
+      fileHandle = await open(physicalPath, safeOpenFlags());
+      const handleStat = await fileHandle.stat({ bigint: true });
+      const handleIdentity = assertRegularSingleLinkFile(handleStat, 'Agent workspace 文件');
+      const canonicalPath = await realpath(physicalPath);
+      if (
+        canonicalPath !== physicalPath
+        || !sameFileIdentity(pathIdentity, handleIdentity)
+      ) {
+        throw new Error('Agent workspace 文件身份无效');
+      }
+      const hashed = await readAndHashFileHandle({
+        expectedIdentity: handleIdentity,
+        signal,
+        source: fileHandle,
+      });
+      const verifyUnchanged = async (): Promise<void> => {
+        if (!fileHandle) throw new Error('Agent workspace 文件句柄已经关闭');
+        const finalHandleStat = await fileHandle.stat({ bigint: true });
+        const finalHandleIdentity = assertRegularSingleLinkFile(
+          finalHandleStat,
+          'Agent workspace 文件',
+        );
+        const finalPathStat = await lstat(physicalPath, { bigint: true });
+        const finalPathIdentity = assertRegularSingleLinkFile(
+          finalPathStat,
+          'Agent workspace 文件',
+        );
+        const finalCanonicalPath = await realpath(physicalPath);
+        await captureWorkspaceRoot(record);
+        if (
+          finalCanonicalPath !== physicalPath
+          || !sameFileIdentity(handleIdentity, finalHandleIdentity)
+          || !sameFileIdentity(handleIdentity, finalPathIdentity)
+          || records.get(workspaceId) !== record
+          || record.generation !== preparation.generation
+        ) {
+          throw new Error('Agent workspace 文件在读取期间发生变化');
+        }
+      };
+      const result = await consumer(Object.freeze({
+        contentHash: hashed.contentHash,
+        displayName: path.basename(resolved.logicalPath),
+        fileHandle,
+        generation: preparation.generation,
+        logicalPath: resolved.logicalPath,
+        managedRootPath: record.rootPath,
+        sizeBytes: hashed.sizeBytes,
+        verifyUnchanged,
+        workspaceId,
+      }));
+      await verifyUnchanged();
+      return result;
+    } finally {
+      await fileHandle?.close().catch(() => undefined);
+      const released = await quotaManager.releaseLease(record.quotaResourceRef, lease.leaseId, owner)
+        .catch(() => false);
+      if (!released) await requestCleanup(workspaceId, owner).catch(() => undefined);
+    }
   }
 
   async function create(runIdInput: string, ownerInput: AgentShellWorkspaceOwner): Promise<AgentShellWorkspace> {
@@ -1041,6 +1635,19 @@ export function createAgentShellWorkspaceStore(options: AgentShellWorkspaceStore
     disposePromise = (async () => {
       await ready.catch(() => undefined);
       await waitForOperations(activePublicOperations);
+      for (const quota of Array.from(executionQuotas.values())) {
+        if (!quota.reservationReleased) {
+          await quotaManager.cancelReservation(quota.quotaId, quota.owner);
+          quota.reservationReleased = true;
+        }
+        const released = await quotaManager.releaseLease(
+          quota.quotaResourceRef,
+          quota.quotaLeaseId,
+          quota.owner,
+        );
+        if (!released) throw new Error('Agent workspace execution quota lease 释放失败');
+        executionQuotas.delete(quota.workspaceId);
+      }
       adapterAdmissionOpen = false;
       await waitForOperations(activeAdapterOperations);
       await mutationTail;
@@ -1057,12 +1664,18 @@ export function createAgentShellWorkspaceStore(options: AgentShellWorkspaceStore
   }
 
   const admittedCreate = admit(create);
+  const admittedBeginExecutionQuota = admit(beginExecutionQuota);
+  const admittedCancelExecutionQuota = admit(cancelExecutionQuota);
   const admittedReportUsage = admit(reportUsage);
   const admittedRequestCleanup = admit(requestCleanup);
   const admittedResolveLogicalPath = admit(resolveLogicalPath);
   const admittedResolvePreparationContext = admit(resolvePreparationContext);
+  const admittedResolveExecutionResultContext = admit(resolveExecutionResultContext);
+  const admittedScanExecutionQuotaUsage = admit(scanExecutionQuotaUsage);
+  const admittedStageFileFromHandle = admit(stageFileFromHandle);
   const admittedTouch = admit(touch);
   const admittedUpdateManifest = admit(updateManifest);
+  const admittedWithOwnedFile = admit(withOwnedFile);
 
   function admittedGet(...args: Parameters<typeof get>): ReturnType<typeof get> {
     if (closing) return null;
@@ -1070,6 +1683,8 @@ export function createAgentShellWorkspaceStore(options: AgentShellWorkspaceStore
   }
 
   return {
+    beginExecutionQuota: admittedBeginExecutionQuota,
+    cancelExecutionQuota: admittedCancelExecutionQuota,
     create: admittedCreate,
     dispose,
     get: admittedGet,
@@ -1077,9 +1692,13 @@ export function createAgentShellWorkspaceStore(options: AgentShellWorkspaceStore
     reportUsage: admittedReportUsage,
     requestCleanup: admittedRequestCleanup,
     resolveLogicalPath: admittedResolveLogicalPath,
+    resolveExecutionResultContext: admittedResolveExecutionResultContext,
     resolvePreparationContext: admittedResolvePreparationContext,
+    scanExecutionQuotaUsage: admittedScanExecutionQuotaUsage,
+    stageFileFromHandle: admittedStageFileFromHandle,
     touch: admittedTouch,
     updateManifest: admittedUpdateManifest,
+    withOwnedFile: admittedWithOwnedFile,
   };
 }
 

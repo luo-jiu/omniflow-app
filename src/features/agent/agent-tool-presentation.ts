@@ -93,6 +93,25 @@ function mediaInspectPresenter(activity: AgentToolActivitySnapshot): AgentPresen
   return entries.length > 0 ? [{ entries, title: '媒体信息', type: 'details' }] : [];
 }
 
+function shellRunPresenter(activity: AgentToolActivitySnapshot): AgentPresentationBlock[] {
+  const data = asRecord(activity.result?.data);
+  if (!data) return [];
+  const durationMs = Number(data.durationMs);
+  const exitCode = data.exitCode === null ? '无' : textValue(data.exitCode);
+  const entries = [
+    { label: '状态', value: textValue(data.status) },
+    { label: '退出码', value: exitCode },
+    {
+      label: '耗时',
+      value: Number.isFinite(durationMs) && durationMs >= 0 ? `${durationMs} ms` : '',
+    },
+    { label: '标准输出', value: textValue(data.stdoutTail) },
+    { label: '错误输出', value: textValue(data.stderrTail) },
+    { label: '输出截断', value: data.tailTruncated === true ? '是' : '' },
+  ].filter(entry => entry.value);
+  return entries.length > 0 ? [{ entries, title: 'Shell 执行结果', type: 'details' }] : [];
+}
+
 const TOOL_TITLES: Record<string, string> = {
   'directory.create': '创建文件夹',
   'file.list': '读取目录',
@@ -100,12 +119,14 @@ const TOOL_TITLES: Record<string, string> = {
   'interaction.request': '用户输入',
   'media.extractAudio': '提取音频',
   'media.inspect': '检查媒体',
+  'shell.run': '运行 Shell 命令',
 };
 
 const TOOL_PRESENTERS: Record<string, ToolPresenter> = {
   'directory.create': artifactPresenter,
   'media.extractAudio': artifactPresenter,
   'media.inspect': mediaInspectPresenter,
+  'shell.run': shellRunPresenter,
 };
 
 export function getAgentToolTitle(activity: AgentToolActivitySnapshot): string {

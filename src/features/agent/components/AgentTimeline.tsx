@@ -3,6 +3,7 @@ import styled from 'styled-components';
 
 import type {
   AgentMessage,
+  AgentOwnerScope,
   AgentPreparedActionPublic,
   AgentPresentationAction,
   AgentRunSnapshot,
@@ -48,6 +49,7 @@ interface AgentTimelineProps {
   libraryId: number;
   messages: AgentMessage[];
   onAction?: (action: AgentPresentationAction) => void;
+  ownerScope: AgentOwnerScope | null;
   onResolveApproval: (
     approval: AgentToolApprovalSnapshot,
     approved: boolean,
@@ -64,6 +66,7 @@ export default function AgentTimeline({
   messages,
   onAction,
   onResolveApproval,
+  ownerScope,
   runs,
   toolActivities,
 }: AgentTimelineProps) {
@@ -97,6 +100,7 @@ export default function AgentTimeline({
               )}
               libraryId={libraryId}
               onAction={onAction}
+              ownerScope={ownerScope}
               onResolveApproval={onResolveApproval}
             />
           );

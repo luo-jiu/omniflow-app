@@ -3,6 +3,8 @@ import {
   lstat,
   mkdtemp,
   mkdir,
+  open,
+  readFile,
   rename,
   rm,
   symlink,
@@ -333,6 +335,215 @@ describe('Agent shell workspace store', () => {
       'run-other',
       OWNER,
     )).rejects.toThrow('Run 不匹配');
+  });
+
+  verifiedIdentityIt('atomically stages an opened regular file into input with quota and manifest settlement', async () => {
+    const { manager, root, store } = await createStore();
+    const workspace = await store.create('run-1', OWNER);
+    const sourcePath = path.join(root, 'picked-source.txt');
+    await writeFile(sourcePath, 'hello stage');
+    const sourceFileHandle = await open(sourcePath, 'r');
+    try {
+      const staged = await store.stageFileFromHandle({
+        displayName: 'picked-source.txt',
+        expectedGeneration: workspace.generation,
+        expectedRunId: 'run-1',
+        owner: OWNER,
+        provenance: 'local-picker:test',
+        sourceFileHandle,
+        workspaceId: workspace.workspaceId,
+      });
+
+      expect(staged).toMatchObject({
+        contentHash: 'sha256:c891da55008e35cc0929eb8ca21a3ee1ce8340f89a8ad280805eb541ea5dbd8c',
+        displayName: 'picked-source.txt',
+        logicalPath: 'input/picked-source.txt',
+        sizeBytes: 11,
+        workspaceId: workspace.workspaceId,
+      });
+      expect(staged).not.toHaveProperty('filePath');
+      await expect(readFile(
+        path.join(root, `workspace-${workspace.workspaceId}`, staged.logicalPath),
+        'utf8',
+      )).resolves.toBe('hello stage');
+      expect(store.get(workspace.workspaceId, OWNER)?.manifest).toMatchObject({
+        provenance: ['local-picker:test'],
+      });
+      expect(store.get(workspace.workspaceId, OWNER)?.manifest.entries).toContainEqual({
+        contentHash: staged.contentHash,
+        kind: 'file',
+        logicalPath: staged.logicalPath,
+        sizeBytes: staged.sizeBytes,
+      });
+      expect(manager.getUsage()).toMatchObject({ resourceCount: 1 });
+      expect(manager.getResource(`workspace:${workspace.workspaceId}`, OWNER)).toMatchObject({
+        actualBytes: expect.any(Number),
+        state: 'committed',
+      });
+    } finally {
+      await sourceFileHandle.close();
+    }
+  });
+
+  verifiedIdentityIt('auto-renames repeated staged file names without overwriting prior input', async () => {
+    const { root, store } = await createStore();
+    const workspace = await store.create('run-1', OWNER);
+    const firstSourcePath = path.join(root, 'first.txt');
+    const secondSourcePath = path.join(root, 'second.txt');
+    await writeFile(firstSourcePath, 'first');
+    await writeFile(secondSourcePath, 'second');
+    const firstHandle = await open(firstSourcePath, 'r');
+    const secondHandle = await open(secondSourcePath, 'r');
+    try {
+      const first = await store.stageFileFromHandle({
+        displayName: 'same.txt',
+        expectedGeneration: workspace.generation,
+        expectedRunId: 'run-1',
+        owner: OWNER,
+        provenance: 'local-picker:first',
+        sourceFileHandle: firstHandle,
+        workspaceId: workspace.workspaceId,
+      });
+      await expect(store.stageFileFromHandle({
+        displayName: 'same.txt',
+        expectedGeneration: workspace.generation,
+        expectedRunId: 'run-1',
+        owner: OWNER,
+        provenance: 'local-picker:stale',
+        sourceFileHandle: secondHandle,
+        workspaceId: workspace.workspaceId,
+      })).rejects.toThrow('generation 已变化');
+      const second = await store.stageFileFromHandle({
+        displayName: 'same.txt',
+        expectedGeneration: first.generation,
+        expectedRunId: 'run-1',
+        owner: OWNER,
+        provenance: 'local-picker:second',
+        sourceFileHandle: secondHandle,
+        workspaceId: workspace.workspaceId,
+      });
+
+      expect(first.logicalPath).toBe('input/same.txt');
+      expect(second.logicalPath).toBe('input/same-2.txt');
+      await expect(readFile(
+        path.join(root, `workspace-${workspace.workspaceId}`, first.logicalPath),
+        'utf8',
+      )).resolves.toBe('first');
+      await expect(readFile(
+        path.join(root, `workspace-${workspace.workspaceId}`, second.logicalPath),
+        'utf8',
+      )).resolves.toBe('second');
+    } finally {
+      await Promise.all([firstHandle.close(), secondHandle.close()]);
+    }
+  });
+
+  verifiedIdentityIt('serves an owned logical file by handle and rejects mutation during consumption', async () => {
+    const { root, store } = await createStore();
+    const workspace = await store.create('run-1', OWNER);
+    const outputPath = path.join(
+      root,
+      `workspace-${workspace.workspaceId}`,
+      'output',
+      'result.txt',
+    );
+    await writeFile(outputPath, 'finished');
+
+    const metadata = await store.withOwnedFile(
+      workspace.workspaceId,
+      'output/result.txt',
+      'run-1',
+      OWNER,
+      async (ownedFile) => {
+        expect(ownedFile.logicalPath).toBe('output/result.txt');
+        expect(ownedFile.contentHash).toBe(
+          'sha256:05343e9845302eb730fa9d18ac7b28d5e509893daf1eb76ede8d6e82d47b2da9',
+        );
+        const buffer = Buffer.alloc(8);
+        const read = await ownedFile.fileHandle.read(buffer, 0, buffer.length, 0);
+        await ownedFile.verifyUnchanged();
+        return { content: buffer.subarray(0, read.bytesRead).toString(), size: ownedFile.sizeBytes };
+      },
+    );
+    expect(metadata).toEqual({ content: 'finished', size: 8 });
+
+    await expect(store.withOwnedFile(
+      workspace.workspaceId,
+      'output/result.txt',
+      'run-1',
+      OWNER,
+      async () => {
+        await writeFile(outputPath, 'changed!');
+        return true;
+      },
+    )).rejects.toThrow('发生变化');
+  });
+
+  verifiedIdentityIt('reserves execution growth, monitors usage, and atomically settles it', async () => {
+    const { manager, root, store } = await createStore();
+    const workspace = await store.create('run-1', OWNER);
+    const prepared = await store.resolvePreparationContext(
+      workspace.workspaceId,
+      'work',
+      'run-1',
+      OWNER,
+    );
+    const quota = await store.beginExecutionQuota(workspace.workspaceId, 16 * 1024, OWNER);
+    expect(quota).toMatchObject({
+      baselineBytes: prepared.workspaceTotalBytes,
+      reservedGrowthBytes: 16 * 1024,
+      workspaceId: workspace.workspaceId,
+    });
+    expect(manager.getUsage().resourceCount).toBe(2);
+
+    await writeFile(
+      path.join(root, `workspace-${workspace.workspaceId}`, 'work', 'generated.bin'),
+      Buffer.alloc(1024),
+    );
+    await expect(store.scanExecutionQuotaUsage(
+      workspace.workspaceId,
+      quota.quotaId,
+      OWNER,
+    )).resolves.toMatchObject({ totalBytes: expect.any(Number) });
+    const settled = await store.resolveExecutionResultContext(
+      workspace.workspaceId,
+      'work',
+      'run-1',
+      OWNER,
+      quota.quotaId,
+    );
+
+    expect(manager.getUsage()).toMatchObject({
+      resourceCount: 1,
+      totalBytes: settled.workspaceTotalBytes,
+    });
+    expect(manager.getResource(`workspace:${workspace.workspaceId}`, OWNER)).toMatchObject({
+      actualBytes: settled.workspaceTotalBytes,
+      expectedBytes: settled.workspaceTotalBytes,
+      state: 'committed',
+    });
+    await expect(store.cancelExecutionQuota(workspace.workspaceId, quota.quotaId, OWNER))
+      .resolves.toBe(false);
+  });
+
+  verifiedIdentityIt('cancels execution when measured workspace growth exceeds its reservation', async () => {
+    const { manager, root, store } = await createStore();
+    const workspace = await store.create('run-1', OWNER);
+    await store.resolvePreparationContext(workspace.workspaceId, 'work', 'run-1', OWNER);
+    const quota = await store.beginExecutionQuota(workspace.workspaceId, 4 * 1024, OWNER);
+    await writeFile(
+      path.join(root, `workspace-${workspace.workspaceId}`, 'output', 'oversized.bin'),
+      Buffer.alloc(8 * 1024),
+    );
+
+    await expect(store.scanExecutionQuotaUsage(
+      workspace.workspaceId,
+      quota.quotaId,
+      OWNER,
+    )).rejects.toThrow('预留额度');
+    await expect(store.cancelExecutionQuota(workspace.workspaceId, quota.quotaId, OWNER))
+      .resolves.toBe(true);
+    expect(manager.getUsage().resourceCount).toBe(1);
   });
 
   it('requires the preparation cwd to exist as a real directory', async () => {

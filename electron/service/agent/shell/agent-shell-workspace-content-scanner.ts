@@ -20,6 +20,9 @@ const DEFAULT_MAX_FILE_BYTES = 2 * 1024 * 1024 * 1024;
 const DEFAULT_MAX_TOTAL_BYTES = 2 * 1024 * 1024 * 1024;
 const READ_CHUNK_BYTES = 1024 * 1024;
 
+export const AGENT_SHELL_WORKSPACE_MAX_TOTAL_BYTES = DEFAULT_MAX_TOTAL_BYTES;
+export const AGENT_SHELL_WORKSPACE_MAX_FILE_BYTES = DEFAULT_MAX_FILE_BYTES;
+
 export interface AgentShellWorkspaceContentEntry {
   allocatedBytes: number;
   changeTimeNs: string;
@@ -53,6 +56,23 @@ export interface AgentShellWorkspaceContentScanOptions {
   provenance: readonly string[];
   rootPath: string;
   signal?: AbortSignal;
+}
+
+export interface AgentShellWorkspaceUsageScanOptions {
+  expectedRootIdentity?: AgentManagedDirectoryIdentity;
+  logicalRoots: readonly string[];
+  maxDepth?: number;
+  maxDurationMs?: number;
+  maxEntries?: number;
+  maxFileBytes?: number;
+  maxTotalBytes?: number;
+  rootPath: string;
+  signal?: AbortSignal;
+}
+
+export interface AgentShellWorkspaceUsageSnapshot {
+  entryCount: number;
+  totalBytes: number;
 }
 
 interface StatFingerprint {
@@ -595,5 +615,154 @@ export async function scanAgentShellWorkspaceContent(
       throw error;
     }
     throw new AgentShellWorkspaceContentScanError('失败');
+  }
+}
+
+/**
+ * Lightweight execution-time accounting. It intentionally does not hash file
+ * contents because Shell is expected to mutate the workspace while this scan
+ * runs. The authoritative post-execution content scan still performs the full
+ * identity and drift checks before quota settlement.
+ */
+export async function scanAgentShellWorkspaceUsage(
+  options: AgentShellWorkspaceUsageScanOptions,
+): Promise<AgentShellWorkspaceUsageSnapshot> {
+  if (process.platform === 'win32') {
+    scanError('Windows 平台尚未通过执行期用量校验');
+  }
+  const maxDepth = positiveLimit(options.maxDepth, DEFAULT_MAX_DEPTH, 'Agent workspace 用量扫描深度');
+  const maxDurationMs = positiveLimit(
+    options.maxDurationMs,
+    2_000,
+    'Agent workspace 用量扫描超时',
+  );
+  const maxEntries = positiveLimit(options.maxEntries, DEFAULT_MAX_ENTRIES, 'Agent workspace 用量扫描条目');
+  const maxFileBytes = positiveLimit(
+    options.maxFileBytes,
+    DEFAULT_MAX_FILE_BYTES,
+    'Agent workspace 用量单文件上限',
+  );
+  const maxTotalBytes = positiveLimit(
+    options.maxTotalBytes,
+    DEFAULT_MAX_TOTAL_BYTES,
+    'Agent workspace 用量总大小上限',
+  );
+  const logicalRoots = assertLogicalRoots(options.logicalRoots);
+  const rawRootPath = String(options.rootPath ?? '').trim();
+  if (!rawRootPath || rawRootPath.includes('\0')) {
+    throw new Error('Agent workspace 用量扫描根目录无效');
+  }
+  const rootPath = path.resolve(rawRootPath);
+  const deadline = performance.now() + maxDurationMs;
+  let entryCount = 0;
+  let totalBytes = 0;
+
+  function checkBudget(): void {
+    if (options.signal?.aborted) throw abortError();
+    if (performance.now() > deadline) scanError('用量扫描超时');
+  }
+
+  function account(stat: BigIntStats): void {
+    const allocatedBytes = publicAllocatedBytes(stat);
+    const logicalBytes = stat.isFile()
+      ? Number(stat.size)
+      : 0;
+    if (!Number.isSafeInteger(logicalBytes) || logicalBytes < 0) {
+      scanError('用量扫描文件大小无效');
+    }
+    const bytes = Math.max(logicalBytes, allocatedBytes);
+    if (bytes > maxTotalBytes - totalBytes) scanError('用量超过执行预留额度');
+    totalBytes += bytes;
+    entryCount += 1;
+    if (entryCount > maxEntries) scanError('用量扫描条目过多');
+  }
+
+  async function readNames(absolutePath: string): Promise<string[] | null> {
+    let directory: Awaited<ReturnType<typeof opendir>> | undefined;
+    try {
+      directory = await opendir(absolutePath, {
+        bufferSize: 32,
+        encoding: 'buffer' as BufferEncoding,
+      });
+      const names: string[] = [];
+      let entry = await directory.read();
+      while (entry) {
+        checkBudget();
+        if (names.length >= maxEntries) scanError('用量扫描条目过多');
+        names.push(decodeDirectoryEntryName(entry.name as unknown));
+        entry = await directory.read();
+      }
+      assertNoCaseCollision(names);
+      return names;
+    } catch (error) {
+      if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
+        return null;
+      }
+      if (
+        error instanceof AgentShellWorkspaceContentScanError
+        || (error instanceof Error && error.name === 'AbortError')
+      ) {
+        throw error;
+      }
+      return scanError('用量扫描无法枚举目录');
+    } finally {
+      await directory?.close().catch(() => undefined);
+    }
+  }
+
+  async function visit(absolutePath: string, depth: number): Promise<void> {
+    checkBudget();
+    if (depth > maxDepth) scanError('用量扫描目录深度超限');
+    let stat: BigIntStats;
+    try {
+      stat = await lstat(absolutePath, { bigint: true });
+    } catch (error) {
+      if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') return;
+      scanError('用量扫描无法读取文件状态');
+    }
+    if (stat.isSymbolicLink()) scanError('用量扫描不允许符号链接或 junction');
+    if (stat.isFile()) {
+      assertRegularFile(stat);
+      if (stat.size > BigInt(maxFileBytes)) scanError('用量扫描单文件大小超限');
+      account(stat);
+      return;
+    }
+    assertDirectory(stat);
+    account(stat);
+    const names = await readNames(absolutePath);
+    if (!names) return;
+    for (const name of names) {
+      await visit(path.join(absolutePath, name), depth + 1);
+    }
+  }
+
+  try {
+    checkBudget();
+    const rootStat = await lstat(rootPath, { bigint: true });
+    assertDirectory(rootStat);
+    const canonicalRoot = await realpath(rootPath);
+    assertExpectedRootIdentity(rootStat, canonicalRoot, options.expectedRootIdentity);
+    account(rootStat);
+    const rootNames = await readNames(rootPath);
+    if (!rootNames || !sameNames(sortedNames(rootNames), logicalRoots)) {
+      scanError('用量扫描逻辑根集合不匹配');
+    }
+    for (const logicalRoot of logicalRoots) {
+      await visit(path.join(rootPath, logicalRoot), 1);
+    }
+    const finalRootStat = await lstat(rootPath, { bigint: true });
+    assertDirectory(finalRootStat);
+    const finalCanonicalRoot = await realpath(rootPath);
+    assertExpectedRootIdentity(finalRootStat, finalCanonicalRoot, options.expectedRootIdentity);
+    if (finalCanonicalRoot !== canonicalRoot) scanError('用量扫描根目录身份已变化');
+    return Object.freeze({ entryCount, totalBytes });
+  } catch (error) {
+    if (
+      error instanceof AgentShellWorkspaceContentScanError
+      || (error instanceof Error && error.name === 'AbortError')
+    ) {
+      throw error;
+    }
+    throw new AgentShellWorkspaceContentScanError('用量扫描失败');
   }
 }

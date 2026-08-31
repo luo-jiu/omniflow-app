@@ -62,7 +62,7 @@ function mediaPreparedAction(): AgentMediaExtractAudioPreparedActionPublicV1 {
 }
 
 describe('Agent Tool registry', () => {
-  it('keeps shell.run out of the production registry until execution gates are complete', () => {
+  it('starts without shell.run before the production service probes an execution-ready provider', () => {
     expect(agentToolRegistry.get('shell.run')).toBeNull();
   });
 
@@ -142,11 +142,34 @@ describe('Agent Tool registry', () => {
 
     expect(result).toEqual({ data: { nodeId: 3 }, ok: true });
     expect(registry.list()).toHaveLength(1);
+    expect(registry.createSnapshot().get('file.list')?.cancellationSettleTimeoutMs).toBe(6_000);
     await expect(registry.execute('media.extractAudio', {}, {
       appContext: { platform: 'darwin', selectedNodeIds: [] },
       onProgress: () => undefined,
       signal: controller.signal,
     })).rejects.toThrow('Agent Tool 不存在');
+  });
+
+  it('freezes a bounded cancellation settlement budget into Tool snapshots', () => {
+    const registry = createAgentToolRegistry([{
+      cancellationSettleTimeoutMs: 45_000,
+      description: 'Long-settling main tool',
+      execute: async () => ({ ok: true }),
+      inputSchema: { type: 'object' },
+      name: 'file.long-settlement',
+      risk: 'write',
+    }]);
+
+    expect(registry.createSnapshot().get('file.long-settlement')?.cancellationSettleTimeoutMs)
+      .toBe(45_000);
+    expect(() => registry.register({
+      cancellationSettleTimeoutMs: 90_001,
+      description: 'Invalid settlement budget',
+      execute: async () => ({ ok: true }),
+      inputSchema: { type: 'object' },
+      name: 'file.invalid-settlement',
+      risk: 'write',
+    })).toThrow('cancellation settlement timeout 无效');
   });
 
   it('rejects duplicate names and cancelled executions', async () => {

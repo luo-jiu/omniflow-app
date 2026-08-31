@@ -21,6 +21,17 @@ interface SaveAgentMediaArtifactDependencies {
   statFile?: typeof stat;
 }
 
+export interface SaveAgentLocalFileInput {
+  copySource: (temporaryPath: string, signal: AbortSignal) => Promise<void>;
+  defaultFileName: string;
+  dialogTitle: string;
+  fileTypeLabel?: string;
+  internalRootPath: string;
+  sender: WebContents;
+  signal: AbortSignal;
+  sourceFileName: string;
+}
+
 function abortError(): Error {
   const error = new Error('Agent 本机保存已取消');
   error.name = 'AbortError';
@@ -79,8 +90,8 @@ async function replaceTemporaryFile(
   await removeFile(backupPath, { force: true }).catch(() => undefined);
 }
 
-export async function saveAgentMediaArtifactAs(
-  input: SaveAgentMediaArtifactInput,
+export async function saveAgentLocalFileAs(
+  input: SaveAgentLocalFileInput,
   dependencies: SaveAgentMediaArtifactDependencies = {},
 ): Promise<AgentMediaArtifactSaveResult> {
   const removeFile = dependencies.removeFile || rm;
@@ -88,15 +99,23 @@ export async function saveAgentMediaArtifactAs(
 
   const defaultFileName = normalizeDefaultFileName(
     input.defaultFileName,
-    input.artifact.fileName,
+    input.sourceFileName,
   );
-  const extension = path.extname(defaultFileName).replace(/^\./u, '').slice(0, 16);
+  const extensionCandidate = path.extname(defaultFileName).replace(/^\./u, '').slice(0, 16);
+  const extension = /^[A-Za-z0-9]{1,16}$/u.test(extensionCandidate)
+    ? extensionCandidate
+    : '';
   const options = {
     defaultPath: defaultFileName,
     ...(extension
-      ? { filters: [{ extensions: [extension], name: `${extension.toUpperCase()} 音频` }] }
+      ? {
+          filters: [{
+            extensions: [extension],
+            name: `${extension.toUpperCase()} ${input.fileTypeLabel || '文件'}`,
+          }],
+        }
       : {}),
-    title: '保存提取后的音频',
+    title: input.dialogTitle,
   };
   const showSaveDialog = dependencies.showSaveDialog || dialog.showSaveDialog;
   const ownerWindow = BrowserWindow.fromWebContents(input.sender);
@@ -107,8 +126,8 @@ export async function saveAgentMediaArtifactAs(
   if (selection.canceled || !selection.filePath) return { canceled: true };
 
   const targetPath = path.resolve(selection.filePath);
-  if (isPathInsideOrEqual(input.artifact.directoryPath, targetPath)) {
-    throw new Error('不能将 Agent 媒体产物保存到内部临时位置');
+  if (isPathInsideOrEqual(input.internalRootPath, targetPath)) {
+    throw new Error('不能将 Agent 文件保存到内部临时位置');
   }
   const targetDirectory = path.dirname(targetPath);
   const temporaryPath = path.join(
@@ -116,11 +135,27 @@ export async function saveAgentMediaArtifactAs(
     `.${path.basename(targetPath)}.omniflow-${crypto.randomUUID()}.tmp`,
   );
   try {
-    await input.copyArtifact(temporaryPath, input.signal);
+    await input.copySource(temporaryPath, input.signal);
     throwIfAborted(input.signal);
     await replaceTemporaryFile(temporaryPath, targetPath, dependencies);
   } finally {
     await removeFile(temporaryPath, { force: true }).catch(() => undefined);
   }
   return { canceled: false, fileName: path.basename(targetPath) };
+}
+
+export async function saveAgentMediaArtifactAs(
+  input: SaveAgentMediaArtifactInput,
+  dependencies: SaveAgentMediaArtifactDependencies = {},
+): Promise<AgentMediaArtifactSaveResult> {
+  return saveAgentLocalFileAs({
+    copySource: input.copyArtifact,
+    defaultFileName: input.defaultFileName,
+    dialogTitle: '保存提取后的音频',
+    fileTypeLabel: '音频',
+    internalRootPath: input.artifact.directoryPath,
+    sender: input.sender,
+    signal: input.signal,
+    sourceFileName: input.artifact.fileName,
+  }, dependencies);
 }

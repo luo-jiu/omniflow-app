@@ -34,6 +34,7 @@ export async function probeBashShellProvider(
       stdoutDecoder: 'utf8' as const,
     }),
     environmentRevision: 'agent-shell-env-policy-v1',
+    executionReady: false,
     fixedArgs: Object.freeze(['--noprofile', '--norc', '-c']),
     implementationId: 'omniflow.shell.system-bash.v1',
     invocationRevision: 'bash-no-profile-invocation-v1',

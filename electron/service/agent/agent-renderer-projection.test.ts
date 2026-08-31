@@ -62,6 +62,29 @@ describe('Agent renderer projection', () => {
     expect(projectAgentToolActivityForRenderer(source)).toBe(source);
   });
 
+  it('keeps Shell tails but removes main-only log identities', () => {
+    const source = activity('shell.run');
+    source.result = {
+      data: {
+        executionId: 'execution-secret',
+        logRef: `log:v1:${'e'.repeat(64)}`,
+        status: 'completed',
+        stdoutTail: 'done',
+      },
+      message: 'Shell 命令执行完成',
+      ok: true,
+    };
+
+    const projected = projectAgentToolActivityForRenderer(source);
+    expect(projected.result).toEqual({
+      data: { status: 'completed', stdoutTail: 'done' },
+      message: 'Shell 命令执行完成',
+      ok: true,
+    });
+    expect(JSON.stringify(projected)).not.toContain('execution-secret');
+    expect(JSON.stringify(projected)).not.toContain('log:v1:');
+  });
+
   it('redacts both live event results and canonical activity arrays', () => {
     const sourceActivity = activity();
     const event = {

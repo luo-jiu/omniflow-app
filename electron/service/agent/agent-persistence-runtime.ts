@@ -22,6 +22,7 @@ import {
   type AgentShellStorageRuntime,
 } from './shell/agent-shell-storage-runtime';
 import { initializeAgentShellWorkspaceDatabaseSchema } from './shell/agent-shell-workspace-sqlite';
+import { initializeAgentShellLogDatabaseSchema } from './shell/agent-shell-log-sqlite';
 import { agentDatabaseSchemaCoordinator } from './storage/agent-database-schema-coordinator';
 import { initializeAgentLocalStorageQuotaDatabaseSchema } from './storage/agent-local-storage-quota-sqlite';
 
@@ -33,6 +34,7 @@ const REQUIRED_AGENT_DATABASE_TABLES = [
   'agent_runs',
   'agent_sessions',
   'agent_shell_workspaces',
+  'agent_shell_logs',
   'agent_tool_runs',
 ] as const;
 
@@ -138,6 +140,28 @@ const REQUIRED_AGENT_DATABASE_COLUMNS = {
     'created_at',
     'updated_at',
   ],
+  agent_shell_logs: [
+    'log_ref',
+    'backend_scope',
+    'account_scope',
+    'session_id',
+    'run_id',
+    'tool_run_id',
+    'execution_id',
+    'created_at',
+    'detailed_bytes',
+    'detailed_frames_json',
+    'detailed_frame_refs_json',
+    'dropped_detailed_bytes',
+    'expires_at',
+    'expired',
+    'finished',
+    'generation',
+    'last_sequence',
+    'tail_bytes',
+    'tail_frames_json',
+    'truncated_before',
+  ],
   agent_tool_runs: [
     'id',
     'run_id',
@@ -181,6 +205,7 @@ const REQUIRED_AGENT_DATABASE_INDEXES = [
   'agent_runs_session_created_idx',
   'agent_sessions_owner_library_updated_idx',
   'agent_shell_workspaces_owner_idx',
+  'agent_shell_logs_owner_idx',
   'agent_tool_runs_approval_idx',
   'agent_tool_runs_interaction_idx',
   'agent_tool_runs_run_ordinal_idx',
@@ -222,6 +247,7 @@ export async function bootstrapAgentPersistenceDatabase(
       await initializeAgentMemoryDatabaseSchema(database);
       await initializeAgentLocalStorageQuotaDatabaseSchema(database);
       await initializeAgentShellWorkspaceDatabaseSchema(database);
+      await initializeAgentShellLogDatabaseSchema(database);
     },
     requiredColumns: REQUIRED_AGENT_DATABASE_COLUMNS,
     requiredIndexes: REQUIRED_AGENT_DATABASE_INDEXES,

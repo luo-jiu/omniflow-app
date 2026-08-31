@@ -17,6 +17,7 @@ import type {
 import { serializeAgentOwnerScope } from '@/shared/agent/agent-owner-scope';
 import {
   getAgentSession,
+  completeAgentFileAuthority,
   completeAgentToolExecution,
   completeAgentToolPreparation,
   markAgentToolExecutionCommitted,
@@ -25,7 +26,9 @@ import {
   startAgentChat,
   stopAgentChat,
   subscribeAgentChat,
+  subscribeAgentFileAuthorityRequests,
 } from '../services/agent.api';
+import { resolveAgentFileAuthority } from '../services/agent-file-authority';
 import { readAgentPerception } from '../services/agent-context.api';
 import { executeAgentRendererTool } from '../services/agent-tool-executor';
 import { prepareAgentRendererTool } from '../services/agent-tool-preparer';
@@ -520,6 +523,31 @@ export function useAgentSession({
     if (activeSessionId !== event.sessionId) return;
     applyEvent(event);
   }), [applyEvent]);
+
+  React.useEffect(() => subscribeAgentFileAuthorityRequests((request) => {
+    void resolveAgentFileAuthority(request).then(
+      result => completeAgentFileAuthority({
+        authorityId: request.authorityId,
+        libraryId: request.libraryId,
+        ownerScope: request.ownerScope,
+        result,
+        runId: request.runId,
+        sessionId: request.sessionId,
+        toolRunId: request.toolRunId,
+        version: 1,
+      }),
+      error => completeAgentFileAuthority({
+        authorityId: request.authorityId,
+        error: error instanceof Error ? error.message.slice(0, 500) : '资料库文件授权失败',
+        libraryId: request.libraryId,
+        ownerScope: request.ownerScope,
+        runId: request.runId,
+        sessionId: request.sessionId,
+        toolRunId: request.toolRunId,
+        version: 1,
+      }),
+    ).catch(() => undefined);
+  }), []);
 
   React.useLayoutEffect(() => {
     if (sessionScopeKeyRef.current === sessionScopeKey) return;

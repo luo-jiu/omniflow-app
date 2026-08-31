@@ -49,6 +49,7 @@ import {
   MINIMUM_AGENT_PROVIDER_TOOL_RESULT_CONTENT,
   projectAgentToolResultForProvider,
 } from './agent-tool-result-projection';
+import { sealAgentShellPreparedActionPublicV1 } from './shell/agent-shell-prepared-action';
 import { builtInAgentSkillRegistry } from './skills/agent-skill-runtime';
 import { resolveAgentSkillActivationResult } from './skills/skill-activate-tool';
 import { createAIServiceRunSessionRegistry } from '../aiServiceRunSession';
@@ -129,6 +130,35 @@ function mediaPreparedAction(
   };
 }
 
+function shellPreparedAction(risk: AgentTool['risk']) {
+  return sealAgentShellPreparedActionPublicV1({
+    aiDestination: {
+      identityHash: `v1:${'a'.repeat(64)}`,
+      profileLabel: 'Test profile',
+      providerType: 'openai',
+    },
+    assessment: {
+      facets: ['filesystem.read'],
+      operations: [{
+        argvPrefix: ['--version'],
+        effects: ['filesystem.read'],
+        executable: 'git',
+      }],
+      persistentRuleEligible: false,
+      risk,
+      unresolved: [],
+    },
+    command: 'git --version',
+    cwd: { kind: 'run-workspace', path: 'work' },
+    dataScope: { stagedInputs: [], unresolvedWorkspaceRead: false },
+    environment: [],
+    kind: 'shell.run',
+    provider: { dialect: 'zsh', id: 'system-zsh', version: '5.9' },
+    timeoutMs: 60_000,
+    version: 1,
+  });
+}
+
 function skillPromptCatalog() {
   const snapshot = builtInAgentSkillRegistry.createRunSnapshot();
   return {
@@ -165,6 +195,87 @@ describe('Agent orchestrator', () => {
       runSessionRegistry: createAIServiceRunSessionRegistry(),
     });
   }
+
+  it('reads detailed Shell logs only through the canonical session ToolRun binding', async () => {
+    await store.createSession({
+      appContext: { libraryId: 3, platform: 'darwin', selectedNodeIds: [] },
+      id: 'session-shell-log',
+      now: new Date(0).toISOString(),
+      ownerScope: OWNER_SCOPE,
+      title: 'Shell log',
+    });
+    await store.createRun({
+      id: 'run-shell-log',
+      model: 'model-a',
+      now: new Date(1).toISOString(),
+      profileId: 'profile-a',
+      reasoningEffort: 'auto',
+      sessionId: 'session-shell-log',
+      userPrompt: 'run command',
+    });
+    await store.createToolRun({
+      callId: 'call-shell-log',
+      id: 'tool-shell-log',
+      input: { command: 'pwd' },
+      now: new Date(2).toISOString(),
+      permissionBehavior: 'allow',
+      runId: 'run-shell-log',
+      status: 'running',
+      toolName: 'shell.run',
+    });
+    const logRef = `log:v1:${'e'.repeat(64)}`;
+    await store.completeToolRun('tool-shell-log', {
+      data: {
+        executionId: 'execution-shell-log',
+        logRef,
+        status: 'completed',
+      },
+      ok: true,
+    }, new Date(3).toISOString());
+    const page = {
+      availableRanges: [],
+      executionId: 'execution-shell-log',
+      expired: false,
+      frames: [],
+      nextAvailableSequence: null,
+      pageFirstSequence: null,
+      pageLastSequence: null,
+      requestedAfter: null,
+      unavailableThrough: null,
+    } as const;
+    const readShellLogPage = vi.fn(async () => page);
+    const orchestrator = createAgentOrchestrator({
+      getSessionStore: async () => store,
+      readShellLogPage,
+    });
+    const request = {
+      libraryId: 3,
+      ownerScope: OWNER_SCOPE,
+      runId: 'run-shell-log',
+      sessionId: 'session-shell-log',
+      toolRunId: 'tool-shell-log',
+      version: 1 as const,
+    };
+
+    await expect(orchestrator.readShellLogPage(request)).resolves.toEqual(page);
+    expect(readShellLogPage).toHaveBeenCalledWith(expect.objectContaining({
+      executionId: 'execution-shell-log',
+      logRef,
+      owner: { ...OWNER_SCOPE, sessionId: 'session-shell-log' },
+      runId: 'run-shell-log',
+      sessionId: 'session-shell-log',
+      toolRunId: 'tool-shell-log',
+    }));
+    await expect(orchestrator.readShellLogPage({
+      ...request,
+      runId: 'run-forged',
+    })).rejects.toThrow('不属于当前 Tool Run');
+    await expect(orchestrator.readShellLogPage({
+      ...request,
+      ownerScope: OTHER_OWNER_SCOPE,
+    })).rejects.toThrow('不属于当前 Tool Run');
+    expect(readShellLogPage).toHaveBeenCalledTimes(1);
+  });
 
   function createMediaArtifactFallbackFixture(
     uploadResult: AgentMediaArtifactUploadResult,
@@ -2764,6 +2875,107 @@ describe('Agent orchestrator', () => {
       if (started) await orchestrator.shutdown();
       updateSpy.mockRestore();
       resolveSpy.mockRestore();
+      snapshotSpy.mockRestore();
+    }
+  });
+
+  it('uses analyzer-selected risk for a dynamic main prepared Tool from approval through execution', async () => {
+    const execute = vi.fn(async () => ({ message: 'shell read completed', ok: true }));
+    const prepareMain = vi.fn(async () => ({
+      binding: { privateMarker: 'shell-binding' },
+      decision: {
+        behavior: 'ask' as const,
+        preview: {
+          description: '读取 Git 版本',
+          risk: 'read' as const,
+          title: '运行 Shell 命令',
+        },
+        risk: 'read' as const,
+      },
+      publicAction: shellPreparedAction('read'),
+      snapshotMaterial: { authorizationIdentity: 'shell-read-v1' },
+    }));
+    const shellTool: AgentTool = {
+      description: 'test dynamic shell risk',
+      execute,
+      inputSchema: {
+        additionalProperties: false,
+        properties: { command: { type: 'string' } },
+        required: ['command'],
+        type: 'object',
+      },
+      name: 'shell.run',
+      prepareMain,
+      preparedRisk: 'dynamic',
+      registrationId: 'shell.run@dynamic-risk-test',
+      risk: 'destructive',
+    };
+    const testRegistry = createAgentToolRegistry([
+      ...agentToolRegistry.list().filter(tool => tool.name !== shellTool.name),
+      shellTool,
+    ]);
+    const snapshotSpy = vi.spyOn(agentToolRegistry, 'createSnapshot')
+      .mockReturnValue(testRegistry.createSnapshot());
+
+    try {
+      mocks.streamAgentProviderTurn
+        .mockResolvedValueOnce({
+          content: '',
+          toolCalls: [{
+            id: 'call-shell-read',
+            input: { command: 'git --version' },
+            name: shellTool.name,
+          }],
+        })
+        .mockImplementationOnce(async (_connection, input, onDelta) => {
+          expect(input.messages.at(-1)?.content).toContain('shell read completed');
+          onDelta('Git 版本读取完成。');
+          return { content: 'Git 版本读取完成。', toolCalls: [] };
+        });
+      const webContents = sender();
+      const orchestrator = createOrchestrator();
+      const started = await orchestrator.start(webContents as never, request());
+      await vi.waitFor(() => {
+        expect(webContents.send).toHaveBeenCalledWith(
+          'agent:chat:event',
+          expect.objectContaining({ type: 'tool-approval-required' }),
+        );
+      });
+      const approval = webContents.send.mock.calls
+        .map(call => call[1])
+        .find(event => event?.type === 'tool-approval-required').approval as AgentToolApprovalSnapshot;
+      expect(approval.preview).toMatchObject({ risk: 'read' });
+      expect(approval.preparation?.action).toMatchObject({
+        assessment: { risk: 'read' },
+        kind: 'shell.run',
+      });
+
+      await expect(orchestrator.resolveToolApproval(webContents.id, {
+        approvalId: approval.approvalId,
+        approved: true,
+        libraryId: 3,
+        ownerScope: OWNER_SCOPE,
+        preparedAction: approval.preparation?.action,
+        preparedActionId: approval.preparation?.preparedActionId,
+        runId: started.runId,
+        sessionId: started.sessionId,
+      })).resolves.toEqual({ approved: true });
+      await vi.waitFor(() => expect(execute).toHaveBeenCalledOnce());
+      await vi.waitFor(() => {
+        expect(webContents.send).toHaveBeenCalledWith(
+          'agent:chat:event',
+          expect.objectContaining({ type: 'completed' }),
+        );
+      });
+      await orchestrator.shutdown();
+      expect(prepareMain).toHaveBeenCalledTimes(2);
+      expect((await store.getSession(started.sessionId, OWNER_SCOPE, 3))?.toolActivities[0])
+        .toMatchObject({
+          approval: { status: 'approved' },
+          permissionBehavior: 'ask',
+          status: 'completed',
+        });
+    } finally {
       snapshotSpy.mockRestore();
     }
   });

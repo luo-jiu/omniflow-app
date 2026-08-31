@@ -268,6 +268,18 @@ interface Window {
     ) => Promise<import('@/shared/agent/agent.types').AgentChatStartResult>;
     stopChat: (sessionId: string) => Promise<boolean>;
     releaseOwner: () => Promise<boolean>;
+    getShellSettings: () => Promise<
+      import('@/shared/agent/shell/agent-shell.types').AgentShellSettingsSnapshot
+    >;
+    updateShellPermissionMode: (
+      permissionMode: import('@/shared/agent/shell/agent-shell.types').AgentShellPermissionMode,
+    ) => Promise<import('@/shared/agent/shell/agent-shell.types').AgentShellSettingsSnapshot>;
+    readShellLogPage: (
+      input: import('@/shared/agent/shell/agent-shell.types').AgentShellLogPageRequestV1,
+    ) => Promise<import('@/shared/agent/shell/agent-shell.types').AgentShellLogPageV1>;
+    completeFileAuthority: (
+      input: import('@/shared/agent/agent.types').AgentFileAuthorityCompletionV1,
+    ) => Promise<boolean>;
     resolveToolApproval: (
       input: import('@/shared/agent/agent.types').AgentToolApprovalDecisionRequest,
     ) => Promise<import('@/shared/agent/agent.types').AgentToolApprovalDecisionResult>;
@@ -337,6 +349,9 @@ interface Window {
     ) => Promise<boolean>;
     onEvent: (
       listener: (event: import('@/shared/agent/agent.types').AgentChatStreamEvent) => void,
+    ) => () => void;
+    onFileAuthorityRequest: (
+      listener: (request: import('@/shared/agent/agent.types').AgentFileAuthorityRequestV1) => void,
     ) => () => void;
   };
 

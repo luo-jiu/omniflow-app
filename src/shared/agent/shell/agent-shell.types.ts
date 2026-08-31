@@ -87,6 +87,54 @@ export const AGENT_SHELL_SENSITIVE_ENVIRONMENT_NAME_PARTS = Object.freeze([
 
 export type AgentShellDialect = 'bash' | 'powershell' | 'zsh';
 
+export type AgentShellPermissionMode = 'ask' | 'auto' | 'full-access';
+
+export interface AgentShellSettingsSnapshot {
+  permissionMode: AgentShellPermissionMode;
+  version: 1;
+}
+
+export interface AgentShellOutputFrameV1 {
+  executionId: string;
+  observedAt: string;
+  sequence: number;
+  stream: 'stdout' | 'stderr';
+  text: string;
+}
+
+export interface AgentShellLogPageV1 {
+  availableRanges: readonly {
+    firstSequence: number;
+    lastSequence: number;
+  }[];
+  executionId: string;
+  expired: boolean;
+  frames: readonly AgentShellOutputFrameV1[];
+  nextAvailableSequence: number | null;
+  nextCursor?: string;
+  pageFirstSequence: number | null;
+  pageLastSequence: number | null;
+  requestedAfter: number | null;
+  unavailableThrough: number | null;
+}
+
+/** Renderer request. Main resolves logRef/executionId from the canonical ToolRun. */
+export interface AgentShellLogPageRequestV1 {
+  afterSequence?: number;
+  cursor?: string;
+  libraryId: number;
+  maxBytes?: number;
+  maxFrames?: number;
+  ownerScope: {
+    accountScope: string;
+    backendScope: string;
+  };
+  runId: string;
+  sessionId: string;
+  toolRunId: string;
+  version: 1;
+}
+
 export type AgentShellRisk = 'destructive' | 'external' | 'read' | 'write';
 
 export type AgentShellRiskFacet =

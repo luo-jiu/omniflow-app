@@ -65,7 +65,7 @@ describe('Agent Shell platform providers', () => {
         stderrDecoder: 'utf8',
         stdoutDecoder: 'utf8',
       },
-      executionReady: false,
+      executionReady: true,
       fixedArgs: ['-f', '-c'],
       implementationId: 'omniflow.shell.system-zsh.v1',
       platform: 'darwin',

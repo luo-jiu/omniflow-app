@@ -27,6 +27,8 @@ import type {
   AgentChatRequest,
   AgentChatStartResult,
   AgentChatStreamEvent,
+  AgentFileAuthorityCompletionV1,
+  AgentFileAuthorityRequestV1,
   AgentInteractionSubmissionRequest,
   AgentInteractionSubmissionResult,
   AgentMediaArtifactReleaseRequest,
@@ -54,6 +56,12 @@ import type {
   AgentToolExecutionProgressRequest,
   AgentToolPrepareCompletion,
 } from '@/shared/agent/agent.types'
+import type {
+  AgentShellLogPageRequestV1,
+  AgentShellLogPageV1,
+  AgentShellPermissionMode,
+  AgentShellSettingsSnapshot,
+} from '@/shared/agent/shell/agent-shell.types'
 import type {
   QQMusicLyricsOperation,
   QQMusicLyricsPreview,
@@ -257,6 +265,20 @@ contextBridge.exposeInMainWorld('electronAgent', {
   ),
   stopChat: (sessionId: string): Promise<boolean> => ipcRenderer.invoke('agent:chat:stop', sessionId),
   releaseOwner: (): Promise<boolean> => ipcRenderer.invoke('agent:owner:release'),
+  getShellSettings: (): Promise<AgentShellSettingsSnapshot> => (
+    ipcRenderer.invoke('agent:shell:settings:get')
+  ),
+  updateShellPermissionMode: (
+    permissionMode: AgentShellPermissionMode,
+  ): Promise<AgentShellSettingsSnapshot> => (
+    ipcRenderer.invoke('agent:shell:settings:update', permissionMode)
+  ),
+  readShellLogPage: (input: AgentShellLogPageRequestV1): Promise<AgentShellLogPageV1> => (
+    ipcRenderer.invoke('agent:shell:log:read-page', input)
+  ),
+  completeFileAuthority: (input: AgentFileAuthorityCompletionV1): Promise<boolean> => (
+    ipcRenderer.invoke('agent:file-authority:complete', input)
+  ),
   resolveToolApproval: (
     input: AgentToolApprovalDecisionRequest,
   ): Promise<AgentToolApprovalDecisionResult> => (
@@ -350,6 +372,13 @@ contextBridge.exposeInMainWorld('electronAgent', {
     }
     ipcRenderer.on('agent:chat:event', wrapped)
     return () => ipcRenderer.removeListener('agent:chat:event', wrapped)
+  },
+  onFileAuthorityRequest: (listener: (request: AgentFileAuthorityRequestV1) => void) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: AgentFileAuthorityRequestV1) => {
+      listener(payload)
+    }
+    ipcRenderer.on('agent:file-authority:requested', wrapped)
+    return () => ipcRenderer.removeListener('agent:file-authority:requested', wrapped)
   },
 })
 

@@ -33,6 +33,8 @@ const MAX_SCHEMA_CLONE_DEPTH = 32;
 const MAX_SCHEMA_CLONE_NODES = 10_000;
 const MAX_MAIN_PREPARATION_SNAPSHOT_BYTES = 256 * 1024;
 const MAX_TOOL_REGISTRATION_ID_LENGTH = 200;
+const DEFAULT_TOOL_CANCELLATION_SETTLE_TIMEOUT_MS = 6_000;
+const MAX_TOOL_CANCELLATION_SETTLE_TIMEOUT_MS = 90_000;
 const UNSAFE_INPUT_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 const INVALID_TOOL_REGISTRATION_ID_MESSAGE = 'Agent Tool registration identity 无效';
 const DUPLICATE_TOOL_REGISTRATION_ID_MESSAGE = 'Agent Tool registration identity 已注册';
@@ -184,6 +186,8 @@ export interface AgentToolMainPreparationResult {
 
 export interface AgentTool {
   readonly availability?: Partial<AgentToolAvailabilityPolicy>;
+  /** Main-only time budget for authoritative cleanup after execution cancellation. */
+  readonly cancellationSettleTimeoutMs?: number;
   readonly assess?: (
     input: unknown,
     context: AgentToolExecutionContext,
@@ -206,6 +210,8 @@ export interface AgentTool {
   /** Control Tools are application-owned protocol calls, never Skill-granted work. */
   readonly kind?: AgentToolKind;
   readonly name: string;
+  /** Prepared actions whose analyzer assigns the effective risk at prepare time. */
+  readonly preparedRisk?: 'dynamic';
   readonly risk: AgentToolRisk;
   /**
    * Optional stable identity for this implementation. Built-in tools should
@@ -235,6 +241,7 @@ export interface AgentTool {
 /** A registered Tool with an identity guaranteed by the registry. */
 export type AgentToolSnapshot = AgentTool & {
   readonly availability: AgentToolAvailabilityPolicy;
+  readonly cancellationSettleTimeoutMs: number;
   readonly kind: AgentToolKind;
   readonly registrationId: string;
 };
@@ -549,12 +556,14 @@ function normalizeRegistrationId(value: unknown): string | undefined {
 
 function deriveRegistrationId(input: {
   availability: AgentToolAvailabilityPolicy;
+  cancellationSettleTimeoutMs: number;
   description: string;
   executor: AgentToolExecutor;
   inputSchema: Readonly<Record<string, unknown>>;
   kind: AgentToolKind;
   name: string;
   preparationMode: AgentToolPreparationMode;
+  preparedRisk?: 'dynamic';
   risk: AgentToolRisk;
   timeoutMs?: number;
   explicitRegistrationId?: unknown;
@@ -562,14 +571,16 @@ function deriveRegistrationId(input: {
   const explicit = normalizeRegistrationId(input.explicitRegistrationId);
   if (explicit) return explicit;
   const fingerprint = crypto.createHash('sha256').update(stableSerialize({
-    schemaVersion: 2,
+    schemaVersion: 3,
     availability: input.availability,
+    cancellationSettleTimeoutMs: input.cancellationSettleTimeoutMs,
     description: input.description,
     executor: input.executor,
     inputSchema: input.inputSchema,
     kind: input.kind,
     name: input.name,
     preparationMode: input.preparationMode,
+    preparedRisk: input.preparedRisk ?? null,
     risk: input.risk,
     timeoutMs: input.timeoutMs ?? null,
   })).digest('hex');
@@ -884,15 +895,32 @@ export function createAgentToolRegistry(initialTools: AgentTool[] = []) {
       : hasRendererPreparation
         ? 'renderer'
         : 'none';
+    if (tool.preparedRisk !== undefined && tool.preparedRisk !== 'dynamic') {
+      throw new Error(`Agent Tool prepared risk 无效：${name}`);
+    }
+    if (tool.preparedRisk === 'dynamic' && preparationMode === 'none') {
+      throw new Error(`Agent Tool dynamic prepared risk 缺少 prepare：${name}`);
+    }
     if (preparationMode !== 'none' && typeof tool.assess === 'function') {
       throw new Error(`Agent Tool prepare 与独立 assess 契约不能并存：${name}`);
     }
     if (hasMainPreparation && typeof tool.execute !== 'function') {
       throw new Error(`Agent Tool main prepare 缺少 main executor：${name}`);
     }
+    const cancellationSettleTimeoutMs = tool.cancellationSettleTimeoutMs === undefined
+      ? DEFAULT_TOOL_CANCELLATION_SETTLE_TIMEOUT_MS
+      : Number(tool.cancellationSettleTimeoutMs);
+    if (
+      !Number.isSafeInteger(cancellationSettleTimeoutMs)
+      || cancellationSettleTimeoutMs <= 0
+      || cancellationSettleTimeoutMs > MAX_TOOL_CANCELLATION_SETTLE_TIMEOUT_MS
+    ) {
+      throw new Error(`Agent Tool cancellation settlement timeout 无效：${name}`);
+    }
     const validator = compileToolInputSchema(inputSchemaCompiler, inputSchema);
     const registrationId = deriveRegistrationId({
       availability,
+      cancellationSettleTimeoutMs,
       description: String(tool.description || '').trim(),
       executor,
       explicitRegistrationId: tool.registrationId,
@@ -900,6 +928,7 @@ export function createAgentToolRegistry(initialTools: AgentTool[] = []) {
       kind,
       name,
       preparationMode,
+      preparedRisk: tool.preparedRisk,
       risk: tool.risk,
       timeoutMs: tool.timeoutMs,
     });
@@ -910,6 +939,7 @@ export function createAgentToolRegistry(initialTools: AgentTool[] = []) {
     tools.set(name, Object.freeze({
       ...tool,
       availability,
+      cancellationSettleTimeoutMs,
       inputSchema,
       kind,
       name,

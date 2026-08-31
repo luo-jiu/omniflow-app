@@ -26,6 +26,17 @@
       ]
     },
     {
+      "from": "node_modules/@vscode/tree-sitter-wasm",
+      "to": "node_modules/@vscode/tree-sitter-wasm",
+      "filter": [
+        "LICENSE",
+        "package.json",
+        "wasm/tree-sitter.wasm",
+        "wasm/tree-sitter-bash.wasm",
+        "wasm/tree-sitter-powershell.wasm"
+      ]
+    },
+    {
       "from": "node_modules/bindings",
       "to": "node_modules/bindings"
     },

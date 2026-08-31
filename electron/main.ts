@@ -18,6 +18,10 @@ import {
   disposeAgentPersistenceRuntime,
   getAgentPersistenceRuntime,
 } from './service/agent/agent-persistence-runtime'
+import {
+  disposeAgentShellServiceRuntime,
+  initializeAgentShellServiceRuntime,
+} from './service/agent/shell/agent-shell-service-runtime'
 import { clearFileTransferRuntime, initializeFileTransferRuntime } from './service/fileTransferRuntime'
 import { createAppUpdateService } from './service/appUpdateService'
 import { defaultProcessingTaskRegistry } from './service/embedded-browser/processing/task-registry'
@@ -399,6 +403,7 @@ const appGracefulShutdown = createAppGracefulShutdown({
     systemVideoWindowController.destroy()
     let agentSettled = await agentOrchestrator.shutdown()
     await clearFileTransferRuntime()
+    await disposeAgentShellServiceRuntime()
     if (!agentSettled) {
       agentSettled = await agentOrchestrator.shutdown(1_000)
     }
@@ -454,6 +459,13 @@ app.whenReady().then(async () => {
   })
   await getAgentPersistenceRuntime().catch((error) => {
     console.error('[agent] persistence runtime failed to start', error)
+  })
+  await initializeAgentShellServiceRuntime().then((enabled) => {
+    if (!enabled) {
+      console.warn('[agent-shell] no execution-ready provider; shell.run remains unavailable')
+    }
+  }).catch((error) => {
+    console.error('[agent-shell] production runtime failed to start', error)
   })
   await agentMediaArtifactStore.sweepExpired().catch((error) => {
     console.error('[agent] media artifact sweep failed to start', error)

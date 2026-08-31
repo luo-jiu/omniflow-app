@@ -215,6 +215,7 @@ describe('Agent Run capability snapshot', () => {
     const firstIdentity = first.identity;
 
     expect(first.shellProviderSnapshot).toBe(firstProviderSnapshot);
+    expect(first.shellPermissionMode).toBe('ask');
     expect(first.shellProviderSnapshotIdentity).toBe(firstProviderSnapshot.snapshotIdentity);
     expect(first.defaultShellProviderId).toBe('system-zsh');
     expect(first.defaultShellProviderRegistrationIdentity)
@@ -243,6 +244,43 @@ describe('Agent Run capability snapshot', () => {
     expect(first.getShellProviderById('system-zsh')).not.toBe(laterProvider);
     expect(later.getShellProviderById('system-zsh')).toBe(laterProvider);
   });
+
+  it.each(['ask', 'auto', 'full-access'] as const)(
+    'freezes Shell permission mode %s into the Run identity',
+    (shellPermissionMode) => {
+      const toolSnapshot = createAgentToolRegistry([]).createSnapshot();
+      const skillSnapshot = createAgentSkillRegistry().createRunSnapshot();
+      const baseline = createAgentRunCapabilitySnapshot({
+        shellPermissionMode: 'ask',
+        skillSnapshot,
+        toolSnapshot,
+      });
+      const snapshot = createAgentRunCapabilitySnapshot({
+        shellPermissionMode,
+        skillSnapshot,
+        toolSnapshot,
+      });
+
+      expect(snapshot.shellPermissionMode).toBe(shellPermissionMode);
+      expect(Object.isFrozen(snapshot)).toBe(true);
+      if (shellPermissionMode === 'ask') {
+        expect(snapshot.identity).toBe(baseline.identity);
+      } else {
+        expect(snapshot.identity).not.toBe(baseline.identity);
+      }
+    },
+  );
+
+  it.each(['unknown', ''])(
+    'rejects invalid Shell permission mode %j',
+    (shellPermissionMode) => {
+      expect(() => createAgentRunCapabilitySnapshot({
+        shellPermissionMode: shellPermissionMode as 'ask',
+        skillSnapshot: createAgentSkillRegistry().createRunSnapshot(),
+        toolSnapshot: createAgentToolRegistry([]).createSnapshot(),
+      })).toThrow('权限模式无效');
+    },
+  );
 
   it('produces the same identity for equivalent Tool and Skill definitions in another order', () => {
     const first = createFixture().snapshot;

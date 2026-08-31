@@ -994,6 +994,72 @@ export function createAgentLocalStorageQuotaManager(
     });
   }
 
+  async function settleReservationIntoResource(
+    reservationIdInput: string,
+    resourceRefInput: string,
+    actualBytesInput: number,
+    ownerInput: AgentLocalStorageQuotaOwner,
+    resourceLeaseIdInput?: string,
+  ): Promise<AgentLocalStorageQuotaReservation> {
+    const reservationId = normalizeReservationId(reservationIdInput);
+    const resourceRef = normalizeResourceRef(resourceRefInput);
+    const actualBytes = normalizeBytes(actualBytesInput, 'Agent resource 实际字节');
+    const resourceLeaseId = resourceLeaseIdInput === undefined
+      ? undefined
+      : normalizeReservationId(resourceLeaseIdInput);
+    return enqueueMutation(() => {
+      const reservation = records.get(reservationId);
+      if (!reservation) throw new Error('Agent growth reservation 不存在或已经释放');
+      assertRecordOwner(reservation, ownerInput);
+      if (
+        reservation.state !== 'reserved'
+        || reservation.resourceRef
+        || hasPendingDeletionIntent(reservation)
+      ) {
+        throw new Error('Agent growth reservation 状态无效');
+      }
+      const resourceReservationId = resourceIndex.get(resourceRef);
+      const resource = resourceReservationId
+        ? records.get(resourceReservationId)
+        : undefined;
+      if (!resource || resource.state !== 'committed' || resource.resourceRef !== resourceRef) {
+        throw new Error('Agent growth reservation 目标资源无效');
+      }
+      assertRecordOwner(resource, ownerInput);
+      if (hasPendingDeletionIntent(resource)) {
+        throw new Error('Agent growth reservation 目标资源正在清理');
+      }
+      if (
+        reservation.adapterId !== resource.adapterId
+        || reservation.category !== resource.category
+        || reservation.runId !== resource.runId
+      ) {
+        throw new Error('Agent growth reservation 与目标资源身份不匹配');
+      }
+      if (resourceLeaseId && !resource.liveLeaseIds.has(resourceLeaseId)) {
+        throw new Error('Agent growth reservation 执行 lease 无效');
+      }
+      const previousBytes = accountedBytes(resource);
+      const reservedGrowthBytes = accountedBytes(reservation);
+      if (
+        actualBytes > maxSingleResourceBytes
+        || actualBytes > previousBytes + reservedGrowthBytes
+      ) {
+        throw new Error('Agent resource 实际增长超过预留额度');
+      }
+      removeUnboundRecord(reservation);
+      if (resourceLeaseId) resource.liveLeaseIds.delete(resourceLeaseId);
+      resource.actualBytes = actualBytes;
+      resource.expectedBytes = actualBytes;
+      resource.lastTouchedAt = now();
+      resource.expiresAt = resource.lastTouchedAt + Math.min(
+        maxTtlMs,
+        Math.max(1, resource.expiresAt - resource.createdAt),
+      );
+      return cloneReservation(resource);
+    });
+  }
+
   async function touch(
     resourceRefInput: string,
     ttlInput: number,
@@ -1633,6 +1699,7 @@ export function createAgentLocalStorageQuotaManager(
     releaseLease,
     ready,
     reserve,
+    settleReservationIntoResource,
     setAdmissionBlock,
     sweep,
     touch,

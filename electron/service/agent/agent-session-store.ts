@@ -3,6 +3,10 @@ import path from 'node:path';
 import sqlite3 from 'sqlite3';
 
 import {
+  AGENT_FILE_PUBLISH_PREPARED_ACTION_KIND,
+  AGENT_FILE_PUBLISH_PREPARED_ACTION_VERSION,
+  AGENT_FILE_STAGE_PREPARED_ACTION_KIND,
+  AGENT_FILE_STAGE_PREPARED_ACTION_VERSION,
   AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_KIND,
   AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_VERSION,
   AGENT_PREPARED_ACTION_PUBLIC_IDENTITIES,
@@ -96,6 +100,148 @@ const PREPARED_ACTION_TRIM_CHARACTERS_SQL = [
 ].map(code => `char(${code})`).join(' || ');
 const PREPARED_ACTION_JSON_WITHOUT_ESCAPED_BACKSLASHES_SQL =
   "replace(NEW.prepared_action_json, char(92) || char(92), '')";
+
+function preparedActionTextControlSql(jsonPath: string): string {
+  return Array.from(
+    { length: 32 },
+    (_, code) => `instr(
+      CAST(json_extract(NEW.prepared_action_json, ${sqlText(jsonPath)}) AS BLOB),
+      X'${code.toString(16).padStart(2, '0')}'
+    ) > 0`,
+  ).join('\n    OR ');
+}
+
+function preparedActionBoundedTextInvalidSql(
+  jsonPath: string,
+  maximumCharacters: number,
+): string {
+  const value = `json_extract(NEW.prepared_action_json, ${sqlText(jsonPath)})`;
+  return `
+    COALESCE(json_type(NEW.prepared_action_json, ${sqlText(jsonPath)}), '') <> 'text'
+    OR trim(${value}) = ''
+    OR ${value} <> trim(${value}, ${PREPARED_ACTION_TRIM_CHARACTERS_SQL})
+    OR length(${value}) > ${maximumCharacters}
+    OR (${preparedActionTextControlSql(jsonPath)})
+  `;
+}
+
+function preparedActionFileNameInvalidSql(jsonPath: string): string {
+  const value = `json_extract(NEW.prepared_action_json, ${sqlText(jsonPath)})`;
+  return `
+    ${preparedActionBoundedTextInvalidSql(jsonPath, 255)}
+    OR ${value} IN ('.', '..')
+    OR instr(${value}, '/') > 0
+    OR instr(${value}, char(92)) > 0
+  `;
+}
+
+const FILE_STAGE_PREPARED_ACTION_INVALID_SQL = `
+  COALESCE(json_type(NEW.prepared_action_json, '$.sourceKind'), '') <> 'text'
+  OR json_extract(NEW.prepared_action_json, '$.sourceKind') NOT IN ('local-picker', 'library-node')
+  OR (${preparedActionBoundedTextInvalidSql('$.targetLabel', 500)})
+  OR (
+    json_extract(NEW.prepared_action_json, '$.sourceKind') = 'local-picker'
+    AND (
+      EXISTS (
+        SELECT 1 FROM json_each(NEW.prepared_action_json) AS field
+        WHERE field.key NOT IN ('kind', 'sourceKind', 'targetLabel', 'version')
+      )
+      OR (SELECT COUNT(*) FROM json_each(NEW.prepared_action_json)) <> 4
+    )
+  )
+  OR (
+    json_extract(NEW.prepared_action_json, '$.sourceKind') = 'library-node'
+    AND (
+      EXISTS (
+        SELECT 1 FROM json_each(NEW.prepared_action_json) AS field
+        WHERE field.key NOT IN (
+          'kind', 'libraryId', 'sourceDisplayName', 'sourceIdentity', 'sourceKind',
+          'sourceNodeId', 'sourceSizeBytes', 'targetLabel', 'version'
+        )
+      )
+      OR (SELECT COUNT(*) FROM json_each(NEW.prepared_action_json)) <> 9
+      OR COALESCE(json_type(NEW.prepared_action_json, '$.libraryId'), '') <> 'integer'
+      OR CAST(json_extract(NEW.prepared_action_json, '$.libraryId') AS INTEGER) <= 0
+      OR CAST(json_extract(NEW.prepared_action_json, '$.libraryId') AS INTEGER) > ${MAX_SAFE_SQLITE_AGENT_ID}
+      OR COALESCE(json_type(NEW.prepared_action_json, '$.sourceNodeId'), '') <> 'integer'
+      OR CAST(json_extract(NEW.prepared_action_json, '$.sourceNodeId') AS INTEGER) <= 0
+      OR CAST(json_extract(NEW.prepared_action_json, '$.sourceNodeId') AS INTEGER) > ${MAX_SAFE_SQLITE_AGENT_ID}
+      OR COALESCE(json_type(NEW.prepared_action_json, '$.sourceSizeBytes'), '') <> 'integer'
+      OR CAST(json_extract(NEW.prepared_action_json, '$.sourceSizeBytes') AS INTEGER) < 0
+      OR CAST(json_extract(NEW.prepared_action_json, '$.sourceSizeBytes') AS INTEGER) > ${MAX_SAFE_SQLITE_AGENT_ID}
+      OR (${preparedActionFileNameInvalidSql('$.sourceDisplayName')})
+      OR COALESCE(json_type(NEW.prepared_action_json, '$.sourceIdentity'), '') <> 'text'
+      OR length(json_extract(NEW.prepared_action_json, '$.sourceIdentity')) <> 71
+      OR substr(json_extract(NEW.prepared_action_json, '$.sourceIdentity'), 1, 7) <> 'sha256:'
+      OR substr(json_extract(NEW.prepared_action_json, '$.sourceIdentity'), 8) GLOB '*[^0-9a-f]*'
+    )
+  )
+`;
+
+const FILE_PUBLISH_SOURCE_PATH_SQL =
+  "json_extract(NEW.prepared_action_json, '$.sourcePath')";
+const FILE_PUBLISH_CONTENT_HASH_SQL =
+  "json_extract(NEW.prepared_action_json, '$.contentHash')";
+const FILE_PUBLISH_PREPARED_ACTION_INVALID_SQL = `
+  COALESCE(json_type(NEW.prepared_action_json, '$.destinationKind'), '') <> 'text'
+  OR json_extract(NEW.prepared_action_json, '$.destinationKind') NOT IN ('local-save-as', 'library')
+  OR COALESCE(json_type(NEW.prepared_action_json, '$.contentHash'), '') <> 'text'
+  OR length(${FILE_PUBLISH_CONTENT_HASH_SQL}) <> 71
+  OR substr(${FILE_PUBLISH_CONTENT_HASH_SQL}, 1, 7) <> 'sha256:'
+  OR substr(${FILE_PUBLISH_CONTENT_HASH_SQL}, 8) GLOB '*[^0-9a-f]*'
+  OR (${preparedActionFileNameInvalidSql('$.displayName')})
+  OR COALESCE(json_type(NEW.prepared_action_json, '$.sizeBytes'), '') <> 'integer'
+  OR CAST(json_extract(NEW.prepared_action_json, '$.sizeBytes') AS INTEGER) < 0
+  OR CAST(json_extract(NEW.prepared_action_json, '$.sizeBytes') AS INTEGER)
+    > ${MAX_SAFE_SQLITE_AGENT_ID}
+  OR COALESCE(json_type(NEW.prepared_action_json, '$.sourcePath'), '') <> 'text'
+  OR ${FILE_PUBLISH_SOURCE_PATH_SQL} <> trim(
+    ${FILE_PUBLISH_SOURCE_PATH_SQL},
+    ${PREPARED_ACTION_TRIM_CHARACTERS_SQL}
+  )
+  OR length(CAST(${FILE_PUBLISH_SOURCE_PATH_SQL} AS BLOB)) > 1024
+  OR length(${FILE_PUBLISH_SOURCE_PATH_SQL}) <= 7
+  OR substr(${FILE_PUBLISH_SOURCE_PATH_SQL}, 1, 7) <> 'output/'
+  OR instr(${FILE_PUBLISH_SOURCE_PATH_SQL}, char(92)) > 0
+  OR instr(${FILE_PUBLISH_SOURCE_PATH_SQL}, '//') > 0
+  OR ${FILE_PUBLISH_SOURCE_PATH_SQL} GLOB '*/./*'
+  OR ${FILE_PUBLISH_SOURCE_PATH_SQL} GLOB '*/../*'
+  OR substr(${FILE_PUBLISH_SOURCE_PATH_SQL}, -2) = '/.'
+  OR substr(${FILE_PUBLISH_SOURCE_PATH_SQL}, -3) = '/..'
+  OR (${preparedActionTextControlSql('$.sourcePath')})
+  OR (${preparedActionFileNameInvalidSql('$.suggestedFileName')})
+  OR (${preparedActionBoundedTextInvalidSql('$.targetLabel', 500)})
+  OR EXISTS (
+    SELECT 1
+    FROM json_each(NEW.prepared_action_json) AS field
+    WHERE field.key NOT IN (
+      'contentHash', 'destinationKind', 'displayName', 'kind', 'sizeBytes',
+      'sourcePath', 'suggestedFileName', 'targetLabel', 'version',
+      'conflictPolicy', 'libraryId', 'parentId', 'providerId'
+    )
+  )
+  OR (
+    json_extract(NEW.prepared_action_json, '$.destinationKind') = 'local-save-as'
+    AND (SELECT COUNT(*) FROM json_each(NEW.prepared_action_json)) <> 9
+  )
+  OR (
+    json_extract(NEW.prepared_action_json, '$.destinationKind') = 'library'
+    AND (
+      (SELECT COUNT(*) FROM json_each(NEW.prepared_action_json)) <> 13
+      OR COALESCE(json_type(NEW.prepared_action_json, '$.conflictPolicy'), '') <> 'text'
+      OR json_extract(NEW.prepared_action_json, '$.conflictPolicy') NOT IN ('fail', 'rename')
+      OR COALESCE(json_type(NEW.prepared_action_json, '$.libraryId'), '') <> 'integer'
+      OR CAST(json_extract(NEW.prepared_action_json, '$.libraryId') AS INTEGER) <= 0
+      OR CAST(json_extract(NEW.prepared_action_json, '$.libraryId') AS INTEGER) > ${MAX_SAFE_SQLITE_AGENT_ID}
+      OR COALESCE(json_type(NEW.prepared_action_json, '$.parentId'), '') <> 'integer'
+      OR CAST(json_extract(NEW.prepared_action_json, '$.parentId') AS INTEGER) <= 0
+      OR CAST(json_extract(NEW.prepared_action_json, '$.parentId') AS INTEGER) > ${MAX_SAFE_SQLITE_AGENT_ID}
+      OR (${preparedActionBoundedTextInvalidSql('$.providerId', 128)})
+      OR json_extract(NEW.prepared_action_json, '$.providerId') GLOB '*[^A-Za-z0-9._:-]*'
+      OR substr(json_extract(NEW.prepared_action_json, '$.providerId'), 1, 1) GLOB '[^A-Za-z0-9]'
+    )
+  )
+`;
 
 function sqlList(values: readonly string[]): string {
   return values.map(sqlText).join(', ');
@@ -1550,6 +1696,20 @@ async function ensureToolPreparationTriggers(
           AND CAST(json_extract(NEW.prepared_action_json, '$.version') AS INTEGER)
             = ${AGENT_SHELL_PREPARED_ACTION_VERSION}
           AND (${SHELL_PREPARED_ACTION_INVALID_SQL})
+        )
+        OR (
+          json_extract(NEW.prepared_action_json, '$.kind')
+            = ${sqlText(AGENT_FILE_STAGE_PREPARED_ACTION_KIND)}
+          AND CAST(json_extract(NEW.prepared_action_json, '$.version') AS INTEGER)
+            = ${AGENT_FILE_STAGE_PREPARED_ACTION_VERSION}
+          AND (${FILE_STAGE_PREPARED_ACTION_INVALID_SQL})
+        )
+        OR (
+          json_extract(NEW.prepared_action_json, '$.kind')
+            = ${sqlText(AGENT_FILE_PUBLISH_PREPARED_ACTION_KIND)}
+          AND CAST(json_extract(NEW.prepared_action_json, '$.version') AS INTEGER)
+            = ${AGENT_FILE_PUBLISH_PREPARED_ACTION_VERSION}
+          AND (${FILE_PUBLISH_PREPARED_ACTION_INVALID_SQL})
         )
       )
     THEN RAISE(ABORT, 'Agent Tool prepared action is invalid') END;

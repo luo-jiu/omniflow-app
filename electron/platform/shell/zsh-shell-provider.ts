@@ -31,6 +31,7 @@ export async function probeZshShellProvider(
       stdoutDecoder: 'utf8' as const,
     }),
     environmentRevision: 'agent-shell-env-policy-v1',
+    executionReady: true,
     fixedArgs: Object.freeze(['-f', '-c']),
     implementationId: 'omniflow.shell.system-zsh.v1',
     invocationRevision: 'zsh-no-rc-invocation-v1',

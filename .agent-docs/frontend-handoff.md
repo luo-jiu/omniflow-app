@@ -1,6 +1,6 @@
 # OmniFlow App 前端交接索引
 
-更新时间：2026-08-26
+更新时间：2026-08-31
 
 适用对象：继续维护 `omniflow-app` 前端、Electron 主进程、IPC、桌面交互和前端文档的开发者或 Coding Agent。
 
@@ -29,7 +29,7 @@
    - `docs/embedded-browser-architecture.md`
    - `docs/library-detail-workspace.md`
    - `docs/built-in-agent-architecture.md`（Agent 执行、持久化、IPC 和安全事实）
-   - `docs/built-in-agent-shell-architecture.md`（Agent raw Shell 的目标权限、平台、工作区和日志契约；非执行准备基座已落地，可执行 Tool 尚未注册）
+   - `docs/built-in-agent-shell-architecture.md`（Agent raw Shell 的权限、平台、工作区、日志和文件桥契约；macOS Zsh 三权限模式、终态日志分页、本机及资料库文件桥已进入开发预览，Linux / Windows 与持久规则仍 fail-closed）
    - `docs/built-in-agent-ui-contract.md`（Agent 工作区、状态投影和受控交互）
    - `docs/file-explorer-file-viewer-boundary.md`
    - `docs/built-in-type-and-archive-mode.md`

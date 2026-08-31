@@ -26,6 +26,7 @@ const MAX_TOOL_RESULT_JSON_LENGTH = 100_000;
 const DEFAULT_MAIN_EXECUTION_TIMEOUT_MS = 30_000;
 const MAX_MAIN_EXECUTION_TIMEOUT_MS = 6 * 60 * 60 * 1_000;
 const MAIN_CANCELLATION_SETTLE_TIMEOUT_MS = 6_000;
+const MAX_MAIN_CANCELLATION_SETTLE_TIMEOUT_MS = 90_000;
 const MIN_RENDERER_EXECUTION_TIMEOUT_MS = 1_000;
 const MAX_RENDERER_EXECUTION_TIMEOUT_MS = 6 * 60 * 60 * 1_000;
 const RENDERER_COMMIT_SETTLE_TIMEOUT_MS = 30_000;
@@ -144,8 +145,13 @@ export function createAgentToolBroker(options: AgentToolBrokerOptions = {}) {
     context: AgentToolDispatchContext,
     timeoutMs = DEFAULT_MAIN_EXECUTION_TIMEOUT_MS,
     runToolRegistry?: AgentToolRegistryExecutor | AgentToolRegistrySnapshot,
+    cancellationSettleTimeoutMs = MAIN_CANCELLATION_SETTLE_TIMEOUT_MS,
   ): Promise<AgentToolResult> {
     const boundedTimeoutMs = Math.max(1, Math.min(timeoutMs, MAX_MAIN_EXECUTION_TIMEOUT_MS));
+    const boundedCancellationSettleTimeoutMs = Math.max(1, Math.min(
+      cancellationSettleTimeoutMs,
+      MAX_MAIN_CANCELLATION_SETTLE_TIMEOUT_MS,
+    ));
     return new Promise((resolve, reject) => {
       const controller = new AbortController();
       let cancellationError: Error | undefined;
@@ -163,7 +169,7 @@ export function createAgentToolBroker(options: AgentToolBrokerOptions = {}) {
         controller.abort();
         cancellationTimer = setTimeout(() => {
           finish(() => reject(error));
-        }, MAIN_CANCELLATION_SETTLE_TIMEOUT_MS);
+        }, boundedCancellationSettleTimeoutMs);
         cancellationTimer.unref?.();
       };
       const handleAbort = () => requestCancellation(abortError());
@@ -196,7 +202,9 @@ export function createAgentToolBroker(options: AgentToolBrokerOptions = {}) {
         ? executionRegistry.execute(name, input, executionContext)
         : executionRegistry.execute(name, input, executionContext, expectedRegistrationId)
       ).then(
-        result => finish(() => resolve(result)),
+        result => finish(() => (
+          cancellationError ? reject(cancellationError) : resolve(result)
+        )),
         error => finish(() => reject(cancellationError || error)),
       );
     });

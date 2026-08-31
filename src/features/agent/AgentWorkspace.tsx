@@ -1,6 +1,13 @@
 import React from 'react';
-import { IconBookmark, IconHistory, IconPlus, IconSend, IconStop } from '@douyinfe/semi-icons';
-import { Toast } from '@douyinfe/semi-ui';
+import {
+  IconBookmark,
+  IconHistory,
+  IconPlus,
+  IconSend,
+  IconShieldStroked,
+  IconStop,
+} from '@douyinfe/semi-icons';
+import { Dropdown, Toast } from '@douyinfe/semi-ui';
 import styled, { css } from 'styled-components';
 
 import AIModelSettingsControl from '@/features/ai-services/components/AIModelSettingsControl';
@@ -20,6 +27,7 @@ import type {
   AgentSessionCursor,
   AgentSessionSummary,
 } from '@/shared/agent/agent.types';
+import type { AgentShellPermissionMode } from '@/shared/agent/shell/agent-shell.types';
 import { serializeAgentOwnerScope } from '@/shared/agent/agent-owner-scope';
 import AgentMemoryManager, {
   type AgentMemoryDeleteInput,
@@ -43,8 +51,10 @@ import { useAgentMemories } from './hooks/useAgentMemories';
 import { useAgentSession } from './hooks/useAgentSession';
 import {
   deleteAgentSession,
+  getAgentShellSettings,
   listAgentSessions,
   renameAgentSession,
+  updateAgentShellPermissionMode,
 } from './services/agent.api';
 
 const AgentRoot = styled.section`
@@ -174,6 +184,35 @@ const Composer = styled.form`
     cursor: pointer;
   }
 
+  .agent-permission-mode {
+    height: 28px;
+    max-width: 116px;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    flex: none;
+    padding: 0 9px;
+    border: 0;
+    border-radius: var(--app-radius-medium);
+    color: var(--app-text-muted);
+    background: transparent;
+    cursor: pointer;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+
+  .agent-permission-mode:hover,
+  .agent-permission-mode:focus-visible {
+    color: var(--app-text);
+    background: var(--app-hover-bg);
+    outline: 0;
+  }
+
+  .agent-permission-mode:disabled {
+    cursor: default;
+    opacity: 0.5;
+  }
+
   .agent-submit {
     background: var(--semi-color-primary);
     color: #fff;
@@ -244,6 +283,16 @@ type AgentWorkspaceProps = {
   selectedTreeNode: SelectedTreeNode | null;
 };
 
+const AGENT_PERMISSION_MODE_LABELS: Record<AgentShellPermissionMode, string> = {
+  ask: '询问我',
+  auto: '自动批准',
+  'full-access': '完全访问',
+};
+
+const AGENT_PERMISSION_MODES = Object.keys(
+  AGENT_PERMISSION_MODE_LABELS,
+) as AgentShellPermissionMode[];
+
 function buildAppContext(
   libraryId: number,
   rootNodeId: number | null,
@@ -286,6 +335,8 @@ export default function AgentWorkspace({
   const [loadingModels, setLoadingModels] = React.useState(false);
   const [configError, setConfigError] = React.useState<string | null>(null);
   const [composerHeight, setComposerHeight] = React.useState(INITIAL_AGENT_COMPOSER_HEIGHT);
+  const [shellPermissionMode, setShellPermissionMode] = React.useState<AgentShellPermissionMode>('ask');
+  const [shellSettingsLoading, setShellSettingsLoading] = React.useState(true);
   const [sessions, setSessions] = React.useState<AgentSessionSummary[]>([]);
   const [sessionsLoading, setSessionsLoading] = React.useState(true);
   const [sessionsLoadingMore, setSessionsLoadingMore] = React.useState(false);
@@ -416,6 +467,21 @@ export default function AgentWorkspace({
   }, [loadConfig]);
 
   React.useEffect(() => {
+    let active = true;
+    setShellSettingsLoading(true);
+    void getAgentShellSettings().then((settings) => {
+      if (active) setShellPermissionMode(settings.permissionMode);
+    }).catch((error) => {
+      if (active) {
+        Toast.error(error instanceof Error ? error.message : '读取 Agent 权限模式失败');
+      }
+    }).finally(() => {
+      if (active) setShellSettingsLoading(false);
+    });
+    return () => { active = false; };
+  }, []);
+
+  React.useEffect(() => {
     if (restoredScopeKeyRef.current === sessionScopeKey) return;
     restoredScopeKeyRef.current = sessionScopeKey;
     setSessions([]);
@@ -493,6 +559,22 @@ export default function AgentWorkspace({
       setLoadingModels(false);
     }
   }, [activeProfile, modelPreferences, persistModelPreferences]);
+
+  const handleShellPermissionModeChange = React.useCallback(async (
+    permissionMode: AgentShellPermissionMode,
+  ) => {
+    if (permissionMode === shellPermissionMode || shellSettingsLoading) return;
+    setShellSettingsLoading(true);
+    try {
+      const settings = await updateAgentShellPermissionMode(permissionMode);
+      setShellPermissionMode(settings.permissionMode);
+      if (session.isBusy) Toast.info('权限模式将在下一次 Agent 任务中生效');
+    } catch (error) {
+      Toast.error(error instanceof Error ? error.message : '更新 Agent 权限模式失败');
+    } finally {
+      setShellSettingsLoading(false);
+    }
+  }, [session.isBusy, shellPermissionMode, shellSettingsLoading]);
 
   const handleComposerResizePointerDown = React.useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
     if (event.button !== 0) return;
@@ -723,6 +805,7 @@ export default function AgentWorkspace({
               libraryId={libraryId}
               messages={session.messages}
               onAction={handlePresentationAction}
+              ownerScope={ownerScope}
               onResolveApproval={(approval, approved, preparedAction) => {
                 void session.resolveApproval(approval, approved, preparedAction);
               }}
@@ -802,6 +885,34 @@ export default function AgentWorkspace({
                 reasoningEffort,
               })}
             />
+            <Dropdown
+              position="topRight"
+              render={(
+                <Dropdown.Menu>
+                  {AGENT_PERMISSION_MODES.map(permissionMode => (
+                    <Dropdown.Item
+                      active={permissionMode === shellPermissionMode}
+                      key={permissionMode}
+                      onClick={() => { void handleShellPermissionModeChange(permissionMode); }}
+                    >
+                      {AGENT_PERMISSION_MODE_LABELS[permissionMode]}
+                    </Dropdown.Item>
+                  ))}
+                </Dropdown.Menu>
+              )}
+              trigger="click"
+            >
+              <button
+                aria-label={`Agent 权限模式：${AGENT_PERMISSION_MODE_LABELS[shellPermissionMode]}`}
+                className="agent-permission-mode"
+                disabled={shellSettingsLoading}
+                title="设置后续 Agent 任务的 Shell 权限模式"
+                type="button"
+              >
+                <IconShieldStroked aria-hidden="true" />
+                <span>{AGENT_PERMISSION_MODE_LABELS[shellPermissionMode]}</span>
+              </button>
+            </Dropdown>
             <button
               aria-label="管理 Agent 会话"
               className="agent-reset"

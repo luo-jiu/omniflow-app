@@ -20,6 +20,7 @@ import {
   AGENT_SHELL_WORKSPACE_CONTENT_SCAN_TIMEOUT_MS,
   AGENT_SHELL_WORKSPACE_CONTENT_SCANNER_REVISION,
   scanAgentShellWorkspaceContent,
+  scanAgentShellWorkspaceUsage,
 } from './agent-shell-workspace-content-scanner';
 
 const LOGICAL_ROOTS = ['input', 'work', 'output', 'tmp', 'home'] as const;
@@ -228,6 +229,25 @@ describe('Agent shell workspace content scanner', () => {
     await expect(scan(root, { signal: enumerationSignal }))
       .rejects.toMatchObject({ name: 'AbortError' });
     expect(budgetChecks).toBe(4);
+  });
+
+  verifiedIdentityIt('measures changing execution data without hashing and enforces reserved bytes', async () => {
+    const root = await createWorkspace();
+    await writeFile(path.join(root, 'work', 'generated.bin'), Buffer.alloc(128));
+
+    await expect(scanAgentShellWorkspaceUsage({
+      logicalRoots: LOGICAL_ROOTS,
+      maxTotalBytes: 1024 * 1024,
+      rootPath: root,
+    })).resolves.toMatchObject({
+      entryCount: 7,
+      totalBytes: expect.any(Number),
+    });
+    await expect(scanAgentShellWorkspaceUsage({
+      logicalRoots: LOGICAL_ROOTS,
+      maxTotalBytes: 1,
+      rootPath: root,
+    })).rejects.toThrow('预留额度');
   });
 
   linuxOnlyIt('rejects non-UTF-8 directory entry bytes before building a logical path', async () => {

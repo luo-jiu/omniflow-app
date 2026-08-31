@@ -16,11 +16,17 @@ import {
   type AgentShellWorkspaceStore,
 } from './agent-shell-workspace-store';
 import { createSQLiteAgentShellWorkspacePersistence } from './agent-shell-workspace-sqlite';
+import { createAgentShellLogStore, type AgentShellLogStore } from './agent-shell-log-store';
+import { createAgentShellLogFileStore, type AgentShellLogFileStore } from './agent-shell-log-file-store';
+import { createAgentShellLogQuotaAdapter } from './agent-shell-log-quota-adapter';
+import { createSQLiteAgentShellLogPersistence } from './agent-shell-log-sqlite';
 
 const WORKSPACE_DIRECTORY_NAME = 'agent-shell-workspaces';
 const WORKSPACE_ADAPTER_ID = 'shell-workspace';
 
 export interface AgentShellStorageRuntime {
+  logFileStore: AgentShellLogFileStore;
+  logStore: AgentShellLogStore;
   quotaManager: AgentLocalStorageQuotaManager;
   workspaceStore: AgentShellWorkspaceStore;
   close: () => Promise<void>;
@@ -31,6 +37,8 @@ interface AgentShellStorageRuntimeManagerOptions {
 }
 
 export function createAgentShellStorageRuntimeCloser(
+  logStore: Pick<AgentShellLogStore, 'dispose'>,
+  logFileStore: Pick<AgentShellLogFileStore, 'dispose'>,
   workspaceStore: Pick<AgentShellWorkspaceStore, 'dispose'>,
   quotaManager: Pick<AgentLocalStorageQuotaManager, 'close'>,
 ): () => Promise<void> {
@@ -39,6 +47,16 @@ export function createAgentShellStorageRuntimeCloser(
     if (closePromise) return closePromise;
     closePromise = (async () => {
       const errors: unknown[] = [];
+      try {
+        await logStore.dispose();
+      } catch (error) {
+        errors.push(error);
+      }
+      try {
+        await logFileStore.dispose();
+      } catch (error) {
+        errors.push(error);
+      }
       try {
         await workspaceStore.dispose();
       } catch (error) {
@@ -132,6 +150,9 @@ async function createAgentShellStorageRuntime(): Promise<AgentShellStorageRuntim
   let workspacePersistence: Awaited<ReturnType<
     typeof createSQLiteAgentShellWorkspacePersistence
   >> | null = null;
+  let logStore: AgentShellLogStore | null = null;
+  let logFileStore: AgentShellLogFileStore | null = null;
+  let logPersistence: Awaited<ReturnType<typeof createSQLiteAgentShellLogPersistence>> | null = null;
   try {
     await quotaManager.ready;
     workspacePersistence = await createSQLiteAgentShellWorkspacePersistence(databasePath);
@@ -142,10 +163,31 @@ async function createAgentShellStorageRuntime(): Promise<AgentShellStorageRuntim
       rootPath: path.join(userDataPath, WORKSPACE_DIRECTORY_NAME),
     });
     await workspaceStore.ready;
+    logPersistence = await createSQLiteAgentShellLogPersistence(databasePath);
+    logFileStore = createAgentShellLogFileStore({
+      quotaManager,
+      rootPath: path.join(userDataPath, 'agent-shell-logs'),
+    });
+    logStore = createAgentShellLogStore({
+      persistence: logPersistence,
+      physicalStore: logFileStore,
+      quota: createAgentShellLogQuotaAdapter({ quotaManager }),
+    });
+    await logFileStore.ready;
+    await logStore.ready;
     await quotaManager.sweep('startup-recovery');
     const initializedWorkspaceStore = workspaceStore;
+    const initializedLogStore = logStore;
+    const initializedLogFileStore = logFileStore;
     return {
-      close: createAgentShellStorageRuntimeCloser(initializedWorkspaceStore, quotaManager),
+      close: createAgentShellStorageRuntimeCloser(
+        initializedLogStore,
+        initializedLogFileStore,
+        initializedWorkspaceStore,
+        quotaManager,
+      ),
+      logFileStore: initializedLogFileStore,
+      logStore: initializedLogStore,
       quotaManager,
       workspaceStore: initializedWorkspaceStore,
     };
@@ -155,6 +197,12 @@ async function createAgentShellStorageRuntime(): Promise<AgentShellStorageRuntim
     } else {
       await workspacePersistence?.close?.().catch(() => undefined);
     }
+    if (logStore) {
+      await logStore.dispose().catch(() => undefined);
+    } else {
+      await logPersistence?.close?.().catch(() => undefined);
+    }
+    await logFileStore?.dispose().catch(() => undefined);
     await quotaManager.close().catch(() => undefined);
     throw error;
   }

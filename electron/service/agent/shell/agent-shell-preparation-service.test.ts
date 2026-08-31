@@ -18,6 +18,7 @@ import {
   type AgentToolMainPreparationContext,
 } from '../agent-tool-registry';
 import { createAgentSkillRegistry } from '../skills/agent-skill-registry';
+import { AGENT_SHELL_COMMAND_ANALYZER_REVISION } from './agent-shell-command-analyzer';
 import type { AgentShellProviderRegistrySnapshot } from './agent-shell-provider-registry';
 import { AGENT_SHELL_WORKSPACE_CONTENT_SCANNER_REVISION } from './agent-shell-workspace-content-scanner';
 import {
@@ -25,6 +26,7 @@ import {
   type AgentShellPreparationHostEnvironment,
   type AgentShellPreparationWorkspaceReader,
 } from './agent-shell-preparation-service';
+import type { AgentShellPermissionMode } from './agent-shell-policy-engine';
 import type {
   AgentShellWorkspaceOwner,
   AgentShellWorkspacePreparationContext,
@@ -131,9 +133,13 @@ function providerFixture(input: {
   return { binding, createInvocation, getMainBinding, provider, registrySnapshot };
 }
 
-function runCapabilitySnapshot(provider?: ProviderFixture) {
+function runCapabilitySnapshot(
+  provider?: ProviderFixture,
+  shellPermissionMode: AgentShellPermissionMode = 'ask',
+) {
   return createAgentRunCapabilitySnapshot({
     ...(provider ? { shellProviderSnapshot: provider.registrySnapshot } : {}),
+    shellPermissionMode,
     skillSnapshot: createAgentSkillRegistry().createRunSnapshot(),
     toolSnapshot: createAgentToolRegistry([]).createSnapshot(),
   });
@@ -248,7 +254,7 @@ function environmentFromBinding(binding: Readonly<Record<string, unknown>>) {
 }
 
 describe('Agent Shell PreparationService', () => {
-  it('freezes a conservative macOS action from the Run Provider and workspace snapshot', async () => {
+  it('freezes an analyzed macOS action from the Run Provider and workspace snapshot', async () => {
     const provider = providerFixture();
     const snapshot = runCapabilitySnapshot(provider);
     const workspace = workspaceFixture();
@@ -268,21 +274,25 @@ describe('Agent Shell PreparationService', () => {
         providerType: AI_DESTINATION.providerType,
       },
       assessment: {
-        facets: ['unknown_syntax', 'environment_change'],
-        operations: [],
+        facets: ['environment_change', 'process_launch'],
+        operations: [{
+          argvPrefix: ['hello\\n'],
+          effects: ['process_launch'],
+          executable: 'printf',
+        }],
         persistentRuleEligible: false,
-        risk: 'destructive',
-        unresolved: ['ast-analysis-unavailable'],
+        risk: 'write',
+        unresolved: [],
       },
       command: 'printf "hello\\n"',
       cwd: { kind: 'run-workspace', path: 'work' },
-      dataScope: { stagedInputs: [], unresolvedWorkspaceRead: true },
+      dataScope: { stagedInputs: [], unresolvedWorkspaceRead: false },
       environment: [{ name: 'MODE', value: 'test' }],
       provider: { dialect: 'zsh', id: 'system-zsh', version: '5.9' },
       timeoutMs: 12_000,
     });
     expect(action.commandHash).toMatch(/^sha256:[a-f0-9]{64}$/u);
-    expect(result.decision).toMatchObject({ behavior: 'ask', risk: 'destructive' });
+    expect(result.decision).toMatchObject({ behavior: 'ask', risk: 'write' });
     expect(result.decision.behavior === 'ask' && result.decision.preview.details)
       .toContainEqual({ label: '环境变量 MODE', value: 'test' });
     expect(Object.fromEntries(environment.entries.map(entry => [entry.name, entry.value])))
@@ -306,10 +316,16 @@ describe('Agent Shell PreparationService', () => {
     expect(result.binding).toMatchObject({
       aiDestination: AI_DESTINATION,
       analysis: {
-        analyzerRevision: 'system-zsh-analyzer-v1',
+        analysisIdentity: expect.stringMatching(/^v1:[a-f0-9]{64}$/u),
+        analyzerRevision: AGENT_SHELL_COMMAND_ANALYZER_REVISION,
+        authorizationIdentity: expect.stringMatching(/^v1:[a-f0-9]{64}$/u),
         fallbackAnalyzerRevision: 'shell-analysis-unavailable-v1',
-        immutableDenyRevision: 'shell-immutable-deny-pending-v1',
-        policyRevision: 'shell-conservative-ask-policy-v1',
+        immutableDenyRevision: 'shell-immutable-deny-v1',
+        permissionMode: 'ask',
+        policyRevision: 'shell-policy-v1',
+        providerAnalyzerRevision: 'system-zsh-analyzer-v1',
+        reasonCodes: ['mode-requires-confirmation'],
+        workspaceBoundaryVerified: true,
       },
       invocation: {
         argv: ['-f', '-c', 'printf "hello\\n"'],
@@ -320,12 +336,15 @@ describe('Agent Shell PreparationService', () => {
     });
     expect(result.snapshotMaterial).toMatchObject({
       providerSnapshotIdentity: provider.registrySnapshot.snapshotIdentity,
+      permissionMode: 'ask',
+      policyReasonCodes: ['mode-requires-confirmation'],
       workspaceContentIdentity: workspace.prepared.workspaceContentIdentity,
       workspaceContentScannerRevision: AGENT_SHELL_WORKSPACE_CONTENT_SCANNER_REVISION,
       workspaceEntryCount: 5,
       workspaceGeneration: 1,
       workspaceMetadataIdentity: workspace.prepared.workspaceMetadataIdentity,
       workspaceTotalBytes: 0,
+      workspaceBoundaryVerified: true,
     });
     expect(provider.getMainBinding).toHaveBeenCalledTimes(1);
     expect(provider.createInvocation).toHaveBeenCalledWith('printf "hello\\n"');
@@ -340,6 +359,99 @@ describe('Agent Shell PreparationService', () => {
       .not.toContain('/managed/omniflow');
     expect(Object.isFrozen(result.binding)).toBe(true);
     expect(Object.isFrozen(environment.entries)).toBe(true);
+  });
+
+  it.each<{
+    expectedBehavior: 'ask' | 'deny';
+    mode: AgentShellPermissionMode;
+  }>([
+    { expectedBehavior: 'ask', mode: 'ask' },
+    { expectedBehavior: 'ask', mode: 'auto' },
+    { expectedBehavior: 'deny', mode: 'full-access' },
+  ])('uses the Run-frozen $mode permission mode', async ({ expectedBehavior, mode }) => {
+    const provider = providerFixture();
+    const snapshot = runCapabilitySnapshot(provider, mode);
+    const workspace = workspaceFixture();
+    const result = await createAgentShellPreparationService({
+      workspaceStore: workspace.store,
+    }).prepare(prepareRequest(
+      preparationContext(snapshot),
+      { input: { command: 'opaque-command "value"' } },
+    ));
+
+    expect(result.decision.behavior).toBe(expectedBehavior);
+    expect(result.binding).toMatchObject({
+      analysis: { permissionMode: mode },
+    });
+    expect(result.snapshotMaterial).toMatchObject({ permissionMode: mode });
+  });
+
+  it('lets deterministic auto mode approve a fully analyzed workspace command', async () => {
+    const provider = providerFixture();
+    const result = await createAgentShellPreparationService({
+      workspaceStore: workspaceFixture().store,
+    }).prepare(prepareRequest(
+      preparationContext(runCapabilitySnapshot(provider, 'auto')),
+      { input: { command: 'pwd' } },
+    ));
+
+    expect(result.decision).toEqual({
+      behavior: 'allow',
+      risk: 'read',
+    });
+    expect(result.snapshotMaterial).toMatchObject({
+      policyReasonCodes: ['mode-auto'],
+      workspaceBoundaryVerified: true,
+    });
+  });
+
+  it('lets full access approve a fully analyzed external command', async () => {
+    const provider = providerFixture();
+    const result = await createAgentShellPreparationService({
+      workspaceStore: workspaceFixture().store,
+    }).prepare(prepareRequest(
+      preparationContext(runCapabilitySnapshot(provider, 'full-access')),
+      { input: { command: 'cat /etc/hosts' } },
+    ));
+
+    expect(result.decision).toEqual({
+      behavior: 'allow',
+      risk: 'external',
+    });
+    expect(result.snapshotMaterial).toMatchObject({
+      policyReasonCodes: ['mode-full-access'],
+      workspaceBoundaryVerified: false,
+    });
+  });
+
+  it('falls back without exposing parser failures when analysis is unavailable', async () => {
+    const provider = providerFixture();
+    const result = await createAgentShellPreparationService({
+      commandAnalyzer: {
+        analyze: vi.fn().mockRejectedValue(new Error('/private/parser failure')),
+      },
+      workspaceStore: workspaceFixture().store,
+    }).prepare(prepareRequest(
+      preparationContext(runCapabilitySnapshot(provider, 'auto')),
+      { input: { command: 'pwd' } },
+    ));
+    const action = normalizeAgentShellPreparedActionPublicV1(result.publicAction);
+
+    expect(action.assessment).toEqual({
+      facets: ['unknown_syntax'],
+      operations: [],
+      persistentRuleEligible: false,
+      risk: 'destructive',
+      unresolved: ['ast-analysis-unavailable'],
+    });
+    expect(result.decision.behavior).toBe('ask');
+    expect(result.snapshotMaterial).toMatchObject({
+      analysisIdentity: null,
+      analyzerRevision: 'shell-analysis-unavailable-v1',
+      authorizationIdentity: null,
+      workspaceBoundaryVerified: false,
+    });
+    expect(JSON.stringify(result)).not.toContain('/private/parser failure');
   });
 
   it('builds a case-insensitive, local-drive-only Windows environment without enumerating host env', async () => {
@@ -472,10 +584,15 @@ describe('Agent Shell PreparationService', () => {
         providerType: AI_DESTINATION.providerType,
       },
       assessment: {
-        facets: ['unknown_syntax', 'environment_change'],
-        operations: [],
+        facets: ['environment_change', 'external_path', 'network', 'process_launch'],
+        operations: [{
+          argvPrefix: ['status'],
+          effects: ['external_path', 'network', 'process_launch'],
+          executable: 'git',
+        }],
         persistentRuleEligible: false,
-        risk: 'destructive',
+        risk: 'external',
+        unresolved: [],
       },
       command: 'git status',
       cwd: { path: 'output' },

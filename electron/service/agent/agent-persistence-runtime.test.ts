@@ -12,6 +12,7 @@ import {
 } from './agent-persistence-runtime';
 import { createSQLiteAgentSessionStore, type AgentSessionStore } from './agent-session-store';
 import type { AgentShellStorageRuntime } from './shell/agent-shell-storage-runtime';
+import { createSQLiteAgentShellLogPersistence } from './shell/agent-shell-log-sqlite';
 import { createSQLiteAgentShellWorkspacePersistence } from './shell/agent-shell-workspace-sqlite';
 import { createSQLiteAgentLocalStorageQuotaPersistence } from './storage/agent-local-storage-quota-sqlite';
 
@@ -72,20 +73,23 @@ describe('Agent persistence runtime manager', () => {
     const databasePath = path.join(directory, 'agent.sqlite3');
 
     await bootstrapAgentPersistenceDatabase(databasePath);
-    const [sessionStore, memoryStore, quotaPersistence, workspacePersistence] = await Promise.all([
+    const [sessionStore, memoryStore, quotaPersistence, workspacePersistence, logPersistence] = await Promise.all([
       createSQLiteAgentSessionStore(databasePath),
       createSQLiteAgentMemoryStore(databasePath),
       createSQLiteAgentLocalStorageQuotaPersistence(databasePath),
       createSQLiteAgentShellWorkspacePersistence(databasePath),
+      createSQLiteAgentShellLogPersistence(databasePath),
     ]);
 
     await expect(quotaPersistence.load()).resolves.toEqual([]);
     await expect(workspacePersistence.load()).resolves.toEqual([]);
+    await expect(logPersistence.load()).resolves.toEqual([]);
     await Promise.all([
       sessionStore.close(),
       memoryStore.close(),
       quotaPersistence.close?.(),
       workspacePersistence.close?.(),
+      logPersistence.close?.(),
     ]);
   });
 

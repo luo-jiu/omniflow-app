@@ -2,6 +2,7 @@ import type { BrowserWindow, IpcMain, IpcMainInvokeEvent, WebContents } from 'el
 
 import type {
   AgentChatRequest,
+  AgentFileAuthorityCompletionV1,
   AgentInteractionSubmissionRequest,
   AgentMediaArtifactReleaseRequest,
   AgentMediaArtifactSaveRequest,
@@ -20,6 +21,9 @@ import type {
   AgentToolPrepareCompletion,
 } from '@/shared/agent/agent.types';
 import { agentOrchestrator } from '../service/agent/agent-orchestrator';
+import { agentShellSettingsStore } from '../service/agent/shell/agent-shell-settings-store';
+import { agentFileAuthorityBroker } from '../service/agent/agent-file-authority-broker';
+import type { AgentShellLogPageRequestV1 } from '@/shared/agent/shell/agent-shell.types';
 import { assertMainWindowAgentSender } from './aiServiceAccess';
 
 interface RegisterAgentIpcOptions {
@@ -42,6 +46,7 @@ export function registerAgentIpc(
     sender.once('destroyed', () => {
       ownersWithCleanup.delete(sender.id);
       agentOrchestrator.releaseOwner(sender.id);
+      agentFileAuthorityBroker.releaseOwner(sender.id);
     });
   }
 
@@ -59,7 +64,31 @@ export function registerAgentIpc(
   ipcMain.handle('agent:owner:release', (event) => {
     const sender = requireMainWindow(event);
     agentOrchestrator.releaseOwner(sender.id);
+    agentFileAuthorityBroker.releaseOwner(sender.id);
     return true;
+  });
+
+  ipcMain.handle(
+    'agent:file-authority:complete',
+    (event, input: AgentFileAuthorityCompletionV1) => {
+      const sender = requireMainWindow(event);
+      return agentFileAuthorityBroker.complete(sender.id, input);
+    },
+  );
+
+  ipcMain.handle('agent:shell:settings:get', (event) => {
+    requireMainWindow(event);
+    return agentShellSettingsStore.load();
+  });
+
+  ipcMain.handle('agent:shell:settings:update', (event, permissionMode: unknown) => {
+    requireMainWindow(event);
+    return agentShellSettingsStore.updatePermissionMode(permissionMode);
+  });
+
+  ipcMain.handle('agent:shell:log:read-page', (event, input: AgentShellLogPageRequestV1) => {
+    requireMainWindow(event);
+    return agentOrchestrator.readShellLogPage(input);
   });
 
   ipcMain.handle(

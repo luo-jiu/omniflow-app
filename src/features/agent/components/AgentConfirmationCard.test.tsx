@@ -3,14 +3,18 @@ import TestRenderer, { act } from 'react-test-renderer';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type {
+  AgentFilePublishPreparedActionPublicV1,
+  AgentFileStagePreparedActionPublicV1,
   AgentMediaExtractAudioPreparedActionPublicV1,
   AgentPreparedActionPublic,
+  AgentShellPreparedActionPublicV1,
   AgentToolApprovalSnapshot,
 } from '@/shared/agent/agent.types';
 import AgentConfirmationCard from './AgentConfirmationCard';
 
 vi.mock('@douyinfe/semi-icons', () => ({
   IconFolder: () => null,
+  IconTerminal: () => null,
 }));
 
 vi.mock('@/features/file-explorer', () => ({
@@ -67,6 +71,55 @@ function approval(action?: unknown): AgentToolApprovalSnapshot {
   };
 }
 
+function shellAction(): AgentShellPreparedActionPublicV1 {
+  return {
+    aiDestination: {
+      identityHash: `v1:${'a'.repeat(64)}`,
+      profileLabel: 'Local AI',
+      providerType: 'openai',
+    },
+    assessment: {
+      facets: ['filesystem.read', 'process_launch'],
+      operations: [{ argvPrefix: [], effects: ['filesystem.read'], executable: 'pwd' }],
+      persistentRuleEligible: true,
+      risk: 'read',
+      unresolved: [],
+    },
+    command: 'pwd\nprintf "done"',
+    commandHash: `sha256:${'b'.repeat(64)}`,
+    cwd: { kind: 'run-workspace', path: 'work' },
+    dataScope: { stagedInputs: [], unresolvedWorkspaceRead: false },
+    environment: [],
+    kind: 'shell.run',
+    provider: { dialect: 'zsh', id: 'system-zsh', version: '5.9' },
+    timeoutMs: 10_000,
+    version: 1,
+  };
+}
+
+function fileStageAction(): AgentFileStagePreparedActionPublicV1 {
+  return {
+    kind: 'file.stage',
+    sourceKind: 'local-picker',
+    targetLabel: '当前任务 input 目录',
+    version: 1,
+  };
+}
+
+function filePublishAction(): AgentFilePublishPreparedActionPublicV1 {
+  return {
+    contentHash: `sha256:${'c'.repeat(64)}`,
+    destinationKind: 'local-save-as',
+    displayName: 'result.txt',
+    kind: 'file.publish',
+    sizeBytes: 8,
+    sourcePath: 'output/result.txt',
+    suggestedFileName: 'result.txt',
+    targetLabel: '本机（执行时选择位置）',
+    version: 1,
+  };
+}
+
 function renderCard(input: AgentToolApprovalSnapshot, onResolve = vi.fn()) {
   let renderer!: TestRenderer.ReactTestRenderer;
   act(() => {
@@ -94,6 +147,39 @@ afterEach(() => {
 });
 
 describe('AgentConfirmationCard', () => {
+  it('shows the complete immutable Shell action and allows approval without an editable draft', () => {
+    const input = approval(shellAction());
+    input.call = { id: 'call-shell', input: { command: 'pwd' }, name: 'shell.run' };
+    input.preview.title = '运行 Shell 命令';
+    const { onResolve, renderer } = renderCard(input);
+    const command = renderer.root.findByProps({ className: 'agent-confirmation-shell-command' });
+    const allow = renderer.root.findAllByType('button')
+      .find(button => textContent(button) === '允许');
+
+    expect(textContent(command)).toContain('pwd\\nprintf');
+    expect(allow?.props.disabled).toBe(false);
+    act(() => allow?.props.onClick());
+    expect(onResolve).toHaveBeenCalledWith(true, undefined);
+  });
+
+  it.each([
+    ['file.stage', fileStageAction()],
+    ['file.publish', filePublishAction()],
+  ])('supports the immutable %s prepared action on the generic preview path', (toolName, action) => {
+    const input = approval(action);
+    input.call = { id: `call-${toolName}`, input: {}, name: toolName };
+    input.preview.details = [{ label: '位置', value: action.targetLabel }];
+    const { onResolve, renderer } = renderCard(input);
+    const allow = renderer.root.findAllByType('button')
+      .find(button => textContent(button) === '允许');
+
+    expect(renderer.root.findAllByProps({ role: 'alert' })).toHaveLength(0);
+    expect(textContent(renderer.root)).toContain(action.targetLabel);
+    expect(allow?.props.disabled).toBe(false);
+    act(() => allow?.props.onClick());
+    expect(onResolve).toHaveBeenCalledWith(true, undefined);
+  });
+
   it('preserves the media action discriminator while editing the public draft', () => {
     const { onResolve, renderer } = renderCard(approval(mediaAction()));
     const fileNameInput = renderer.root.findAllByType('input')

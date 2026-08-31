@@ -13,6 +13,7 @@ import { containsAgentSensitiveData } from '../agent-sensitive-data';
 import type {
   AgentToolMainPreparationContext,
   AgentToolMainPreparationResult,
+  AgentToolPermissionDecision,
 } from '../agent-tool-registry';
 import type {
   AgentShellProvider,
@@ -30,12 +31,21 @@ import {
   AGENT_SHELL_WORKSPACE_CONTENT_SCANNER_REVISION,
   AGENT_SHELL_WORKSPACE_PERSISTENT_RULE_IDENTITY_READY,
 } from './agent-shell-workspace-content-scanner';
+import {
+  AGENT_SHELL_IMMUTABLE_DENY_REVISION,
+  AGENT_SHELL_POLICY_REVISION,
+  createAgentShellPolicyEngine,
+  type AgentShellPolicyDecision,
+} from './agent-shell-policy-engine';
+import {
+  createAgentShellCommandAnalyzer,
+  type AgentShellCommandAnalysis,
+  type AgentShellCommandAnalyzer,
+} from './agent-shell-command-analyzer';
 
-const AGENT_SHELL_ENVIRONMENT_BINDING_VERSION = 1 as const;
-const AGENT_SHELL_ENVIRONMENT_POLICY_REVISION = 'shell-environment-policy-v1';
-const AGENT_SHELL_FALLBACK_ANALYZER_REVISION = 'shell-analysis-unavailable-v1';
-const AGENT_SHELL_IMMUTABLE_DENY_REVISION = 'shell-immutable-deny-pending-v1';
-const AGENT_SHELL_POLICY_REVISION = 'shell-conservative-ask-policy-v1';
+export const AGENT_SHELL_ENVIRONMENT_BINDING_VERSION = 1 as const;
+export const AGENT_SHELL_ENVIRONMENT_POLICY_REVISION = 'shell-environment-policy-v1';
+export const AGENT_SHELL_FALLBACK_ANALYZER_REVISION = 'shell-analysis-unavailable-v1';
 const MAX_AI_DESTINATION_LABEL_BYTES = 512;
 const MAX_AI_MODEL_BYTES = 512;
 const MAX_AI_PROFILE_ID_BYTES = 256;
@@ -57,6 +67,7 @@ export interface AgentShellPreparationWorkspaceReader {
 
 export interface CreateAgentShellPreparationServiceOptions {
   readonly additionalPathEntries?: readonly string[];
+  readonly commandAnalyzer?: Pick<AgentShellCommandAnalyzer, 'analyze'>;
   readonly hostEnvironment?: AgentShellPreparationHostEnvironment;
   readonly workspaceStore: AgentShellPreparationWorkspaceReader;
 }
@@ -70,7 +81,7 @@ export interface AgentShellPreparationHostEnvironment {
   readonly windir?: string;
 }
 
-interface AgentShellEffectiveEnvironment {
+export interface AgentShellEffectiveEnvironment {
   readonly entries: readonly { name: string; value: string }[];
   readonly identity: string;
   readonly pathHash: string;
@@ -145,7 +156,7 @@ function sameOwnerScope(
     && left.backendScope === right.backendScope;
 }
 
-function freezeProviderInvocation(
+export function freezeAgentShellProviderInvocation(
   provider: AgentShellProvider,
   providerBinding: AgentShellProviderMainBinding,
   command: string,
@@ -275,7 +286,7 @@ function buildPathEntries(
   return Object.freeze(result);
 }
 
-function buildEffectiveEnvironment(input: {
+export function buildAgentShellEffectiveEnvironment(input: {
   additionalPathEntries: readonly string[];
   hostEnvironment: AgentShellPreparationHostEnvironment;
   overrides: Readonly<Record<string, string>>;
@@ -378,17 +389,81 @@ function assertWorkspaceBinding(
   return preparedWorkspace;
 }
 
-function createConservativeAssessment(
+export function createAgentShellConservativeAnalysis(
   hasEnvironmentOverrides: boolean,
-): AgentShellPreparedActionPublicV1['assessment'] {
+): AgentShellCommandAnalysis {
   return Object.freeze({
-    facets: Object.freeze(hasEnvironmentOverrides
-      ? ['unknown_syntax', 'environment_change'] as const
-      : ['unknown_syntax'] as const),
-    operations: Object.freeze([]),
-    persistentRuleEligible: AGENT_SHELL_WORKSPACE_PERSISTENT_RULE_IDENTITY_READY,
-    risk: 'destructive' as const,
-    unresolved: Object.freeze(['ast-analysis-unavailable']),
+    analysisIdentity: null,
+    analyzerRevision: AGENT_SHELL_FALLBACK_ANALYZER_REVISION,
+    assessment: Object.freeze({
+      facets: Object.freeze(hasEnvironmentOverrides
+        ? ['environment_change', 'unknown_syntax'] as const
+        : ['unknown_syntax'] as const),
+      operations: Object.freeze([]),
+      persistentRuleEligible: false,
+      risk: 'destructive' as const,
+      unresolved: Object.freeze(['ast-analysis-unavailable']),
+    }),
+    workspaceBoundaryVerified: false,
+  });
+}
+
+export function createAgentShellAuthorizationIdentity(input: {
+  readonly aiDestinationIdentity: string;
+  readonly analysisIdentity: string | null;
+  readonly environmentIdentity: string;
+  readonly providerRegistrationIdentity: string;
+  readonly workspaceContentIdentity: string;
+  readonly workspaceContentScannerRevision: string;
+}): string | undefined {
+  if (!input.analysisIdentity) return undefined;
+  return hashIdentity('omniflow.agent.shell.authorization-v1', {
+    aiDestinationIdentity: input.aiDestinationIdentity,
+    analysisIdentity: input.analysisIdentity,
+    environmentIdentity: input.environmentIdentity,
+    immutableDenyRevision: AGENT_SHELL_IMMUTABLE_DENY_REVISION,
+    policyRevision: AGENT_SHELL_POLICY_REVISION,
+    providerRegistrationIdentity: input.providerRegistrationIdentity,
+    workspaceContentIdentity: input.workspaceContentIdentity,
+    workspaceContentScannerRevision: input.workspaceContentScannerRevision,
+  });
+}
+
+function createPreparationDecision(
+  policyDecision: AgentShellPolicyDecision,
+  publicAction: AgentShellPreparedActionPublicV1,
+): AgentToolPermissionDecision {
+  if (policyDecision.behavior === 'allow') {
+    return Object.freeze({
+      behavior: 'allow' as const,
+      risk: policyDecision.risk,
+    });
+  }
+  if (policyDecision.behavior === 'deny') {
+    return Object.freeze({
+      behavior: 'deny' as const,
+      message: 'Agent Shell 当前策略不允许执行此命令',
+      risk: policyDecision.risk,
+    });
+  }
+  return Object.freeze({
+    behavior: 'ask' as const,
+    preview: Object.freeze({
+      description: '此命令将以当前系统用户权限运行，并把有界输出提供给当前 AI 服务。',
+      details: Object.freeze([
+        Object.freeze({ label: '命令', value: publicAction.command }),
+        Object.freeze({ label: 'Provider', value: publicAction.provider.id }),
+        Object.freeze({ label: '工作目录', value: publicAction.cwd.path }),
+        Object.freeze({ label: '超时', value: `${publicAction.timeoutMs} ms` }),
+        ...publicAction.environment.map(entry => Object.freeze({
+          label: `环境变量 ${entry.name}`,
+          value: entry.value,
+        })),
+      ]),
+      risk: policyDecision.risk,
+      title: '运行 Shell 命令',
+    }),
+    risk: policyDecision.risk,
   });
 }
 
@@ -396,6 +471,8 @@ export function createAgentShellPreparationService(
   options: CreateAgentShellPreparationServiceOptions,
 ) {
   if (!options?.workspaceStore) throw new Error('Agent Shell PreparationService 缺少 workspace');
+  const commandAnalyzer = options.commandAnalyzer || createAgentShellCommandAnalyzer();
+  const policyEngine = createAgentShellPolicyEngine();
   const hostEnvironment = captureHostEnvironment(options.hostEnvironment || process.env);
   const additionalPathEntries = Object.freeze([...(options.additionalPathEntries || [])]);
 
@@ -454,10 +531,14 @@ export function createAgentShellPreparationService(
       throw new Error('Agent Shell Provider registration identity 不匹配');
     }
     let providerBinding: AgentShellProviderMainBinding;
-    let invocation: ReturnType<typeof freezeProviderInvocation>;
+    let invocation: ReturnType<typeof freezeAgentShellProviderInvocation>;
     try {
       providerBinding = provider.getMainBinding();
-      invocation = freezeProviderInvocation(provider, providerBinding, normalizedInput.command);
+      invocation = freezeAgentShellProviderInvocation(
+        provider,
+        providerBinding,
+        normalizedInput.command,
+      );
     } catch {
       throw new Error('Agent Shell Provider execution binding 无法确认');
     }
@@ -517,7 +598,7 @@ export function createAgentShellPreparationService(
         MAX_AI_PROVIDER_TYPE_BYTES,
       ),
     });
-    const effectiveEnvironment = buildEffectiveEnvironment({
+    const effectiveEnvironment = buildAgentShellEffectiveEnvironment({
       additionalPathEntries,
       hostEnvironment,
       overrides: normalizedInput.env,
@@ -525,9 +606,32 @@ export function createAgentShellPreparationService(
       providerBinding,
       workspace: preparedWorkspace,
     });
-    const assessment = createConservativeAssessment(
-      Object.keys(normalizedInput.env).length > 0,
-    );
+    let commandAnalysis: AgentShellCommandAnalysis;
+    try {
+      commandAnalysis = await commandAnalyzer.analyze({
+        command: normalizedInput.command,
+        dialect: provider.publicIdentity.dialect,
+        hasEnvironmentOverrides: Object.keys(normalizedInput.env).length > 0,
+        logicalCwd: preparedWorkspace.logicalCwd,
+        persistentRuleEligible: AGENT_SHELL_WORKSPACE_PERSISTENT_RULE_IDENTITY_READY,
+        providerAnalyzerRevision: provider.publicIdentity.analyzerRevision,
+      });
+      abortIfNeeded(context.signal);
+    } catch {
+      abortIfNeeded(context.signal);
+      commandAnalysis = createAgentShellConservativeAnalysis(
+        Object.keys(normalizedInput.env).length > 0,
+      );
+    }
+    const assessment = commandAnalysis.assessment;
+    const authorizationIdentity = createAgentShellAuthorizationIdentity({
+      aiDestinationIdentity: aiDestination.identity,
+      analysisIdentity: commandAnalysis.analysisIdentity,
+      environmentIdentity: effectiveEnvironment.identity,
+      providerRegistrationIdentity: provider.publicIdentity.registrationIdentity,
+      workspaceContentIdentity: preparedWorkspace.workspaceContentIdentity,
+      workspaceContentScannerRevision: preparedWorkspace.workspaceContentScannerRevision,
+    });
     const publicAction = sealAgentShellPreparedActionPublicV1({
       aiDestination: Object.freeze({
         identityHash: aiDestination.identity,
@@ -539,7 +643,7 @@ export function createAgentShellPreparationService(
       cwd: Object.freeze({ kind: 'run-workspace', path: preparedWorkspace.logicalCwd }),
       dataScope: Object.freeze({
         stagedInputs: Object.freeze([]),
-        unresolvedWorkspaceRead: true,
+        unresolvedWorkspaceRead: !commandAnalysis.workspaceBoundaryVerified,
       }),
       environment: Object.freeze(Object.entries(normalizedInput.env)
         .sort(([left], [right]) => left.localeCompare(right))
@@ -553,15 +657,27 @@ export function createAgentShellPreparationService(
       timeoutMs: normalizedInput.timeoutMs,
       version: 1,
     });
+    const policyDecision = policyEngine.evaluate({
+      assessment,
+      authorizationIdentity,
+      mode: context.runCapabilitySnapshot.shellPermissionMode,
+      workspaceBoundaryVerified: commandAnalysis.workspaceBoundaryVerified,
+    });
     abortIfNeeded(context.signal);
     return Object.freeze({
       binding: Object.freeze({
         aiDestination,
         analysis: Object.freeze({
-          analyzerRevision: provider.publicIdentity.analyzerRevision,
+          analysisIdentity: commandAnalysis.analysisIdentity,
+          analyzerRevision: commandAnalysis.analyzerRevision,
+          authorizationIdentity: authorizationIdentity || null,
           fallbackAnalyzerRevision: AGENT_SHELL_FALLBACK_ANALYZER_REVISION,
           immutableDenyRevision: AGENT_SHELL_IMMUTABLE_DENY_REVISION,
           policyRevision: AGENT_SHELL_POLICY_REVISION,
+          permissionMode: context.runCapabilitySnapshot.shellPermissionMode,
+          providerAnalyzerRevision: provider.publicIdentity.analyzerRevision,
+          reasonCodes: policyDecision.reasonCodes,
+          workspaceBoundaryVerified: commandAnalysis.workspaceBoundaryVerified,
         }),
         commandHash: publicAction.commandHash,
         effectiveEnvironment,
@@ -574,42 +690,31 @@ export function createAgentShellPreparationService(
           executableContentIdentity: Object.freeze({
             ...providerBinding.executableContentIdentity,
           }),
+          executionReady: provider.publicIdentity.executionReady,
           fixedArgs: Object.freeze([...provider.publicIdentity.fixedArgs]),
           invocationRevision: provider.publicIdentity.invocationRevision,
           probeGeneration: provider.publicIdentity.probeGeneration,
           probeIdentity: provider.publicIdentity.probeIdentity,
+          providerSnapshotIdentity: context.runCapabilitySnapshot.shellProviderSnapshotIdentity,
           registrationIdentity: provider.publicIdentity.registrationIdentity,
           resolvedExecutable: providerBinding.resolvedExecutable,
           terminationRevision: provider.publicIdentity.terminationRevision,
         }),
         workspace: preparedWorkspace,
       }),
-      decision: Object.freeze({
-        behavior: 'ask' as const,
-        preview: Object.freeze({
-          description: '此命令将以当前系统用户权限运行，并把有界输出提供给当前 AI 服务。',
-          details: Object.freeze([
-            Object.freeze({ label: '命令', value: publicAction.command }),
-            Object.freeze({ label: 'Provider', value: publicAction.provider.id }),
-            Object.freeze({ label: '工作目录', value: publicAction.cwd.path }),
-            Object.freeze({ label: '超时', value: `${publicAction.timeoutMs} ms` }),
-            ...publicAction.environment.map(entry => Object.freeze({
-              label: `环境变量 ${entry.name}`,
-              value: entry.value,
-            })),
-          ]),
-          risk: 'destructive' as const,
-          title: '运行 Shell 命令',
-        }),
-        risk: 'destructive' as const,
-      }),
+      decision: createPreparationDecision(policyDecision, publicAction),
       publicAction,
       snapshotMaterial: Object.freeze({
         aiDestinationConfigurationIdentity: aiDestination.configurationIdentity,
-        analyzerRevision: provider.publicIdentity.analyzerRevision,
+        analysisIdentity: commandAnalysis.analysisIdentity,
+        analyzerRevision: commandAnalysis.analyzerRevision,
+        authorizationIdentity: authorizationIdentity || null,
         fallbackAnalyzerRevision: AGENT_SHELL_FALLBACK_ANALYZER_REVISION,
         immutableDenyRevision: AGENT_SHELL_IMMUTABLE_DENY_REVISION,
         policyRevision: AGENT_SHELL_POLICY_REVISION,
+        permissionMode: context.runCapabilitySnapshot.shellPermissionMode,
+        policyReasonCodes: policyDecision.reasonCodes,
+        providerAnalyzerRevision: provider.publicIdentity.analyzerRevision,
         providerSnapshotIdentity: context.runCapabilitySnapshot.shellProviderSnapshotIdentity,
         workspaceContentIdentity: preparedWorkspace.workspaceContentIdentity,
         workspaceContentScannerRevision: preparedWorkspace.workspaceContentScannerRevision,
@@ -617,6 +722,7 @@ export function createAgentShellPreparationService(
         workspaceGeneration: preparedWorkspace.generation,
         workspaceMetadataIdentity: preparedWorkspace.workspaceMetadataIdentity,
         workspaceTotalBytes: preparedWorkspace.workspaceTotalBytes,
+        workspaceBoundaryVerified: commandAnalysis.workspaceBoundaryVerified,
       }),
     });
   }

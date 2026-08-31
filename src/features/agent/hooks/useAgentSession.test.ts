@@ -13,6 +13,7 @@ import type {
 import { useAgentSession } from './useAgentSession';
 
 const apiMocks = vi.hoisted(() => ({
+  completeAgentFileAuthority: vi.fn(),
   completeAgentToolExecution: vi.fn(),
   getAgentSession: vi.fn(),
   markAgentToolExecutionCommitted: vi.fn(),
@@ -21,6 +22,7 @@ const apiMocks = vi.hoisted(() => ({
   stopAgentChat: vi.fn(),
   submitAgentInteraction: vi.fn(),
   subscribeAgentChat: vi.fn(),
+  subscribeAgentFileAuthorityRequests: vi.fn(),
 }));
 
 const contextMocks = vi.hoisted(() => ({
@@ -186,6 +188,7 @@ describe('useAgentSession event coordination', () => {
       listener = nextListener;
       return vi.fn();
     });
+    apiMocks.subscribeAgentFileAuthorityRequests.mockReturnValue(vi.fn());
     apiMocks.stopAgentChat.mockResolvedValue(true);
     apiMocks.completeAgentToolExecution.mockResolvedValue(true);
     apiMocks.markAgentToolExecutionCommitted.mockResolvedValue(true);

@@ -1,8 +1,14 @@
 import {
+  AGENT_FILE_PUBLISH_PREPARED_ACTION_KIND,
+  AGENT_FILE_PUBLISH_PREPARED_ACTION_VERSION,
+  AGENT_FILE_STAGE_PREPARED_ACTION_KIND,
+  AGENT_FILE_STAGE_PREPARED_ACTION_VERSION,
   AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_KIND,
   AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_VERSION,
   AGENT_SHELL_PREPARED_ACTION_VERSION,
   AGENT_SHELL_RUN_TOOL_NAME,
+  type AgentFilePublishPreparedActionPublicV1,
+  type AgentFileStagePreparedActionPublicV1,
   type AgentMediaExtractAudioOutputFormat,
   type AgentMediaExtractAudioPreparedActionPublicV1,
   type AgentPreparedActionPublic,
@@ -11,6 +17,28 @@ import { normalizeAgentShellPreparedActionPublicV1 } from './shell/agent-shell.t
 
 const MAX_OUTPUT_FILE_NAME_CHARACTERS = 255;
 const MAX_TARGET_LABEL_CHARACTERS = 500;
+const MAX_LOGICAL_PATH_UTF8_BYTES = 1_024;
+const CONTENT_HASH_PATTERN = /^sha256:[a-f0-9]{64}$/u;
+const FILE_STAGE_LOCAL_FIELDS = new Set(['kind', 'sourceKind', 'targetLabel', 'version']);
+const FILE_STAGE_LIBRARY_FIELDS = new Set([
+  'kind', 'libraryId', 'sourceDisplayName', 'sourceIdentity', 'sourceKind',
+  'sourceNodeId', 'sourceSizeBytes', 'targetLabel', 'version',
+]);
+const FILE_PUBLISH_FIELDS = new Set([
+  'conflictPolicy',
+  'contentHash',
+  'destinationKind',
+  'displayName',
+  'kind',
+  'libraryId',
+  'parentId',
+  'providerId',
+  'sizeBytes',
+  'sourcePath',
+  'suggestedFileName',
+  'targetLabel',
+  'version',
+]);
 const MEDIA_EXTRACT_AUDIO_FIELDS = new Set([
   'conflictPolicy',
   'destination',
@@ -85,6 +113,119 @@ function safeTargetLabel(value: unknown): string {
   return normalized;
 }
 
+function safeLogicalOutputPath(value: unknown): string {
+  const normalized = boundedText(value, '工作区输出路径', MAX_LOGICAL_PATH_UTF8_BYTES);
+  if (
+    Buffer.byteLength(normalized, 'utf8') > MAX_LOGICAL_PATH_UTF8_BYTES
+    || !normalized.startsWith('output/')
+    || normalized.includes('\\')
+    || normalized.split('/').some(segment => !segment || segment === '.' || segment === '..')
+    || Array.from(normalized).some(character => character.charCodeAt(0) < 32)
+  ) {
+    throw new Error('工作区输出路径无效');
+  }
+  return normalized;
+}
+
+function safeContentHash(value: unknown): string {
+  const normalized = boundedText(value, '文件内容摘要', 80);
+  if (!CONTENT_HASH_PATTERN.test(normalized)) throw new Error('文件内容摘要无效');
+  return normalized;
+}
+
+function safeSizeBytes(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+    throw new Error('文件大小无效');
+  }
+  return value;
+}
+
+export function normalizeAgentFileStagePreparedActionPublicV1(
+  input: unknown,
+): AgentFileStagePreparedActionPublicV1 {
+  const source = strictObject(input);
+  if (
+    source.kind !== AGENT_FILE_STAGE_PREPARED_ACTION_KIND
+    || source.version !== AGENT_FILE_STAGE_PREPARED_ACTION_VERSION
+  ) {
+    throw new Error('Agent prepared action 类型或版本不受支持');
+  }
+  if (source.sourceKind === 'local-picker') {
+    assertExactFields(source, FILE_STAGE_LOCAL_FIELDS);
+    return {
+      kind: AGENT_FILE_STAGE_PREPARED_ACTION_KIND,
+      sourceKind: 'local-picker',
+      targetLabel: safeTargetLabel(source.targetLabel),
+      version: AGENT_FILE_STAGE_PREPARED_ACTION_VERSION,
+    };
+  }
+  if (source.sourceKind !== 'library-node') throw new Error('文件来源无效');
+  assertExactFields(source, FILE_STAGE_LIBRARY_FIELDS);
+  return {
+    kind: AGENT_FILE_STAGE_PREPARED_ACTION_KIND,
+    libraryId: positiveId(source.libraryId, '资料库'),
+    sourceDisplayName: safeFileName(source.sourceDisplayName),
+    sourceIdentity: safeContentHash(source.sourceIdentity),
+    sourceKind: 'library-node',
+    sourceNodeId: positiveId(source.sourceNodeId, '资料库节点'),
+    sourceSizeBytes: safeSizeBytes(source.sourceSizeBytes),
+    targetLabel: safeTargetLabel(source.targetLabel),
+    version: AGENT_FILE_STAGE_PREPARED_ACTION_VERSION,
+  };
+}
+
+export function normalizeAgentFilePublishPreparedActionPublicV1(
+  input: unknown,
+): AgentFilePublishPreparedActionPublicV1 {
+  const source = strictObject(input);
+  if (
+    source.kind !== AGENT_FILE_PUBLISH_PREPARED_ACTION_KIND
+    || source.version !== AGENT_FILE_PUBLISH_PREPARED_ACTION_VERSION
+  ) {
+    throw new Error('Agent prepared action 类型或版本不受支持');
+  }
+  assertExactFields(source, FILE_PUBLISH_FIELDS);
+  if (source.destinationKind !== 'local-save-as' && source.destinationKind !== 'library') {
+    throw new Error('文件发布目标无效');
+  }
+  const base = {
+    contentHash: safeContentHash(source.contentHash),
+    displayName: safeFileName(source.displayName),
+    kind: AGENT_FILE_PUBLISH_PREPARED_ACTION_KIND,
+    sizeBytes: safeSizeBytes(source.sizeBytes),
+    sourcePath: safeLogicalOutputPath(source.sourcePath),
+    suggestedFileName: safeFileName(source.suggestedFileName),
+    targetLabel: safeTargetLabel(source.targetLabel),
+    version: AGENT_FILE_PUBLISH_PREPARED_ACTION_VERSION,
+  };
+  if (source.destinationKind === 'local-save-as') {
+    if (
+      source.conflictPolicy !== undefined
+      || source.libraryId !== undefined
+      || source.parentId !== undefined
+      || source.providerId !== undefined
+    ) {
+      throw new Error('本机文件发布目标包含资料库字段');
+    }
+    return { ...base, destinationKind: 'local-save-as' };
+  }
+  const conflictPolicy = source.conflictPolicy === 'fail' || source.conflictPolicy === 'rename'
+    ? source.conflictPolicy
+    : null;
+  const providerId = boundedText(source.providerId, '存储服务', 128);
+  if (!conflictPolicy || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(providerId)) {
+    throw new Error('资料库文件发布目标无效');
+  }
+  return {
+    ...base,
+    conflictPolicy,
+    destinationKind: 'library',
+    libraryId: positiveId(source.libraryId, '资料库'),
+    parentId: positiveId(source.parentId, '目标目录'),
+    providerId,
+  };
+}
+
 function outputFormat(value: unknown): AgentMediaExtractAudioOutputFormat {
   const normalized = boundedText(value, '输出格式', 32).toLowerCase();
   if (!MEDIA_EXTRACT_AUDIO_OUTPUT_FORMATS.has(normalized as AgentMediaExtractAudioOutputFormat)) {
@@ -147,6 +288,18 @@ export function normalizeAgentPreparedActionPublic(
   input: unknown,
 ): AgentPreparedActionPublic {
   const source = strictObject(input);
+  if (
+    source.kind === AGENT_FILE_STAGE_PREPARED_ACTION_KIND
+    && source.version === AGENT_FILE_STAGE_PREPARED_ACTION_VERSION
+  ) {
+    return normalizeAgentFileStagePreparedActionPublicV1(source);
+  }
+  if (
+    source.kind === AGENT_FILE_PUBLISH_PREPARED_ACTION_KIND
+    && source.version === AGENT_FILE_PUBLISH_PREPARED_ACTION_VERSION
+  ) {
+    return normalizeAgentFilePublishPreparedActionPublicV1(source);
+  }
   if (
     source.kind === AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_KIND
     && source.version === AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_VERSION

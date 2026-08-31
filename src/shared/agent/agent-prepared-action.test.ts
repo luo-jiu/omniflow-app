@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  AGENT_FILE_PUBLISH_PREPARED_ACTION_KIND,
+  AGENT_FILE_PUBLISH_PREPARED_ACTION_VERSION,
+  AGENT_FILE_STAGE_PREPARED_ACTION_KIND,
+  AGENT_FILE_STAGE_PREPARED_ACTION_VERSION,
   AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_KIND,
   AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_VERSION,
 } from './agent.types';
@@ -26,7 +30,101 @@ function libraryAction(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function fileStageAction(overrides: Record<string, unknown> = {}) {
+  return {
+    kind: AGENT_FILE_STAGE_PREPARED_ACTION_KIND,
+    sourceKind: 'local-picker',
+    targetLabel: '当前任务 input 目录',
+    version: AGENT_FILE_STAGE_PREPARED_ACTION_VERSION,
+    ...overrides,
+  };
+}
+
+function libraryFileStageAction(overrides: Record<string, unknown> = {}) {
+  return {
+    kind: AGENT_FILE_STAGE_PREPARED_ACTION_KIND,
+    libraryId: 3,
+    sourceDisplayName: 'source.txt',
+    sourceIdentity: `sha256:${'b'.repeat(64)}`,
+    sourceKind: 'library-node',
+    sourceNodeId: 8,
+    sourceSizeBytes: 12,
+    targetLabel: '当前任务 input 目录',
+    version: AGENT_FILE_STAGE_PREPARED_ACTION_VERSION,
+    ...overrides,
+  };
+}
+
+function filePublishAction(overrides: Record<string, unknown> = {}) {
+  return {
+    contentHash: `sha256:${'a'.repeat(64)}`,
+    destinationKind: 'local-save-as',
+    displayName: 'result.txt',
+    kind: AGENT_FILE_PUBLISH_PREPARED_ACTION_KIND,
+    sizeBytes: 12,
+    sourcePath: 'output/result.txt',
+    suggestedFileName: 'result.txt',
+    targetLabel: '本机（执行时选择位置）',
+    version: AGENT_FILE_PUBLISH_PREPARED_ACTION_VERSION,
+    ...overrides,
+  };
+}
+
+function libraryFilePublishAction(overrides: Record<string, unknown> = {}) {
+  return filePublishAction({
+    conflictPolicy: 'rename',
+    destinationKind: 'library',
+    libraryId: 3,
+    parentId: 9,
+    providerId: 'local',
+    targetLabel: '资料库目录“Output” / 本机存储',
+    ...overrides,
+  });
+}
+
 describe('Agent prepared action public contract', () => {
+  it('normalizes file.stage and file.publish v1 branches canonically', () => {
+    expect(normalizeAgentPreparedActionPublic(fileStageAction({
+      targetLabel: '  当前任务 input 目录  ',
+    }))).toEqual(fileStageAction());
+    expect(normalizeAgentPreparedActionPublic(filePublishAction({
+      displayName: ' result.txt ',
+      sourcePath: ' output/result.txt ',
+      suggestedFileName: ' result.txt ',
+      targetLabel: ' 本机（执行时选择位置） ',
+    }))).toEqual(filePublishAction());
+    expect(normalizeAgentPreparedActionPublic(libraryFileStageAction({
+      sourceDisplayName: ' source.txt ',
+    }))).toEqual(libraryFileStageAction());
+    expect(normalizeAgentPreparedActionPublic(libraryFilePublishAction({
+      providerId: ' local ',
+    }))).toEqual(libraryFilePublishAction());
+  });
+
+  it.each([
+    ['stage extra field', fileStageAction({ path: '/tmp/private.txt' })],
+    ['stage source kind', fileStageAction({ sourceKind: 'library-node' })],
+    ['stage mixed local fields', fileStageAction({ libraryId: 3 })],
+    ['stage invalid library identity', libraryFileStageAction({ sourceIdentity: 'sha256:bad' })],
+    ['stage invalid library ID', libraryFileStageAction({ libraryId: 0 })],
+    ['stage invalid node ID', libraryFileStageAction({ sourceNodeId: Number.MAX_SAFE_INTEGER + 1 })],
+    ['stage invalid size', libraryFileStageAction({ sourceSizeBytes: -1 })],
+    ['publish extra field', filePublishAction({ targetPath: '/tmp/result.txt' })],
+    ['publish destination', filePublishAction({ destinationKind: 'library' })],
+    ['publish mixed local fields', filePublishAction({ libraryId: 3 })],
+    ['publish invalid provider', libraryFilePublishAction({ providerId: '../local' })],
+    ['publish invalid library ID', libraryFilePublishAction({ libraryId: 0 })],
+    ['publish invalid parent ID', libraryFilePublishAction({ parentId: 0 })],
+    ['publish invalid conflict policy', libraryFilePublishAction({ conflictPolicy: 'replace' })],
+    ['publish traversal', filePublishAction({ sourcePath: 'output/../private.txt' })],
+    ['publish non-output path', filePublishAction({ sourcePath: 'work/result.txt' })],
+    ['publish invalid hash', filePublishAction({ contentHash: `sha256:${'A'.repeat(64)}` })],
+    ['publish unsafe size', filePublishAction({ sizeBytes: Number.MAX_SAFE_INTEGER + 1 })],
+    ['publish unsafe name', filePublishAction({ suggestedFileName: '../result.txt' })],
+  ])('rejects malformed file bridge prepared actions: %s', (_label, input) => {
+    expect(() => normalizeAgentPreparedActionPublic(input)).toThrow();
+  });
+
   it('normalizes the supported media.extractAudio v1 branch canonically', () => {
     expect(normalizeAgentPreparedActionPublic(libraryAction({
       outputFileName: '  movie-audio.m4a  ',

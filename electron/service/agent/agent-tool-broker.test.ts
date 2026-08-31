@@ -161,6 +161,38 @@ describe('Agent tool broker', () => {
     }
   });
 
+  it('uses the Run-frozen cancellation settlement budget before abandoning cleanup', async () => {
+    vi.useFakeTimers();
+    try {
+      const controller = new AbortController();
+      let settle!: (value: { ok: true }) => void;
+      const execute = vi.fn(() => new Promise<{ ok: true }>((resolve) => {
+        settle = resolve;
+      }));
+      const broker = createAgentToolBroker({ toolRegistry: { execute } });
+      const running = broker.executeMain('file.publish', {}, {
+        appContext: prepareInput(controller.signal).appContext,
+        onProgress: vi.fn(),
+        signal: controller.signal,
+      }, 30_000, undefined, 45_000);
+      await Promise.resolve();
+      controller.abort();
+      await vi.advanceTimersByTimeAsync(6_001);
+
+      let settled = false;
+      void running.then(
+        () => { settled = true; },
+        () => { settled = true; },
+      );
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      settle({ ok: true });
+      await expect(running).rejects.toMatchObject({ name: 'AbortError' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('accepts one authorized renderer result and normalizes its projection', async () => {
     const controller = new AbortController();
     const broker = createAgentToolBroker({

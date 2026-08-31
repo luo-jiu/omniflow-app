@@ -9,18 +9,21 @@ import {
 import styled from 'styled-components';
 
 import type {
+  AgentOwnerScope,
   AgentPresentationAction,
   AgentPresentationBlock,
   AgentPreparedActionPublic,
   AgentToolActivitySnapshot,
   AgentToolApprovalSnapshot,
 } from '@/shared/agent/agent.types';
+import type { AgentShellOutputFrameV1 } from '@/shared/agent/shell/agent-shell.types';
 import {
   buildAgentToolPresentation,
   getAgentToolTitle,
 } from '../agent-tool-presentation';
 import AgentConfirmationCard from './AgentConfirmationCard';
 import AgentInteractionBlock from './AgentInteractionBlock';
+import { readAgentShellLogPage } from '../services/agent.api';
 
 const ActivityCard = styled.article`
   width: min(620px, 100%);
@@ -183,6 +186,51 @@ const ActivityCard = styled.article`
     color: var(--app-text);
   }
 
+  .agent-shell-log-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .agent-shell-log {
+    min-width: 0;
+    overflow: hidden;
+    border: 1px solid var(--app-border);
+    border-radius: var(--app-radius-small);
+    background: color-mix(in srgb, var(--app-text) 5%, var(--app-bg));
+  }
+
+  .agent-shell-log-output {
+    max-height: 280px;
+    margin: 0;
+    padding: 10px 12px;
+    overflow: auto;
+    color: var(--app-text);
+    font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .agent-shell-log-output [data-stream='stderr'] {
+    color: var(--semi-color-danger);
+  }
+
+  .agent-shell-log-empty,
+  .agent-shell-log-notice {
+    margin: 0;
+    padding: 9px 12px;
+    color: var(--app-text-muted);
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
+  .agent-shell-log-notice + .agent-shell-log-output,
+  .agent-shell-log-output + .agent-shell-log-notice {
+    border-top: 1px solid var(--app-border);
+  }
+
   @keyframes agent-activity-spin {
     to { transform: rotate(360deg); }
   }
@@ -294,11 +342,123 @@ interface AgentToolActivityCardProps {
   interactionBusy: boolean;
   libraryId: number;
   onAction?: (action: AgentPresentationAction) => void;
+  ownerScope: AgentOwnerScope | null;
   onResolveApproval: (
     approval: AgentToolApprovalSnapshot,
     approved: boolean,
     preparedAction?: AgentPreparedActionPublic,
   ) => void;
+}
+
+interface AgentShellLogDetailsProps {
+  activity: AgentToolActivitySnapshot;
+  libraryId: number;
+  ownerScope: AgentOwnerScope;
+}
+
+function AgentShellLogDetails({ activity, libraryId, ownerScope }: AgentShellLogDetailsProps) {
+  const [open, setOpen] = React.useState(false);
+  const [loaded, setLoaded] = React.useState(false);
+  const [loading, setLoading] = React.useState(false);
+  const [frames, setFrames] = React.useState<readonly AgentShellOutputFrameV1[]>([]);
+  const [nextCursor, setNextCursor] = React.useState<string | undefined>();
+  const [expired, setExpired] = React.useState(false);
+  const [unavailableThrough, setUnavailableThrough] = React.useState<number | null>(null);
+  const [error, setError] = React.useState('');
+
+  React.useEffect(() => {
+    setOpen(false);
+    setLoaded(false);
+    setLoading(false);
+    setFrames([]);
+    setNextCursor(undefined);
+    setExpired(false);
+    setUnavailableThrough(null);
+    setError('');
+  }, [activity.id]);
+
+  const loadPage = async (cursor?: string) => {
+    if (loading) return;
+    setLoading(true);
+    setError('');
+    try {
+      const page = await readAgentShellLogPage({
+        ...(cursor ? { cursor } : {}),
+        libraryId,
+        maxBytes: 128 * 1024,
+        maxFrames: 128,
+        ownerScope,
+        runId: activity.runId,
+        sessionId: activity.sessionId,
+        toolRunId: activity.id,
+        version: 1,
+      });
+      setFrames(current => {
+        const merged = new Map(current.map(frame => [frame.sequence, frame]));
+        page.frames.forEach(frame => merged.set(frame.sequence, frame));
+        return Array.from(merged.values()).sort((left, right) => left.sequence - right.sequence);
+      });
+      setNextCursor(page.nextCursor);
+      setExpired(page.expired);
+      setUnavailableThrough(current => (
+        page.unavailableThrough === null
+          ? current
+          : Math.max(current || 0, page.unavailableThrough)
+      ));
+      setLoaded(true);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : '详细日志读取失败');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const toggle = () => {
+    const nextOpen = !open;
+    setOpen(nextOpen);
+    if (nextOpen && !loaded && !loading) void loadPage();
+  };
+
+  return (
+    <>
+      <div className="agent-shell-log-actions">
+        <button className="agent-activity-action" onClick={toggle} type="button">
+          {open ? '收起详细日志' : '查看详细日志'}
+        </button>
+      </div>
+      {open ? (
+        <div className="agent-shell-log">
+          {expired ? (
+            <p className="agent-shell-log-notice">详细日志已过期</p>
+          ) : unavailableThrough !== null ? (
+            <p className="agent-shell-log-notice">
+              序号 {unavailableThrough} 及以前的部分输出已不可用
+            </p>
+          ) : null}
+          {frames.length > 0 ? (
+            <pre className="agent-shell-log-output">
+              {frames.map(frame => (
+                <span data-stream={frame.stream} key={frame.sequence}>{frame.text}</span>
+              ))}
+            </pre>
+          ) : loaded && !loading && !error && !expired ? (
+            <p className="agent-shell-log-empty">命令没有产生输出</p>
+          ) : null}
+          {error ? <p className="agent-shell-log-notice" role="alert">{error}</p> : null}
+          {loading ? <p className="agent-shell-log-notice" role="status">正在读取日志...</p> : null}
+          {!loading && nextCursor ? (
+            <button
+              className="agent-activity-action"
+              onClick={() => { void loadPage(nextCursor); }}
+              type="button"
+            >
+              加载更多
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+    </>
+  );
 }
 
 export default function AgentToolActivityCard({
@@ -308,6 +468,7 @@ export default function AgentToolActivityCard({
   libraryId,
   onAction,
   onResolveApproval,
+  ownerScope,
 }: AgentToolActivityCardProps) {
   if (activity.status === 'awaiting_approval' && activity.approval?.status === 'pending') {
     const approval: AgentToolApprovalSnapshot = {
@@ -343,6 +504,15 @@ export default function AgentToolActivityCard({
       {blocks.length > 0 ? (
         <div className="agent-activity-body">
           {blocks.map((block, index) => renderBlock(block, index, interactionBusy, onAction))}
+        </div>
+      ) : null}
+      {activity.call.name === 'shell.run' && activity.result && ownerScope ? (
+        <div className="agent-activity-body">
+          <AgentShellLogDetails
+            activity={activity}
+            libraryId={libraryId}
+            ownerScope={ownerScope}
+          />
         </div>
       ) : null}
     </ActivityCard>

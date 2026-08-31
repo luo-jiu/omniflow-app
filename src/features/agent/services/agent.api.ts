@@ -2,6 +2,8 @@ import type {
   AgentChatRequest,
   AgentChatStartResult,
   AgentChatStreamEvent,
+  AgentFileAuthorityCompletionV1,
+  AgentFileAuthorityRequestV1,
   AgentInteractionSubmissionRequest,
   AgentInteractionSubmissionResult,
   AgentMediaArtifactReleaseRequest,
@@ -29,6 +31,12 @@ import type {
   AgentToolExecutionProgressRequest,
   AgentToolPrepareCompletion,
 } from '@/shared/agent/agent.types';
+import type {
+  AgentShellLogPageRequestV1,
+  AgentShellLogPageV1,
+  AgentShellPermissionMode,
+  AgentShellSettingsSnapshot,
+} from '@/shared/agent/shell/agent-shell.types';
 import { clearAuthSessionAndDisposeWorkspaces } from '@/service/auth-session-release';
 import { auth } from '@/utils/auth';
 
@@ -49,6 +57,28 @@ export function stopAgentChat(sessionId: string): Promise<boolean> {
 
 export function releaseAgentOwnerRuns(): Promise<boolean> {
   return bridge().releaseOwner();
+}
+
+export function getAgentShellSettings(): Promise<AgentShellSettingsSnapshot> {
+  return bridge().getShellSettings();
+}
+
+export function updateAgentShellPermissionMode(
+  permissionMode: AgentShellPermissionMode,
+): Promise<AgentShellSettingsSnapshot> {
+  return bridge().updateShellPermissionMode(permissionMode);
+}
+
+export function readAgentShellLogPage(
+  input: AgentShellLogPageRequestV1,
+): Promise<AgentShellLogPageV1> {
+  return bridge().readShellLogPage(input);
+}
+
+export function completeAgentFileAuthority(
+  input: AgentFileAuthorityCompletionV1,
+): Promise<boolean> {
+  return bridge().completeFileAuthority(input);
 }
 
 export function completeAgentToolPreparation(
@@ -203,4 +233,10 @@ export function subscribeAgentChat(
   listener: (event: AgentChatStreamEvent) => void,
 ): () => void {
   return bridge().onEvent(listener);
+}
+
+export function subscribeAgentFileAuthorityRequests(
+  listener: (request: AgentFileAuthorityRequestV1) => void,
+): () => void {
+  return bridge().onFileAuthorityRequest(listener);
 }

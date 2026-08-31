@@ -5,6 +5,8 @@ import sqlite3 from 'sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type {
+  AgentFilePublishPreparedActionPublicV1,
+  AgentFileStagePreparedActionPublicV1,
   AgentMessage,
   AgentRunPlanSnapshot,
   AgentShellPreparedActionPublicV1,
@@ -373,6 +375,55 @@ function preparedAction(outputFileName = 'movie-audio.m4a') {
     sourceNodeId: 8,
     targetLabel: '视频',
     version: 1 as const,
+  };
+}
+
+function fileStagePreparedAction(): AgentFileStagePreparedActionPublicV1 {
+  return {
+    kind: 'file.stage',
+    sourceKind: 'local-picker',
+    targetLabel: '当前任务 input 目录',
+    version: 1,
+  };
+}
+
+function libraryFileStagePreparedAction(): AgentFileStagePreparedActionPublicV1 {
+  return {
+    kind: 'file.stage',
+    libraryId: 3,
+    sourceDisplayName: 'source.txt',
+    sourceIdentity: `sha256:${'b'.repeat(64)}`,
+    sourceKind: 'library-node',
+    sourceNodeId: 8,
+    sourceSizeBytes: 12,
+    targetLabel: '当前任务 input 目录',
+    version: 1,
+  };
+}
+
+function filePublishPreparedAction(): AgentFilePublishPreparedActionPublicV1 {
+  return {
+    contentHash: `sha256:${'c'.repeat(64)}`,
+    destinationKind: 'local-save-as',
+    displayName: 'result.txt',
+    kind: 'file.publish',
+    sizeBytes: 8,
+    sourcePath: 'output/result.txt',
+    suggestedFileName: 'result.txt',
+    targetLabel: '本机（执行时选择位置）',
+    version: 1,
+  };
+}
+
+function libraryFilePublishPreparedAction(): AgentFilePublishPreparedActionPublicV1 {
+  return {
+    ...filePublishPreparedAction(),
+    conflictPolicy: 'rename',
+    destinationKind: 'library',
+    libraryId: 3,
+    parentId: 9,
+    providerId: 'local',
+    targetLabel: '资料库目录“Output” / 本机存储',
   };
 }
 
@@ -2316,6 +2367,124 @@ describe('SQLite Agent session store', () => {
         },
         status: 'completed',
       })],
+    });
+    expect(await readDatabaseVersion(databasePath)).toBe(2);
+  });
+
+  it('persists strict file bridge prepared actions in schema 2', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'omniflow-agent-file-bridge-'));
+    temporaryDirectories.push(directory);
+    const databasePath = path.join(directory, 'agent-sessions.sqlite3');
+    const store = await createStore(databasePath);
+    const sessionId = 'session-file-bridge-prepared';
+    const runId = 'run-file-bridge-prepared';
+    const actions = [{
+      action: fileStagePreparedAction(),
+      id: 'tool-file-stage-prepared',
+      name: 'file.stage',
+    }, {
+      action: libraryFileStagePreparedAction(),
+      id: 'tool-file-stage-library-prepared',
+      name: 'file.stage',
+    }, {
+      action: filePublishPreparedAction(),
+      id: 'tool-file-publish-prepared',
+      name: 'file.publish',
+    }, {
+      action: libraryFilePublishPreparedAction(),
+      id: 'tool-file-publish-library-prepared',
+      name: 'file.publish',
+    }] as const;
+    await createSession(store, sessionId, 3, '文件桥准备动作');
+    await store.createRun({
+      id: runId,
+      model: 'model-a',
+      now: timestamp(1),
+      profileId: 'profile-a',
+      reasoningEffort: 'auto',
+      sessionId,
+      userPrompt: '处理本机文件',
+    });
+    for (const [index, entry] of actions.entries()) {
+      await store.createToolRun({
+        callId: `call-file-bridge-${index}`,
+        id: entry.id,
+        input: {},
+        now: timestamp(index + 2),
+        permissionBehavior: 'ask',
+        runId,
+        status: 'preparing',
+        toolName: entry.name,
+      });
+      await expect(store.completeToolPreparation({
+        action: entry.action,
+        approvalId: `approval-file-bridge-${index}`,
+        approvalInputHash: String(index + 1).repeat(64),
+        approvalPreview: {
+          description: '确认文件桥操作',
+          risk: 'write',
+          title: '文件桥',
+        },
+        id: entry.id,
+        permissionBehavior: 'ask',
+        preparedActionId: `prepared-file-bridge-${index}`,
+        snapshotHash: String(index + 1).repeat(64),
+      })).resolves.toMatchObject({
+        preparation: { action: entry.action },
+        status: 'awaiting_approval',
+      });
+    }
+
+    const malformed = [{
+      id: actions[0].id,
+      value: { ...actions[0].action, path: '/tmp/private.txt' },
+    }, {
+      id: actions[0].id,
+      value: { ...actions[0].action, sourceKind: 'library-node' },
+    }, {
+      id: actions[1].id,
+      value: { ...actions[1].action, sourceIdentity: `sha256:${'C'.repeat(64)}` },
+    }, {
+      id: actions[1].id,
+      value: { ...actions[1].action, sourceNodeId: 0 },
+    }, {
+      id: actions[2].id,
+      value: { ...actions[2].action, contentHash: `sha256:${'C'.repeat(64)}` },
+    }, {
+      id: actions[2].id,
+      value: { ...actions[2].action, sourcePath: 'output/../private.txt' },
+    }, {
+      id: actions[2].id,
+      value: { ...actions[2].action, sizeBytes: -1 },
+    }, {
+      id: actions[2].id,
+      value: { ...actions[2].action, suggestedFileName: '../result.txt' },
+    }, {
+      id: actions[3].id,
+      value: { ...actions[3].action, providerId: '../local' },
+    }, {
+      id: actions[3].id,
+      value: { ...actions[3].action, parentId: 0 },
+    }, {
+      id: actions[3].id,
+      value: { ...actions[3].action, conflictPolicy: 'replace' },
+    }];
+    for (const entry of malformed) {
+      await expect(runDatabaseSql(databasePath, `
+        UPDATE agent_tool_runs
+        SET prepared_action_json = ?
+        WHERE id = ?
+      `, [JSON.stringify(entry.value), entry.id])).rejects.toThrow('prepared action is invalid');
+    }
+
+    await store.close();
+    stores.splice(stores.indexOf(store), 1);
+    const reopenedStore = await createStore(databasePath);
+    expect(await reopenedStore.getSession(sessionId, OWNER_SCOPE, 3)).toMatchObject({
+      toolActivities: expect.arrayContaining(actions.map(entry => expect.objectContaining({
+        id: entry.id,
+        preparation: expect.objectContaining({ action: entry.action }),
+      }))),
     });
     expect(await readDatabaseVersion(databasePath)).toBe(2);
   });
