@@ -4,6 +4,10 @@ import type {
   EmbeddedBrowserHlsTaskEventInput,
   EmbeddedBrowserHlsTaskEventPayload,
 } from '../../embeddedBrowserMainTypes'
+import {
+  defaultProcessingTaskRegistry,
+  type ProcessingTaskRegistry,
+} from './task-registry'
 
 export type EmbeddedBrowserHlsRetrySessionBase = {
   requestId: string
@@ -35,6 +39,7 @@ type EmbeddedBrowserHlsActiveTaskInput = {
 type EmbeddedBrowserHlsSessionOwnerOptions = {
   maxTaskSnapshots?: number
   removeWorkDirectory?: (workDirectoryPath: string) => Promise<void>
+  taskRegistry?: ProcessingTaskRegistry
 }
 
 function matchesSession(
@@ -132,6 +137,8 @@ export class EmbeddedBrowserHlsSessionOwner<
 
   private readonly removeWorkDirectory: (workDirectoryPath: string) => Promise<void>
 
+  private readonly taskRegistry: ProcessingTaskRegistry
+
   private readonly retrySessions = new Map<string, RetrySession>()
 
   private readonly taskSnapshots = new Map<string, EmbeddedBrowserHlsTaskEventPayload>()
@@ -141,6 +148,7 @@ export class EmbeddedBrowserHlsSessionOwner<
     this.removeWorkDirectory = options.removeWorkDirectory || (async (workDirectoryPath) => {
       await rm(workDirectoryPath, { force: true, recursive: true })
     })
+    this.taskRegistry = options.taskRegistry || defaultProcessingTaskRegistry
   }
 
   upsertRetry(session: RetrySession) {
@@ -247,6 +255,13 @@ export class EmbeddedBrowserHlsSessionOwner<
     const settled = new Promise<void>((resolve) => {
       markSettled = resolve
     })
+    const registryRegistration = this.taskRegistry.register({
+      cancel: () => abortController.abort(),
+      kind: 'hls-task',
+      requestId: input.requestId,
+      settled,
+      tabId: input.tabId,
+    })
     this.activeTasks.set(activeTaskId, {
       abortController,
       requestId: input.requestId,
@@ -262,6 +277,7 @@ export class EmbeddedBrowserHlsSessionOwner<
         completed = true
         this.activeTasks.delete(activeTaskId)
         markSettled()
+        registryRegistration.release()
       },
       signal: abortController.signal,
     }

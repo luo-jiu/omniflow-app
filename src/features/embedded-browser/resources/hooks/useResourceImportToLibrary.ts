@@ -1,8 +1,12 @@
 import React from 'react'
 import { Toast } from '@douyinfe/semi-ui'
 
-import { UPLOAD_TASK_STATUS } from '@/modules/upload-center/model/upload-task.types'
 import { uploadManager } from '@/utils/uploadManager'
+import {
+  createUploadTaskInput,
+  freezeUploadDeliveryTarget,
+  resolveUploadBatchTerminal,
+} from '@/modules/upload-center/services/upload-delivery-adapter'
 
 import {
   cleanupTempImportPath,
@@ -59,19 +63,20 @@ export function useResourceImportToLibrary(input: UseResourceImportToLibraryInpu
     setImportingOutputPath(normalizedOutputPath)
     try {
       const fileInfo = await getTempImportFileInfo(normalizedOutputPath)
-      const batch = uploadManager.createBatch([{
-        file: toUploadFile({
-          name: fileInfo.name,
-          path: fileInfo.filePath,
-          size: fileInfo.size,
-        }),
+      const file = toUploadFile({
+        name: fileInfo.name,
+        path: fileInfo.filePath,
+        size: fileInfo.size,
+      })
+      const target = freezeUploadDeliveryTarget({
+        fileName: fileInfo.name,
         libraryId,
         parentId: targetFolder.id,
         relativePath: fileInfo.name,
-      }])
-      const results = await batch.done
-      const success = results.some((item) => item.taskStatus === UPLOAD_TASK_STATUS.SUCCESS)
-      if (!success) {
+      })
+      const batch = uploadManager.createBatch([createUploadTaskInput(file, target)])
+      const terminal = await resolveUploadBatchTerminal(batch)
+      if (terminal !== 'completed') {
         throw new Error(`已完成${actionName}，但导入到资源库失败`)
       }
 

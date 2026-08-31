@@ -21,7 +21,7 @@ afterEach(async () => {
 })
 
 describe('StreamingTransfer', () => {
-  it('streams a response without materializing the complete body', async () => {
+  it('transfer.large-response-memory', async () => {
     const outputPath = await createTargetPath()
     const response = new Response(new ReadableStream({
       start(controller) {
@@ -37,7 +37,7 @@ describe('StreamingTransfer', () => {
     await expect(readFile(outputPath, 'utf8')).resolves.toBe('first-second')
   })
 
-  it('rejects oversized streamed content and keeps an existing destination', async () => {
+  it('transfer.temp-budget-backpressure', async () => {
     const outputPath = await createTargetPath()
     await writeFile(outputPath, 'old-content')
     const response = new Response('too-large')
@@ -49,7 +49,7 @@ describe('StreamingTransfer', () => {
     await expect(readdir(path.dirname(outputPath))).resolves.toEqual(['output.bin'])
   })
 
-  it('cancels an active stream and removes the staged partial file', async () => {
+  it('transfer.streaming-cancel-cleanup', async () => {
     const outputPath = await createTargetPath()
     const controller = new AbortController()
     const response = new Response(new ReadableStream({

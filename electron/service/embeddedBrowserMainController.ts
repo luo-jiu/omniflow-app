@@ -176,7 +176,7 @@ import {
   defaultHlsTaskExecutor,
   type HlsTaskExecutionEvent,
 } from './embedded-browser/processing/hls-task'
-import type { EmbeddedBrowserFragmentFetch } from './embeddedBrowserFragmentDownloader'
+import type { EmbeddedBrowserFragmentFetch } from './embedded-browser/cat-catch-port/processing/transfer-engine'
 import {
   DashTaskExecutor,
   appendDashRepresentationSegments,
@@ -205,6 +205,7 @@ import { defaultProcessingTaskRegistry } from './embedded-browser/processing/tas
 import { StreamingTransfer } from './embedded-browser/processing/streaming-transfer'
 import { StagedOutputLeaseStore } from './embedded-browser/processing/staged-output-lease'
 import { publishStagedOutput } from './embedded-browser/processing/staged-output-publisher'
+import { DownloadHandoffStore } from './embedded-browser/processing/download-handoff-store'
 import {
   downloadEmbeddedBrowserHlsLocalTracks,
 } from './embedded-browser/processing/hls-local-track-merge'
@@ -263,28 +264,16 @@ function createEmbeddedBrowserAbortError() {
   return error
 }
 
-async function runRegisteredEmbeddedBrowserTransfer<Result>(
+function isEmbeddedBrowserAbortError(error: unknown) {
+  return error instanceof Error && error.name === 'AbortError'
+}
+
+function runRegisteredEmbeddedBrowserTransfer<Result>(
   tabId: string,
   operation: (signal: AbortSignal, taskId: string) => Promise<Result>,
   kind = 'streaming-transfer',
 ) {
-  const controller = new AbortController()
-  let settleTask: (() => void) | undefined
-  const settled = new Promise<void>((resolve) => {
-    settleTask = resolve
-  })
-  const registration = defaultProcessingTaskRegistry.register({
-    cancel: () => controller.abort(),
-    kind,
-    settled,
-    tabId,
-  })
-  try {
-    return await operation(controller.signal, registration.id)
-  } finally {
-    settleTask?.()
-    registration.release()
-  }
+  return defaultProcessingTaskRegistry.run({ kind, tabId }, operation)
 }
 
 export function createEmbeddedBrowserMainController(
@@ -355,6 +344,7 @@ export function createEmbeddedBrowserMainController(
   const embeddedBrowserMseSpoolStore = new MseSpoolStore()
   const embeddedBrowserStreamingTransfer = new StreamingTransfer()
   let embeddedBrowserStagedOutputLeaseStore: StagedOutputLeaseStore | null = null
+  let embeddedBrowserDownloadHandoffStore: DownloadHandoffStore | null = null
   const embeddedBrowserMseControlQueues = new Map<string, Promise<void>>()
   let activeEmbeddedBrowserTabId: string | null = null
   let selectedEmbeddedBrowserTabId: string | null = null
@@ -367,15 +357,24 @@ export function createEmbeddedBrowserMainController(
       embeddedBrowserStagedOutputLeaseStore = new StagedOutputLeaseStore({
         rootPath: path.join(app.getPath('userData'), 'embedded-browser-output-leases'),
       })
-      void embeddedBrowserStagedOutputLeaseStore.quarantineOrphaned().then(() => (
-        embeddedBrowserStagedOutputLeaseStore?.reapExpired()
-      )).catch((error) => {
+      void embeddedBrowserStagedOutputLeaseStore.ensureReady().catch((error) => {
         runtimeLogger.warn('embedded browser staged output lease reap failed', {
           error: error instanceof Error ? error.message : String(error),
         })
       })
     }
     return embeddedBrowserStagedOutputLeaseStore
+  }
+
+  function getEmbeddedBrowserDownloadHandoffStore() {
+    if (!embeddedBrowserDownloadHandoffStore) {
+      embeddedBrowserDownloadHandoffStore = new DownloadHandoffStore({
+        cleanup: cleanupEmbeddedBrowserDownloadFile,
+        journalPath: path.join(app.getPath('userData'), 'embedded-browser-download-handoff.json'),
+        stagingRootPath: getEmbeddedBrowserDownloadStagingRoot(),
+      })
+    }
+    return embeddedBrowserDownloadHandoffStore
   }
 
   function enqueueEmbeddedBrowserMseControl(
@@ -423,6 +422,9 @@ export function createEmbeddedBrowserMainController(
   }
 
   function emitEmbeddedBrowserDownload(payload: EmbeddedBrowserDownloadPayload) {
+    if (payload.state === 'completed') {
+      getEmbeddedBrowserDownloadHandoffStore().record(payload)
+    }
     const mainWindow = options.getMainWindow()
     if (!mainWindow || mainWindow.isDestroyed()) {
       return false
@@ -785,6 +787,16 @@ export function createEmbeddedBrowserMainController(
     void cleanupStaleEmbeddedBrowserOpenFiles().catch(() => undefined)
     void cleanupStaleEmbeddedBrowserDownloadFiles().catch((error) => {
       runtimeLogger.warn('embedded browser download staging cleanup failed', {
+        error: error instanceof Error ? error.message : String(error),
+      })
+    })
+    void getEmbeddedBrowserStagedOutputLeaseStore().ensureReady().catch((error) => {
+      runtimeLogger.warn('embedded browser staged output lease startup cleanup failed', {
+        error: error instanceof Error ? error.message : String(error),
+      })
+    })
+    void getEmbeddedBrowserDownloadHandoffStore().ensureReady().catch((error) => {
+      runtimeLogger.warn('embedded browser download handoff journal initialization failed', {
         error: error instanceof Error ? error.message : String(error),
       })
     })
@@ -1356,6 +1368,9 @@ export function createEmbeddedBrowserMainController(
         }
         extractedResources.push(resource)
       } catch (error) {
+        if (isEmbeddedBrowserAbortError(error)) {
+          throw error
+        }
         runtimeLogger.warn('embedded browser MSE resource download failed', {
           error: error instanceof Error ? error.message : String(error),
           resourceKey,
@@ -1397,7 +1412,9 @@ export function createEmbeddedBrowserMainController(
         signal: options.signal,
         writeResource: !outputPath,
         writeResourceToFile: async (resourceToWrite, stagedPath) => {
-          await saveEmbeddedBrowserExtractedResourceFile(resourceToWrite, stagedPath)
+          await saveEmbeddedBrowserExtractedResourceFile(resourceToWrite, stagedPath, {
+            signal: options.signal,
+          })
         },
       })
     }
@@ -1432,6 +1449,9 @@ export function createEmbeddedBrowserMainController(
         downloaded = true
       } catch (error) {
         await rm(mergedOutputPath, { force: true }).catch(() => undefined)
+        if (isEmbeddedBrowserAbortError(error)) {
+          throw error
+        }
         runtimeLogger.warn('embedded browser MSE track merge failed; falling back to per-track output', {
           error: error instanceof Error ? error.message : String(error),
           tabId,
@@ -1446,6 +1466,9 @@ export function createEmbeddedBrowserMainController(
           await stageResource(resource, deriveEmbeddedBrowserExtractedResourceOutputFileName(resource.fileName))
           downloaded = true
         } catch (error) {
+          if (isEmbeddedBrowserAbortError(error)) {
+            throw error
+          }
           runtimeLogger.warn('embedded browser MSE resource staging failed', {
             error: error instanceof Error ? error.message : String(error),
             resourceKey: resource.resourceKey,
@@ -1596,7 +1619,7 @@ export function createEmbeddedBrowserMainController(
           if (signal.aborted) {
             throw createEmbeddedBrowserAbortError()
           }
-          await saveEmbeddedBrowserExtractedResourceFile(resource, stagedPath)
+          await saveEmbeddedBrowserExtractedResourceFile(resource, stagedPath, { signal })
           if (signal.aborted) {
             throw createEmbeddedBrowserAbortError()
           }
@@ -1663,6 +1686,9 @@ export function createEmbeddedBrowserMainController(
         }
       })
     } catch (error) {
+      if (isEmbeddedBrowserAbortError(error)) {
+        return { cancelled: true, ok: false }
+      }
       return {
         error: error instanceof Error ? error.message : String(error),
         ok: false,
@@ -1718,6 +1744,9 @@ export function createEmbeddedBrowserMainController(
         return { ok: true, outputPath: result.outputPath }
       })
     } catch (error) {
+      if (isEmbeddedBrowserAbortError(error)) {
+        return { cancelled: true, ok: false }
+      }
       return {
         error: error instanceof Error ? error.message : String(error),
         ok: false,
@@ -1780,29 +1809,36 @@ export function createEmbeddedBrowserMainController(
       }
 
       let ffmpegPath: string | undefined
-      const published = await publishStagedOutput({
-        fileName: path.basename(outputPath),
-        mimeType: 'video/mp4',
-        ownerTaskId: `mse-resource-merge-${randomUUID()}`,
-        purpose: 'mse-resource-merge',
-        store: getEmbeddedBrowserStagedOutputLeaseStore(),
-        targetPath: outputPath,
-        write: async (stagedPath) => {
-          const mergeResult = await mergeEmbeddedBrowserResourceTracks({
-            audio: audioResource,
-            ffmpegPath: payload.ffmpegPath,
-            outputPath: stagedPath,
-            video: videoResource,
-          })
-          ffmpegPath = mergeResult.ffmpegPath
-        },
-      })
+      const published = await runRegisteredEmbeddedBrowserTransfer(
+        normalizedTabId,
+        async (signal, taskId) => publishStagedOutput({
+          fileName: path.basename(outputPath),
+          mimeType: 'video/mp4',
+          ownerTaskId: taskId,
+          purpose: 'mse-resource-merge',
+          store: getEmbeddedBrowserStagedOutputLeaseStore(),
+          targetPath: outputPath,
+          write: async (stagedPath) => {
+            const mergeResult = await mergeEmbeddedBrowserResourceTracks({
+              audio: audioResource,
+              ffmpegPath: payload.ffmpegPath,
+              outputPath: stagedPath,
+              signal,
+              video: videoResource,
+            })
+            ffmpegPath = mergeResult.ffmpegPath
+          },
+        }),
+      )
       return {
         ffmpegPath,
         ok: true,
         outputPath: published.outputPath,
       }
     } catch (error) {
+      if (isEmbeddedBrowserAbortError(error)) {
+        return { cancelled: true, ok: false }
+      }
       runtimeLogger.warn('embedded browser resource merge failed', {
         audioResourceId,
         error: error instanceof Error ? error.message : String(error),
@@ -1875,6 +1911,9 @@ export function createEmbeddedBrowserMainController(
         outputPath,
       }
     } catch (error) {
+      if (isEmbeddedBrowserAbortError(error)) {
+        return { cancelled: true, ok: false }
+      }
       runtimeLogger.warn('embedded browser resource save failed', {
         error: error instanceof Error ? error.message : String(error),
         resourceId,
@@ -1944,29 +1983,36 @@ export function createEmbeddedBrowserMainController(
       }
 
       let ffmpegPath: string | undefined
-      const published = await publishStagedOutput({
-        fileName: path.basename(outputPath),
-        mimeType: `${resource.streamType === 'video' ? 'video' : 'audio'}/${outputFormat}`,
-        ownerTaskId: `captured-resource-transcode-${randomUUID()}`,
-        purpose: 'captured-resource-transcode',
-        store: getEmbeddedBrowserStagedOutputLeaseStore(),
-        targetPath: outputPath,
-        write: async (stagedPath) => {
-          const result = await transcodeEmbeddedBrowserResource({
-            ffmpegPath: payload.ffmpegPath,
-            outputFormat,
-            outputPath: stagedPath,
-            resource,
-          })
-          ffmpegPath = result.ffmpegPath
-        },
-      })
+      const published = await runRegisteredEmbeddedBrowserTransfer(
+        normalizedTabId,
+        async (signal, taskId) => publishStagedOutput({
+          fileName: path.basename(outputPath),
+          mimeType: `${resource.streamType === 'video' ? 'video' : 'audio'}/${outputFormat}`,
+          ownerTaskId: taskId,
+          purpose: 'captured-resource-transcode',
+          store: getEmbeddedBrowserStagedOutputLeaseStore(),
+          targetPath: outputPath,
+          write: async (stagedPath) => {
+            const result = await transcodeEmbeddedBrowserResource({
+              ffmpegPath: payload.ffmpegPath,
+              outputFormat,
+              outputPath: stagedPath,
+              resource,
+              signal,
+            })
+            ffmpegPath = result.ffmpegPath
+          },
+        }),
+      )
       return {
         ffmpegPath,
         ok: true,
         outputPath: published.outputPath,
       }
     } catch (error) {
+      if (isEmbeddedBrowserAbortError(error)) {
+        return { cancelled: true, ok: false }
+      }
       runtimeLogger.warn('embedded browser resource transcode failed', {
         error: error instanceof Error ? error.message : String(error),
         resourceId,
@@ -2058,12 +2104,15 @@ export function createEmbeddedBrowserMainController(
         })
       }
 
-      const executeManifestDownload = async (signal?: AbortSignal) => {
+      const executeManifestDownload = async (
+        signal?: AbortSignal,
+        ownerTaskId = outputOwnerTaskId,
+      ) => {
         let ffmpegPath = ''
         const published = await publishStagedOutput({
           fileName: path.basename(outputPath),
           mimeType: kind === 'hls' ? 'video/mp4' : undefined,
-          ownerTaskId: outputOwnerTaskId,
+          ownerTaskId,
           purpose: kind === 'hls' ? 'hls-manifest-download' : 'mpd-manifest-download',
           store: getEmbeddedBrowserStagedOutputLeaseStore(),
           targetPath: outputPath,
@@ -2105,7 +2154,10 @@ export function createEmbeddedBrowserMainController(
             requestId,
             tabId: normalizedTabId,
           }, executeManifestDownload)
-        : await executeManifestDownload()
+        : await runRegisteredEmbeddedBrowserTransfer(
+            normalizedTabId,
+            (signal, taskId) => executeManifestDownload(signal, taskId),
+          )
       if (kind === 'hls') {
         emitEmbeddedBrowserHlsTask({
           durationSeconds: payload.durationSeconds,
@@ -2125,6 +2177,9 @@ export function createEmbeddedBrowserMainController(
         outputPath: result.outputPath,
       }
     } catch (error) {
+      if (isEmbeddedBrowserAbortError(error)) {
+        return { cancelled: true, ok: false }
+      }
       if (kind === 'hls') {
         emitEmbeddedBrowserHlsTask({
           durationSeconds: payload.durationSeconds,
@@ -4308,6 +4363,14 @@ export function createEmbeddedBrowserMainController(
     }
   }
 
+  async function handleListDownloadHandoff() {
+    return getEmbeddedBrowserDownloadHandoffStore().list()
+  }
+
+  async function handleAcknowledgeDownloadHandoff(downloadId: string) {
+    return getEmbeddedBrowserDownloadHandoffStore().acknowledge(downloadId)
+  }
+
   async function handleStagePageDrag(input: EmbeddedBrowserStagePageDragRequest) {
     const request = {
       ...input,
@@ -4375,6 +4438,7 @@ export function createEmbeddedBrowserMainController(
     registerEmbeddedBrowserMainIpcHandlers({
       activateTab: handleActivateTab,
       cleanupDownloadFile: handleCleanupDownloadFile,
+      acknowledgeDownloadHandoff: handleAcknowledgeDownloadHandoff,
       clearBrowserCache: handleClearCacheAndReload,
       clearCapturedResources: clearEmbeddedBrowserCaptureResources,
       inspectResource: inspectEmbeddedBrowserCapturedResource,
@@ -4402,6 +4466,7 @@ export function createEmbeddedBrowserMainController(
       goBack: handleGoBack,
       goForward: handleGoForward,
       listCapturedResources: getEmbeddedBrowserCaptureSnapshot,
+      listDownloadHandoff: handleListDownloadHandoff,
       listHlsTaskSnapshots: (tabId) => embeddedBrowserHlsSessionOwner.listTaskSnapshots({ tabId }),
       listDashTaskSnapshots: (tabId) => embeddedBrowserDashSessionOwner.listTaskSnapshots({ tabId }),
       mergeMseResources: mergeEmbeddedBrowserCapturedMseResources,
@@ -4478,6 +4543,8 @@ export function createEmbeddedBrowserMainController(
   }
 
   async function dispose() {
+    // Stop every tab-scoped output before tearing down capture and MSE owners.
+    await defaultProcessingTaskRegistry.cancel({ all: true })
     const hlsCleanupPromise = embeddedBrowserHlsHostLifecycle.dispose()
     const dashCleanupPromise = embeddedBrowserDashHostLifecycle.dispose()
     captureRuntime?.dispose()
@@ -4502,6 +4569,12 @@ export function createEmbeddedBrowserMainController(
     })
     embeddedBrowserPendingOpenFiles.clear()
     embeddedBrowserAttachedOpenFiles.clear()
+    await embeddedBrowserDownloadHandoffStore?.flush().catch(() => undefined)
+    await embeddedBrowserStagedOutputLeaseStore?.dispose().catch((error) => {
+      runtimeLogger.warn('embedded browser staged output lease shutdown cleanup failed', {
+        error: error instanceof Error ? error.message : String(error),
+      })
+    })
     await hlsCleanupPromise
     await dashCleanupPromise
   }

@@ -108,6 +108,23 @@ describe('EmbeddedBrowser MSE merge output handoff', () => {
     }
   })
 
+  it('mse.merge-abort-stops before resolving ffmpeg', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'omniflow-mse-merge-abort-test-'))
+    const outputPath = path.join(directory, 'aborted.mp4')
+    const controller = new AbortController()
+    controller.abort()
+
+    try {
+      await expect(mergeEmbeddedBrowserResourceTracks({
+        ...createMergeRequest(outputPath),
+        signal: controller.signal,
+      })).rejects.toMatchObject({ name: 'AbortError' })
+      expect(spawnMock).not.toHaveBeenCalled()
+    } finally {
+      await rm(directory, { force: true, recursive: true })
+    }
+  })
+
   it('output.transcode-failure-cleans-partial-output', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'omniflow-transcode-failure-test-'))
     const outputPath = path.join(directory, 'partial.mp4')

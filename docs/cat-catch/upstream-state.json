@@ -5,7 +5,7 @@
   "baselineCursor": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
   "observedHead": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
   "migrationTarget": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
-  "reviewedThrough": null,
-  "portedThrough": null,
-  "lastCheckedAt": "2026-08-23"
+  "reviewedThrough": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
+  "portedThrough": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
+  "lastCheckedAt": "2026-08-30"
 }

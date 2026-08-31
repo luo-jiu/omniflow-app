@@ -1,3 +1,17 @@
+/**
+ * Concurrent fragment transfer ported from the pinned Cat Catch workflow.
+ *
+ * Upstream: xifangczy/cat-catch@2cb981d7c2f4614732edccc167c4b5793d1cb138
+ * Source: js/m3u8.downloader.js#Downloader; js/downloader.js#Downloader
+ * Reason: media fragments need bounded concurrency, range requests, retry,
+ * cancellation and manifest-order delivery while preserving raw and processed
+ * byte stages for the HLS/DASH adapters.
+ * Adaptation: fetch and buffer processing are injected Web API boundaries;
+ * filesystem, ffmpeg and product task ownership stay outside this port.
+ * Fixtures: transfer.concurrent-retry-abort-order,
+ * transfer.range-terminal-race
+ */
+
 export type EmbeddedBrowserDownloadByteRange = {
   length: number
   offset?: number
@@ -49,6 +63,10 @@ export type EmbeddedBrowserFragmentDownloaderEventMap = {
     fragment: EmbeddedBrowserDownloadFragment,
     processorIndex: number,
   ) => void
+  bufferSinkError: (
+    fragment: EmbeddedBrowserDownloadFragment,
+    error: Error,
+  ) => void
   rawBuffer: (
     buffer: ArrayBuffer,
     fragment: EmbeddedBrowserDownloadFragment,
@@ -78,7 +96,14 @@ export type EmbeddedBrowserFragmentBufferProcessor = (
   fragment: EmbeddedBrowserDownloadFragment,
 ) => ArrayBuffer | Promise<ArrayBuffer>
 
-type EmbeddedBrowserFragmentDownloaderOptions = {
+export type EmbeddedBrowserFragmentBufferSink = (
+  buffer: ArrayBuffer,
+  fragment: EmbeddedBrowserDownloadFragment,
+  signal: AbortSignal,
+) => Promise<void> | void
+
+export type EmbeddedBrowserFragmentDownloaderOptions = {
+  bufferSink?: EmbeddedBrowserFragmentBufferSink
   bufferProcessor?: EmbeddedBrowserFragmentBufferProcessor
   bufferProcessors?: EmbeddedBrowserFragmentBufferProcessor[]
   fetch?: EmbeddedBrowserFragmentFetch
@@ -106,26 +131,26 @@ function mergeHeaders(
   Object.entries(overrideHeaders).forEach(([name, value]) => {
     const normalizedName = String(name || '').trim()
     const normalizedValue = String(value || '').trim()
-    if (!normalizedName || !normalizedValue) {
-      return
-    }
+    if (!normalizedName || !normalizedValue) return
     headers.set(normalizedName, normalizedValue)
   })
   return headers
 }
 
-function createRangeHeader(
-  byteRange?: EmbeddedBrowserDownloadByteRange,
-) {
+function createRangeHeader(byteRange?: EmbeddedBrowserDownloadByteRange) {
   if (!byteRange || !Number.isFinite(byteRange.length) || byteRange.length <= 0) {
     return null
   }
   const start = Math.max(0, Number(byteRange.offset || 0))
   const end = start + Math.max(0, Number(byteRange.length || 0)) - 1
-  if (!Number.isFinite(end) || end < start) {
-    return null
-  }
+  if (!Number.isFinite(end) || end < start) return null
   return `bytes=${start}-${end}`
+}
+
+function createAbortError() {
+  const error = new Error('Fragment transfer aborted')
+  error.name = 'AbortError'
+  return error
 }
 
 async function readResponseBuffer(
@@ -154,9 +179,7 @@ async function readResponseBuffer(
       reading = false
       continue
     }
-    if (!value) {
-      continue
-    }
+    if (!value) continue
     const chunk = value instanceof Uint8Array ? value : new Uint8Array(value)
     chunks.push(chunk)
     receivedLength += chunk.byteLength
@@ -173,59 +196,40 @@ async function readResponseBuffer(
   return mergedBuffer.buffer
 }
 
-export class EmbeddedBrowserFragmentDownloader {
+/** The single pure owner for fragment transfer used by HLS and DASH adapters. */
+export class TransferEngine {
   allFragments: EmbeddedBrowserDownloadFragment[]
-
   buffer: Array<ArrayBuffer | null>
-
   buffersize: number
-
   controller: Array<AbortController | null>
-
   duration: number
-
   errorList: Set<NormalizedEmbeddedBrowserDownloadFragment>
-
   headers?: Record<string, string>
-
   index: number
-
   pushIndex: number
-
   running: number
-
   state: EmbeddedBrowserFragmentDownloaderState
-
   success: number
-
   thread: number
 
   private events: Partial<Record<keyof EmbeddedBrowserFragmentDownloaderEventMap, Array<(...args: any[]) => void>>>
-
   private fragmentsInternal: NormalizedEmbeddedBrowserDownloadFragment[]
-
   private readonly fetchImpl: EmbeddedBrowserFragmentFetch
-
-  private readonly bufferProcessor?: EmbeddedBrowserFragmentBufferProcessor
-
+  private readonly bufferSink?: EmbeddedBrowserFragmentBufferSink
   private readonly bufferProcessors: EmbeddedBrowserFragmentBufferProcessor[]
-
   private readonly signal?: AbortSignal
-
   private externalAbortListener?: () => void
-
-  private maxRetries: number
-
+  private readonly maxRetries: number
   private pendingQueue: EmbeddedBrowserFragmentDownloadTask[]
 
   constructor(options?: EmbeddedBrowserFragmentDownloaderOptions) {
     this.events = {}
     this.thread = Math.max(1, Number(options?.thread || 6))
-    this.maxRetries = Math.max(0, Number(options?.maxRetries || 2))
+    this.maxRetries = Math.max(0, Number(options?.maxRetries ?? 2))
     this.fetchImpl = options?.fetch || ((input, init) => fetch(input, init))
-    this.bufferProcessor = options?.bufferProcessor
+    this.bufferSink = options?.bufferSink
     this.bufferProcessors = (options?.bufferProcessors
-      || (this.bufferProcessor ? [this.bufferProcessor] : []))
+      || (options?.bufferProcessor ? [options.bufferProcessor] : []))
       .filter((processor): processor is EmbeddedBrowserFragmentBufferProcessor => typeof processor === 'function')
     this.signal = options?.signal
     this.headers = options?.headers
@@ -258,18 +262,12 @@ export class EmbeddedBrowserFragmentDownloader {
     eventName: Key,
     ...args: Parameters<EmbeddedBrowserFragmentDownloaderEventMap[Key]>
   ) {
-    const listeners = this.events[eventName]
-    listeners?.forEach((callback) => {
-      callback(...args)
-    })
+    this.events[eventName]?.forEach((callback) => callback(...args))
   }
 
   setFragments(fragments: EmbeddedBrowserDownloadFragment[]) {
-    this.allFragments = fragments.map((fragment) => ({ ...fragment }))
-    this.fragmentsInternal = this.allFragments.map((fragment, index) => ({
-      ...fragment,
-      index,
-    }))
+    this.allFragments = fragments.map(fragment => ({ ...fragment }))
+    this.fragmentsInternal = this.allFragments.map((fragment, index) => ({ ...fragment, index }))
     this.resetRuntimeState()
   }
 
@@ -290,10 +288,7 @@ export class EmbeddedBrowserFragmentDownloader {
   }
 
   push(fragment: EmbeddedBrowserDownloadFragment) {
-    const nextFragment = {
-      ...fragment,
-      index: this.fragmentsInternal.length,
-    }
+    const nextFragment = { ...fragment, index: this.fragmentsInternal.length }
     this.allFragments.push({ ...fragment })
     this.fragmentsInternal.push(nextFragment)
     this.buffer.push(null)
@@ -306,15 +301,11 @@ export class EmbeddedBrowserFragmentDownloader {
       return
     }
     const shouldEmitAborted = this.state === 'running' || this.running > 0 || this.pendingQueue.length > 0
-    this.controller.forEach((controller) => {
-      controller?.abort()
-    })
+    this.controller.forEach(controller => controller?.abort())
     this.detachExternalAbortListener()
     this.pendingQueue = []
     this.state = 'aborted'
-    if (shouldEmitAborted) {
-      this.emit('aborted')
-    }
+    if (shouldEmitAborted) this.emit('aborted')
   }
 
   destroy() {
@@ -342,12 +333,8 @@ export class EmbeddedBrowserFragmentDownloader {
       this.emit('error', 'start >= total')
       return false
     }
-
     const selected = this.allFragments.slice(normalizedStart, normalizedEnd)
-    this.fragmentsInternal = selected.map((fragment, index) => ({
-      ...fragment,
-      index,
-    }))
+    this.fragmentsInternal = selected.map((fragment, index) => ({ ...fragment, index }))
     if (!this.fragmentsInternal.length) {
       this.emit('error', 'List is empty')
       return false
@@ -361,14 +348,9 @@ export class EmbeddedBrowserFragmentDownloader {
       this.emit('error', 'state running')
       return
     }
-    if (!this.range(start, end)) {
-      return
-    }
+    if (!this.range(start, end)) return
     this.state = 'running'
-    this.pendingQueue = this.fragmentsInternal.map((fragment) => ({
-      attempt: 1,
-      fragment,
-    }))
+    this.pendingQueue = this.fragmentsInternal.map(fragment => ({ attempt: 1, fragment }))
     if (this.signal) {
       this.externalAbortListener = () => this.stop()
       if (this.signal.aborted) {
@@ -378,9 +360,7 @@ export class EmbeddedBrowserFragmentDownloader {
       this.signal.addEventListener('abort', this.externalAbortListener, { once: true })
     }
     const workerCount = Math.min(this.thread, this.pendingQueue.length)
-    for (let index = 0; index < workerCount; index += 1) {
-      void this.scheduleNext()
-    }
+    for (let index = 0; index < workerCount; index += 1) void this.scheduleNext()
   }
 
   retryErrors() {
@@ -389,22 +369,15 @@ export class EmbeddedBrowserFragmentDownloader {
       return
     }
     const retryFragments = Array.from(this.errorList)
-    if (!retryFragments.length) {
-      return
-    }
+    if (!retryFragments.length) return
     this.errorList.clear()
     retryFragments.forEach((fragment) => {
       this.buffer[fragment.index] = null
-      this.pendingQueue.push({
-        attempt: 1,
-        fragment,
-      })
+      this.pendingQueue.push({ attempt: 1, fragment })
     })
     this.state = 'running'
     const workerCount = Math.min(this.thread, this.pendingQueue.length)
-    for (let index = 0; index < workerCount; index += 1) {
-      void this.scheduleNext()
-    }
+    for (let index = 0; index < workerCount; index += 1) void this.scheduleNext()
   }
 
   private resetRuntimeState() {
@@ -422,22 +395,16 @@ export class EmbeddedBrowserFragmentDownloader {
   }
 
   private detachExternalAbortListener() {
-    if (!this.externalAbortListener) {
-      return
-    }
+    if (!this.externalAbortListener) return
     this.signal?.removeEventListener('abort', this.externalAbortListener)
     this.externalAbortListener = undefined
   }
 
   private async scheduleNext() {
-    if (this.state !== 'running') {
-      return
-    }
+    if (this.state !== 'running') return
     const task = this.pendingQueue.shift()
     if (!task) {
-      if (this.running === 0) {
-        this.finishIfComplete()
-      }
+      if (this.running === 0) this.finishIfComplete()
       return
     }
     await this.downloadTask(task)
@@ -453,51 +420,76 @@ export class EmbeddedBrowserFragmentDownloader {
     this.running += 1
     const controller = new AbortController()
     this.controller[fragment.index] = controller
-    const initHeaders: Record<string, string> = {}
-    const rangeHeader = createRangeHeader(fragment.byteRange)
-    if (rangeHeader) {
-      initHeaders.Range = rangeHeader
-    }
-    const requestInit: RequestInit = {
-      headers: mergeHeaders(this.headers, initHeaders),
-      signal: controller.signal,
-    }
-    this.emit('start', fragment, requestInit, attempt)
-
     try {
-      const response = await this.fetchImpl(fragment.url, requestInit)
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`)
+      const initHeaders: Record<string, string> = {}
+      const rangeHeader = createRangeHeader(fragment.byteRange)
+      if (rangeHeader) initHeaders.Range = rangeHeader
+      const requestInit: RequestInit = {
+        headers: mergeHeaders(this.headers, initHeaders),
+        signal: controller.signal,
       }
-      const rawBuffer = await readResponseBuffer(response, fragment, this.emit.bind(this))
-      this.emit('rawBuffer', rawBuffer, fragment)
-      let buffer = rawBuffer
-      for (const [processorIndex, processor] of this.bufferProcessors.entries()) {
-        buffer = await processor(buffer, fragment)
-        this.emit('processedBuffer', buffer, fragment, processorIndex)
+      this.emit('start', fragment, requestInit, attempt)
+
+      let buffer: ArrayBuffer
+      try {
+        const response = await this.fetchImpl(fragment.url, requestInit)
+        if (!response.ok) throw new Error(`HTTP ${response.status}`)
+        const rawBuffer = await readResponseBuffer(response, fragment, this.emit.bind(this))
+        this.emit('rawBuffer', rawBuffer, fragment)
+        buffer = rawBuffer
+        for (const [processorIndex, processor] of this.bufferProcessors.entries()) {
+          buffer = await processor(buffer, fragment)
+          this.emit('processedBuffer', buffer, fragment, processorIndex)
+        }
+      } catch (error) {
+        const normalizedError = error instanceof Error ? error : new Error(String(error))
+        if (normalizedError.name === 'AbortError') {
+          this.emit('stop', fragment, normalizedError)
+          return
+        }
+        this.emit('downloadError', fragment, normalizedError, attempt)
+        if (attempt <= this.maxRetries && this.state === 'running') {
+          this.pendingQueue.push({ attempt: attempt + 1, fragment })
+        } else {
+          this.errorList.add(fragment)
+        }
+        return
       }
-      this.buffer[fragment.index] = buffer
+
+      if (controller.signal.aborted || this.state !== 'running') {
+        this.emit('stop', fragment, createAbortError())
+        return
+      }
+
+      if (this.bufferSink) {
+        try {
+          await this.bufferSink(buffer, fragment, controller.signal)
+        } catch (error) {
+          const normalizedError = error instanceof Error ? error : new Error(String(error))
+          if (normalizedError.name === 'AbortError' || controller.signal.aborted || this.state !== 'running') {
+            this.emit('stop', fragment, normalizedError)
+            return
+          }
+          this.emit('bufferSinkError', fragment, normalizedError)
+          this.errorList.add(fragment)
+          return
+        }
+      } else {
+        this.buffer[fragment.index] = buffer
+      }
+
+      if (controller.signal.aborted || this.state !== 'running') {
+        this.buffer[fragment.index] = null
+        this.emit('stop', fragment, createAbortError())
+        return
+      }
+
       this.success += 1
       this.buffersize += buffer.byteLength
       this.duration += Number(fragment.duration || 0)
       this.errorList.delete(fragment)
-      this.sequentialPush()
+      if (!this.bufferSink) this.sequentialPush()
       this.emit('completed', buffer, fragment)
-    } catch (error) {
-      const normalizedError = error instanceof Error ? error : new Error(String(error))
-      if (normalizedError.name === 'AbortError') {
-        this.emit('stop', fragment, normalizedError)
-        return
-      }
-      this.emit('downloadError', fragment, normalizedError, attempt)
-      if (attempt <= this.maxRetries && this.state === 'running') {
-        this.pendingQueue.push({
-          attempt: attempt + 1,
-          fragment,
-        })
-      } else {
-        this.errorList.add(fragment)
-      }
     } finally {
       this.running = Math.max(0, this.running - 1)
       this.controller[fragment.index] = null
@@ -505,27 +497,19 @@ export class EmbeddedBrowserFragmentDownloader {
   }
 
   private sequentialPush() {
-    if (!this.events.sequentialPush?.length) {
-      return
-    }
+    if (!this.events.sequentialPush?.length) return
     for (; this.pushIndex < this.fragmentsInternal.length; this.pushIndex += 1) {
       const buffer = this.buffer[this.pushIndex]
-      if (!buffer) {
-        break
-      }
+      if (!buffer) break
       const fragment = this.fragmentsInternal[this.pushIndex]
-      if (!fragment) {
-        break
-      }
+      if (!fragment) break
       this.emit('sequentialPush', buffer, fragment)
       this.buffer[this.pushIndex] = null
     }
   }
 
   private finishIfComplete() {
-    if (this.state !== 'running' || this.running > 0 || this.pendingQueue.length > 0) {
-      return
-    }
+    if (this.state !== 'running' || this.running > 0 || this.pendingQueue.length > 0) return
     if (this.success === this.fragmentsInternal.length) {
       this.state = 'done'
       this.detachExternalAbortListener()
@@ -538,3 +522,6 @@ export class EmbeddedBrowserFragmentDownloader {
     }
   }
 }
+
+/** Short-lived source-compatible name for adapters that still use the old symbol. */
+export { TransferEngine as EmbeddedBrowserFragmentDownloader }

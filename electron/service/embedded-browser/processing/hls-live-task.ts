@@ -10,13 +10,14 @@ import {
 } from '../contracts/hls'
 import { parseHlsManifest } from '../cat-catch-port/hls/parser'
 import { createHlsDownloadPlan } from '../cat-catch-port/hls/plan'
-import type { EmbeddedBrowserFragmentFetch } from '../../embeddedBrowserFragmentDownloader'
+import type { EmbeddedBrowserFragmentFetch } from '../cat-catch-port/processing/transfer-engine'
 import { defaultHlsTaskExecutor } from './hls-task'
 import {
   fetchHlsManifestWithForceCacheFallback,
 } from '../cat-catch-port/hls/cache-fallback'
 
 export type HlsLiveTaskOptions = {
+  clearSchedule?: (handle: TimerHandle) => void
   fetch?: EmbeddedBrowserFragmentFetch
   headers?: Record<string, string>
   manifestUrl: string
@@ -39,10 +40,13 @@ export type HlsLiveTaskOptions = {
   resolveParentVariableList?: (
     signal?: AbortSignal,
   ) => Promise<Readonly<EmbeddedBrowserHlsVariableList> | undefined>
+  schedule?: (callback: () => void, delayMs: number) => TimerHandle
   segmentQuery?: string
   suggestedThreadCount?: number
   workDirectoryPath?: string
 }
+
+type TimerHandle = ReturnType<typeof setTimeout>
 
 export type HlsLiveTaskStopResult = {
   durationSeconds: number
@@ -158,6 +162,8 @@ export class HlsLiveTask {
 
   private readonly fetch?: EmbeddedBrowserFragmentFetch
 
+  private readonly clearSchedule: (handle: TimerHandle) => void
+
   private readonly onEvent?: HlsLiveTaskOptions['onEvent']
 
   private readonly pageUrl?: string
@@ -170,9 +176,11 @@ export class HlsLiveTask {
 
   private pollIntervalMs = 4000
 
-  private pollTimer: NodeJS.Timeout | null = null
+  private pollTimer: TimerHandle | null = null
 
   private readonly resolveParentVariableList?: HlsLiveTaskOptions['resolveParentVariableList']
+
+  private readonly schedule: (callback: () => void, delayMs: number) => TimerHandle
 
   private readonly segmentQuery?: string
 
@@ -181,6 +189,7 @@ export class HlsLiveTask {
   private workDirectoryPath = ''
 
   constructor(options: HlsLiveTaskOptions) {
+    this.clearSchedule = options.clearSchedule || clearTimeout
     this.headers = options.headers
     this.fetch = options.fetch
     this.manifestUrl = options.manifestUrl
@@ -188,6 +197,7 @@ export class HlsLiveTask {
     this.onEvent = options.onEvent
     this.pageUrl = options.pageUrl
     this.resolveParentVariableList = options.resolveParentVariableList
+    this.schedule = options.schedule || ((callback, delayMs) => setTimeout(callback, delayMs))
     this.segmentQuery = options.segmentQuery
     this.suggestedThreadCount = options.suggestedThreadCount
     this.workDirectoryPath = options.workDirectoryPath || ''
@@ -242,7 +252,7 @@ export class HlsLiveTask {
   private async settleActiveRecording() {
     this.isRecording = false
     if (this.pollTimer) {
-      clearTimeout(this.pollTimer)
+      this.clearSchedule(this.pollTimer)
       this.pollTimer = null
     }
     this.abortController?.abort()
@@ -257,7 +267,7 @@ export class HlsLiveTask {
     if (!this.isRecording) {
       return
     }
-    this.pollTimer = setTimeout(() => {
+    this.pollTimer = this.schedule(() => {
       this.activePollPromise = this.pollOnce(false)
         .catch((error) => {
           if (!this.isRecording && error instanceof Error && error.name === 'AbortError') {

@@ -17,8 +17,8 @@ import {
   type EmbeddedBrowserHlsKeyCandidate,
 } from '../model/embedded-browser-hls-key-verifier';
 import {
-  createEmbeddedBrowserMpdDownloadPlan,
-  parseEmbeddedBrowserMpdManifest,
+  createEmbeddedBrowserMpdPlan,
+  parseEmbeddedBrowserMpdDocument,
   type EmbeddedBrowserMpdDownloadPlan,
   type EmbeddedBrowserMpdManifest,
 } from '../model/embedded-browser-mpd-manifest';
@@ -157,11 +157,11 @@ export async function saveHlsResourceWithFfmpeg(resource: EmbeddedBrowserCapture
 
 export async function analyzeMpdResource(resource: EmbeddedBrowserCapturedResource) {
   const { text, url } = await readManifestResourceText(resource);
-  const manifest = parseEmbeddedBrowserMpdManifest({
+  const manifest = parseEmbeddedBrowserMpdDocument({
     baseUrl: url || resource.url,
     text,
   });
-  const plan = createEmbeddedBrowserMpdDownloadPlan({
+  const plan = createEmbeddedBrowserMpdPlan({
     headers: withResourceRefererHeader(resource),
     manifest,
     manifestUrl: resource.url,

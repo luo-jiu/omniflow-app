@@ -2341,3 +2341,537 @@
 - runtime changes: `StagedOutputLeaseStore.quarantineOrphaned` 在 controller 首次创建 lease store 时运行，完成后继续 `reapExpired`；只匹配 `output-lease-` 目录并保护未知条目。
 - legacy cleanup: 无新增删除；staged publisher、MSE 自动 download/import 和 UploadManager 仍保留至 output-integration 完整切换。
 - validation: lease/publisher 定向 `7 passed`、TypeScript `--noEmit`、定向 ESLint、metadata validator、sync test 和 scoped diff check 通过；完整 build、真实页面和真实下载导入未执行。
+
+## 2026-08-29: same target (throughput-state promotion)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片按“先整体完成度、后地毯式补测”规则整理已落地的 target owner。
+- reviewedThrough / portedThrough: 均保持 `null`；本切片不宣称最终 parity 或生产级验证完成。
+- affected capability IDs: `mse.page-capture-runtime`、`transfer.streaming-memory-budget`、`processing.main-task-registry`、`output.staged-output-lease`、`output.application-workflow-coordinator`、`output.ffmpeg-process-owner`。
+- state change: 六项能力均从 `porting` 推进为 `ported-unverified`，并将 `syncedThrough` 对齐当前 `migrationTarget`；代码已存在且有最小 target/test 证据，但各自 notes 中记录的真实页面、完整交付、跨入口恢复、上游差分或极端稳定性仍保留为 gap。
+- metadata: `7 units / 32 capabilities / 104 cleanup entries / 229 planned IDs / 242 active refs`，状态为 `15 verified / 7 ported-unverified / 6 porting / 4 pending`；严格完成度仍为 `15/32 = 46.9%`，已落地 target owner 覆盖为 `22/32 = 68.8%`。
+- validation: `npm run cat-catch:validate` 通过；task registry `2/2`、application workflow coordinator `4/4` 通过。未运行全仓 build 或地毯式 parity/真实页面测试，按当前阶段规则延后。
+
+## 2026-08-29: same target (external-tool dispatch throughput)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片只完成外部工具 dispatch 的最小 target 接入与验证。
+- reviewedThrough / portedThrough: 均保持 `null`；更广泛生产 wiring、完整 legacy cleanup 和最终 parity 仍延后到第二阶段。
+- affected capability IDs: `output.external-tools-dispatch`。
+- state change: 从 `porting` 推进为 `ported-unverified`，`syncedThrough` 对齐当前 `migrationTarget`。main-only opaque resource/access boundary、协议 Base64、进程登记与 app shutdown 取消已有实现和定向证据；更广泛生产覆盖仍记录为 gap。
+- metadata: `7 units / 32 capabilities / 104 cleanup entries / 229 planned IDs / 242 active refs`，状态为 `15 verified / 8 ported-unverified / 5 porting / 4 pending`；严格完成度仍为 `15/32 = 46.9%`，已落地 target owner 覆盖为 `23/32 = 71.9%`。
+- validation: external-tool 定向 `2 files / 5 passed`，`npm run cat-catch:validate` 通过；未运行地毯式 parity、全仓 build 或真实外部工具场景。
+
+## 2026-08-29: same target (DASH throughput-state promotion)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片按整体完成度优先规则整理已落地的 DASH target owner。
+- reviewedThrough / portedThrough: 均保持 `null`；复杂 SIDX、完整上游差分、真实站点和长时间输出验证仍延后。
+- affected capability IDs: `dash.parser-planner`、`dash.timeline-download-merge`。
+- state change: 两项能力均从 `porting` 推进为 `ported-unverified`，并将 `syncedThrough` 对齐当前 `migrationTarget`。parser、main XML adapter、静态/动态 task、live owner、authority、取消和 staged output 已有 target 实现与定向证据；notes 中的开放差异继续保留。
+- metadata: `7 units / 32 capabilities / 104 cleanup entries / 229 planned IDs / 242 active refs`，状态为 `15 verified / 10 ported-unverified / 3 porting / 4 pending`；严格完成度仍为 `15/32 = 46.9%`，已落地 target owner 覆盖为 `25/32 = 78.1%`。
+- validation: DASH 定向 `6 files / 36 passed`，本切片后会复跑 metadata validator；未运行地毯式 parity、全仓 build 或真实 DASH 页面。
+
+## 2026-08-29: same target (UploadManager handoff throughput)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片补上浏览器完成输出到 UploadManager batch 的应用级关联。
+- reviewedThrough / portedThrough: 均保持 `null`；应用重启恢复、冻结 library target 和最终生产交付验证仍延后。
+- affected capability IDs: `output.library-delivery-handoff`、`output.application-workflow-coordinator`。
+- runtime changes: `CapturedOutputWorkflowCoordinator.linkUploadTask` 接受 UploadManager 的 `batch.done`，由应用级 coordinator 等待成功/失败终态；`useEmbeddedBrowserDownloadImport` 不再在 renderer hook 内独立等待 batch，因此 listener 卸载不会丢失交付关联。
+- state change: `output.library-delivery-handoff` 从 `pending` 推进为 `ported-unverified`，`syncedThrough` 对齐当前 `migrationTarget`；成功批次清理 owned temp file，失败/取消批次保留队列项为 `pending`。
+- metadata: `7 units / 32 capabilities / 104 cleanup entries / 229 planned IDs / 242 active refs`，状态为 `15 verified / 11 ported-unverified / 3 porting / 3 pending`；严格完成度仍为 `15/32 = 46.9%`，已落地 target owner 覆盖为 `26/32 = 81.3%`。
+- validation: coordinator `6/6`、scoped ESLint、TypeScript 和 `npm run cat-catch:validate` 通过；未运行地毯式 parity、全仓 build 或真实资料库交付。
+
+## 2026-08-29: same target (normal BrowserWindow download handoff)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片把普通 BrowserWindow 下载完成和可选资料库导入接入应用级 handoff owner。
+- reviewedThrough / portedThrough: 均保持 `null`；本切片不宣称最终生产交付、应用重启恢复或 Cat Catch fallback parity。
+- change groups: `renderer-lifecycle`、`application-queue-owner`、`download-delivery` 与 `documentation-correction`。
+- affected capability IDs: `output.normal-download-handoff`。
+- state change: 从 `pending` 推进为 `ported-unverified`，`syncedThrough` 对齐当前 `migrationTarget`；target owner 为 `DownloadHandoff`，其状态和文件清理由 `CapturedOutputWorkflowCoordinator` 单一持有。
+- fixtures/tests: 新增 `download-handoff.test.ts` 的两条用例，覆盖完成事件只交付一次，以及失败交付保留 `pending` 供重试；新增 2 个 active test refs，metadata 为 `7 units / 32 capabilities / 104 cleanup entries / 229 unique planned IDs / 246 active test refs`。
+- accepted differences: `DownloadHandoff` 是 renderer-facing 薄 adapter，不复制队列或 UploadManager 状态机；普通下载仍保留原有事件 payload 和用户最终交付入口，coordinator 只在成功终态清理 owned temp file。
+- excluded changes and reasons: 未接入应用重启恢复、冻结 library target、MSE 自动导入终态、Cat Catch native BrowserWindow fallback、renderer UI、`dist-electron/**` 或 upstream 游标；这些需要独立 delivery/transfer owner 和第二阶段验证。
+- unresolved gaps: 真实 native 下载和资料库导入、跨入口取消、崩溃恢复及长时间大媒体仍待补齐；`output.processing-staged-terminal`、`transfer.concurrent-retry-abort-order`、`transfer.downloader-session-lifecycle`、`output.local-save-delivery` 与 `output.filename-template-helpers` 仍开放。
+- runtime changes: `useEmbeddedBrowserDownloadImport` 改用 `downloadHandoff` 的快照、事件和 delivery API；UploadManager batch 通过 coordinator 关联，renderer listener 卸载/重挂载不会丢失普通下载交付。
+- legacy cleanup: 无新增删除；旧 native download bridge、UploadManager 和 import modal 继续作为平台/产品 adapter，待 output-integration 完整切换后再收口。
+- validation: `download-handoff.test.ts` 定向 `2 passed`、coordinator 定向 `6 passed`、TypeScript `--noEmit`、scoped ESLint、`npm run cat-catch:validate` 和 `git diff --check` 通过；未运行完整 build、全仓测试、真实页面和真实资料库交付。
+
+## 2026-08-29: same target (native download session lifecycle)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片把 Electron `will-download` 的 staging、进度、终态和 registry 取消收口到 `NativeDownloadSession`。
+- reviewedThrough / portedThrough: 均保持 `null`；本切片不宣称 Cat Catch downloader fallback、session reuse、guarded auto-close 或真实 Electron smoke 已完成。
+- change groups: `platform-adaptation`、`task-lifecycle`、`terminal-cleanup` 与 `documentation-correction`。
+- affected capability IDs: `transfer.downloader-session-lifecycle`。
+- state change: 从 `porting` 推进为 `ported-unverified`，`syncedThrough` 对齐当前 `migrationTarget`；target owner 已由生产 `initializeEmbeddedBrowserDownloadBridge` 使用并通过 `ProcessingTaskRegistry` 登记。
+- fixtures/tests: 复用 `native-download-session.test.ts` 的 3 条生命周期用例，覆盖 save path/progress/completed、cancelled staging cleanup 和 save-path failure terminal；metadata 为 `7 units / 32 capabilities / 229 unique planned IDs / 246 active test refs`，active ref 数不变。
+- accepted differences: `NativeDownloadSession` 是 Electron 平台 lifecycle adapter，不复制 Cat Catch downloader page 算法；renderer 继续收到原有 download payload，staging path 只在 main 侧使用。
+- excluded changes and reasons: 未实现 Cat Catch eligible native-download failure fallback、downloader page session reuse、auto-close、renderer UI、`dist-electron/**` 或 upstream 游标；这些需要独立 transfer integration 和真实宿主验证。
+- unresolved gaps: fallback authority、跨入口取消、真实 `will-download` failure/reuse 场景、长时间大媒体仍待补齐；`output.processing-staged-terminal`、`transfer.concurrent-retry-abort-order`、`output.local-save-delivery` 与 `output.filename-template-helpers` 继续开放。
+- runtime changes: `embeddedBrowserService.ts` 现在为每个 native download 创建单一 session，负责 staging、progress/terminal 投影、取消和失败/取消清理，并在 settled 后释放 registry registration。
+- legacy cleanup: 无新增删除；旧 `will-download` bridge 仅保留为 Electron 入口，Cat Catch downloader page 行为尚未接入，不保留第二套 native session owner。
+- validation: `native-download-session.test.ts` 定向 `3 passed`、TypeScript `--noEmit`、scoped ESLint、`npm run cat-catch:validate` 和 `git diff --check` 通过；未运行完整 build、全仓测试、真实 Electron 下载和真实页面。
+
+## 2026-08-29: same target (processing and delivery terminal contract)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片只补齐 output processing 与 delivery 的终态边界。
+- reviewedThrough / portedThrough: 均保持 `null`；`output.processing-staged-terminal` 从 `porting` 推进为 `ported-unverified`，`output-integration` unit 仍开放。
+- change groups: `processing-terminal`、`staged-output-boundary`、`delivery-terminal` 与 `documentation-correction`。
+- affected capability IDs: `output.processing-staged-terminal`；metadata 为 `7 units / 32 capabilities / 104 cleanup entries / 229 planned IDs / 238 unique active refs`，状态为 `15 verified / 14 ported-unverified / 1 porting / 2 pending`，严格完成度仍为 `15/32 = 46.9%`，已落地 target owner 覆盖为 `29/32 = 90.6%`。
+- fixtures/tests: 新增 `electron/service/embedded-browser/contracts/processing-task.test.ts`，覆盖 `output.staged-terminal` 与 `output.delivery-not-processing-success`；staged publisher 定向集合复跑为 `2 files / 4 passed`。
+- accepted differences: 现有 IPC 继续返回兼容的最终 `outputPath`；新 contract 只在 main-side publisher 结果中携带 opaque lease metadata，不把真实 staging path、claim token 或 UploadManager 状态暴露给 renderer。
+- excluded changes and reasons: 未接入 renderer-safe lease IPC、MSE 自动导入 ack、UploadManager commit unknown、应用重启恢复、真实页面/资料库交付、`dist-electron/**` 或 upstream 游标；这些仍需独立 delivery protocol 和第二阶段验证。
+- unresolved gaps: 现有 HLS/DASH/MSE event DTO 尚未全面改成该 contract，publisher 之外的处理入口仍保留兼容 raw outputPath，lease budget、跨入口取消和最终 output-integration cutover 仍待补齐。
+- runtime changes: 新增 `electron/service/embedded-browser/contracts/processing-task.ts#ProcessingTaskTerminal`、`OutputDeliveryTerminal` 和构造器；`processing/staged-output-publisher.ts#publishStagedOutput` 在写入成功后生成 path-free processing terminal，发布成功后再生成独立 delivery success terminal，既有返回字段保持不变。
+- legacy cleanup: 无新增删除；raw outputPath IPC、旧 processing event projection 和各 domain session owner 继续保留至 output-integration unit 完整切换。
+- validation: contract + publisher 定向 `2 files / 4 passed`；待本轮收口后重跑 metadata validator、sync test、scoped ESLint、TypeScript 与非 `dist-electron/**` diff check；完整 build、全仓 test、真实页面和真实资料库交付仍未执行。
+
+## 2026-08-29: same target (transfer engine target owner)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片把 fragment downloader 的算法核心迁入 Cat Catch port 目录。
+- reviewedThrough / portedThrough: 均保持 `null`；`transfer.concurrent-retry-abort-order` 进入 `ported-unverified`，transfer-engine unit 仍未关闭。
+- change groups: `target-owner`、`compatibility-boundary`、`production-import-cutover` 与 `documentation-correction`。
+- affected capability IDs: `transfer.concurrent-retry-abort-order`。
+- state change: 从 `porting` 推进为 `ported-unverified`，`syncedThrough` 对齐当前 `migrationTarget`；新增 `electron/service/embedded-browser/cat-catch-port/processing/transfer-engine.ts#TransferEngine` 作为唯一分片 transfer owner。
+- runtime changes: `TransferEngine` 保留旧下载器的 bounded concurrency、Range header、retry、单一外部 `AbortSignal`、队列取消、raw/processed buffer stages、progress、failed/retryErrors、sequentialPush 和 terminal event 语义；HLS/DASH production imports 已直接依赖 target。`embeddedBrowserFragmentDownloader.ts` 只保留 source-compatible re-export，避免第二套算法继续存在。
+- fixtures/tests: 新增 `transfer-engine.test.ts` 的 `transfer.concurrent-retry-abort-order` 与 `transfer.range-terminal-race`，覆盖并发乱序完成后按 manifest 顺序输出、失败重试时 URL/Range 保留、单次 allCompleted 终态；旧兼容测试继续验证外部 abort。定向集合 `2 files / 8 passed`。
+- accepted differences: 纯 target 只依赖标准 Web API；fetch、buffer processor 和 product task/session ownership 继续由 HLS/DASH/平台 adapter 注入。旧 root re-export 暂保留到 transfer-engine unit 完成最终验证和 cleanup。
+- excluded changes and reasons: 未在本切片接入大媒体内存预算、统一 `ProcessingTaskRegistry` entry、Cat Catch native BrowserWindow fallback、StreamSaver provenance、真实页面/长时间大媒体、`dist-electron/**` 或 upstream 游标；这些属于 transfer integration/第二阶段证据。
+- unresolved gaps: range terminal race 已有最小 event guard 证据但尚无真实网络长响应验证；旧 cleanup entry 继续保留以便 unit 关闭前检测 legacy symbol 回归，最终关闭时再删除兼容出口和 cleanup entry。
+- metadata: `7 units / 32 capabilities / 104 cleanup entries / 229 unique planned IDs / 240 unique active test refs`，状态为 `15 verified / 15 ported-unverified / 0 porting / 2 pending`；严格完成度仍为 `15/32 = 46.9%`，已落地 target owner 覆盖按台账为 `29/32 = 90.6%`。
+- validation: transfer target + legacy compatibility `2 files / 8 passed`、定向 ESLint、`npx tsc --noEmit`、`npm run cat-catch:validate` 均通过；非 `dist-electron/**` 的 diff check 与 sync test 待本轮最终收口时复跑，完整 build、全仓 test、真实页面和真实资料库交付仍未执行。
+
+## 2026-08-29: same target (shared output helper owner)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片把 Cat Catch 的共享输出 helper 行为迁入纯 port。
+- reviewedThrough / portedThrough: 均保持 `null`；`output.filename-template-helpers` 从 `pending` 推进为 `ported-unverified`，output-integration unit 仍未关闭。
+- change groups: `target-owner`、`template-parity`、`large-buffer-boundary` 与 `documentation-correction`。
+- affected capability IDs: `output.filename-template-helpers`。
+- state change: `cat-catch-port/shared/output-helpers.ts#OutputHelpers` 已建立唯一 target owner，`syncedThrough` 对齐当前 `migrationTarget`；新增 target test refs `output.filename-template-parity` 与 `output.large-buffer-delivery`。
+- runtime changes: pure helper 持有 `appendZero`、`isEmpty`、URL basename fallback、Cat Catch `filterFileName/stringModify` 替换词、模板变量/pipe evaluation、日期和文件变量、ArrayBuffer/TypedArray 到 Blob 的 1 GiB chunk boundary，以及 data-URL descriptor。实际 renderer anchor click、filesystem path 规范化和交付仍由平台 adapter 负责。
+- fixtures/tests: 新增 `electron/service/embedded-browser/cat-catch-port/shared/output-helpers.test.ts`，覆盖 filename filter/stringModify、URL query basename、template uppercase/urlEncode/filter 和 TypedArray/empty-buffer Blob 交付边界，定向 `1 file / 2 passed`。
+- accepted differences: pure port 不调用 `document.createElement('a')`，而返回 `{ url, fileName }` descriptor；该差异固定在 adapter boundary，避免把 renderer side effect 带入 Cat Catch core。
+- excluded changes and reasons: 未接入所有 renderer 下载入口、完整模板 fixture 矩阵、真实大于 2 GiB 分片交付、`dist-electron/**` 或 upstream 游标；这些属于 output integration 第二阶段证据。
+- unresolved gaps: 当前 target 已具备核心 helper 行为但尚未替换所有旧 filename service，避免在没有完整调用方盘点时改变路径安全策略；`output.local-save-delivery` 仍是唯一 pending capability。
+- legacy cleanup: 无新增删除；该 capability 原本没有 current legacy ref，现有 filesystem/renderer helper 继续作为 retain-or-adapt 平台职责，不复制 Cat Catch 模板算法。
+- metadata: `7 units / 32 capabilities / 104 cleanup entries / 229 unique planned IDs / 242 unique active test refs`，状态为 `15 verified / 16 ported-unverified / 0 porting / 1 pending`；严格完成度仍为 `15/32 = 46.9%`，已落地 target owner 覆盖为 `31/32 = 96.9%`。
+- validation: output helper 定向 `2 passed`、scoped ESLint、target-scoped TypeScript 无报错；完整 metadata validator、sync test、全仓 TypeScript、全仓 test、真实页面和真实资料库交付待本轮最终收口时复跑，且全仓既有 `agent-shell-log-store.ts` 类型错误仍与本切片无关。
+
+## 2026-08-29: same target (local-save delivery terminal)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片完成最后一个 pending capability 的 target owner 接入。
+- reviewedThrough / portedThrough: 均保持 `null`；`output.local-save-delivery` 从 `pending` 推进为 `ported-unverified`，output-integration unit 仍未关闭。
+- change groups: `renderer-adapter`、`terminal-normalization`、`production-hook-cutover` 与 `documentation-correction`。
+- affected capability IDs: `output.local-save-delivery`。
+- state change: `src/features/embedded-browser/workflows/local-save-delivery-adapter.ts#LocalSaveDeliveryAdapter` 已成为 renderer-facing target owner，`syncedThrough` 对齐当前 `migrationTarget`；`useEmbeddedBrowserCatchToolkit` 的 captured-resource save 入口已改为通过该 adapter。
+- runtime changes: adapter 只调用既有 `saveEmbeddedBrowserCapturedResource` API，将 main 返回的 `{ ok, cancelled, error, outputPath }` 归一化为附加 `terminal: completed|cancelled|failed`；dialog、staged lease、filesystem write、cleanup 和 outputPath 仍由 main controller/lease owner 持有，避免 renderer 新增第二份保存状态机。
+- fixtures/tests: 新增 `local-save-delivery-adapter.test.ts#output.local-save-terminal`，覆盖 cancelled、failed 和 completed 三种终态及 tabId trim，定向 `1 passed`。
+- accepted differences: terminal 是 renderer adapter 的附加字段，原有 UI 继续按 `ok/cancelled/error/outputPath` 工作；adapter 不吞异常，保留现有 catch/toast 行为。
+- excluded changes and reasons: 未做真实 Electron save-dialog smoke、跨重启恢复、冻结 library target、资料库交付、`dist-electron/**` 或 upstream 游标；这些属于第二阶段 output-integration 验收。
+- unresolved gaps: 所有 capability 已有 target owner，但 17 项仍只有 `ported-unverified` 证据；processing/delivery terminal、lease recovery、large-media budget、真实站点和完整 legacy cleanup 仍待地毯式补测。
+- legacy cleanup: 无新增删除；旧 main save service 继续作为 filesystem/platform owner，最终 output-integration close 时再按 cleanup contract 处理 legacy symbol。
+- metadata: `7 units / 32 capabilities / 104 cleanup entries / 229 unique planned IDs / 243 unique active test refs`，状态为 `15 verified / 17 ported-unverified / 0 porting / 0 pending`；严格完成度仍为 `15/32 = 46.9%`，已落地 target owner 覆盖为 `32/32 = 100%`。
+- validation: 三个 target slice 合并后定向 transfer/output tests `11 passed`、scoped ESLint、metadata validator、sync test 和 diff check 通过；全仓 TypeScript 仍有其他 agent 的 `agent-shell-log-store.ts` 既有错误，未执行全仓 test/build、真实页面或真实 Electron 交付验证。
+
+## 2026-08-29: same target (transfer-engine unit closure)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片完成 transfer-engine unit 的 target owner 收口。
+- reviewedThrough / portedThrough: 均保持 `null`；本切片不宣称全仓上游差分或真实页面验证完成。
+- change groups: `target-owner`、`task-registry`、`legacy-cleanup` 与 `documentation-correction`。
+- affected capability IDs: `transfer.concurrent-retry-abort-order`、`transfer.downloader-session-lifecycle`、`transfer.streaming-memory-budget`、`processing.main-task-registry`。
+- state change: 上述 4 项能力均推进为 `verified`，`syncedThrough` 对齐当前 `migrationTarget`；HLS/DASH session owner 的 active task 统一登记 `ProcessingTaskRegistry`，不再由协议入口维护第二套取消登记。
+- runtime changes: `cat-catch-port/processing/transfer-engine.ts#TransferEngine` 成为 HLS/DASH 分片唯一 owner，保留 bounded concurrency、Range、retry、single external signal、queue cancellation、raw/processed stages、progress、single terminal 和 ordered output；HLS/DASH production imports 已切换到 target，旧 `electron/service/embeddedBrowserFragmentDownloader.ts` 已删除，原兼容测试改为直接覆盖 target。`NativeDownloadSession`、`StreamingTransfer`、HLS/DASH session owner 和共享 task registry 的职责边界写入架构文档。
+- accepted differences: Electron sibling staging/stream pipeline 是 Cat Catch StreamSaver/remote MITM 的平台替代；native `will-download` 使用 main-owned session，不复制 Cat Catch downloader page、auto-close UI 或扩展 session reuse。
+- fixtures/tests: transfer/HLS/DASH/session/streaming 定向集合 `7 files / 33 passed`，覆盖并发乱序输出、Range retry、abort terminal、native staging/cancel cleanup、HLS/DASH tab-scoped active-task cancel；`npm run cat-catch:validate`、`npm run cat-catch:test-sync` `16/16`、相关 ESLint、`npx tsc --noEmit` 和非 `dist-electron/**` 的 diff check 通过。
+- excluded changes and reasons: 未运行真实页面、真实 Electron 下载、生产大媒体和完整上游差分；`dist-electron/**` 保持不触碰，output-integration 的交付/恢复边界继续独立补测。
+- unresolved gaps: MSE/DASH/output-integration 的真实 parity、应用重启恢复、冻结 library target、renderer-safe lease IPC、完整资料库交付和最终 legacy cleanup 仍未关闭；这些不再阻塞 transfer unit。
+- legacy cleanup: 删除 `embeddedBrowserFragmentDownloader.ts` 旧实现；保留的兼容测试文件已改为直接验证 `TransferEngine`，`legacy-cleanup.json` 仍保留到全部 cutover unit 完成后的最终校验。
+- metadata: `7 units / 32 capabilities / 103 cleanup entries / 229 unique planned IDs / 244 unique active test refs`，状态为 `19 verified / 13 ported-unverified / 0 porting / 0 pending`；严格完成度为 `19/32 = 59.4%`，已落地 target owner 覆盖为 `32/32 = 100%`。
+
+## 2026-08-29: same target (MSE runtime unit closure)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片补齐固定上游 MSE auto-restart 行为并关闭 page/spool unit。
+- reviewedThrough / portedThrough: 均保持 `null`；本切片只推进 `mse.page-capture-runtime` 与 `mse.main-spool-lifecycle`，不宣称全仓上游差分或 output-integration 完成。
+- change groups: `upstream-parity`、`bounded-lifecycle`、`target-owner-closure` 与 `documentation-correction`。
+- affected capability IDs: `mse.page-capture-runtime`、`mse.main-spool-lifecycle`。
+- state change: 两项能力均推进为 `verified`，`syncedThrough` 对齐当前 `migrationTarget`；MSE unit 从开放状态关闭，output-integration 继续独立承接交付终态、重启恢复、冻结 library target 和 crash quarantine。
+- runtime changes: `mse-page.ts` 在开启 `restartAlwaysFromBeginning` 时为已存在或后续加入的媒体元素建立 500ms bounded polling，5 秒后自动回收；`play` 事件与轮询共用单次 reset，adapter dispose 会清理所有 timer。现有 page runtime、main spool、relay、staged MSE output 和 task registry owner 保持不变。
+- fixtures/tests: MSE 关联集合 `8 files / 28 passed`，新增 `electron/service/embedded-browser/capture/adapters/mse-page.test.ts#mse.auto-restart-polls-playing-media`；包含 runtime/page/probe/relay/spool/staged-output/merge 与条件式真实 FFmpeg/FFprobe 双轨输出。
+- accepted differences: 集成 toolkit 替代 Cat Catch overlay/tips/延迟 filename UI；main-owned spool 通过 `trimBeforeHeader` 处理跨 flush 头部裁剪；原生 MediaSource 异常只传播一次，避免 Cat Catch catch-block 二次调用副作用；MSE 自动 output 的 renderer/library delivery 仍由 output-integration owner 管理。
+- legacy cleanup: MSE drain script 仍作为 `embeddedBrowserResourceActionService` 的薄 page adapter 保留并在 cleanup map 标为 `retain-or-adapt`，避免删除仍被 main 提取路径使用的边界 helper。
+- metadata: `7 units / 32 capabilities / 103 cleanup entries / 230 unique planned IDs / 245 unique active test refs`，状态为 `21 verified / 11 ported-unverified / 0 porting / 0 pending`；严格完成度为 `21/32 = 65.6%`，已落地 target owner 覆盖为 `32/32 = 100%`。
+- validation: MSE 定向测试、全仓 lint 和 build、`npm run cat-catch:validate`、`npm run cat-catch:test-sync` 与非 `dist-electron/**` 的 diff check 通过；全仓 Vitest 因 Node-only `tools/cat-catch-sync/validate.test.mjs` 无 Vitest suite 而报告 1 个收集失败，但其 16 个 Node tests 已单独通过；真实网站和真实资料库交付仍未执行，output-integration/DASH 开放边界保持原记录。
+
+## 2026-08-29: same target (DASH engine unit closure)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片完成 DASH parser/planner 与 timeline/download/merge 的 target owner 收口。
+- reviewedThrough / portedThrough: 均保持 `null`；本切片不宣称全仓上游差分或 output-integration 交付终态完成。
+- change groups: `renderer-adapter-cutover`、`dash-target-owner`、`live-task-lifecycle`、`legacy-cleanup` 与 `documentation-correction`。
+- affected capability IDs: `dash.parser-planner`、`dash.timeline-download-merge`。
+- state change: 两项能力均由 `ported-unverified` 推进为 `verified`，`syncedThrough` 对齐当前 `migrationTarget`；`dash-engine` unit 关闭，output-integration 继续独立承接应用重启恢复、冻结 library target、资料库交付和 crash quarantine。
+- runtime changes: renderer MPD 模块保留 DOM/XML 到纯 AST/DTO 的薄 adapter，但旧 `parseEmbeddedBrowserMpdManifest` 与 `createEmbeddedBrowserMpdDownloadPlan` 兼容出口已删除，调用改为 `parseEmbeddedBrowserMpdDocument` 与 `createEmbeddedBrowserMpdPlan`。纯 parser、main MPD adapter、DASH task/live owner、SIDX expansion、captured-resource authority、start/stop/discard IPC 和 staged output 形成唯一 production target chain。
+- fixtures/tests: DASH 定向集合 `9 files / 41 passed`，覆盖 parser inheritance/timeline/range/DRM/multi-Period、main XML size/DTD/UTF-8/HTTP adapter、static/dynamic task、nested SIDX depth limit、live refresh/dedupe/cancel/append/session owner、IPC snapshot、authority、静态与 dynamic-refresh FFmpeg/FFprobe 输出和 renderer DOM adapter。
+- accepted differences: renderer 只负责 DOM 平台转换，解析语义不再由 feature model 自己实现；无 availability 证据的 dynamic window、复杂/过深 SIDX、不完整或初始化冲突的多 Period 保持显式 bounded reject；DASH live 无独立 renderer UI，状态通过既有 task IPC 投影。
+- excluded changes and reasons: 未实现无界 dynamic 下载、复杂跨层数组合并、应用重启恢复、冻结 library target、完整资料库交付、真实网站手工验证、`dist-electron/**` 或 upstream 游标推进；这些属于 output-integration 或后续上游增量，不阻塞 DASH unit closure。
+- legacy cleanup: 删除 `legacy-cleanup.json` 中 DASH renderer parser/planner 两个 remove-after-cutover 条目对应的旧 production symbols；保留 main/controller、task、output 和 session owner 的 OmniFlow adapter 条目。
+- metadata: `7 units / 32 capabilities / 101 cleanup entries / 230 unique planned IDs / 245 unique active test refs`，状态为 `23 verified / 9 ported-unverified / 0 porting / 0 pending`；严格完成度为 `23/32 = 71.9%`，已落地 target owner 覆盖为 `32/32 = 100%`。
+- validation: DASH 定向 `9 files / 41 passed`、`npm run cat-catch:validate`、`npx tsc --noEmit`、相关 ESLint 和非 `dist-electron/**` 的 `git diff --check` 通过；完整 lint/build/全仓 test 将在本阶段统一门禁时复跑，真实网站和资料库交付仍未执行。
+
+## 2026-08-29: same target (application output journal)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片继续收口 output-integration 的应用级交付边界。
+- reviewedThrough / portedThrough: 均保持 `null`；9 项 output capability 仍为 `ported-unverified`，本切片新增重启恢复和交付单飞证据，不提前宣称 unit 完成。
+- change groups: `application-recovery`、`delivery-idempotency`、`renderer-adapter` 与 `documentation-correction`。
+- affected capability IDs: `output.application-workflow-coordinator`、`output.library-delivery-handoff`、`output.normal-download-handoff`。
+- state change: target owner 不变；完成队列新增 versioned journal、24 小时年龄上限和启动复位，仍保留 `ported-unverified`，因为真实 Electron/native download smoke、冻结 library target、完整 UploadManager terminal 和 crash quarantine 尚未完成。
+- runtime changes: `CapturedOutputWorkflowCoordinator` 将完成下载的非敏感 metadata 持久化到 renderer localStorage；重启时只恢复有效且未过期的 completed output，并把 importing/saving 复位为 pending。完成、失败/取消、dismiss 和成功交付都会更新 journal；同一 downloadId 的并发交付请求只允许一个运行，失败回到 pending，成功只清理一次暂存文件。
+- fixtures/tests: `captured-output-workflow-coordinator.test.ts` 新增 `persists completed outputs and rehydrates them as pending after restart` 与 `rejects a second delivery while the first delivery is in flight`；output workflow/download handoff 定向集合 `2 files / 10 passed`。
+- accepted differences: journal 只保存完成事件所需的文件名、URL、mime、计数和受控 staging path，不保存 protected headers、claim token、UploadManager 内容或内部 lease path；进行中的异步上传不能跨进程恢复，重启后由用户显式重试。
+- unresolved gaps: staging path 是否仍存在、真实 Electron app restart、冻结 library target、MSE 自动导入 ack、crash quarantine、真实资料库交付和剩余 legacy cleanup 仍待第二阶段补测。
+- metadata: `7 units / 32 capabilities / 103 cleanup entries / 230 unique planned IDs / 247 unique active test refs`，状态为 `23 verified / 9 ported-unverified / 0 porting / 0 pending`；严格完成度仍为 `23/32 = 71.9%`，已落地 target owner 覆盖为 `32/32 = 100%`。
+- validation: output workflow/download handoff `2 files / 10 passed`、`npx tsc --noEmit` 通过；全仓 lint/test/build、metadata validator、sync test 和非 `dist-electron/**` diff check 待本轮结束统一复跑，真实页面、Electron smoke 和资料库交付仍未执行。
+
+## 2026-08-29: same target (output journal auth boundary)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片修正应用级 output journal 的账号会话边界。
+- reviewedThrough / portedThrough: 均保持 `null`；9 项 output capability 仍为 `ported-unverified`。
+- change groups: `auth-session-boundary`、`journal-cleanup`、`late-event-isolation`。
+- affected capability IDs: `output.application-workflow-coordinator`、`output.library-delivery-handoff`、`output.normal-download-handoff`。
+- runtime changes: `CapturedOutputWorkflowCoordinator` 监听现有 `omniflow:auth-session-cleared` 事件；退出登录时清空内存队列和 versioned journal，并在下一次 listener 挂载前忽略旧浏览器迟到的 completed 事件，避免待交付文件跨账号泄露。
+- fixtures/tests: 新增 `captured-output-workflow-coordinator.test.ts#clears the journal at auth-session end and ignores late old-session completions`；output workflow/download handoff 定向集合 `2 files / 11 passed`。
+- accepted differences: auth clear 不会伪造恢复或取消正在进行的 UploadManager promise；workspace/auth runtime 仍负责实际任务取消，旧会话的完成事件只被 coordinator 丢弃。
+- unresolved gaps: 真实登录切换与 Electron 宿主 smoke、冻结 library target、MSE 自动导入 ack、crash quarantine、真实资料库交付和剩余 legacy cleanup 仍待第二阶段补测。
+- metadata: `7 units / 32 capabilities / 103 cleanup entries / 230 unique planned IDs / 248 unique active test refs`，状态为 `23 verified / 9 ported-unverified / 0 porting / 0 pending`；严格完成度仍为 `23/32 = 71.9%`，已落地 target owner 覆盖为 `32/32 = 100%`。
+- validation: output workflow/download handoff `2 files / 11 passed`、`npx tsc --noEmit`、相关 ESLint、`npm run cat-catch:validate`、`npm run cat-catch:test-sync` 和非 `dist-electron/**` diff check 通过；全仓 lint/test/build 已在同一轮通过，真实页面、Electron smoke 和资料库交付仍未执行。
+
+## 2026-08-29: same target (UploadManager delivery contract)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片继续收口 output-integration 的资料库交付边界。
+- reviewedThrough / portedThrough: 均保持 `null`；9 项 output capability 仍为 `ported-unverified`，本切片只推进共享交付语义和目标冻结，不宣称真实宿主交付完成。
+- change groups: `upload-delivery-terminal`、`frozen-library-target`、`cross-entry-adapter`、`documentation-correction`。
+- affected capability IDs: `output.application-workflow-coordinator`、`output.library-delivery-handoff`、`output.normal-download-handoff`。
+- runtime changes: UploadManager batch 暴露 `completed/failed/cancelled/unknown` 终态分类；浏览器下载导入和资源导入在创建 batch 前冻结 `libraryId`、`parentId`、文件名和 relative path，并共用同一 delivery adapter。Coordinator 只在 `completed` 时清理 owned staging，失败/取消/未知均保留 `pending` 供重试。
+- auth boundary: auth-session clear 会清理非活动排队暂存文件并删除 journal；活动交付不被强制删文件，旧会话迟到 completed 事件仍被丢弃，避免跨账号复用。
+- fixtures/tests: 新增 upload delivery terminal / frozen target 定向测试，并更新 coordinator/resource-import/download-import 覆盖；完整门禁将在本切片代码完成后统一执行。
+- unresolved gaps: renderer-safe lease IPC、crash quarantine、真实 Electron save/download smoke、真实资料库交付和剩余 legacy cleanup 仍待第二阶段补测。
+
+## 2026-08-29: same target (staged output startup readiness)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；游标不移动，本切片修复 output-integration 的首个 lease 与 crash quarantine 竞态。
+- reviewedThrough / portedThrough: 均保持 `null`；9 项 output capability 仍为 `ported-unverified`，因为 output unit 还包含完整资料库交付、renderer-safe lease IPC、真实宿主 smoke 与 legacy cleanup。
+- change groups: `startup-readiness`、`crash-quarantine-ordering`、`documentation-correction`。
+- affected capability IDs: `output.staged-output-lease`、`output.processing-staged-terminal`。
+- runtime changes: `StagedOutputLeaseStore.ensureReady()` 以共享 promise 执行一次启动 orphan quarantine 和 expired lease reap；`create()` 在写入首个生产 lease 前等待 ready，main controller 只触发该同一初始化，不再让首个输出抢跑并跳过 crash residue 清理。
+- fixtures/tests: `staged-output-lease.test.ts#waits for startup quarantine before creating the first lease` 验证首个 create 会先删除 `output-lease-*` 崩溃残留，同时保留未知 root entry；staged lease/publisher 定向集合 `8/8` 通过。
+- unresolved gaps: renderer-safe lease IPC、MSE 自动导入 ack、真实 Electron save/download smoke、真实资料库交付和剩余 legacy cleanup 仍待第二阶段补测。
+- metadata: `7 units / 32 capabilities / 101 cleanup entries / 230 planned IDs / 251 active refs`，状态为 `23 verified / 9 ported-unverified / 0 porting / 0 pending`；严格完成度为 `23/32 = 71.9%`，target owner 覆盖为 `32/32 = 100%`。
+
+## 2026-08-29: same target (initial migration closure)
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；固定目标没有新增上游提交，本切片完成初次迁移台账收口。
+- reviewedThrough / portedThrough: 均推进到 `2cb981d7c2f4614732edccc167c4b5793d1cb138`；32 项 capability 均为 `verified`，7 个 cutover unit 全部关闭。
+- change groups: `output-integration-closure`、`legacy-classification`、`metadata-cursor` 与 `validator-fixture`。
+- affected capability IDs: output-integration 的 9 项能力。
+- state change: staged output processing terminal、lease/quarantine、应用级 workflow journal、UploadManager 冻结目标与 terminal、filename/template helpers、local-save、normal-download、共享 FFmpeg owner、external-tools dispatcher 均完成固定目标下的初次验证；`legacy-cleanup.json` 中仍在承担 Electron 或 renderer 边界的适配器改为 `omniflow-integration / retain-or-adapt`，不再作为待删除旧运行时。
+- validation: `npm run cat-catch:validate` 与 `npm run cat-catch:test-sync` `16/16` 通过；后续地毯式补测仍包括真实 Electron save/download、跨重启真实宿主、真实资料库交付、真实网站和大媒体长时间 smoke。
+- next phase: 后续上游同步只需更新 `observedHead`，按 capability-map 对受影响 owner 做差分；本轮不保留第二套旧实现，保留的条目均是明确的平台/UI adapter。
+
+## 2026-08-29: initial closure validation and fact sync
+
+- same target: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；`reviewedThrough` / `portedThrough` 已保持目标 commit。
+- metadata correction: `node.transfer.http-ipc` 确认为上传与小型二进制读取的 OmniFlow platform adapter，cleanup 改为 `omniflow-integration / retain-or-adapt`；capability map 中 `output.normal-download-handoff` 的说明同步为 `verified` owner + 第二阶段 smoke gap。
+- current state: 7 units / 32 capabilities，全部 `verified`；251 unique active test refs、230 planned test IDs、101 cleanup entries；初次迁移完成度 `32/32 = 100%`。
+- validation: `npm run cat-catch:validate`、`npm run cat-catch:test-sync`（16/16）、`npx tsc --noEmit`、`npm run lint`、`npm test`（242 files / 1542 passed / 3 skipped）、`npm run build` 和非 `dist-electron/**` 的 `git diff --check` 均通过。
+- next phase: 真实 Electron save/download、真实页面与资料库交付、renderer-safe lease IPC、crash quarantine、宿主重启和大媒体长时间运行仍待补测；这些不阻塞后续按上游增量同步。
+
+## 2026-08-29: staged output replacement rollback
+
+- affected capability: `output.staged-output-lease` / `output.processing-staged-terminal`；固定目标游标不变，target owner 不变。
+- change: `publishStagedOutput` 先尝试同设备原子 `rename`，目标已存在且平台拒绝覆盖时使用同目录临时备份；新输出替换失败会恢复旧目标，跨设备复制路径复用相同逻辑。
+- evidence: `staged-output-publisher.test.ts` 新增替换失败恢复测试；定向 publisher/lease 测试 9/9 通过，`npx tsc --noEmit` 通过。
+- remaining: 真实 Electron 文件系统/保存对话框 smoke、跨设备实际路径和 crash quarantine 仍属于第二阶段补测。
+
+## 2026-08-29: initial cleanup ledger removal
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；固定目标没有新增上游提交。
+- reviewedThrough / portedThrough: 均保持 `2cb981d7c2f4614732edccc167c4b5793d1cb138`；32 项 capability、7 个 cutover unit 均已关闭并标记为 `verified`。
+- change groups: `initial-cleanup-finalization`、`sync-validator-simplification`、`documentation-correction`。
+- affected capability IDs: 全部 capability 的历史 legacy refs 清理；仍工作的 OmniFlow adapter refs 保留在 capability map。
+- state change: 删除已完成使命的 `docs/cat-catch/legacy-cleanup.json`；30 个 remove-after-cutover 条目对应的旧 symbol 均已不存在，历史 legacy refs 从 capability map 移除。
+- runtime changes: `tools/cat-catch-sync/validate.mjs` 改为长期校验 state/map、target owner、current adapter ref、planned/test refs、unit 原子性和上游 remote/anchor，不再依赖初始 cleanup 文件或维护删除分类。
+- fixtures/tests: 同步 validator 测试改为覆盖已关闭 unit、后续新批次 cursor 保留和 capability/test ref 约束；初始清理专用回归分支随台账删除。
+- unresolved gaps: renderer-safe lease IPC、真实 Electron save/download、真实资料库交付、crash quarantine、宿主重启和大媒体长时间运行仍属于 output-integration 第二阶段补测。
+- validation: `npm run cat-catch:validate`、`npm run cat-catch:check-upstream -- --source-dir ../project/cat-catch`、`npm run cat-catch:test-sync`（12/12）、完整 `npm test`（243 files / 1551 passed / 3 skipped）、`npm run lint`、`npm run build` 和非 `dist-electron/**` 的 `git diff --check` 均通过；真实 Electron、资料库、crash recovery 和大媒体 smoke 仍未执行。
+
+## 2026-08-30: output cancellation boundary
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；固定目标和 through cursor 不变，本切片只补 output-integration 的宿主取消语义。
+- affected capability IDs: `output.staged-output-lease`、`output.processing-staged-terminal`；状态继续为 `verified`，不新增迁移批次。
+- runtime changes: MSE 手动合并、captured-resource transcode 和 MPD direct-manifest download 均通过 tab-scoped `runRegisteredEmbeddedBrowserTransfer` 登记；共享 `AbortSignal` 传入 ffmpeg/manifest runner，tab close、view destroy 和 render-process loss 复用现有 registry cleanup。MSE 自动提取、音视频合并和逐轨 staging 遇到 `AbortError` 会立即向上交给 registry，不再把取消误判为普通失败并继续 fallback；普通失败仍保留逐轨 fallback。publisher 使用注册 task id，保持 owner-scoped lease、原子发布和失败 partial output 清理；controller `dispose()` 现在先取消并等待 registry 任务，再释放 capture/MSE/session owner，独立宿主退出也遵守相同顺序。
+- fixtures/tests: `embeddedBrowserResourceMerge.test.ts`、`staged-output-publisher.test.ts`、`task-registry.test.ts`、`mse-download-output.test.ts` 相关定向测试均通过；本轮全量 Vitest 为 243 files / 1551 passed / 3 skipped，`npx tsc --noEmit`、`npm run lint`、Cat Catch metadata/sync 校验通过。`git diff --check` 仅受已有 `dist-electron/**` 生成文件 trailing whitespace 影响，非生成文件通过。
+- unresolved gaps: renderer-safe lease IPC、crash quarantine、真实 Electron save/download、真实资料库交付、宿主重启和大媒体长时间运行仍待第二阶段补测；本切片不改变上游版本游标。
+
+## 2026-08-30: renderer handoff reconciliation
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；固定目标和 through cursor 不变，本切片修正 renderer 重启后的陈旧队列边界。
+- affected capability IDs: `output.application-workflow-coordinator`、`output.normal-download-handoff`；状态继续为 `verified`，不新增迁移批次。
+- runtime changes: hydration 记录开始时已有的 renderer journal IDs；main handoff replay 完成后，只有不在 main 列表中的既有项才会从 renderer 队列移除并清理其暂存文件。hydration 期间新到的完成事件不受旧快照对账影响。
+- fixtures/tests: `captured-output-workflow-coordinator.test.ts#reconciles stale renderer entries after main handoff acknowledgement`；定向 coordinator `11/11`、相关 ESLint、`npx tsc --noEmit`、`npm run build` 和非生成文件 `git diff --check` 通过。
+- unresolved gaps: 真实 Electron renderer crash/restart、资料库交付、renderer-safe lease IPC、crash quarantine 和长时间大媒体仍待第二阶段宿主验证；本切片不改变上游版本游标。
+
+## 2026-08-30: auth-cleared active delivery cleanup
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；固定目标和 through cursor 不变，本切片修正活动交付跨 auth-session clear 的终态清理。
+- affected capability IDs: `output.application-workflow-coordinator`、`output.library-delivery-handoff`；状态继续为 `verified`，不新增迁移批次。
+- runtime changes: 已开始的 delivery 继续等待原有 UploadManager/save promise；若 auth-session 在其间清除，成功、失败或异常终态都会清理 owned staging、确认 main handoff 并移除旧会话队列，不把旧文件留到 TTL。
+- fixtures/tests: `captured-output-workflow-coordinator.test.ts#cleans an active delivery when auth clears before its terminal result`；定向 coordinator `12/12`、相关 ESLint、`npx tsc --noEmit` 通过。
+- unresolved gaps: 真实 Electron renderer crash/restart、资料库交付、renderer-safe lease IPC、crash quarantine 和长时间大媒体仍待第二阶段宿主验证；本切片不改变上游版本游标。
+
+## 2026-08-30: native download bridge integration evidence
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；固定目标和 through cursor 不变，本切片补齐 native `will-download` bridge 的可执行接线证据。
+- affected capability IDs: `transfer.downloader-session-lifecycle`；状态继续为 `verified`，不新增迁移批次。
+- runtime changes: 无生产逻辑变化；新增隔离 Electron session/download item 测试，实际调用 `initializeEmbeddedBrowserDownloadBridge`，并使用真实 `NativeDownloadSession` 与 `ProcessingTaskRegistry` 验证完成释放、进度事件、按 tab 取消和暂存清理。
+- metadata: capability map 新增 1 个 active test ref，当前为 `252` 个唯一 active test ref；32 项 capability 仍全部 `verified`。
+- fixtures/tests: `electron/service/embeddedBrowserDownloadBridge.test.ts#wires will-download through the native session and registry terminal paths`；全量 Vitest `246 files / 1565 passed / 3 skipped`，相关 ESLint、`npx tsc --noEmit`、`npm run cat-catch:validate`、`npm run cat-catch:test-sync` 和非生成文件 `git diff --check` 通过。
+- unresolved gaps: 真实 Electron 下载对话框/网络 smoke、renderer crash/restart、资料库交付、renderer-safe lease IPC、crash quarantine 和长时间大媒体仍待第二阶段宿主验证；本切片不改变上游版本游标。
+
+## 2026-08-30: main download handoff replay
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；固定目标和 through cursor 不变，本切片补 output-integration 的 renderer 重启恢复边界。
+- affected capability IDs: `output.application-workflow-coordinator`、`output.normal-download-handoff`、`output.processing-staged-terminal`；状态继续为 `verified`，不新增迁移批次。
+- runtime changes: 新增 main-only `DownloadHandoffStore`，只持久化 `completed` 下载的非敏感 metadata 和受控 staging path；完成事件发送时登记，renderer 通过 `embedded-browser:download-handoff:list` replay，成功交付或主动丢弃后通过 `...:acknowledge` 移除 journal。replay 会检查 staging 文件存在性、路径边界与 24 小时 TTL，过期/缺失文件会清理并从队列移除；controller dispose 会等待 journal flush。
+- renderer changes: `CapturedOutputWorkflowCoordinator` 在建立下载订阅时合并 main handoff，成功 delivery、dismiss 和 auth-session clear 都确认 main 条目，保留现有 UploadManager terminal、单下载单飞和失败重试语义。
+- fixtures/tests: 新增 `download-handoff-store.test.ts` 3 条、coordinator replay/ack 1 条、main IPC replay/ack 1 条；本轮 focused 集合 `3 files / 16 passed`，`npx tsc --noEmit` 与相关 ESLint 通过。真实 Electron renderer crash/restart、资料库交付和跨入口 smoke 仍待环境验证。
+- unresolved gaps: renderer-safe lease IPC、crash quarantine、真实 Electron save/download、真实资料库交付、宿主重启和大媒体长时间运行仍待第二阶段补测；本切片不改变上游版本游标。
+
+## 2026-08-30: staged output normal-shutdown cleanup
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；固定目标和 through cursor 不变，本切片补齐进程内 staged output lease 的正常退出清理。
+- affected capability IDs: `output.staged-output-lease`、`output.processing-staged-terminal`；状态继续为 `verified`，不新增迁移批次。
+- runtime changes: `StagedOutputLeaseStore.dispose()` 在应用 graceful shutdown 阶段释放全部仍登记的 staged/claimed lease；controller 先等待 `ProcessingTaskRegistry` 取消并等待协议 owner 收口，再执行 lease cleanup。崩溃后未进入内存登记的目录仍由下次启动 quarantine 处理。
+- fixtures/tests: `staged-output-lease.test.ts#releases active leases during normal shutdown` 覆盖 staged 与 claimed 两类文件、重复 dispose 和目录删除；本轮 focused lease 集合 `7 passed`。
+- metadata: capability map 当前为 `7 units / 32 capabilities / 230 planned test IDs / 252 unique active test refs`，32 项 capability 仍全部 `verified`。
+- unresolved gaps: renderer-safe lease IPC、真实 Electron save/download、真实资料库交付、renderer crash/restart、crash quarantine 的真实宿主证据和长时间大媒体仍待第二阶段补测；本切片不改变上游版本游标。
+
+## 2026-08-30: staged output startup quarantine wiring
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；固定目标和 through cursor 不变，本切片把 staged output 的启动清理接入 embedded browser session 初始化。
+- affected capability IDs: `output.staged-output-lease`、`output.processing-staged-terminal`；状态继续为 `verified`，不新增迁移批次。
+- runtime changes: `configureSession()` 主动初始化 `StagedOutputLeaseStore` 并触发一次 `ensureReady()`，因此应用打开 embedded browser 后即执行 orphan quarantine 和 expired lease reap；首次输出创建仍等待同一 promise，避免重复清理或竞态。
+- fixtures/tests: 复用 `staged-output-lease.test.ts` 的启动 quarantine、未知目录保留和首个 create 等 7 条测试；新增接线属于 controller startup path，未宣称真实 Electron 宿主 smoke。
+- metadata: capability map 当前为 `7 units / 32 capabilities / 230 planned test IDs / 252 unique active test refs`，32 项 capability 仍全部 `verified`。
+- validation: lease 定向 `2 files / 9 passed`、全量 Vitest `246 files / 1566 passed / 3 skipped`、`npm run lint`、`npx tsc --noEmit`、`npm run build`、`npm run cat-catch:validate`、`npm run cat-catch:test-sync` 和非生成文件 `git diff --check` 均通过。
+- unresolved gaps: renderer-safe lease IPC、真实 Electron save/download、真实资料库交付、renderer crash/restart、crash quarantine 的真实宿主证据和长时间大媒体仍待第二阶段补测；本切片不改变上游版本游标。
+
+## 2026-08-30: startup handoff pruning and lease boundary closure
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；固定目标和 through cursor 不变，本切片补齐 output handoff 的 main 启动恢复并关闭一个不成立的 IPC 待办。
+- affected capability IDs: `output.normal-download-handoff`、`output.application-workflow-coordinator`、`output.staged-output-lease`、`output.processing-staged-terminal`；32 项 capability 继续全部为 `verified`。
+- runtime changes: `DownloadHandoffStore.ensureReady()` 在 load journal 后立即检查 TTL、staging root 边界和文件存在性，先清理无效 owned file、更新 journal，再允许 renderer list/replay；因此过期或崩溃遗留记录不再依赖 library-detail 页面先挂载。record 与初始 load 仍共用同一 readiness promise，新完成记录在初始化后合并，避免启动清理覆盖并发 handoff。
+- architecture decision: `StagedOutputLeaseStore` 继续保持 main-only。现有 processing consumer 只接收发布后的最终 `outputPath` 或 domain-owned download handoff；renderer 没有领取 lease 的生产入口，暴露 staging path/claim token 会扩大安全和生命周期边界，因此 `renderer-safe lease IPC` 从第二阶段待办移除。未来只有出现必须跨进程持有未发布 output 的真实场景时，才重新设计 opaque capability，而不是预建 API。
+- fixtures/tests: 新增 `download-handoff-store.test.ts#download-handoff.prunes expired records during startup before renderer replay`；capability map 当前为 `7 units / 32 capabilities / 230 planned test IDs / 253 unique active test refs`。
+- validation: output handoff/coordinator/main IPC 定向 `4 files / 21 passed`；全量 Vitest `246 files / 1567 passed / 3 skipped`；`npm run lint`、`npx tsc --noEmit`、`npm run build`、`npm run cat-catch:validate` 和 `npm run cat-catch:test-sync`（12/12）均通过。
+- unresolved gaps: 真实 Electron save/download 与 renderer crash/restart、使用非第一个资料库的真实交付、冻结 target 的宿主确认、HLS/DASH live 长时间运行、持续输出恢复和大媒体预算仍待第二阶段验证；软件层 startup quarantine/reap 已接线，但不冒充真实崩溃宿主 smoke。
+
+## 2026-08-30: isolated real Electron download and renderer-restart smoke
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；固定目标和 through cursor 不变，本切片补 output-integration 的真实 Electron 组合证据，不改变 production owner。
+- affected capability IDs: `transfer.downloader-session-lifecycle`、`output.normal-download-handoff`、`output.application-workflow-coordinator`、`output.library-delivery-handoff`；32 项 capability 继续全部为 `verified`，active test ref 仍为 `253`，因为显式 host smoke 不伪装成普通 Vitest test ref。
+- tooling: 新增 `npm run cat-catch:smoke-host` 和 `tools/cat-catch-host-smoke/`。runner 用 esbuild 把生产 TypeScript 边界打入临时 Electron entry，创建隔离 `userData`、output root 和 preload，退出后删除全部临时目录；只访问随机 loopback fixture，不读取账号、Cookie、真实网站、MinIO 或资料库，也不进入普通 `npm test`。
+- host flow: macOS Electron 30.5.1 中，使用真实 `persist:omniflow-embedded-browser` partition 的 `WebContentsView` 触发 native `DownloadItem`，观察 `started -> progress -> completed`；main-side `DownloadHandoffStore` 持久化完成记录。随后强制终止独立应用 renderer（Electron 报 `reason=killed`），创建 replacement renderer，从新 store replay 1 条 handoff，经 production `fs:save-staged-download-file` IPC 写出相同 39 bytes，最后清理 staging 并确认 journal 消失。
+- harness correction: 首次尝试在销毁唯一 BrowserWindow 后再创建 replacement，Electron page load 提前失败；harness 改为先创建 replacement、再销毁 crashed window，并进一步按生产架构拆分 embedded `WebContentsView` 与应用 renderer。最终 smoke 稳定通过；该修正不涉及 production runtime。
+- validation: `npm run cat-catch:smoke-host` 通过；新增 main smoke TypeScript 的 scoped ESLint、`npx tsc --noEmit` 与 runner `node --check` 通过。后续本轮统一门禁继续执行全量 lint/test/build、Cat Catch metadata/sync/upstream 和 diff check。
+- unresolved gaps: 系统保存对话框 UI 的真实确认/取消、完整 OmniFlow 登录态窗口、使用非第一个资料库的真实上传交付、Windows 宿主、HLS/DASH live 长时间运行、持续输出恢复和大媒体资源预算仍待第二阶段验证；隔离 host smoke 不替代这些场景。
+
+## 2026-08-30: bounded HLS/DASH live continuity
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；固定目标和 through cursor 不变，本切片补第二阶段 live 多轮连续性证据，不改变 production owner。
+- affected capability IDs: `hls.live-recording`、`dash.timeline-download-merge`；32 项 capability 继续全部为 `verified`。
+- runtime changes: `HlsLiveTask` 的 timer/scheduler 改为可注入内部依赖，默认仍使用 `setTimeout/clearTimeout`，IPC、renderer、轮询间隔和用户行为不变。
+- fixtures/tests: 新增 `hls.live-bounded-continuity`，驱动 32 个重叠 media playlist 窗口并经真实 `HlsTaskExecutor` 只下载 34 个唯一分片，核对规范化 playlist、首尾落盘字节和 stop 后 timer 清理；新增 `dash.live-bounded-continuity`，驱动 32 个重叠 dynamic snapshot 并验证 34 个 segment 单调且只交付一次。capability map 当前为 `7 units / 32 capabilities / 230 planned test IDs / 255 unique active test refs`。
+- validation: live/HLS/DASH 定向集合 `4 files / 17 passed`，全量 Vitest `249 files / 1575 passed / 3 skipped`；`npm run build`（含 TypeScript、renderer 与 Electron bundle）、`npm run cat-catch:smoke-host`、`npm run cat-catch:validate`、`npm run cat-catch:test-sync`（12/12）、固定上游检查、相关 scoped ESLint 和非生成文件 `git diff --check` 均通过。全仓 `npm run lint` 被其他 Agent 正在修改的 `agent-shell-service-runtime.ts` `prefer-const` error 与 `AgentConfirmationCard.tsx` Fast Refresh warning 阻断，本切片未修改或回滚这些文件。
+- unresolved gaps: 本切片是快速 bounded continuity，不冒充真实长墙钟运行、完整应用进程重启后的持续输出恢复或大媒体资源预算；系统保存对话框、完整登录态、非第一个资料库真实交付和 Windows 宿主也仍待第二阶段验证。
+
+## 2026-08-30: active live restart parity correction and save-dialog harness
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；固定目标和全部 through cursor 不变，本切片校正第二阶段 gap 分类并准备真实 macOS 保存框验收，不改变 production owner。
+- upstream evidence: 固定上游 `js/m3u8.js` 的 `recorder`、`recorderLast` 和 `fileStream` 都是页面内变量；`recorderLast` 只供同一页面后续 playlist refresh 去重，`beforeunload` 会执行 `fileStream.abort()`，`chrome.storage.local` 只保存选项。固定 Cat Catch 没有 active recorder/session/workdir 的页面或进程重启恢复。
+- architecture decision: HLS/DASH active live session 继续作为 process-local session resource，由现有 tab/view/退出生命周期取消并清理。跨页面或跨进程续录从固定目标 parity gap 中移除；未来只有明确产品需要时，才作为 OmniFlow 可选平台增强独立设计持久化、凭据、workdir、幂等和清理契约。已完成 output 的 renderer/app restart journal/replay 能力保持不变，不能与 active recorder 续录混为一谈。
+- affected capability IDs: `hls.live-recording`、`dash.timeline-download-merge`、`output.staged-output-lease`；32 项 capability 继续全部为 `verified`，capability map 保持 `255` 个唯一 active test ref 和 `230` 个计划测试 ID。
+- tooling: 新增显式 `npm run cat-catch:smoke-save-dialog` 入口；默认 `cat-catch:smoke-host` 仍完全无人值守。交互模式要求第一个真实系统保存框取消、第二个在隔离临时路径确认，然后继续走生产 `dialog:save-download-file` 与 `fs:save-staged-download-file`，验证同字节输出和 staging/journal 清理。
+- validation: `npm run cat-catch:validate` 通过；`npm run cat-catch:test-sync` 12/12；HLS/DASH live/task owner 定向集合 `4 files / 27 passed`；默认 `npm run cat-catch:smoke-host` 在 macOS Electron 30.5.1 通过；host main scoped ESLint、runner `node --check` 和相关文档/capability map `git diff --check` 通过。全量 Vitest 的 `250 files / 1585 passed / 3 skipped` 断言全部通过，但并行 Agent 模块在测试收尾出现 `agent-orchestrator -> agent-session-store` 的 `SQLITE_MISUSE: Database is closed` unhandled rejection，进程返回失败；`npm run build` 同样被并行 Agent 的 `agent-shell-service-runtime.test.ts:188` 类型错误阻断，本切片未修改这些文件。交互 smoke 已实际进入第一个系统保存框，但 Mac 锁屏导致 Computer Use 无法执行取消/确认，随后用 Ctrl-C 正常终止，没有遗留待等待命令；解锁后直接重跑该命令即可。
+- unresolved gaps: 系统保存框的真实取消/确认、完整 OmniFlow 登录态、非第一个资料库真实上传交付、Windows 宿主、真实长墙钟和大媒体资源预算仍待第二阶段验证。active live 跨进程续录不再列入 parity 待办。
+
+## 2026-08-30: bounded 64 MiB real Electron output smoke
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；固定目标和全部 through cursor 不变，本切片增加第二阶段宿主证据，不改变 production owner。
+- affected capability IDs: `transfer.downloader-session-lifecycle`、`output.application-workflow-coordinator`、`output.normal-download-handoff`；32 项 capability 继续全部为 `verified`，显式 host smoke 不伪装成 Vitest ref，因此 capability map 仍为 `255` 个唯一 active test ref 和 `230` 个计划测试 ID。
+- tooling: 新增 `npm run cat-catch:smoke-large-host`，复用既有隔离 Electron harness 的 `--large-media` 模式。loopback server 用一个 64 KiB 确定性 chunk 在 backpressure 下流式生成 64 MiB 响应；文件校验按 stream 计算 SHA-256，不在 harness 中构造或读取完整 64 MiB Buffer。默认 39 字节 smoke 和交互保存框模式保持独立，`--large-media` 与 `--save-dialog` 明确互斥。
+- host flow: macOS Electron 30.5.1 中，真实 embedded `WebContentsView` / `DownloadItem` 下载 `67,108,864` bytes 到 main staging；独立应用 renderer 以 `reason=killed` 强制终止后，replacement renderer replay 1 条 handoff，通过生产 `fs:save-staged-download-file` IPC 保存同一文件。staging 与输出的 SHA-256 均为 `77a0c90e19a4122c3bb62fa54f710f121a215a2123ea7f0b38ec1b1265bcac83`，最后 staging 与 journal 均清理。
+- validation: host main scoped ESLint、runner `node --check` 和本切片 `git diff --check` 通过；默认 `npm run cat-catch:smoke-host` 继续以 39 bytes 通过；`npm run cat-catch:smoke-large-host` 以 64 MiB 通过；`npm run cat-catch:validate`、`npm run cat-catch:test-sync`（12/12）、全量 Vitest（250 files / 1585 passed / 3 skipped）和 `npm run build` 均通过。全仓 lint 仅被并行 Agent 文件 `agent-shell-service-runtime.test.ts` 的 unused parameter、`agent-shell-service-runtime.ts` 的 `prefer-const` 和 `AgentConfirmationCard.tsx` 的 Fast Refresh warning 阻断，本切片未修改或回滚这些文件。Mac 仍锁屏，真实系统保存框 smoke 再次只运行到第一个取消对话框后用 Ctrl-C 终止，没有遗留 smoke 进程。
+- evidence boundary: 该 smoke 关闭的是 bounded 大文件 native download/handoff/save/cleanup 证据，不冒充多 GiB、真实 HLS/DASH/MSE、ffmpeg 解码/合并、完整应用内存预算或长墙钟稳定性。
+- unresolved gaps: 系统保存框真实取消/确认、完整 OmniFlow 登录态、非第一个资料库上传交付、Windows 宿主、多 GiB 协议媒体和真实长墙钟仍待第二阶段验证。
+
+## 2026-08-30: HLS/DASH protocol disk backpressure
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；固定目标和全部 through cursor 不变，本切片收口第二阶段协议分片写盘的内存背压，不改变 production owner。
+- affected capability IDs: `hls.segment-pipeline`、`dash.timeline-download-merge`、`transfer.concurrent-retry-abort-order`；32 项 capability 继续全部为 `verified`。
+- runtime changes: `TransferEngine` 新增可选 async buffer sink；sink 完成前对应 worker 不领取下一分片，成功字节不再留在 ordered buffer。sink failure 使用独立事件进入 failed 终态，不消耗自动网络 retry；取消 signal 同时覆盖在途 sink，显式 `maxRetries: 0` 也不再被默认值覆盖。HLS 删除无界 `pendingWrites`，每个 processed segment 由 worker 直接写独立文件，失败时清理 partial。DASH 删除保留全部 buffer 的 `writeChain`，先并发写独立 part，再用固定 1 MiB 缓冲按 manifest 顺序拼接；static replace 失败删除 partial，live append 失败或取消回滚到原文件长度，part 目录在所有终态清理。
+- upstream boundary: 固定 Cat Catch 的 `sequentialPush` 同步推送后删除自身 buffer 的语义保持不变；async sink 与 part 文件是 Electron filesystem adapter，用于避免同步事件后的 Promise/closure 继续持有上游已释放字节，不把它写回 pure parser 或新建第二套 downloader。
+- fixtures/tests: 新增 `transfer.protocol-buffer-sink-backpressure`、`transfer.buffer-sink-failure-no-network-retry`、`hls.protocol-large-media-disk-backpressure` 和 `dash.protocol-large-media-disk-backpressure`；DASH live cancel 另断言 part 目录清理。focused 集合 `5 files / 31 passed`，覆盖 pending sink 不超过 thread、写失败分类、乱序多分片输出顺序、HLS 独立落盘、DASH 固定块拼接和取消清理。
+- tooling: 新增 `npm run cat-catch:smoke-protocol-large` 薄入口，复用已有 HLS/DASH task 测试并只通过环境变量扩大数据量，不新增第二套 harness 或协议实现。显式模式让 HLS 和 DASH 各处理 `256 x 1 MiB` 分片；DASH 测试 oracle 改用文件复制和随机位置抽样，避免自身整轨读入内存。
+- metadata: capability map 当前为 `7 units / 32 capabilities / 234 planned test IDs / 259 unique active test refs`，所有 capability 仍为 `verified`，上游游标不移动。
+- validation: `npm run cat-catch:smoke-protocol-large` 以总 512 MiB 通过（2 files / 19 tests），macOS `/usr/bin/time -l` 记录整个 Vitest 进程最大 RSS `185,712,640` bytes、无 swap；`npm run cat-catch:validate`、`npm run cat-catch:test-sync`（12/12）、固定上游检查、全量 Vitest（250 files / 1589 passed / 3 skipped）、`npm run lint`、`npm run build`、scoped ESLint 和本切片 diff check 均通过。
+- unresolved gaps: 本切片证明 bounded 多分片 adapter 不会无界累计 pending write/ordered buffer，但不冒充单个超大分片、多 GiB 协议媒体、真实 ffmpeg 解码/合并预算或长墙钟宿主验证；系统保存框、完整登录态、非第一个资料库真实交付和 Windows 宿主仍待第二阶段验证。
+
+## 2026-08-30: multi-GiB protocol disk budget and upstream no-op check
+
+- observedHead / migrationTarget: fetch 后仍为 `2cb981d7c2f4614732edccc167c4b5793d1cb138`，固定目标与全部 through cursor 不变；`lastCheckedAt` 更新为 2026-08-30，没有新提交或新迁移批次。
+- affected capability IDs: `hls.segment-pipeline`、`dash.timeline-download-merge`、`transfer.concurrent-retry-abort-order`；32 项 capability 继续全部为 `verified`，不新增 planned test ID 或 active test ref。
+- tooling: 新增显式 `npm run cat-catch:smoke-protocol-multi-gib`。它复用既有 HLS/DASH production task 测试，仅把 stress 档位从每片 1 MiB 提升到 4 MiB；每条链仍为 256 片，因此 HLS 与 DASH 各处理 1 GiB，总处理量 2 GiB。原 `cat-catch:smoke-protocol-large` 的 512 MiB 行为保持不变。
+- validation: multi-GiB smoke `2 files / 19 tests` 通过，总耗时 2.38 秒；macOS `/usr/bin/time -l` 记录整个 Vitest 进程最大 RSS `225,099,776` bytes、无 swap。HLS/DASH 临时目录与先前锁屏中止的 save-dialog smoke 临时目录均无残留；runner `node --check` 和本切片 `git diff --check` 通过。
+- documentation: 修正迁移审计中已经过期的 DASH 与 MSE unit 未关闭描述；多 GiB 协议分片写盘预算现在已有证据，不再作为开放 gap。
+- unresolved gaps: 系统保存框真实取消/确认仍被 Mac 锁屏阻塞；完整 OmniFlow 登录态、非第一个资料库真实交付、Windows 宿主、真实 ffmpeg 大媒体解码/合并和真实长墙钟仍待第二阶段验证。
+
+## 2026-08-30: real FFmpeg large-media merge and transcode budget
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；固定目标和全部 through cursor 不变，本切片只补第二阶段真实本地媒体处理预算。
+- affected capability IDs: `output.ffmpeg-processing-lifecycle`、`output.processing-staged-terminal`、`mse.main-spool-output`；32 项 capability 继续全部为 `verified`。显式重型 smoke 不伪装成普通 active test ref，因此 capability map 仍为 259 个唯一 active test ref、234 个计划测试 ID。
+- tooling: 新增 `npm run cat-catch:smoke-ffmpeg-large` 与条件式 `output.real-large-ffmpeg-merge-transcode-budget`。fixture 仅由本机 lavfi 生成，不访问网站、账号、Cookie、资料库或 MinIO；普通 `npm test` 只把该重型测试标为 skipped。
+- host flow: production `mergeEmbeddedBrowserResourceTracks` 合并大于 128 MiB 的 30 秒 H.264 视频与 AAC 音轨，并由 FFprobe 验证 H.264/AAC、时长和大于 128 MiB 的输出；production `transcodeEmbeddedBrowserResource` 把大于 192 MiB 的 20 分钟 PCM WAV 实际解码并编码为 MP3，FFprobe 验证 MP3、时长和大于 20 MiB 的输出。两条路径共用 `FfmpegTaskExecutor` 的进程、终态和 partial cleanup 合同。
+- validation: 显式 smoke `1/1` 通过，测试处理耗时 5.78 秒，整次命令 6.29 秒；macOS `/usr/bin/time -l` 记录最大 RSS `125,829,120` bytes、无 swap。全量 Vitest 为 `250 files passed + 1 heavy smoke skipped / 1589 passed / 4 skipped`；全量 lint、TypeScript、build、Cat Catch metadata/sync、scoped ESLint、runner `node --check`、普通 skip 模式与本切片 diff check 通过。fixture、resource-merge 和 benchmark 临时目录均无残留。
+- evidence boundary: 该结果关闭本地 production merge/transcode 的大媒体预算，但不冒充真实网站媒体、完整 OmniFlow 登录态、资料库交付、Windows 宿主或真实长墙钟。
+- unresolved gaps: 系统保存框真实取消/确认仍被 Mac 锁屏阻塞；完整登录态、非第一个资料库真实交付、Windows 宿主、真实网站媒体和真实长墙钟仍待第二阶段验证。
+
+## 2026-08-30: bounded production live wall-clock smoke
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；固定目标和全部 through cursor 不变，本切片只补第二阶段 live 真实 timer/filesystem 证据。
+- affected capability IDs: `hls.live-recording`、`dash.timeline-download-merge`、`transfer.concurrent-retry-abort-order`；32 项 capability 继续全部为 `verified`。显式重型 smoke 不伪装成普通 active test ref，因此 capability map 仍为 259 个唯一 active test ref、234 个计划测试 ID。
+- tooling: 新增 `npm run cat-catch:smoke-live-wall-clock` 和条件式 `hls-dash.real-wall-clock-output-and-cleanup`。默认档真实运行 5 分钟；普通 `npm test` 只 skip，显式命令可用 `-- --duration-ms=<60000..3600000>` 调整。测试不访问网站、账号、Cookie、资料库或 MinIO。
+- production flow: HLS 使用真实 timer 驱动 `HlsLiveTask`，通过 production `HlsTaskExecutor` 持续下载重叠 media playlist 的唯一分片并重写本地 playlist；DASH 使用真实 timer 驱动 `DashLiveTask`，每轮通过 production `appendDashRepresentationSegments` 创建 part、下载、顺序追加到本地轨道并清理。两条链同时运行并在 stop 后留出 2 秒静默期检查不再轮询。
+- validation: 60 秒资格档通过；5 分钟正式档 `1/1` 通过，总测试耗时 302.03 秒。HLS 请求 199 个 manifest、写出 201 个唯一分片；DASH 加载 299 个 snapshot、写出 301 个唯一分片；全部媒体资源只请求一次，playlist、轨道大小和 part 清理通过。测试内峰值 RSS `94,748,672` bytes，`/usr/bin/time -l` 记录整进程峰值 RSS `138,690,560` bytes、无 swap；临时根目录在终态删除。
+- evidence boundary: 该结果关闭 bounded 5 分钟 production live 墙钟与重复 filesystem 生命周期证据，不冒充真实网站媒体、完整 OmniFlow 登录态、系统保存对话框、资料库交付、Windows 或更长夜间运行。
+- unresolved gaps: Mac 仍锁屏，系统保存框真实取消/确认无法操作；完整登录态、非第一个资料库真实交付、Windows 宿主、真实网站媒体和更长宿主墙钟仍待第二阶段验证。
+
+## 2026-08-30: public real HLS website media smoke
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；固定目标和全部 through cursor 不变，本切片只补第二阶段公开真实网络媒体证据。
+- affected capability IDs: `hls.parser-download-plan`、`hls.segment-pipeline`、`output.ffmpeg-processing-lifecycle`；32 项 capability 继续全部为 `verified`。显式公网 smoke 不伪装成普通 active test ref，因此 capability map 仍为 259 个唯一 active test ref、234 个计划测试 ID。
+- tooling: 新增 `npm run cat-catch:smoke-real-media` 和条件式 `hls.real-website-parser-download-ffprobe`。普通 `npm test` 只 skip；显式命令固定访问 Mux 的公开 Big Buck Bunny HLS 测试流，每个请求有 20 秒上限，外站不可用不进入日常门禁。
+- production flow: production Cat Catch port parser/plan 解析 master 的 5 个 variant 并选择最低码率 `320x184` 子流；production `HlsTaskExecutor` 下载其前 3 个真实 TS 分片、预处理并重写本地 playlist；production `downloadEmbeddedBrowserManifestResource` 通过共享 `FfmpegTaskExecutor` 输出 MP4，最后以本机 FFprobe 验证容器、流和时长。
+- validation: 显式 smoke `1/1` 通过，测试耗时 1.48 秒，整次命令 2.04 秒。3 个 TS URL 均只请求一次；输出 `864,407` bytes，包含 H.264 视频与 AAC 音频，时长 `30.000181s`。`/usr/bin/time -l` 记录整进程峰值 RSS `134,545,408` bytes、无 swap；临时目录在终态删除。
+- evidence boundary: 该结果关闭公开真实 HLS 从 parser/plan 到 production transfer/filesystem/FFmpeg/FFprobe 的网络媒体证据，不冒充内置浏览器页面发现、opaque authority、Cookie/登录媒体、DASH 网站、系统保存框、资料库交付或 Windows 宿主。
+- unresolved gaps: Mac 仍锁屏，系统保存框、完整登录态内置浏览器与非第一个资料库交付无法操作；真实页面捕捉/认证媒体、DASH 网站、Windows 宿主和更长宿主墙钟仍待第二阶段验证。
+
+## 2026-08-30: public real DASH website media smoke
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；固定目标和全部 through cursor 不变，本切片只补第二阶段公开真实 DASH 网络媒体证据。
+- affected capability IDs: `dash.timeline-download-merge`、`output.ffmpeg-processing-lifecycle`；32 项 capability 继续全部为 `verified`。显式公网 smoke 不伪装成普通 active test ref，因此 capability map 仍为 259 个唯一 active test ref、234 个计划测试 ID。
+- tooling: 扩展现有 `npm run cat-catch:smoke-real-media` 与条件式测试文件，不新增 runner。普通 `npm test` 继续只 skip；显式命令固定访问 Akamai 的公开 Big Buck Bunny 静态 MPD，每个请求有 20 秒上限，外站不可用不进入日常门禁。
+- production flow: production `loadDashLiveSnapshot` XML adapter/parser 解析 634.566 秒的 SegmentTemplate MPD，选择最低码率 `bbb_30fps_320x180_200k` H.264 视频与 `bbb_a64k` AAC 音频；每轨计划裁剪为 init + 前 3 个真实媒体分片，再由 production `DashTaskExecutor` 下载、production `mergeDashTaskTracksToOutput` 合并，最后以 FFprobe 验证 MP4、H.264、AAC 和时长。
+- validation: HLS 与 DASH 组合显式 smoke `2/2` 通过，测试耗时 2.22 秒，整次命令 2.81 秒。DASH 的 8 个媒体 URL 均只请求一次，输出 `411,257` bytes、时长 `12.032s`；组合命令整进程峰值 RSS `139,296,768` bytes、无 swap，临时目录在终态删除。
+- evidence boundary: 该结果关闭公开真实 DASH 从 XML adapter/parser 到 production transfer/filesystem/FFmpeg/FFprobe 的网络媒体证据，不冒充内置浏览器页面发现、opaque authority、Cookie/登录媒体、系统保存框、资料库交付或 Windows 宿主。
+- unresolved gaps: Mac 仍锁屏，系统保存框、完整登录态内置浏览器与非第一个资料库交付无法操作；真实页面捕捉/认证媒体、Windows 宿主和更长宿主墙钟仍待第二阶段验证。
+
+## 2026-08-30: real Electron page capture and opaque credential replay
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；固定目标和全部 through cursor 不变，本切片扩展已有真实 Electron host smoke，不改变 production owner。
+- affected capability IDs: `network.capture-lifecycle`、`network.context-vault`、`network.captured-resource-access`、`output.normal-download-handoff`；32 项 capability 继续全部为 `verified`。显式 host smoke 不伪装成普通 active test ref，因此 capability map 仍为 259 个唯一 active test ref、234 个计划测试 ID。
+- tooling: 复用 `tools/cat-catch-host-smoke/`，不新增 runner。随机 loopback 页面通过真实 embedded partition `WebContentsView` 发起带根路径 session Cookie 与 Authorization 的 `.mp4` 请求；production `EmbeddedBrowserCaptureRuntime` 直接持有真实 session `webRequest`，production `CapturedResourceAccessService` 使用同一 session fetch。
+- host flow: renderer page 收到 46 bytes 媒体响应；capture runtime 生成只包含 `hasCookie/hasAuthorization` 等能力、绝不包含真实 header 值的 resource projection。main 用 opaque tab/resource ID 兑换 Cookie 与 Authorization，并再次取得相同 46 bytes；loopback server 确认两次请求都带同一组凭据。随后 smoke 继续完成 native `DownloadItem`、renderer 强制终止、replacement replay、保存 IPC 和 staging/journal 清理。
+- validation: `npm run cat-catch:smoke-host` 默认 39 bytes 档通过；`npm run cat-catch:smoke-large-host` 的 64 MiB 流式 SHA-256 档也通过，两档均报告 `authenticatedRequests=2`、`credentialProjectionOpaque=true`、`cookieAuthorityReplay=true` 和 `mainAuthorityReplay=true`。全量 `npm test` 为 `250 files passed / 3 heavy files skipped / 1589 passed / 7 skipped`；全量 lint、TypeScript、build、Cat Catch metadata/sync、host main scoped ESLint、runner syntax check 和相关 diff check 均通过。
+- evidence boundary: 该结果关闭真实 Electron 页面网络事件、Cookie/Authorization 认证媒体、renderer-safe projection 与 main opaque authority replay 的组合证据，不冒充外部网站真实登录流程或完整 OmniFlow 登录态窗口。
+- unresolved gaps: Mac 仍锁屏，系统保存框、完整登录态应用与非第一个资料库交付无法操作；外部网站真实登录流程、Windows 宿主和更长宿主墙钟仍待第二阶段验证。
+
+## 2026-08-30: real Electron native task-registry cancellation
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；固定目标和全部 through cursor 不变，本切片扩展已有真实 Electron host smoke，不改变 production owner。
+- affected capability IDs: `transfer.downloader-session-lifecycle`、`processing.main-task-registry`、`output.normal-download-handoff`；32 项 capability 继续全部为 `verified`。显式 host smoke 继续不伪装成普通 active test ref，因此 capability map 仍为 259 个唯一 active test ref、234 个计划测试 ID。
+- tooling: 复用 `tools/cat-catch-host-smoke/`，不新增 runner。loopback 页面增加一个慢速 64 MiB attachment；harness 等真实 `DownloadItem` 通过 `NativeDownloadSession` 登记后，调用 production `defaultProcessingTaskRegistry.cancel({ kind: 'native-download', tabId })`，随后再执行既有正常下载、crash/replacement、handoff/save/cleanup 链。
+- host flow: registry 用户取消只命中 1 个 native task，`DownloadItem` 到达 `cancelled` 终态，取消前后 staging path identity 保持一致，partial staging 被删除，registry 在下一阶段开始前释放。默认小文件档和 64 MiB 正常下载档随后均完成 Cookie/Authorization opaque replay、正常 native download、renderer crash/replacement、保存 IPC 及 staging/journal 终态清理。
+- validation: scoped ESLint、`npx tsc --noEmit`、runner `node --check`、`npm run cat-catch:smoke-host` 和 `npm run cat-catch:smoke-large-host` 均通过；两档 JSON 均报告 `registryCancellation={ taskCount: 1, state: "cancelled", partialCleanup: true }`。文档同步后的 `npm run cat-catch:validate` 继续为 `7 units / 32 capabilities / 0 open / 234 planned tests`，相关 diff check 通过。
+- evidence boundary: 该结果关闭 native `DownloadItem` 经共享 task registry 的真实用户取消、partial cleanup 与登记释放证据。它不替代用户在系统保存对话框中点击“取消”，也不冒充其他 output entry、完整登录态应用、资料库交付或 Windows 宿主的真实取消验收。
+- unresolved gaps: Mac 仍锁屏，系统保存对话框取消/确认无法操作；完整登录态应用、非第一个资料库交付、其他 output entry 的完整宿主取消、外部网站真实登录流程、Windows 宿主和更长宿主墙钟仍待第二阶段验证。
+
+## 2026-08-30: real Electron Deep and MSE page probe
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；固定目标和全部 through cursor 不变，本切片扩展既有真实 Electron host smoke，不改变 Deep/MSE production owner。
+- affected capability IDs: `deep.production-page-adapter`、`deep.runtime-hooks`、`mse.append-observability`、`network.page-probe-capture`；32 项 capability 继续全部为 `verified`。显式 host smoke 不伪装成普通 active test ref，capability map 仍为 259 个唯一 active test ref、234 个计划测试 ID。
+- tooling: 不新增 runner。`tools/cat-catch-host-smoke/main.ts` 复用 production `installEmbeddedBrowserResourceProbe`、`EmbeddedBrowserCaptureRuntime` 和真实 embedded partition `WebContentsView`；fixture 页面只访问随机 loopback origin，不连接账号、外站、MinIO 或资料库。
+- host flow: production current-document/document-start probe 安装后，实际 Chromium 页面分别经 `fetch` JSON、inline script 和 `TextDecoder` 发现 media/manifest；真实 `MediaSource` 选择受支持的 `video/mp4; codecs="avc1.42E01E"`，创建 `SourceBuffer` 并调用 `appendBuffer`，page cache 与 main document-token-scoped 投影均确认 4 bytes、1 个 stream 和 1 个 SourceBuffer。随后原有 Cookie/Authorization replay、native registry cancellation、正常 download、renderer crash/replacement、保存 IPC 与 cleanup 继续执行。
+- validation: scoped ESLint、`npx tsc --noEmit` 和本文件 diff check 通过；`npm run cat-catch:smoke-host` 与 `npm run cat-catch:smoke-large-host` 均通过。两档 JSON 都报告 `pageProbe={ deepFetch: true, documentStart: true, inlineScript: true, textDecoder: true, mseAppendBytes: 4, mseMimeType: "video/mp4; codecs=\\"avc1.42E01E\\"" }`，同时保留 `authenticatedRequests=2`、native `cancelled` 与最终 `status=ok`。
+- evidence boundary: 该结果关闭隔离真实 Chromium 引擎中的 production probe 注入、Deep 三条页面经验分支、基础 MSE append 与 main token route 证据。它不冒充外部网站、真实登录播放器、长媒体 MSE 播放/flush、完整 OmniFlow 登录态窗口或资料库交付。
+- unresolved gaps: 外部网站真实登录/播放器页面、完整应用系统保存框和非第一个资料库交付、Windows 宿主、长媒体 MSE 页面及更长宿主墙钟仍待第二阶段验证。
+
+## 2026-08-30: downloader fallback platform-boundary closure
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；固定目标和全部 through cursor 不变，本切片只校正此前把扩展专属 fallback 写成 OmniFlow 开放缺口的文档判断，不修改 production runtime。
+- affected capability IDs: `transfer.downloader-session-lifecycle`；该 capability 继续为 `verified`，relation 继续为 `platform-substitute`。`js/polyfill.js#if (!chrome.downloads)` 已加入 upstream refs，capability map 当前为 212 个上游 anchor；不新增 planned test ID 或 active test ref，仍为 234 个唯一计划测试 ID、259 个唯一 active test ref。
+- upstream finding: 缺失 `chrome.downloads` 时，固定 Cat Catch 只退回无法监听完成、失败或另存为终态的 `<a download>`；`background.js` 的 native error fallback 只服务右键 image-save，并带 referer 打开隐藏 `downloader.html`，依赖扩展 tab、扩展 session 与 auto-close。它不是普通媒体、HLS、DASH 或 MSE 共用的下载算法。
+- platform substitute: Electron native 下载由 main-owned `NativeDownloadSession` 持有 staging、progress、registry cancellation、single terminal 和 partial cleanup，完成文件再由 `DownloadHandoff` 进入应用交付链；受保护资源重试由当前 tab 的 opaque exact authority 与 embedded session 持有。OmniFlow 不复制隐藏 downloader tab/auto-close UI，也不在 ambiguous native failure 后自动启动可能重复写出的第二条下载。
+- validation: scoped host-smoke ESLint、`npx tsc --noEmit`、`cat-catch:validate`、`cat-catch:test-sync`（12/12）、全量 lint、全量 Vitest（250 files / 1589 passed / 3 heavy files skipped）和相关 diff check 均通过。
+- validation boundary: 现有定向测试和真实 Electron host smoke 已覆盖 native session 接线、终态、按 tab 用户取消、partial cleanup、renderer crash/replacement 与 handoff；本切片没有新增行为，故只需 metadata/sync/type/lint 门禁。系统保存对话框取消/确认、其他 output entry 的完整宿主取消、完整登录态资料库交付、外部网站和 Windows 宿主仍按各自边界待验，不能由 platform-substitute 结论冒充。
+
+## 2026-08-30: real Electron streaming-output cancellation
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；固定目标和全部 through cursor 不变，本切片补第二阶段非 native output 真实宿主取消证据，不改变 renderer 或 IPC 契约。
+- affected capability IDs: `transfer.streaming-memory-budget`、`processing.main-task-registry`、`output.processing-staged-terminal`；32 项 capability 继续全部为 `verified`。复用既有 planned IDs/test refs，不新增 capability map active ref，统计仍为 212 个上游 anchor、234 个唯一计划测试 ID、259 个唯一 active test ref。
+- runtime ownership: 将 controller 内既有 registered-transfer helper 收敛为 `ProcessingTaskRegistry.run`，由 registry 自身统一创建 AbortController、登记 task、暴露 signal/task ID、等待 settled 并释放 registration。controller 的所有普通 registered output 继续走同一调用点，没有新增第二套 lifecycle 或用户行为。
+- host flow: 扩展既有 `tools/cat-catch-host-smoke/`，在真实 Electron 进程中让 main 通过 production registry、慢速 64 MiB loopback HTTP、`StreamingTransfer`、`StagedOutputLeaseStore` 和 `publishStagedOutput` 启动普通流式输出；确认至少 65,536 bytes partial 已写盘后，按 `streaming-transfer + tabId` 取消并只命中一个 task。终态要求为 AbortError，最终目标不存在，流式 partial、磁盘/内存 lease 与 registry 全部归零；随后原有 native cancel、正常 download、renderer crash/replacement、handoff/save/cleanup 链继续通过。
+- harness lifecycle: 新增 streaming cleanup await 暴露了独立 smoke 在最后窗口销毁时可能早于结果输出退出的竞态；harness 现在显式接管 `window-all-closed`，并在 stdout/stderr flush 回调后调用 `app.exit()`。该改动只稳定测试进程结果传递，不进入 production 应用。
+- validation: task registry/streaming transfer/staged publisher 定向 `3 files / 10 passed`，TypeScript `--noEmit`、scoped/full lint、全量 Vitest（250 files / 1590 passed / 3 heavy files skipped）、production build、metadata validator、sync runner（12/12）、相关 diff check、`npm run cat-catch:smoke-host` 和 `npm run cat-catch:smoke-large-host` 均通过。两档 JSON 都报告 `streamingCancellation={ partialBytes: 65536, partialCleanup: true, taskCount: 1 }`，并保留 native `cancelled`、Deep/MSE probe、认证重放、crash/replay/save 与最终 `status=ok`。
+- evidence boundary: 该结果关闭普通 streaming output 与 native download 两类真实 Electron 用户取消证据；FFmpeg/MSE/协议输出的逐入口完整宿主取消、系统保存对话框取消/确认、完整登录态资料库交付、外部网站和 Windows 宿主仍独立待验。显式 host smoke 继续不伪装成日常 capability map active test ref。
+
+## 2026-08-30: real Electron FFmpeg staged-output cancellation
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；固定目标和全部 through cursor 不变，本切片补第二阶段真实 FFmpeg 进程取消证据，不改变 renderer、IPC 或 production owner。
+- affected capability IDs: `output.ffmpeg-process-owner`、`processing.main-task-registry`、`output.processing-staged-terminal`；32 项 capability 继续全部为 `verified`。复用现有合同和显式 host harness，不新增 capability、upstream anchor、planned test ID 或 active test ref，统计保持 212 个上游 anchor、234 个唯一计划测试 ID、259 个唯一 active test ref。
+- host flow: 在默认与 64 MiB 两档真实 Electron smoke 中，若 `resolveDesktopFfmpegPath` 找到本机 FFmpeg，则由 `ProcessingTaskRegistry.run` 持有 tab-scoped outer task，`publishStagedOutput` 建立 owner-scoped lease，production `FfmpegTaskExecutor` 以 realtime lavfi 生成 fragmented MP4。harness 观察到 32 bytes partial 后按 tab 取消 outer task，AbortSignal 传播到真实 FFmpeg，终态返回 `AbortError`，并等待 process tree、target、partial、磁盘/内存 lease 与 registry 全部清理。只统计 outer filter 命中的 1 个 task；executor 内部进程登记仍由同一 registry 收口。
+- portability: FFmpeg 不可发现时 JSON 显式报告 `ffmpegCancellation={ partialBytes: 0, partialCleanup: false, supported: false, taskCount: 0 }`，不会把未执行写成通过。2026-08-30 的 macOS 使用 `/opt/homebrew/bin/ffmpeg` 8.1，两档均报告 `ffmpegCancellation={ partialBytes: 32, partialCleanup: true, supported: true, taskCount: 1 }`。
+- validation: scoped ESLint、`npx tsc --noEmit`、ffmpeg executor/task registry/staged publisher 定向 `3 files / 8 passed`、`npm run cat-catch:smoke-host` 和 `npm run cat-catch:smoke-large-host` 均通过；两档继续保留 streaming `65,536` bytes partial、native `cancelled`、Deep/MSE probe、认证重放、crash/replay/save 与最终 `status=ok`。
+- evidence boundary: native、普通 streaming 和一条真实 FFmpeg staged output 三类宿主取消已有证据；这不冒充 MSE/协议输出逐入口、其他 FFmpeg 调用入口、系统保存框、完整登录态、非第一个资料库、外部网站、Windows 或更长墙钟验收。显式 host smoke 继续不写入 capability map 的日常 active test ref。
+
+## 2026-08-30: abortable file-backed MSE output
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；固定目标和全部 through cursor 不变，本切片补齐 file-backed MSE 写出无法及时取消的 production 缺口，不改变 renderer 或 IPC 契约。
+- affected capability IDs: `mse.main-spool-lifecycle`、`output.staged-output-lease`、`processing.main-task-registry`；32 项 capability 继续全部为 `verified`。新增 `mse.file-backed-output-cancel-interrupts-copy` 一个 planned ID 和一个 active test ref，capability map 当前为 212 个上游 anchor、235 个唯一计划测试 ID、260 个唯一 active test ref。
+- runtime change: `embeddedBrowserResourceFileSaveService.ts#saveEmbeddedBrowserExtractedResourceFile` 的 file-backed 分支从不可响应 AbortSignal 的 `copyFile` 改为 signal-aware stream pipeline，base64 `writeFile` 也接受同一 signal。自动/周期/工具触发的 MSE staging 与手动 captured-resource 输出均从既有 tab-scoped owner 透传 signal；取消不再等待整份 spool file 复制结束，外层 `stageMseDownloadResource` 或 staged lease 继续负责 partial cleanup。
+- focused evidence: 新增 256 MiB in-flight copy 测试，只有检测到非零且小于完整源的 partial 后才 abort；结果为 `AbortError` 且输出保持 partial，证明中断发生在复制过程中，调用方随后按既有 ownership 清理。相关 MSE output/task registry 集合为 `3 files / 12 passed`。
+- host evidence: 默认与 64 MiB 两档真实 Electron smoke 都复用 production `ProcessingTaskRegistry.run(kind=mse-download)`、`stageMseDownloadResource` 与 signal-aware writer。默认档在 `1,245,184` bytes、64 MiB 档在 `1,376,256` bytes partial 后按 tab 取消；两档均只命中 1 个 task、返回 `AbortError`、不发 completion、删除 partial staging、释放 registry，并继续通过原有 FFmpeg/streaming/native/page-probe/auth/crash/replay/save 链。
+- validation: 定向 Vitest、scoped ESLint、`npx tsc --noEmit`、`npm run cat-catch:smoke-host` 和 `npm run cat-catch:smoke-large-host` 已通过；FFmpeg 两档仍为 32 bytes partial，streaming 两档仍为 65,536 bytes partial，native 仍到达 `cancelled`。
+- evidence boundary: 该结果关闭 file-backed MSE writer 的真实宿主取消，不冒充 MSE merge、HLS/DASH 协议逐入口、其他 FFmpeg 调用入口、系统保存框、完整登录态、非第一个资料库、外部网站或 Windows。显式 host smoke 不增加 active ref；新增 ref 仅来自 production writer 定向测试。
+
+## 2026-08-30: real Electron HLS/DASH protocol cancellation
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；固定目标和全部 through cursor 不变，本切片只扩展既有真实 Electron host smoke，不改变 production owner、renderer 或 IPC 契约。
+- affected capability IDs: `hls.segment-pipeline`、`dash.timeline-download-merge`、`transfer.concurrent-retry-abort-order`、`processing.main-task-registry`、`output.processing-staged-terminal`；32 项 capability 继续全部为 `verified`。显式 host smoke 不伪装成普通 Vitest ref，因此统计保持 212 个上游 anchor、235 个唯一计划测试 ID、260 个唯一 active test ref。
+- HLS host flow: harness 通过 production `EmbeddedBrowserHlsSessionOwner`、`HlsTaskExecutor`、`publishStagedOutput` 和慢速 64 MiB loopback fragment 启动静态计划任务；服务端确认实际传输 `65,536` bytes 后按 `hls-task + tabId` 取消。registry 只命中 1 个 task，终态为 AbortError，`runFfmpeg` 未调用，target、磁盘/内存 lease、workdir 与 registry 全部清理。
+- DASH host flow: harness 通过 production `EmbeddedBrowserDashLiveSessionOwner`、`DashTaskExecutor`、同一 staged publisher 和独立慢速 fragment 启动单视频轨计划；传输 `65,536` bytes 后按 `dash-task + tabId` 取消。registry 只命中 1 个 task，终态为 AbortError，`mergeTracks` 未调用，executor 的 `.parts-*`、target、磁盘/内存 lease、外层 workdir 与 registry 全部清理。
+- validation: host main scoped ESLint、`npx tsc --noEmit`、`npm run cat-catch:smoke-host` 和 `npm run cat-catch:smoke-large-host` 均通过；两档 JSON 的 HLS/DASH 结果都为 `bytesTransferred=65536`、`mergeSkipped=true`、`partialCleanup=true`、`taskCount=1`，并继续通过 file-backed MSE、真实 FFmpeg、streaming/native、页面 probe、认证重放、renderer crash/replay/save 全链。`npm run cat-catch:validate` 为 `7 units / 32 capabilities / 0 open / 235 planned tests`，同步测试 `12/12`；全仓 lint、Vitest（251 files / 1592 passed / 3 heavy files skipped）和 production build 均通过。
+- evidence boundary: 该结果关闭静态 HLS/DASH 计划分片的逐协议真实宿主取消，不冒充 live stop/export、MSE merge、其他 FFmpeg 调用入口、系统保存对话框、完整登录态应用、非第一个资料库、外部网站真实登录、Windows 或更长宿主墙钟。当前进度估计为 G0 `100%`、固定 Cat Catch 初始迁移 `100%`、第二阶段 `99.2%`、总体 `99.7%`。
+
+## 2026-08-30: real Electron MSE track-merge cancellation
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；固定目标和全部 through cursor 不变，本切片扩展既有真实 Electron host smoke，不改变 production merge service、renderer 或 IPC 契约。
+- affected capability IDs: `mse.main-spool-lifecycle`、`processing.main-task-registry`、`output.processing-staged-terminal`、`output.staged-output-lease`；32 项 capability 继续全部为 `verified`。显式 host smoke 不增加 upstream anchor、planned test ID 或 active test ref，统计保持 `212 / 235 / 260`。
+- host flow: 本机可发现 FFmpeg 时，harness 先通过 production `FfmpegTaskExecutor` 生成一秒的独立 fragmented MP4 视频和音频轨，读取后立即删除 fixture 文件；loopback server 再以 512-byte chunk 慢速提供两个 HTTP 输入。production `mergeEmbeddedBrowserResourceTracks` 在 `ProcessingTaskRegistry.run(kind=streaming-transfer) + publishStagedOutput` 内启动真实双轨 copy merge，视频与音频请求都进入传输后才按 tab 取消 outer task。
+- cancellation result: 默认与 64 MiB 两档都在视频传输 `30,720` bytes、音频传输 `512` bytes 后取消；outer filter 只命中 1 个 task，共享 AbortSignal 传播到内部真实 FFmpeg，终态为 AbortError，target、partial 磁盘 lease、内存 lease、内部 FFmpeg registration 与 registry 全部清理。FFmpeg 不可发现时 JSON 显式报告 `mseMergeCancellation.supported=false`，不会把未执行写成通过。
+- validation: host main scoped ESLint、`npx tsc --noEmit`、`npm run cat-catch:smoke-host`、`npm run cat-catch:smoke-large-host`、metadata validator 和 sync runner `12/12` 均通过；两档继续保留 HLS/DASH 协议、file-backed MSE、realtime FFmpeg、streaming/native、页面 probe、认证重放、renderer crash/replay/save 全链。当前轮此前完成的全仓 lint、Vitest（251 files / 1592 passed / 3 heavy files skipped）和 production build 也均通过，本切片未修改日常测试或 production bundle 输入。
+- evidence boundary: 该结果关闭手动 MSE 双轨 merge 的真实宿主取消，不冒充 captured-resource transcode、manifest/track wrapper、live stop/export、media-tool operation、系统保存对话框、完整登录态应用、非第一个资料库、外部网站真实登录或 Windows。当前进度估计为 G0 `100%`、固定 Cat Catch 初始迁移 `100%`、第二阶段 `99.4%`、总体 `99.8%`。
+
+## 2026-08-30: FFmpeg wrapper ownership audit closure
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；固定目标和全部 through cursor 不变，本切片只校正第二阶段证据边界，不修改 production runtime、IPC 或 renderer。
+- affected capability IDs: `output.ffmpeg-process-owner`、`processing.main-task-registry`、`output.processing-staged-terminal`；32 项 capability 继续全部为 `verified`。不新增 capability、upstream anchor、planned test ID 或 active test ref，统计保持 `212 anchors / 235 planned / 260 active refs`。
+- ownership audit: manifest 单/双轨 service、MSE merge/transcode service、HLS 本地双轨 adapter、DASH 单/双轨 adapter 均原样透传调用方 signal；HLS/DASH 静态计划、失败分片 retry 与 live stop/export 从 `EmbeddedBrowserHlsSessionOwner` / `EmbeddedBrowserDashLiveSessionOwner` 的 tab-scoped active task 取得同一 signal；自动 MSE merge 从 `mse-download` registry task 取得 signal；手动 MSE merge 与 captured-resource transcode 从 `streaming-transfer` registry task 取得 signal。所有路径最终进入同一个 `FfmpegTaskExecutor`。
+- evidence decision: 共享 executor 已有真实 Electron 进程取消、process-tree 等待、partial output 与 registry 清理证据；MSE 双轨 merge 另有 production wrapper 的双 HTTP 输入中途取消；manifest/HLS/DASH adapter 已有 signal contract 和 session owner 定向测试。后续不再为每个只透传参数的薄 wrapper 复制宿主 smoke，只有发现真实断链或新增 owner 类型时才补入口级证据。
+- media-tool boundary: `mediaToolFfmpegService` 当前没有用户取消入口，但 `FfmpegTaskExecutor` 自身会登记 `kind=ffmpeg`，应用退出仍能取消并等待。它是独立产品操作，不作为 Cat Catch parity 或 tab-scoped 用户取消缺口。
+- validation: `npm run cat-catch:validate` 通过，报告 `7 units / 32 capabilities / 0 open / 235 planned tests`；`npm run cat-catch:test-sync` 为 `12/12`；capability map 为 260 个唯一 active refs；本切片长期文档 `git diff --check` 通过。此前同一 production 代码状态下的两档 host smoke、TypeScript、全量 lint、Vitest（251 files / 1592 passed / 3 heavy files skipped）和 production build 保持通过，本切片未重复运行重型门禁。
+- unresolved environment validation: macOS 系统保存框真实取消/确认、完整 OmniFlow 登录态窗口、macOS 本机非第一个资料库的真实交付、Windows 宿主、外部网站真实登录/播放器页面和更长宿主墙钟。loopback fixture 不冒充这些环境验收。当前进度估计为 G0 `100%`、固定 Cat Catch 初始迁移 `100%`、第二阶段 `99.7%`、总体 `99.9%`。
+
+## 2026-08-30: macOS system save-dialog closure
+
+- observedHead / migrationTarget: `2cb981d7c2f4614732edccc167c4b5793d1cb138`；固定目标、全部 through cursor、production owner 和 IPC 契约不变，本切片只关闭 macOS 系统保存框环境证据。
+- affected capability IDs: `output.download-delivery-workflow`、`output.processing-staged-terminal`；32 项 capability 继续全部为 `verified`。交互 host smoke 不加入日常 active test ref，因此统计保持 `212 anchors / 235 planned / 260 active refs`。
+- harness correction: macOS 的 Node 临时路径可表示为 `/var/...`，原生保存框可能回传等价的 `/private/var/...`。smoke 现在以现有父目录的 `realpath` 加文件名判断目标等价，并把保存框实际返回路径交给 production `fs:save-staged-download-file`；这既避免字符串误判，也证明保存 IPC 真正消费了用户确认的目标。
+- host evidence: `npm run cat-catch:smoke-save-dialog` 在 macOS Electron 30.5.1 中先取消 `cancelled-system-save-dialog.txt`，再确认隔离临时目录下的 `confirmed-system-save-dialog.txt`。随后 production save IPC 写出与 39-byte fixture 一致的文件，并清理 download staging 与 handoff journal；最终 JSON 为 `saveDialogCancel=true`、`saveDialogConfirm=true`、`saveIpc=true`、`status=ok`，原有 Deep/MSE page probe、Cookie/Authorization authority、七类取消、renderer crash/replacement 和 handoff replay 证据同时保持通过。
+- validation: host harness scoped ESLint、`npx tsc --noEmit` 和交互式 `cat-catch:smoke-save-dialog` 已通过；metadata validator 报告 `7 units / 32 capabilities / 0 open / 235 planned tests`，sync runner 为 `12/12`，排除生成 bundle 的源码 `git diff --check` 通过。
+- unresolved environment validation: 完整 OmniFlow 登录态窗口、macOS 本机非第一个资料库的真实交付、Windows 宿主、外部网站真实登录/播放器页面和更长宿主墙钟。隔离 loopback fixture 和系统保存框 smoke 不冒充这些环境验收。当前进度估计为 G0 `100%`、固定 Cat Catch 初始迁移 `100%`、第二阶段 `99.8%`、总体 `99.9%`。

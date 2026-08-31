@@ -81,6 +81,8 @@ export class StagedOutputLeaseStore {
 
   private readonly leases = new Map<string, StagedOutputLeaseRecord>()
 
+  private readyPromise: Promise<void> | null = null
+
   constructor(options: StagedOutputLeaseStoreOptions) {
     this.now = options.now || Date.now
     this.rootPath = path.resolve(String(options.rootPath || '').trim())
@@ -88,6 +90,16 @@ export class StagedOutputLeaseStore {
       throw new Error('staged output lease rootPath 无效')
     }
     this.ttlMs = normalizeTtl(options.ttlMs)
+  }
+
+  /** Runs startup orphan cleanup once, before the first production lease is created. */
+  async ensureReady() {
+    if (!this.readyPromise) {
+      this.readyPromise = this.quarantineOrphaned()
+        .then(() => this.reapExpired())
+        .then(() => undefined)
+    }
+    return this.readyPromise
   }
 
   async create(input: {
@@ -98,6 +110,7 @@ export class StagedOutputLeaseStore {
     sizeBytes?: number
     ttlMs?: number
   }): Promise<StagedOutputLeaseHandle> {
+    await this.ensureReady()
     const ownerTaskId = normalizeText(input.ownerTaskId, '')
     const purpose = normalizeText(input.purpose, '')
     if (!ownerTaskId || !purpose) {
@@ -178,6 +191,13 @@ export class StagedOutputLeaseStore {
       .filter(record => record.expiresAt <= this.now())
     await Promise.all(expired.map(record => this.release(record.leaseId, record.claimId)))
     return expired.length
+  }
+
+  /** Releases every in-process lease during normal application shutdown. */
+  async dispose() {
+    await this.ensureReady()
+    const activeLeases = Array.from(this.leases.values())
+    await Promise.all(activeLeases.map(record => this.release(record.leaseId, record.claimId)))
   }
 
   /** Removes lease directories left by a previous process before any new lease is created. */

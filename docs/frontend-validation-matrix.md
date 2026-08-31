@@ -1,6 +1,6 @@
 # 前端验证矩阵
 
-更新时间：2026-08-27
+更新时间：2026-08-30
 
 适用范围：`omniflow-app` 前端、Electron、IPC、工作区、文件树、文件预览、上传、内置浏览器和资源捕捉相关改动的提测、自测与 review 验证。
 
@@ -290,6 +290,78 @@ legacy 兼容检查：
 - 下载失败
 - 用户取消保存
 - 导入失败后错误提示是否清楚
+
+真实 Electron 边界可显式运行：
+
+```bash
+npm run cat-catch:smoke-host
+```
+
+该命令使用隔离 `userData` 和 loopback fixture。真实 embedded `WebContentsView` 先经 production document-start/current-document 入口安装页面 probe：Deep 的 `fetch`、inline script、`TextDecoder` 分支分别进入 main 资源投影，真实 `MediaSource` 创建 H.264 `SourceBuffer` 并通过 `appendBuffer` 捕捉 4 bytes MSE 数据。随后页面发起带 partition session Cookie 与 Authorization 的 `.mp4` 请求，production `EmbeddedBrowserCaptureRuntime` 捕捉网络事件，renderer 投影只显示 `hasCookie/hasAuthorization`、不包含 header 值，main 再用 opaque resource ID 兑换两项凭据并重放同字节响应。接着让 main 以 `ProcessingTaskRegistry.run + StreamingTransfer + publishStagedOutput` 处理慢速 64 MiB response，观察到 partial bytes 后按 tab 取消，确认只命中一个 streaming task，target、partial、磁盘/内存 lease 和 registry 全部清理；本机存在 FFmpeg 时，再通过同一 registry/staged publisher 和 production `FfmpegTaskExecutor` 启动 realtime lavfi fragmented MP4，观察到 partial 后按 tab 取消 outer task，确认 AbortSignal 传播到真实进程并清理 process tree、target、partial、lease 与 registry；最后启动慢速 native `DownloadItem`，验证同样只命中一个任务、终态 `cancelled`、partial staging 删除和 registry 释放。之后继续覆盖正常 native download、main handoff journal、renderer 强制终止、replacement renderer replay、`fs:save-staged-download-file` IPC 与终态清理。2026-08-30 的 macOS Electron 30.5.1 默认档和 64 MiB 档均通过上述页面 probe、认证重放、native/streaming/FFmpeg 三类宿主取消与交付链；FFmpeg partial 为 32 bytes。FFmpeg 不可发现时该项显式报告 `supported=false`，不是通过。全部 Cat Catch 相关 FFmpeg wrapper 由定向 signal contract 和 production owner 审计补足，共享 executor 的真实宿主证据不要求逐 wrapper 复制。该命令不替代外部网站的真实登录/媒体流程、完整应用系统保存对话框、非第一个资料库交付或 Windows，也不进入普通单元测试门禁。
+
+同一两档 host smoke 另用 256 MiB sparse source 验证 production file-backed MSE writer：默认档在 `1,245,184` bytes、64 MiB 档在 `1,376,256` bytes partial 后取消 `mse-download + tabId`，两档均只命中一个 task、返回 AbortError、不发 completion，并删除 partial staging。该证据关闭 file-backed MSE copy 的真实宿主取消，不替代完整应用交付。
+
+本机可发现 FFmpeg 时，两档 host smoke 还会先生成独立 fragmented MP4 音视频轨，再由两个慢速 loopback HTTP 输入进入 production `mergeEmbeddedBrowserResourceTracks`。视频传输 `30,720` bytes、音频传输 `512` bytes 后按 outer `streaming-transfer + tabId` 取消，均只命中一个 outer task、返回 AbortError，并删除 target、磁盘/内存 staged lease、内部 FFmpeg registration。FFmpeg 不可发现时该项明确报告 `supported=false`；该结果关闭手动 MSE 双轨 merge 的宿主取消，并与其余 wrapper 的 signal/owner contract 一起覆盖共享 FFmpeg 生命周期，不替代跨平台验收。
+
+同一两档 host smoke 还分别让 production `HlsTaskExecutor` 与 `DashTaskExecutor` 经各自 session owner 下载慢速 64 MiB 分片；服务端确认每条链实际传输 `65,536` bytes 后，按 `hls-task/dash-task + tabId` 取消。两条链均只命中一个 task、返回 AbortError、未调用 ffmpeg/track merge，并清理 target、磁盘/内存 staged lease、workdir、DASH part 和 registry。该结果关闭静态 HLS/DASH 计划分片的真实宿主取消；live stop/export 的 FFmpeg 阶段由同一 session owner signal、wrapper contract 和共享 executor 证据覆盖。它不替代外部网站登录媒体、资料库交付或 Windows。
+
+bounded 大文件宿主链可显式运行：
+
+```bash
+npm run cat-catch:smoke-large-host
+```
+
+该命令用 64 MiB 确定性 loopback 响应重复 streaming/native、file-backed MSE、MSE 双轨 merge、HLS/DASH 静态协议与条件式真实 FFmpeg 取消，同时覆盖正常 download、crash/replacement、save IPC 与 cleanup，并以文件大小和流式 SHA-256 验证正常下载的 staging/输出。它不替代多 GiB、真实 HLS/DASH/MSE 页面或长墙钟验证；其他 FFmpeg wrapper 由 contract/owner 审计覆盖，不再作为该 smoke 的逐入口目标。
+
+HLS/DASH 协议分片写盘的 bounded 自动化证据随 `npm test` 运行：`transfer-engine.test.ts` 验证 async sink 的活动写入不超过 thread、写盘失败不触发网络 retry；HLS/DASH task 测试用乱序多分片输入验证独立落盘、manifest 顺序、固定 1 MiB DASH 拼接缓冲和取消后的 part 清理。该证据证明 adapter 不会无界累计 pending write/ordered buffer，但仍不替代多 GiB、单个超大分片或真实长墙钟宿主预算。
+
+协议大媒体写盘可显式运行：
+
+```bash
+npm run cat-catch:smoke-protocol-large
+```
+
+该命令复用同两条 production task 测试，把 HLS 和 DASH 各扩到 `256 x 1 MiB` 分片，总处理量 512 MiB；HLS 逐分片核对首尾字节，DASH 使用流式复制和随机位置抽样核对完整顺序，不让测试 oracle 自己整轨读入内存。2026-08-30 的 macOS 运行 `19/19` 通过，整个 Vitest 进程最大 RSS 为 `185,712,640` bytes；该数值是当前机器的观测证据，不是跨平台硬阈值，也不替代多 GiB、真实网络、ffmpeg 解码/合并或长墙钟验证。
+
+协议多 GiB 写盘预算可显式运行：
+
+```bash
+npm run cat-catch:smoke-protocol-multi-gib
+```
+
+该档位仍复用同两条 production task 测试，只把每个分片扩大到 4 MiB：HLS 与 DASH 各处理 1 GiB，总处理量 2 GiB。2026-08-30 的 macOS 运行 `19/19` 通过，总耗时 2.38 秒；整个 Vitest 进程最大 RSS 为 `225,099,776` bytes、无 swap，临时目录全部清理。它验证多 GiB 级协议分片的 bounded 写盘、顺序和终态清理，不冒充真实网络、媒体有效性、ffmpeg 解码/合并、长墙钟或跨平台证据。
+
+真实 FFmpeg 大媒体预算可显式运行：
+
+```bash
+npm run cat-catch:smoke-ffmpeg-large
+```
+
+该命令只使用本机生成的无声视频与合成音频：先让 production `mergeEmbeddedBrowserResourceTracks` 合并超过 128 MiB 的 H.264 视频与 AAC 音轨，再让 production `transcodeEmbeddedBrowserResource` 把超过 192 MiB 的 20 分钟 PCM WAV 解码并编码为 MP3；FFprobe 验证流、时长和输出，测试还要求合并文件超过 128 MiB、转码文件超过 20 MiB。2026-08-30 的 macOS 运行 `1/1` 通过，测试处理耗时 5.78 秒，整次命令 6.29 秒，峰值 RSS `125,829,120` bytes、无 swap，所有临时目录清理。该证据不替代真实网站媒体、完整应用、跨平台或长墙钟。
+
+HLS/DASH live 的有界真实墙钟可显式运行：
+
+```bash
+npm run cat-catch:smoke-live-wall-clock
+```
+
+默认档使用真实 timer 同时运行 5 分钟：HLS 经 production `HlsLiveTask` 下载重叠窗口中的唯一分片并持续重写本地 playlist；DASH 经 production `DashLiveTask` 与 `appendDashRepresentationSegments` 持续创建 part、下载、顺序追加并清理。普通 `npm test` 只 skip 该重型测试；需要调整时可在命令后追加 `-- --duration-ms=<60000..3600000>`。2026-08-30 的 macOS 正式档生成 HLS `201` 个唯一分片和 DASH `301` 个唯一分片，全部只请求一次；stop 后 2 秒不再轮询，输出字节、playlist、part 清理均通过。测试内峰值 RSS 为 `94,748,672` bytes，整进程峰值为 `138,690,560` bytes、无 swap。该结果关闭 5 分钟 bounded production live 墙钟证据，不替代真实网站、完整登录态应用、跨平台或更长夜间运行。
+
+公开真实 HLS/DASH 媒体闭环可显式运行：
+
+```bash
+npm run cat-catch:smoke-real-media
+```
+
+该命令访问两条公开 Big Buck Bunny 测试流。HLS 使用 `test-streams.mux.dev`：production parser/plan 从 5 个 master variant 中选择最低码率 `320x184` 子流，下载前 3 个真实 TS 并重写本地 playlist，再由 production FFmpeg 输出 `864,407` bytes、`30.000181s` 的 H.264/AAC MP4。DASH 使用 `dash.akamaized.net`：production XML adapter/parser 选择 `bbb_30fps_320x180_200k` 视频与 `bbb_a64k` 音频，下载两轨 init 和各前 3 个真实媒体分片，再由 production task/merge 输出 `411,257` bytes、`12.032s` 的 H.264/AAC MP4。普通 `npm test` 只 skip；每个公网请求有 20 秒上限，外站不可用不会影响日常门禁。2026-08-30 的 macOS 运行 `2/2` 通过，11 个媒体 URL 均只请求一次，整进程峰值 RSS `139,296,768` bytes、无 swap，临时目录清理。该结果关闭公开真实 HLS/DASH 从 parser 到输出的网络媒体证据；真实 Electron 页面捕捉与 Cookie/Authorization opaque authority 由 `cat-catch:smoke-host` 独立覆盖，macOS 系统保存框由 `cat-catch:smoke-save-dialog` 独立覆盖，外部网站真实登录流程和资料库交付仍未覆盖。
+
+macOS 系统保存对话框的真实取消/确认可显式运行：
+
+```bash
+npm run cat-catch:smoke-save-dialog
+```
+
+该命令会连续打开两个真实系统保存对话框：第一个必须取消，第二个在隔离临时目录确认保存；随后继续走生产 `fs:save-staged-download-file` 并验证同字节输出、staging 与 journal 清理。2026-08-30 的 macOS Electron 30.5.1 运行返回 `saveDialogCancel=true`、`saveDialogConfirm=true`、`saveIpc=true` 和 `status=ok`。harness 会按父目录 `realpath` 与文件名比较待创建目标，兼容 macOS 对同一临时目录返回 `/var/...` 与 `/private/var/...` 两种等价路径，并把保存框实际返回路径交给 production IPC。它是交互式 smoke，不进入无人值守测试门禁，也不操作资料库。
 
 ### 3.9 IPC / Preload / 请求层
 

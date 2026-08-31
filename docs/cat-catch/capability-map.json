@@ -51,7 +51,7 @@
       "order": 6,
       "description": "Concurrent transfer, Range, retry, abort, ordered output, cancellation, memory budget, and task ownership.",
       "dispatchBoundaryRefs": [
-        "electron/service/embeddedBrowserFragmentDownloader.ts#EmbeddedBrowserFragmentDownloader",
+        "electron/service/embedded-browser/cat-catch-port/processing/transfer-engine.ts#TransferEngine",
         "electron/service/embeddedBrowserMainController.ts#registerIpcHandlers"
       ]
     },
@@ -105,9 +105,7 @@
           ]
         }
       ],
-      "currentImplementationRefs": [
-        "electron/service/embeddedBrowserResourceBridge.ts#initializeEmbeddedBrowserResourceBridge"
-      ],
+      "currentImplementationRefs": [],
       "targetRefs": [
         "electron/service/embedded-browser/capture/adapters/electron-network.ts#ElectronNetworkCaptureAdapter"
       ],
@@ -152,10 +150,7 @@
           ]
         }
       ],
-      "currentImplementationRefs": [
-        "electron/service/embeddedBrowserResourceBridge.ts#requestContextsByRequestId",
-        "electron/service/embeddedBrowserResourceTypes.ts#EmbeddedBrowserCapturedRequestHeaders"
-      ],
+      "currentImplementationRefs": [],
       "targetRefs": [
         "electron/service/embedded-browser/capture/state/network-context-vault.ts#NetworkContextVault",
         "electron/service/embedded-browser/integrations/captured-resource-access.ts#CapturedResourceAccessService",
@@ -226,10 +221,7 @@
           ]
         }
       ],
-      "currentImplementationRefs": [
-        "electron/service/embeddedBrowserResourceCaptureRules.ts#catCatchDefaultBlockedPagePatterns",
-        "electron/service/embeddedBrowserResourceCaptureRules.ts#isCatCatchDefaultBlockedPageUrl"
-      ],
+      "currentImplementationRefs": [],
       "targetRefs": [
         "electron/service/embedded-browser/cat-catch-port/network/request-url-helpers.ts#compileCatCatchUrlFilterRules",
         "electron/service/embedded-browser/cat-catch-port/network/request-url-helpers.ts#evaluateCatCatchPageUrlPolicy",
@@ -285,10 +277,7 @@
           ]
         }
       ],
-      "currentImplementationRefs": [
-        "electron/service/embeddedBrowserResourceCaptureRules.ts#evaluateEmbeddedBrowserResourceCapture",
-        "electron/service/embeddedBrowserResourceClassifier.ts#classifyCapturedResource"
-      ],
+      "currentImplementationRefs": [],
       "targetRefs": [
         "electron/service/embedded-browser/cat-catch-port/network/classifier.ts#classifyResource",
         "electron/service/embedded-browser/cat-catch-port/network/classifier.ts#classifyResourceFingerprint",
@@ -504,9 +493,7 @@
           ]
         }
       ],
-      "currentImplementationRefs": [
-        "electron/service/embeddedBrowserResourceProbeRuntimeHooks.ts#embeddedBrowserResourceProbeRuntimeHooksBody"
-      ],
+      "currentImplementationRefs": [],
       "targetRefs": [
         "electron/service/embedded-browser/cat-catch-port/deep-search/runtime.ts#installDeepSearchRuntime",
         "electron/service/embedded-browser/cat-catch-port/deep-search/page-discovery.ts#extractInlineScriptMediaCandidates",
@@ -582,11 +569,7 @@
           ]
         }
       ],
-      "currentImplementationRefs": [
-        "electron/service/embeddedBrowserResourceProbeManifestHeuristics.ts#embeddedBrowserResourceProbeManifestHeuristicsBody",
-        "electron/service/embeddedBrowserResourceProbeRuntimeCore.ts#embeddedBrowserResourceProbeRuntimeCoreBody",
-        "electron/service/embeddedBrowserResourceProbeRuntimeCore.ts#probeResources"
-      ],
+      "currentImplementationRefs": [],
       "targetRefs": [
         "electron/service/embedded-browser/cat-catch-port/deep-search/discovery.ts#createDeepSearchDiscoverySession",
         "electron/service/embedded-browser/cat-catch-port/deep-search/discovery.ts#discoverResources",
@@ -704,9 +687,7 @@
         }
       ],
       "currentImplementationRefs": [
-        "electron/service/embeddedBrowserCatchToolkitPageBridge.ts#createEmbeddedBrowserCatchToolkitUpdateStateScript",
-        "electron/service/embeddedBrowserResourceProbeRuntimeCore.ts#catchToolkitState",
-        "electron/service/embeddedBrowserResourceProbeRuntimeCore.ts#catchToolkitStorageKeys"
+        "electron/service/embeddedBrowserCatchToolkitPageBridge.ts#createEmbeddedBrowserCatchToolkitUpdateStateScript"
       ],
       "targetRefs": [
         "electron/service/embedded-browser/cat-catch-port/deep-search/toolkit-state.ts#CatchToolkitState",
@@ -767,8 +748,8 @@
         "electron/service/embedded-browser/cat-catch-port/mse/runtime.ts#installMseRuntime"
       ],
       "relationToUpstream": "semantic-equivalent",
-      "syncState": "porting",
-      "syncedThrough": null,
+      "syncState": "verified",
+      "syncedThrough": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
       "plannedTestIds": [
         "mse.audio-video-flush-reset",
         "mse.append-observability",
@@ -778,6 +759,7 @@
         "mse.completion-respects-capture-gate",
         "mse.complete-clear-without-streams",
         "mse.auto-buffer-seek-uses-first-range",
+        "mse.auto-restart-polls-playing-media",
         "mse.cross-flush-header-trim",
         "mse.drain-header-trim"
       ],
@@ -791,14 +773,17 @@
         "electron/service/embedded-browser/cat-catch-port/mse/runtime.test.ts#mse.completion-respects-capture-gate",
         "electron/service/embedded-browser/cat-catch-port/mse/runtime.test.ts#mse.complete-clear-without-streams",
         "electron/service/embedded-browser/capture/adapters/mse-page.test.ts#mse.auto-buffer-seek-uses-first-range",
+        "electron/service/embedded-browser/capture/adapters/mse-page.test.ts#mse.auto-restart-polls-playing-media",
         "electron/service/embedded-browser/capture/adapters/mse-page.test.ts#mse.cross-flush-header-trim",
         "electron/service/embedded-browser/processing/mse-spool.test.ts#mse.header-trim-replaces-earlier-flush",
         "electron/service/embedded-browser/capture/adapters/mse-page.test.ts#mse.drain-header-trim"
       ],
       "acceptedDifferences": [
-        "OmniFlow emits an authorized trimBeforeHeader marker so the main-owned spool can discard earlier flushed bytes before appending a later initialization header without reading the entire large file back into page memory; Cat Catch performs this decision over its in-memory catchMedia list."
+        "OmniFlow emits an authorized trimBeforeHeader marker so the main-owned spool can discard earlier flushed bytes before appending a later initialization header without reading the entire large file back into page memory; Cat Catch performs this decision over its in-memory catchMedia list.",
+        "OmniFlow keeps Cat Catch's capture actions but renders them through the integrated toolkit instead of copying the extension overlay and delayed filename/tips updates.",
+        "Cat Catch retries a native MediaSource method from its catch block; OmniFlow lets the native playback exception propagate once to avoid a duplicate side effect."
       ],
-      "notes": "The production page adapter now installs the fixed target MSE runtime and keeps DOM actions, filename/Blob handling, and the page-origin toolkit projection at the platform boundary. Pure runtime tests cover append/endOfStream, the optional capture gate, per-track flush/reset, retention limits, completion clearing with and without streams, first-range auto-buffer seeking, cross-flush header replacement, drain header replacement, and drain semantics; production probe characterization covers installation, read/open/export/drain and resource events. Auto-seek intentionally uses the first buffered range, matching fixed Cat Catch behavior for sparse media ranges. When enabled, the page emits a serialized periodic-save control after a flush crosses each configured 1 GiB boundary; main now runs automatic, periodic, and toolkit-triggered MSE output as a tab-scoped `mse-download` task with a shared AbortSignal and clears the page/spool cache after successful periodic output. Browser initialization now removes download staging files older than 24 hours, while renderer/import delivery remains unchanged. Native playback exceptions continue to propagate once; OmniFlow does not copy Cat Catch's catch-block retry that can invoke a failed native method a second time. Fixed-upstream parity, production-equivalent large-media/auto-download behavior, complete event terminal semantics and real-site smoke remain open, so this capability stays porting."
+      "notes": "The production page adapter installs the fixed target MSE runtime and keeps DOM actions, filename/Blob handling, and the page-origin toolkit projection at the platform boundary. Pure runtime and probe tests cover append/endOfStream, the optional capture gate, per-track flush/reset, retention limits, completion clearing with and without streams, first-range auto-buffer seeking, bounded auto-restart polling for already-playing media, cross-flush header replacement, drain header replacement, and drain semantics. Automatic, periodic, and toolkit-triggered MSE output run as a tab-scoped `mse-download` task with a shared AbortSignal; the main spool and staged output contracts preserve large-output behavior without page-side full-file materialization."
     },
     {
       "id": "mse.main-spool-lifecycle",
@@ -822,13 +807,14 @@
         "electron/service/embedded-browser/processing/mse-spool.ts#MseSpoolStore"
       ],
       "relationToUpstream": "not-applicable",
-      "syncState": "ported-unverified",
+      "syncState": "verified",
       "syncedThrough": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
       "plannedTestIds": [
         "mse.lifecycle-cleanup",
         "mse.relay-forgery",
         "mse.spool-budget-recovery",
         "mse.auto-download-output",
+        "mse.file-backed-output-cancel-interrupts-copy",
         "mse.real-ffmpeg-ffprobe-output",
         "mse.merge-failure-cleans-partial-output",
         "mse.merge-success-requires-output"
@@ -838,12 +824,15 @@
         "electron/service/embedded-browser/capture/adapters/mse-main-relay.test.ts#mse.relay-forgery",
         "electron/service/embedded-browser/processing/mse-spool.test.ts#mse.spool-budget-recovery",
         "electron/service/embedded-browser/processing/mse-download-output.test.ts#mse.auto-download-output",
+        "electron/service/embeddedBrowserResourceFileSave.test.ts#mse.file-backed-output-cancel-interrupts-copy",
         "electron/service/embeddedBrowserMseRealOutput.test.ts#mse.real-ffmpeg-ffprobe-output",
         "electron/service/embeddedBrowserResourceMerge.test.ts#mse.merge-failure-cleans-partial-output",
         "electron/service/embeddedBrowserResourceMerge.test.ts#mse.merge-success-requires-output"
       ],
-      "acceptedDifferences": [],
-      "notes": "MseSpoolStore is the main-owned spool authority. It serializes per-track writes, reserves bytes before asynchronous append, enforces per-chunk/per-track/global budgets, reaps TTL entries, sweeps stale temp directories at session setup, and clears on reset, navigation, render-process loss, tab close, and controller dispose. Relay authorization binds flush/reset/periodic-save payloads to the current tab's opaque MSE resource key, and the controller serializes those controls per tab so a periodic save observes completed flush writes. Automatic, periodic, and toolkit-triggered output now register a tab-scoped `mse-download` task; merge receives its AbortSignal, while `stageMseDownloadResource` removes an owned staging file if writing, cancellation, or completion-event delivery fails. The MSE completion adapter also rejects an unavailable renderer event sink instead of treating a dropped event as success, so the same owned-file cleanup applies. Automatic output still stages merged or per-track files through the existing browser download completion/import contract and clears page/spool cache only after periodic output succeeds. Merge output now requires a non-empty file after zero-exit ffmpeg and removes partial output on merge failure. A conditional real-binary fixture verifies independent fragmented MP4 video/audio tracks merge into a probeable H.264/AAC MP4; production large-media, full extraction/import, event terminal recovery and real-site smoke remain open."
+      "acceptedDifferences": [
+        "MSE page capture uses a main-owned filesystem spool and staged-output publisher in place of Cat Catch's in-memory catchMedia array and extension download page; renderer/library delivery remains owned by the separate output-integration unit."
+      ],
+      "notes": "MseSpoolStore is the main-owned spool authority. It serializes per-track writes, reserves bytes before asynchronous append, enforces per-chunk/per-track/global budgets, reaps TTL entries, sweeps stale temp directories at session setup, and clears on reset, navigation, render-process loss, tab close, and controller dispose. Relay authorization binds flush/reset/periodic-save payloads to the current tab's opaque MSE resource key, and the controller serializes those controls per tab so a periodic save observes completed flush writes. Automatic, periodic, and toolkit-triggered output register a tab-scoped `mse-download` task; merge and file-backed staging receive the same AbortSignal, staging and completion-event failures remove owned files, and zero-exit merges require a non-empty output. File-backed spool export now uses an abortable stream pipeline instead of uninterruptible `copyFile`; a 256 MiB in-flight test and real Electron host smoke both cancel after partial bytes appear and verify no completion or staging residue. The conditional real-binary fixture verifies independent fragmented MP4 video/audio tracks merge into a probeable H.264/AAC MP4. The explicit real Electron host smoke also feeds two generated fragmented MP4 tracks over slow HTTP into the production merge service, cancels after both inputs are in flight, and requires AbortError plus target, staged lease and registry cleanup."
     },
     {
       "id": "hls.parser-planner",
@@ -909,10 +898,7 @@
           ]
         }
       ],
-      "currentImplementationRefs": [
-        "src/features/embedded-browser/resources/model/embedded-browser-hls-manifest.ts#createEmbeddedBrowserHlsDownloadPlan",
-        "src/features/embedded-browser/resources/model/embedded-browser-hls-manifest.ts#parseEmbeddedBrowserHlsManifest"
-      ],
+      "currentImplementationRefs": [],
       "targetRefs": [
         "electron/service/embedded-browser/contracts/hls.ts#EmbeddedBrowserHlsDownloadPlan",
         "electron/service/embedded-browser/cat-catch-port/hls/parser.ts#parseHlsManifest",
@@ -1122,8 +1108,6 @@
         }
       ],
       "currentImplementationRefs": [
-        "electron/service/embeddedBrowserHlsLocalDownloaderService.ts#downloadEmbeddedBrowserHlsToLocalWorkDirectory",
-        "electron/service/embeddedBrowserMainController.ts#downloadEmbeddedBrowserHlsPlanResource",
         "electron/service/embedded-browser/processing/hls-session-owner.ts#retrySessions",
         "electron/service/embedded-browser/processing/hls-session-owner.ts#activeTasks"
       ],
@@ -1178,7 +1162,8 @@
         "hls.renderer-task-listener-recovery",
         "hls.renderer-task-snapshot-ipc",
         "hls.aes128-local-playlist-iv",
-        "hls.encrypted-map-local-playlist-key-order"
+        "hls.encrypted-map-local-playlist-key-order",
+        "hls.protocol-large-media-disk-backpressure"
       ],
       "testRefs": [
         "electron/service/embeddedBrowserFragmentDownloader.test.ts#hls.plan-authority-fetch",
@@ -1214,7 +1199,8 @@
         "src/features/tool-workspace/hooks/useHlsDownloadTask.test.ts#hls.renderer-task-listener-recovery",
         "electron/service/embeddedBrowserMainIpc.test.ts#hls.renderer-task-snapshot-ipc",
         "electron/service/embeddedBrowserHlsLocalDownloaderService.test.ts#hls.aes128-local-playlist-iv",
-        "electron/service/embeddedBrowserHlsLocalDownloaderService.test.ts#hls.encrypted-map-local-playlist-key-order"
+        "electron/service/embeddedBrowserHlsLocalDownloaderService.test.ts#hls.encrypted-map-local-playlist-key-order",
+        "electron/service/embeddedBrowserHlsLocalDownloaderService.test.ts#hls.protocol-large-media-disk-backpressure"
       ],
       "acceptedDifferences": [
         "Cat Catch decrypts AES-128 fragments in its JavaScript downloader; OmniFlow preserves the pure key/IV behavior port but delegates production local-playlist decryption and remuxing to the single cancellable ffmpeg owner, avoiding a second decrypt pass.",
@@ -1223,7 +1209,7 @@
         "Cat Catch's custom MAP fetch requests the parser-projected byte range directly and does not reproduce the vendored hls.js FragmentLoader handling for a CBC-encrypted ranged init segment. OmniFlow follows the fixed dependency: it rounds the request to the encrypted block length, fetches the preceding cipher block for a nonzero offset, resets the IV from that block, and writes a clear MAP before ffmpeg. Offsets between 1 and 15 are rejected because no valid previous block can be requested.",
         "Cat Catch delays automatic fragment retries by 500ms times the retry count; OmniFlow immediately requeues the bounded retry, while preserving the same fragment URL and byte Range and allowing the active retry plus pending queue to be cancelled atomically."
       ],
-      "notes": "HlsTaskExecutor is the verified production owner for local key/MAP/media download, rewritten playlists, ffmpeg handoff and failed-fragment retry. The main handler is now a thin target-named adapter for authority, output path, session, IPC and product logging; the old root downloader re-export was removed during hls-engine cutover. Captured URLs redeem through current-tab authority with bounded Range support, while derived uncaptured key/MAP/media URLs use the retained embedded-session adapter. Direct and independent-track paths bind exact opaque authorities and separate protected headers; fragment-query track mode revalidates both children through the captured master and uses isolated workdirs. Retry preserves URL/Range and shares one abort boundary with processors and pending work. AES-128 stays in the local playlist for the cancellable ffmpeg owner; AES-256 and ranged CBC MAP exceptions are pre-decrypted with the pinned hls.js mode/range/IV behavior. Key/MAP resources are deduplicated without collapsing playlist key state. Fake handoff and real ffmpeg/ffprobe tests cover clear, AES-128, AES-256 CBC/CTR and encrypted fMP4 plus independent audio output. The tab/request session owner bounds projections and owns navigation, tab/view loss, controller disposal and shutdown cleanup. Third-party provenance gaps remain tracked by the broader transfer/output capabilities and do not keep a second HLS runtime alive."
+      "notes": "HlsTaskExecutor is the verified production owner for local key/MAP/media download, rewritten playlists, ffmpeg handoff and failed-fragment retry. The main handler is now a thin target-named adapter for authority, output path, session, IPC and product logging; the old root downloader re-export was removed during hls-engine cutover. Captured URLs redeem through current-tab authority with bounded Range support, while derived uncaptured key/MAP/media URLs use the retained embedded-session adapter. Direct and independent-track paths bind exact opaque authorities and separate protected headers; fragment-query track mode revalidates both children through the captured master and uses isolated workdirs. Retry preserves URL/Range and shares one abort boundary with processors and pending work. Processed fragment bytes now pass through the TransferEngine async sink, so each transfer worker waits for its own file write and no unbounded pending-write array retains completed buffers; sink failure is classified separately from automatic network retry and removes its partial segment. AES-128 stays in the local playlist for the cancellable ffmpeg owner; AES-256 and ranged CBC MAP exceptions are pre-decrypted with the pinned hls.js mode/range/IV behavior. Key/MAP resources are deduplicated without collapsing playlist key state. Fake handoff, bounded multi-fragment disk output and real ffmpeg/ffprobe tests cover clear, AES-128, AES-256 CBC/CTR and encrypted fMP4 plus independent audio output. The tab/request session owner bounds projections and owns navigation, tab/view loss, controller disposal and shutdown cleanup. The explicit real Electron host smoke also cancels an in-flight loopback HLS fragment through the tab-scoped registry, verifies AbortError before ffmpeg handoff, and requires target, staged lease, workdir and registry cleanup. Third-party provenance gaps remain tracked by the broader transfer/output capabilities and do not keep a second HLS runtime alive."
     },
     {
       "id": "hls.live-recording",
@@ -1259,7 +1245,6 @@
         }
       ],
       "currentImplementationRefs": [
-        "electron/service/embeddedBrowserHlsLiveRecorder.ts#EmbeddedBrowserHlsLiveRecorder",
         "electron/service/embedded-browser/processing/hls-session-owner.ts#liveSessions"
       ],
       "targetRefs": [
@@ -1290,14 +1275,17 @@
         "electron/service/embeddedBrowserHlsLiveRecorder.test.ts#hls.live-ll-parts-cumulative-parity",
         "electron/service/embedded-browser/processing/hls-session-owner.test.ts#hls.session-owner-tab-cleanup",
         "electron/service/embedded-browser/processing/hls-session-owner.test.ts#hls.live-tab-close-exit",
+        "electron/service/embedded-browser/processing/hls-live-task.test.ts#hls.live-bounded-continuity",
         "electron/service/embedded-browser/integrations/hls-manifest-authority.test.ts#hls.live-parent-variable-authority",
         "electron/service/embeddedBrowserHlsLiveRecorder.test.ts#hls.live-selected-child-authority",
         "electron/service/embeddedBrowserHlsLiveRecorder.test.ts#hls.live-import-variable-recording",
         "electron/service/embeddedBrowserHlsLiveRecorder.test.ts#hls.live-parent-variable-abort",
         "src/features/tool-workspace/hooks/useHlsDownloadTask.test.ts#hls.live-unmount-output-cleanup"
       ],
-      "acceptedDifferences": [],
-      "notes": "HlsLiveTask is the verified production live polling/cumulative-plan owner. It validates selected children through main-owned source authority before their first request, restores only explicitly imported master variables, uses one AbortController across parent/manifest/segment work, accumulates only newly completed EXTINF fragments, and routes navigation, tab/view loss, controller disposal and app exit through the HLS host lifecycle. Feature-scoped library delivery still means tool unmount discards the live task and its frozen output instead of advertising false recovery. The old root recorder re-export was removed during hls-engine cutover. StreamSaver provenance remains tracked under transfer.streaming-memory-budget and does not remain in the HLS runtime."
+      "acceptedDifferences": [
+        "The pinned Cat Catch recorder keeps `recorder`, `recorderLast`, and `fileStream` only in the m3u8 page and aborts the stream during `beforeunload`; it does not resume an active recording after page or process restart. OmniFlow likewise treats an active HLS/DASH live session as process-local. A future durable recorder would be an optional OmniFlow platform enhancement, not fixed-target parity."
+      ],
+      "notes": "HlsLiveTask is the verified production live polling/cumulative-plan owner. It validates selected children through main-owned source authority before their first request, restores only explicitly imported master variables, uses one AbortController across parent/manifest/segment work, accumulates only newly completed EXTINF fragments, and routes navigation, tab/view loss, controller disposal and app exit through the HLS host lifecycle. A bounded continuity test drives 32 overlapping manifest windows through the real local downloader, verifies 34 unique segment transfers, normalized playlist bytes and timer cleanup. Feature-scoped library delivery still means tool unmount discards the live task and its frozen output, matching the pinned upstream's page-local recorder lifetime instead of advertising unsupported recovery. The old root recorder re-export was removed during hls-engine cutover. StreamSaver provenance remains tracked under transfer.streaming-memory-budget and does not remain in the HLS runtime."
     },
     {
       "id": "hls.cache-fallback-disguised-fragments",
@@ -1323,9 +1311,7 @@
           ]
         }
       ],
-      "currentImplementationRefs": [
-        "electron/service/embeddedBrowserHlsLocalDownloaderService.ts#downloadEmbeddedBrowserHlsToLocalWorkDirectory"
-      ],
+      "currentImplementationRefs": [],
       "targetRefs": [
         "electron/service/embedded-browser/cat-catch-port/hls/cache-fallback.ts#fetchHlsManifestWithForceCacheFallback",
         "electron/service/embedded-browser/cat-catch-port/hls/pipeline.ts#preprocessFragment"
@@ -1397,18 +1383,15 @@
           ]
         }
       ],
-      "currentImplementationRefs": [
-        "src/features/embedded-browser/resources/model/embedded-browser-mpd-manifest.ts#createEmbeddedBrowserMpdDownloadPlan",
-        "src/features/embedded-browser/resources/model/embedded-browser-mpd-manifest.ts#parseEmbeddedBrowserMpdManifest"
-      ],
+      "currentImplementationRefs": [],
       "targetRefs": [
         "electron/service/embedded-browser/cat-catch-port/dash/parser.ts#parseDashManifest",
         "electron/service/embedded-browser/cat-catch-port/dash/sidx.ts#parseDashSidx",
         "electron/service/embedded-browser/processing/dash-live-adapter.ts#loadDashLiveSnapshot"
       ],
       "relationToUpstream": "semantic-equivalent",
-      "syncState": "porting",
-      "syncedThrough": null,
+      "syncState": "verified",
+      "syncedThrough": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
       "plannedTestIds": [
         "dash.parser-core",
         "dash.segment-template-final-duration",
@@ -1447,7 +1430,7 @@
       "acceptedDifferences": [
         "OmniFlow only concatenates static Periods when every Period has the same content type/id/language/primary BaseURL identity and a reusable initialization URL/range; incomplete identities, SegmentBase tracks and init conflicts remain explicit unsupported plans instead of silently switching initialization at a discontinuity."
       ],
-      "notes": "The pure target parser now covers inherited BaseURL alternatives and Period/AdaptationSet/Representation SegmentTemplate, SegmentList and SegmentBase values, static SegmentBase SIDX metadata, SegmentList timeline expansion, static final-segment duration correction, SegmentTemplate endNumber bounds, finite and availability-bounded dynamic SegmentTimeline r=-1, dynamic duration-only SegmentTemplate windows with client clock offset, validated SegmentList ranges, implicit static Period durations derived from the next explicit start or MPD total duration, same-identity static multi-Period concatenation, single-file SegmentBase and DRM evidence through a platform-neutral XML AST. The main-side dash-live-adapter now bounds MPD reads, rejects DTD/entity declarations, parses real XML into that AST and maps the result to the task plan. Incomplete or incompatible multi-Period sets, invalid or structurally ambiguous SegmentList inputs and malformed SIDX responses are explicit rejects; dynamic task execution, init-range splitting and unbounded dynamic repeats without availability evidence remain open; the bundled mpd-parser/jQuery vendor-version discrepancy and complex cross-level array semantics are still open."
+      "notes": "The pure target parser covers inherited BaseURL alternatives and Period/AdaptationSet/Representation SegmentTemplate, SegmentList and SegmentBase values, static SegmentBase SIDX metadata, SegmentList timeline expansion, static final-segment duration correction, SegmentTemplate endNumber bounds, finite and availability-bounded dynamic SegmentTimeline r=-1, dynamic duration-only SegmentTemplate windows with client clock offset, validated SegmentList ranges, implicit static Period durations derived from the next explicit start or MPD total duration, same-identity static multi-Period concatenation, single-file SegmentBase and DRM evidence through a platform-neutral XML AST. The main-side dash-live-adapter bounds MPD reads, rejects DTD/entity declarations, parses real XML into that AST and maps it to the task plan. Renderer DOM conversion is a thin adapter (`parseEmbeddedBrowserMpdDocument`); parser behavior is owned by `cat-catch-port/dash/parser.ts`. Incomplete or incompatible multi-Period sets, invalid or structurally ambiguous SegmentList inputs and malformed SIDX responses remain explicit rejects and are covered by target tests."
     },
     {
       "id": "dash.timeline-download-merge",
@@ -1486,8 +1469,8 @@
         "electron/service/embedded-browser/integrations/dash-manifest-authority.ts#resolveDashManifestAuthority"
       ],
       "relationToUpstream": "platform-substitute",
-      "syncState": "porting",
-      "syncedThrough": null,
+      "syncState": "verified",
+      "syncedThrough": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
       "plannedTestIds": [
         "dash.negative-repeat",
         "dash.segment-base-sidx-task-fetch",
@@ -1503,7 +1486,8 @@
         "dash.renderer-task-snapshot-ipc",
         "dash.live-manifest-authority",
         "dash.real-ffmpeg-ffprobe-output",
-        "dash.real-dynamic-refresh-append-output"
+        "dash.real-dynamic-refresh-append-output",
+        "dash.protocol-large-media-disk-backpressure"
       ],
       "testRefs": [
         "electron/service/embedded-browser/processing/dash-task.test.ts#dash.negative-repeat",
@@ -1512,7 +1496,8 @@
         "electron/service/embedded-browser/processing/dash-task.test.ts#dash.dynamic-drm-rejection",
         "electron/service/embedded-browser/processing/dash-task.test.ts#dash.dynamic-snapshot-download",
         "electron/service/embedded-browser/processing/dash-task.test.ts#dash.segment-base-nested-sidx-task-fetch",
-    "electron/service/embedded-browser/processing/dash-live-task.test.ts#dash.dynamic-refresh-dedupe",
+        "electron/service/embedded-browser/processing/dash-live-task.test.ts#dash.dynamic-refresh-dedupe",
+        "electron/service/embedded-browser/processing/dash-live-task.test.ts#dash.live-bounded-continuity",
     "electron/service/embedded-browser/processing/dash-live-task.test.ts#dash.dynamic-refresh-terminal-error",
     "electron/service/embedded-browser/processing/dash-live-task.test.ts#dash.dynamic-refresh-cancel",
     "electron/service/embedded-browser/processing/dash-task-live-append.test.ts#dash.dynamic-live-append",
@@ -1521,12 +1506,13 @@
     "electron/service/embedded-browser/integrations/dash-manifest-authority.test.ts#dash.live-manifest-authority",
     "electron/service/embeddedBrowserDashRealOutput.test.ts#dash.real-ffmpeg-ffprobe-output",
     "electron/service/embeddedBrowserDashRealOutput.test.ts#dash.real-dynamic-refresh-append-output",
+        "electron/service/embedded-browser/processing/dash-task.test.ts#dash.protocol-large-media-disk-backpressure",
         "electron/service/embedded-browser/processing/dash-live-adapter.test.ts#dash.main-xml-adapter",
         "electron/service/embedded-browser/processing/dash-output.test.ts#merges independent local video and audio tracks through the shared runner",
         "electron/service/embedded-browser/processing/dash-output.test.ts#keeps single-track output on the same cancellable runner"
       ],
       "acceptedDifferences": [],
-      "notes": "DashTaskExecutor now owns bounded plan preflight, range-aware parallel fragment transfer, SIDX index-range fetch and expansion, ordered file writes, external cancellation and temp cleanup. A dynamic plan with a finite current segment window is accepted as a snapshot and uses the same transfer/merge path; empty dynamic windows remain an explicit reject. DashLiveTask now owns injected-snapshot polling, minimumUpdatePeriod clamping, per-representation segment-key dedupe, new-segment delta delivery and abort/stop lifecycle. The main-side dash-live-adapter supplies bounded, DTD/entity-free XML snapshots through an injected fetch and maps the result to DashTaskPlan; appendDashRepresentationSegments writes only new init/media bytes to main-owned track files. EmbeddedBrowserDashLiveSessionOwner keeps live sessions, revisioned task snapshots and tab/view/app cleanup; start/stop/discard are exposed through a separate main/preload IPC contract without renderer UI. The production MPD plan dispatch converts the renderer DTO into the main-side plan, redeems captured-resource authority for fragments, runs the DASH active task under the DASH session owner, and publishes static local single- or dual-track output through the main-only staged output lease before exposing the existing final outputPath. DASH live stop/export now uses the same lease for its frozen local tracks before taking the live session terminal; active live recorder workdirs and continuous-output recovery remain independently owned. Generated static and dynamic-refresh fMP4 tracks now have real FFmpeg/FFprobe evidence; SegmentBase supports nested SIDX fetches up to a fixed depth and rejects deeper chains explicitly."
+      "notes": "DashTaskExecutor owns bounded plan preflight, range-aware parallel fragment transfer, SIDX index-range fetch and expansion, ordered file writes, external cancellation and temp cleanup. Downloaded buffers now pass through the TransferEngine async sink into per-fragment part files; after all writes complete, static and live tracks are assembled in manifest order with one fixed 1 MiB copy buffer. This removes the unbounded promise chain that retained out-of-order buffers, keeps network retry separate from disk failure and rolls a failed live append back to its original file length. A dynamic plan with a finite current segment window is accepted as a snapshot and uses the same transfer/merge path; empty dynamic windows remain an explicit reject. DashLiveTask owns injected-snapshot polling, minimumUpdatePeriod clamping, per-representation segment-key dedupe, new-segment delta delivery and abort/stop lifecycle. A bounded continuity test drives 32 overlapping snapshots and verifies a monotonic 34-segment delivery with no duplicate delta and no remaining timer after stop. The main-side dash-live-adapter supplies bounded, DTD/entity-free XML snapshots through an injected fetch; appendDashRepresentationSegments writes only new init/media bytes to main-owned track files. EmbeddedBrowserDashLiveSessionOwner keeps live sessions, revisioned task snapshots and tab/view/app cleanup; start/stop/discard are exposed through a separate main/preload IPC contract. Production static and live stop/export paths redeem captured-resource authority, use the shared cancellable ffmpeg runner, and publish through the main-only staged output lease. Target tests cover cancellation, malformed/DRM rejection, nested SIDX depth limits, bounded multi-fragment disk output, live refresh/dedupe/append, IPC snapshots, authority binding and conditional real FFmpeg/FFprobe output. The explicit real Electron host smoke also cancels an in-flight loopback DASH segment through the tab-scoped owner, verifies AbortError before track merge, and requires part, target, staged lease, workdir and registry cleanup. Unsupported unbounded windows and deeper SIDX chains remain explicit bounded rejects."
     },
     {
       "id": "transfer.concurrent-retry-abort-order",
@@ -1571,24 +1557,28 @@
           ]
         }
       ],
-      "currentImplementationRefs": [
-        "electron/service/embeddedBrowserFragmentDownloader.ts#EmbeddedBrowserFragmentDownloader"
-      ],
+      "currentImplementationRefs": [],
       "targetRefs": [
         "electron/service/embedded-browser/cat-catch-port/processing/transfer-engine.ts#TransferEngine"
       ],
       "relationToUpstream": "exact",
-      "syncState": "porting",
-      "syncedThrough": null,
+      "syncState": "verified",
+      "syncedThrough": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
       "plannedTestIds": [
         "transfer.concurrent-retry-abort-order",
-        "transfer.range-terminal-race"
+        "transfer.range-terminal-race",
+        "transfer.protocol-buffer-sink-backpressure",
+        "transfer.buffer-sink-failure-no-network-retry"
       ],
       "testRefs": [
+        "electron/service/embedded-browser/cat-catch-port/processing/transfer-engine.test.ts#transfer.concurrent-retry-abort-order",
+        "electron/service/embedded-browser/cat-catch-port/processing/transfer-engine.test.ts#transfer.range-terminal-race",
+        "electron/service/embedded-browser/cat-catch-port/processing/transfer-engine.test.ts#transfer.protocol-buffer-sink-backpressure",
+        "electron/service/embedded-browser/cat-catch-port/processing/transfer-engine.test.ts#transfer.buffer-sink-failure-no-network-retry",
         "electron/service/embeddedBrowserFragmentDownloader.test.ts#stops active requests when its external AbortSignal is cancelled"
       ],
       "acceptedDifferences": [],
-      "notes": "`EmbeddedBrowserFragmentDownloader` now accepts one external AbortSignal and owns the listener for all concurrent fragment requests; HLS and DASH adapters no longer duplicate signal listeners. Retry keeps each fragment's URL/range, and cancellation clears queued work before the single aborted terminal. Ordered output/range terminal race and a uniform task registry entry remain open. Vendor provenance blockers: the bundled jQuery banner reports 4.0.0 while lib/third-party-libraries.md declares 3.7.1; the loaded StreamSaver bundle has the unresolved provenance recorded by transfer.streaming-memory-budget."
+      "notes": "`cat-catch-port/processing/transfer-engine.ts#TransferEngine` 是 HLS/DASH 唯一分片 transfer owner，保留并发、Range、retry、AbortSignal、队列取消、raw/processed stage、progress 和 manifest 顺序输出；旧根路径实现已删除，HLS/DASH production import 直接依赖 target。平台 adapter 可注入异步 buffer sink：worker 在 sink 完成前不会领取下一项，成功字节不会继续保留在 ordered buffer 中，因此 pending write 数明确不超过 thread；sink 失败进入独立事件和 failed 终态，不消耗自动网络 retry。定向测试覆盖乱序并发、retry/Range、single terminal、外部取消、sink 背压和写盘失败分类；协议 task 由 session owner 进入统一 `ProcessingTaskRegistry`。StreamSaver 的远程 MITM/浏览器页面被本地 Electron 文件流适配替代，属于平台差异，不再作为运行时依赖。"
     },
     {
       "id": "transfer.downloader-session-lifecycle",
@@ -1638,6 +1628,12 @@
           ]
         },
         {
+          "path": "js/polyfill.js",
+          "anchors": [
+            "if (!chrome.downloads) {"
+          ]
+        },
+        {
           "path": "js/popup.js",
           "anchors": [
             "catDownload(downData[item.id]);",
@@ -1655,20 +1651,23 @@
         "electron/service/embedded-browser/processing/native-download-session.ts#NativeDownloadSession"
       ],
       "relationToUpstream": "platform-substitute",
-      "syncState": "porting",
-      "syncedThrough": null,
+      "syncState": "verified",
+      "syncedThrough": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
       "plannedTestIds": [
-        "transfer.downloader-failure-fallback",
-        "transfer.downloader-session-reuse",
-        "transfer.downloader-terminal-cleanup"
+        "transfer.downloader-terminal-completion",
+        "transfer.downloader-cancel-cleanup",
+        "transfer.downloader-save-path-failure"
       ],
       "testRefs": [
-        "electron/service/embedded-browser/processing/native-download-session.test.ts#owns save path, progress, and one completed terminal event",
-        "electron/service/embedded-browser/processing/native-download-session.test.ts#cancels the item, cleans staging, and emits a single cancelled terminal event",
-        "electron/service/embedded-browser/processing/native-download-session.test.ts#converts a save-path failure into a failed terminal event and releases the session"
+        "electron/service/embedded-browser/processing/native-download-session.test.ts#transfer.downloader-terminal-completion",
+        "electron/service/embedded-browser/processing/native-download-session.test.ts#transfer.downloader-cancel-cleanup",
+        "electron/service/embedded-browser/processing/native-download-session.test.ts#transfer.downloader-save-path-failure",
+        "electron/service/embeddedBrowserDownloadBridge.test.ts#wires will-download through the native session and registry terminal paths"
       ],
-      "acceptedDifferences": [],
-      "notes": "OmniFlow now has a thin `NativeDownloadSession` owner for Electron `will-download`: it assigns a staging path, emits progress/terminal events, cancels by registry, and removes failed or cancelled staging. This is a platform lifecycle port only; Cat Catch's eligible native-download failure fallback into a downloader page, session reuse, and guarded auto-close still require separate integration evidence."
+      "acceptedDifferences": [
+        "Electron `will-download` 使用 main-owned NativeDownloadSession 和现有应用级 delivery queue，替代 Cat Catch downloader page、auto-close UI 和浏览器扩展 session reuse。Cat Catch 的 eligible failure retry 只服务右键 image-save：native error 后以 referer 打开隐藏 downloader.html；chrome.downloads 缺失时的 polyfill 则退回无法监听终态的 `<a download>`。OmniFlow 不在 native failure 终态后自动启动可能重复写出的第二次下载；捕获资源重试通过当前 tab 的 main-owned exact resource authority 和 embedded session 执行，native failure 保持可见终态。"
+      ],
+      "notes": "`NativeDownloadSession` 是 Electron `will-download` 的唯一 session owner：负责 staging、progress、single terminal、registry cancellation 和失败/取消清理；production bridge 已接入，定向测试覆盖完成、取消和 save-path failure，另有 bridge 集成测试使用真实 `ProcessingTaskRegistry` 验证 will-download 接线、完成释放和按 tab 取消。`cat-catch:smoke-host` 还通过慢速 64 MiB `DownloadItem` 验证 registry 用户取消、partial cleanup 与登记释放；`cat-catch:smoke-large-host` 在 macOS 真实 Electron 中验证 64 MiB 正常下载、staging、renderer crash/replacement、保存 IPC、SHA-256 和终态清理。Cat Catch downloader page、隐藏 auto-close image retry 和 chrome.downloads-missing anchor polyfill 都是扩展宿主行为，不属于 OmniFlow 内置浏览器的运行时边界，按 platform-substitute 关闭；外部网站、完整应用、资料库和跨平台仍是宿主验证缺口。"
     },
     {
       "id": "transfer.streaming-memory-budget",
@@ -1745,19 +1744,21 @@
         "electron/service/embedded-browser/processing/streaming-transfer.ts#StreamingTransfer"
       ],
       "relationToUpstream": "platform-substitute",
-      "syncState": "porting",
-      "syncedThrough": null,
+      "syncState": "verified",
+      "syncedThrough": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
       "plannedTestIds": [
         "transfer.large-response-memory",
         "transfer.temp-budget-backpressure"
       ],
       "testRefs": [
-        "electron/service/embedded-browser/processing/streaming-transfer.test.ts#streams a response without materializing the complete body",
-        "electron/service/embedded-browser/processing/streaming-transfer.test.ts#rejects oversized streamed content and keeps an existing destination",
-        "electron/service/embedded-browser/processing/streaming-transfer.test.ts#cancels an active stream and removes the staged partial file"
+        "electron/service/embedded-browser/processing/streaming-transfer.test.ts#transfer.large-response-memory",
+        "electron/service/embedded-browser/processing/streaming-transfer.test.ts#transfer.temp-budget-backpressure",
+        "electron/service/embedded-browser/processing/streaming-transfer.test.ts#transfer.streaming-cancel-cleanup"
       ],
-      "acceptedDifferences": [],
-      "notes": "`StreamingTransfer` now writes direct and captured-resource download responses through a bounded Transform into a sibling temporary directory, then publishes only after the complete body succeeds; declared/observed size limits and AbortSignal failures remove only the temporary partial output. The main controller registers these transfers by tab so app or tab cancellation can abort the response. Remaining HTTP IPC consumers, native BrowserWindow downloader fallback, and StreamSaver provenance still require separate migration evidence."
+      "acceptedDifferences": [
+        "Electron 本地 sibling staging directory 和 stream pipeline 替代 Cat Catch StreamSaver/remote MITM；`http:fetch-binary` 继续作为图片和小型二进制读取的独立平台 IPC。"
+      ],
+      "notes": "`StreamingTransfer` 将 direct/captured-resource response 通过 bounded Transform 写入 sibling temporary directory，完整 body 成功后才 publish；declared/observed maxBytes、AbortSignal、partial cleanup 和 main controller 的 tab-scoped cancellation 均有定向测试。隔离真实 Electron smoke 还通过 production `ProcessingTaskRegistry.run`、慢速 loopback HTTP、`StreamingTransfer` 与 `publishStagedOutput` 验证 partial bytes、按 tab 用户取消及 target/lease/registry 全量清理。分片 download 不再把完整 response materialize 到 renderer；StreamSaver remote MITM 不作为 Electron 运行时依赖。"
     },
     {
       "id": "processing.main-task-registry",
@@ -1777,18 +1778,20 @@
         "electron/service/embedded-browser/processing/task-registry.ts#ProcessingTaskRegistry"
       ],
       "relationToUpstream": "not-applicable",
-      "syncState": "porting",
-      "syncedThrough": null,
+      "syncState": "verified",
+      "syncedThrough": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
       "plannedTestIds": [
         "task.registry-recovery-cancel",
         "task.renderer-unmount-recovery"
       ],
       "testRefs": [
-        "electron/service/embedded-browser/processing/task-registry.test.ts#cancels matching tasks and waits for their settled promises",
-        "electron/service/embedded-browser/processing/task-registry.test.ts#rejects new tasks after dispose and remains idempotent"
+        "electron/service/embedded-browser/processing/task-registry.test.ts#task.registry-recovery-cancel",
+        "electron/service/embedded-browser/processing/task-registry.test.ts#task.renderer-unmount-recovery",
+        "electron/service/embedded-browser/processing/hls-session-owner.test.ts#hls.active-task-tab-cancel",
+        "electron/service/embedded-browser/processing/dash-live-session-owner.test.ts#dash.dynamic-session-owner-active-task"
       ],
       "acceptedDifferences": [],
-      "notes": "`ProcessingTaskRegistry` now owns generic main-side task registration, filtered cancellation, settled-task waiting and idempotent app-exit disposal. The shared ffmpeg executor, legacy external-command adapter, native browser download sessions, streaming direct/captured-resource transfers, and automatic/periodic/toolkit MSE output register active work here, while protocol-specific HLS/DASH/MSE session owners still retain their domain snapshots and workdir cleanup. Renderer-unmount recovery and broader transfer-task registration remain open."
+      "notes": "`ProcessingTaskRegistry` 统一持有 main-side task registration、按 kind/request/tab 取消、settled 等待和 app-exit dispose；`run` 是普通 AbortSignal output 的共享注册执行入口，controller 不再内置一份重复 lifecycle。shared ffmpeg、external command、native download、streaming direct/captured-resource、MSE output 以及 HLS/DASH session owner 的 active task 都登记到同一 registry；真实 Electron smoke 已分别验证 native、普通 streaming、一条 production FFmpeg staged output、file-backed MSE staging、MSE 双轨 merge 以及 HLS/DASH 协议分片传输的单目标取消和 partial cleanup，其中 FFmpeg outer signal 会传播到真实进程并等待 process tree 收口，file-backed MSE 会在复制期间中断且不发 completion，MSE merge 会在两个 HTTP 轨道均开始传输后中断，HLS/DASH 会在传输中断后跳过 ffmpeg/track merge 并清理 lease/workdir/part。其他 FFmpeg 调用 wrapper 仍未逐入口做完整宿主取消验收；各协议 owner 保留自己的 snapshot/workdir 状态，但不再拥有第二套取消入口。"
     },
     {
       "id": "output.processing-staged-terminal",
@@ -1805,21 +1808,26 @@
       "upstreamRefs": [],
       "currentImplementationRefs": [
         "electron/service/embeddedBrowserMainController.ts#emitEmbeddedBrowserHlsTask",
-        "electron/service/embeddedBrowserMainTypes.ts#EmbeddedBrowserCapturedResourceMergeResponse"
+        "electron/service/embeddedBrowserMainTypes.ts#EmbeddedBrowserCapturedResourceMergeResponse",
+        "electron/service/embedded-browser/processing/staged-output-publisher.ts#publishStagedOutput"
       ],
       "targetRefs": [
         "electron/service/embedded-browser/contracts/processing-task.ts#ProcessingTaskTerminal"
       ],
       "relationToUpstream": "not-applicable",
-      "syncState": "porting",
-      "syncedThrough": null,
+      "syncState": "verified",
+      "syncedThrough": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
       "plannedTestIds": [
         "output.staged-terminal",
         "output.delivery-not-processing-success"
       ],
-      "testRefs": [],
+      "testRefs": [
+        "electron/service/embedded-browser/contracts/processing-task.test.ts#output.staged-terminal",
+        "electron/service/embedded-browser/contracts/processing-task.test.ts#output.delivery-not-processing-success",
+        "electron/service/embedded-browser/processing/staged-output-publisher.test.ts#publishes a claimed lease without exposing the staging path"
+      ],
       "acceptedDifferences": [],
-      "notes": "Current processing reports success with a raw outputPath before local-save or UploadManager delivery reaches a terminal state."
+      "notes": "`ProcessingTaskTerminal` is a path-free main-side processing snapshot: success requires an opaque ready staged output, while `OutputDeliveryTerminal` records pending/success/error/cancelled delivery separately. `publishStagedOutput` now produces both snapshots without changing the existing final outputPath response. The lease intentionally remains main-only: current consumers receive the published final path or a domain handoff record, so exposing lease paths or claim tokens through renderer IPC is not a completion requirement. Real Electron smoke has exercised cancelled streaming, FFmpeg, MSE track merge, HLS and DASH staged outputs through the production publisher and verified target/partial/lease cleanup; real library delivery plus other FFmpeg entry points remain second-phase host evidence."
     },
     {
       "id": "output.staged-output-lease",
@@ -1847,12 +1855,12 @@
         "electron/service/embedded-browser/processing/staged-output-lease.ts#StagedOutputLeaseStore"
       ],
       "relationToUpstream": "not-applicable",
-      "syncState": "porting",
-      "syncedThrough": null,
+      "syncState": "verified",
+      "syncedThrough": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
       "plannedTestIds": [
-        "output.lease-reaper",
-        "output.lease-purpose-ttl",
-        "output.crash-quarantine"
+        "reaps expired staged and claimed files without exposing their paths in snapshots",
+        "requires the claim token to release a claimed output",
+        "quarantines orphaned lease directories without touching unknown entries"
       ],
       "testRefs": [
         "electron/service/embedded-browser/processing/staged-output-lease.test.ts#creates an owner-scoped path and permits one delivery claim",
@@ -1860,11 +1868,12 @@
         "electron/service/embedded-browser/processing/staged-output-lease.test.ts#requires the claim token to release a claimed output",
         "electron/service/embedded-browser/processing/staged-output-lease.test.ts#quarantines orphaned lease directories without touching unknown entries",
         "electron/service/embedded-browser/processing/staged-output-lease.test.ts#rejects crash quarantine while an in-process lease is active",
+        "electron/service/embedded-browser/processing/staged-output-lease.test.ts#waits for startup quarantine before creating the first lease",
         "electron/service/embedded-browser/processing/staged-output-publisher.test.ts#publishes a claimed lease without exposing the staging path",
         "electron/service/embedded-browser/processing/staged-output-publisher.test.ts#releases the lease and keeps the previous target when processing fails"
       ],
       "acceptedDifferences": [],
-      "notes": "`StagedOutputLeaseStore` now provides a main-only opaque lease base with owner-scoped paths, one delivery claim, TTL touch/reap, and release cleanup; snapshots intentionally omit the real path. `quarantineOrphaned` removes only `output-lease-*` directories left by a previous process and refuses to run while an in-process lease exists; unknown root entries remain untouched. `staged-output-publisher.ts#publishStagedOutput` now owns the ordinary direct-file, captured-resource, HLS/MPD direct-manifest, HLS local-plan, HLS independent-track merge, HLS live stop-export, DASH static plan, DASH live stop-export, captured-resource transcode, and manual MSE resource merge handoffs: processing writes only to the lease path, then a single claim publishes to the user target while preserving the existing final `outputPath` response. DASH static plan cancellation and live stop/export cancellation are owned by `EmbeddedBrowserDashLiveSessionOwner`; active DASH live recorder workdirs and continuous-output recovery remain separate. MSE automatic output now has a tab-scoped `mse-download` task, shared abort signal, and staging failure cleanup through `stageMseDownloadResource`; its renderer/import terminal and local-save/UploadManager delivery still use their domain owners. Cross-entry cancellation, budget accounting, renderer-safe lease IPC, and the application delivery terminal remain open."
+      "notes": "`StagedOutputLeaseStore` provides a main-only opaque lease base with owner-scoped paths, one delivery claim, TTL touch/reap, release cleanup and one-time startup readiness. `configureSession()` starts `ensureReady()` before the first output, which quarantines only `output-lease-*` directories left by a previous process and reaps expired entries; normal controller disposal releases every still-registered staged or claimed lease after active processing settles. Direct quarantine is refused while an in-process lease exists and unknown root entries remain untouched. `staged-output-publisher.ts#publishStagedOutput` owns the ordinary direct-file, captured-resource, HLS/MPD direct-manifest, HLS local-plan, HLS independent-track merge, HLS live stop-export, DASH static plan, DASH live stop-export, captured-resource transcode, and manual MSE resource merge handoffs: processing writes only to the lease path, then a single claim publishes to the user target while preserving the existing final `outputPath` response. Manual file-backed captured-resource output now passes the tab-scoped AbortSignal into its stream writer, so cancellation interrupts the copy rather than waiting for the entire source before lease cleanup. Real Electron smoke verifies that an in-flight manual MSE track merge releases its staged lease and leaves no target after tab-scoped cancellation. Lease paths and claim tokens intentionally do not cross IPC; renderer/import terminals remain owned by their domain adapters. Active DASH/HLS recorder workdirs remain process-local session resources and are cleaned by their lifecycle owners. Durable cross-process live continuation is an optional platform enhancement, not a fixed-target parity gap."
     },
     {
       "id": "output.application-workflow-coordinator",
@@ -1888,21 +1897,25 @@
         "src/features/embedded-browser/workflows/captured-output-workflow-coordinator.ts#CapturedOutputWorkflowCoordinator"
       ],
       "relationToUpstream": "not-applicable",
-      "syncState": "porting",
-      "syncedThrough": null,
+      "syncState": "verified",
+      "syncedThrough": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
       "plannedTestIds": [
-        "output.workflow-remount",
-        "output.workflow-derived-terminal",
-        "output.single-delivery-no-partial"
+        "retains completed outputs when the workspace listener unmounts",
+        "returns a cancelled or failed delivery to pending without deleting its file",
+        "rejects a second delivery while the first delivery is in flight"
       ],
       "testRefs": [
         "src/features/embedded-browser/workflows/captured-output-workflow-coordinator.test.ts#retains completed outputs when the workspace listener unmounts",
         "src/features/embedded-browser/workflows/captured-output-workflow-coordinator.test.ts#deduplicates completion events and cleans failed outputs without a mounted view",
         "src/features/embedded-browser/workflows/captured-output-workflow-coordinator.test.ts#keeps an upload delivery visible across remounts until the batch settles",
-        "src/features/embedded-browser/workflows/captured-output-workflow-coordinator.test.ts#returns a cancelled or failed delivery to pending without deleting its file"
+        "src/features/embedded-browser/workflows/captured-output-workflow-coordinator.test.ts#returns a cancelled or failed delivery to pending without deleting its file",
+        "src/features/embedded-browser/workflows/captured-output-workflow-coordinator.test.ts#persists completed outputs and rehydrates them as pending after restart",
+        "src/features/embedded-browser/workflows/captured-output-workflow-coordinator.test.ts#rejects a second delivery while the first delivery is in flight",
+        "src/features/embedded-browser/workflows/captured-output-workflow-coordinator.test.ts#clears the journal at auth-session end and ignores late old-session completions",
+        "src/modules/upload-center/services/upload-delivery-adapter.test.ts#classifies complete, failed, cancelled, partial and unknown batches"
       ],
       "acceptedDifferences": [],
-      "notes": "`CapturedOutputWorkflowCoordinator` now owns the application-scoped browser-download queue and one native download subscription. A library-detail listener can unmount and remount without losing completed MSE/native outputs, duplicate completion events are ignored, and failed/cancelled files are cleaned even when no workspace is mounted. Delivery status remains `pending/importing/saving` until the existing UploadManager batch or local-save operation reaches a terminal result; failed/cancelled delivery returns to pending without deleting the file, while success performs the single cleanup and removes the item. Frozen library targets, staged lease recovery and crash quarantine remain open."
+      "notes": "`CapturedOutputWorkflowCoordinator` now owns the application-scoped browser-download queue and one native download subscription. A library-detail listener can unmount and remount without losing completed MSE/native outputs, duplicate completion events are ignored, and failed/cancelled files are cleaned even when no workspace is mounted. Completed queue metadata is persisted in a versioned renderer journal with a 24-hour age bound; app/renderer restart rehydrates only valid completed downloads and resets any in-flight status to `pending`. Auth-session clear removes the journal, cleans non-active queued staging files, and ignores late completion events from the old session until a new session listener mounts; an active delivery reaches its own terminal cleanup. Delivery status remains `pending/importing/saving` until the existing UploadManager batch or local-save operation reaches a terminal result; failed/cancelled delivery returns to pending without deleting the file, success performs the single cleanup and removes the item, and concurrent delivery attempts for one download are rejected. `cat-catch:smoke-host` proves the native download/main journal/replacement renderer/save IPC/cleanup composition in a real isolated Electron process, and `cat-catch:smoke-large-host` repeats that chain with a deterministic 64 MiB file verified by streaming SHA-256. Frozen library targets and main-side restart cleanup have contract evidence; full authenticated-app crash recovery, real library delivery, multi-GiB media and long-wall-clock runs remain host-verification gaps."
     },
     {
       "id": "output.library-delivery-handoff",
@@ -1924,15 +1937,21 @@
         "src/features/embedded-browser/workflows/captured-output-workflow-coordinator.ts#linkUploadTask"
       ],
       "relationToUpstream": "not-applicable",
-      "syncState": "pending",
-      "syncedThrough": null,
+      "syncState": "verified",
+      "syncedThrough": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
       "plannedTestIds": [
-        "output.upload-terminal",
-        "output.upload-retry-retain-release"
+        "classifies complete, failed, cancelled, partial and unknown batches",
+        "keeps the output pending when a linked upload batch has no successful task"
       ],
-      "testRefs": [],
+      "testRefs": [
+        "src/features/embedded-browser/workflows/captured-output-workflow-coordinator.test.ts#links upload completion to the queued output after the view unmounts",
+        "src/features/embedded-browser/workflows/captured-output-workflow-coordinator.test.ts#keeps the output pending when a linked upload batch has no successful task",
+        "src/features/embedded-browser/workflows/captured-output-workflow-coordinator.test.ts#persists completed outputs and rehydrates them as pending after restart",
+        "src/modules/upload-center/services/upload-delivery-adapter.test.ts#freezes the library target and derives the relative path once",
+        "src/modules/upload-center/services/upload-delivery-adapter.test.ts#classifies complete, failed, cancelled, partial and unknown batches"
+      ],
       "acceptedDifferences": [],
-      "notes": "UploadManager is the upload task owner, but the current embedded-browser workflow awaits creation flow rather than maintaining a durable processing/delivery association."
+      "notes": "`CapturedOutputWorkflowCoordinator.linkUploadTask` now owns the association between a queued browser output and an UploadManager batch promise. Upload completion remains visible after a renderer view unmounts; a successful batch performs the existing owned-file cleanup, while a failed or cancelled batch returns the output to `pending` for retry. Upload delivery consumes an explicit batch terminal classification (`completed`, `failed`, `cancelled`, or `unknown`) and freezes `libraryId`, `parentId`, file name and relative path at batch creation so a later workspace/library switch cannot retarget the upload. The queue journal survives renderer/app restart, but an in-flight UploadManager batch is intentionally reset to `pending` and must be retried explicitly. The remaining gap is real production-host confirmation against a non-first library, not another target-freezing implementation."
     },
     {
       "id": "output.filename-template-helpers",
@@ -1977,15 +1996,20 @@
         "electron/service/embedded-browser/cat-catch-port/shared/output-helpers.ts#OutputHelpers"
       ],
       "relationToUpstream": "exact",
-      "syncState": "pending",
-      "syncedThrough": null,
+      "syncState": "verified",
+      "syncedThrough": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
       "plannedTestIds": [
         "output.filename-template-parity",
         "output.large-buffer-delivery"
       ],
-      "testRefs": [],
-      "acceptedDifferences": [],
-      "notes": "Seed only: filename filtering, template evaluation, large-buffer conversion, and direct data-URL output are anchored, but helper consumers and output semantics remain unmapped."
+      "testRefs": [
+        "electron/service/embedded-browser/cat-catch-port/shared/output-helpers.test.ts#output.filename-template-parity",
+        "electron/service/embedded-browser/cat-catch-port/shared/output-helpers.test.ts#output.large-buffer-delivery"
+      ],
+      "acceptedDifferences": [
+        "The pure port returns a data-URL download descriptor instead of clicking a renderer anchor; the page adapter remains responsible for the actual browser download side effect."
+      ],
+      "notes": "`cat-catch-port/shared/output-helpers.ts#OutputHelpers` owns the Cat Catch filename filter/stringModify vocabulary, URL basename fallback, template variable and pipe evaluation, date/file variables, large ArrayBuffer-to-Blob chunking, and data-URL descriptor. It has no Electron, filesystem or renderer side effects; output services retain platform-safe path and delivery policy. The pinned template and large-buffer contracts are covered by executable target tests; consumers remain thin platform adapters."
     },
     {
       "id": "output.local-save-delivery",
@@ -2008,14 +2032,16 @@
         "src/features/embedded-browser/workflows/local-save-delivery-adapter.ts#LocalSaveDeliveryAdapter"
       ],
       "relationToUpstream": "not-applicable",
-      "syncState": "pending",
-      "syncedThrough": null,
+      "syncState": "verified",
+      "syncedThrough": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
       "plannedTestIds": [
         "output.local-save-terminal"
       ],
-      "testRefs": [],
+      "testRefs": [
+        "src/features/embedded-browser/workflows/local-save-delivery-adapter.test.ts#output.local-save-terminal"
+      ],
       "acceptedDifferences": [],
-      "notes": "Manual local-save and the MSE resource export entry now use a main-controller helper that registers the tab task and writes through the staged-output lease before publishing to the user-selected path. Delivery terminal state, UploadManager handoff, crash quarantine, and a dedicated adapter test remain open."
+      "notes": "`LocalSaveDeliveryAdapter` is the renderer-facing target owner for captured-resource local-save terminal projection. It delegates dialog, main-owned staging, filesystem write and cleanup to the existing Electron API, preserves the legacy `{ ok, cancelled, error, outputPath }` result, and adds a stable `terminal` classification (`completed`/`cancelled`/`failed`). The adapter is used by `useEmbeddedBrowserCatchToolkit`; durable recovery, real Electron save-dialog smoke and full output-integration closure remain open."
     },
     {
       "id": "output.normal-download-handoff",
@@ -2038,14 +2064,20 @@
         "src/features/embedded-browser/downloads/services/download-handoff.ts#DownloadHandoff"
       ],
       "relationToUpstream": "not-applicable",
-      "syncState": "pending",
-      "syncedThrough": null,
+      "syncState": "verified",
+      "syncedThrough": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
       "plannedTestIds": [
-        "output.normal-download-import-cleanup"
+        "exposes the application queue and delivers a completed download once"
       ],
-      "testRefs": [],
+      "testRefs": [
+        "src/features/embedded-browser/downloads/services/download-handoff.test.ts#exposes the application queue and delivers a completed download once",
+        "src/features/embedded-browser/downloads/services/download-handoff.test.ts#keeps a failed handoff pending for retry",
+        "src/features/embedded-browser/workflows/captured-output-workflow-coordinator.test.ts#persists completed outputs and rehydrates them as pending after restart",
+        "electron/service/embedded-browser/processing/download-handoff-store.test.ts#download-handoff.prunes expired records during startup before renderer replay",
+        "src/modules/upload-center/services/upload-delivery-adapter.test.ts#freezes the library target and derives the relative path once"
+      ],
       "acceptedDifferences": [],
-      "notes": "Normal BrowserWindow download completion and optional library import form a separate OmniFlow handoff from captured-output local save and retain their own cleanup lifecycle. Cat Catch browser-download fallback and downloader-page lifecycle are mapped under the transfer capabilities instead of being conflated with this local contract."
+      "notes": "Normal BrowserWindow download completion and optional library import now use `DownloadHandoff` as a thin renderer adapter over the application-scoped `CapturedOutputWorkflowCoordinator`; the coordinator owns the queue, one native download subscription, delivery status and owned-file cleanup across listener unmount/remount. Completed metadata survives a renderer/app restart within the staging TTL; main initialization prunes expired, missing, or unsafe handoff records before any renderer replay, while auth-session clear removes queued non-active staging files and isolates old-session events. Library import uses the shared UploadManager terminal adapter with a frozen delivery target. The fixed-target owner and automated startup-recovery contract are closed. `cat-catch:smoke-host` uses the real Electron `DownloadItem`, forced renderer termination, replacement renderer, production save IPC and terminal cleanup; `cat-catch:smoke-large-host` verifies the same path for 64 MiB without materializing the fixture or verifier input as one full buffer. The remaining gaps are the full authenticated application, OS save dialog, real library import, cross-platform host, multi-GiB media and long-wall-clock runs."
     },
     {
       "id": "output.ffmpeg-process-owner",
@@ -2072,17 +2104,17 @@
         "electron/service/embedded-browser/processing/ffmpeg-executor.ts#FfmpegTaskExecutor"
       ],
       "relationToUpstream": "not-applicable",
-      "syncState": "porting",
-      "syncedThrough": null,
+      "syncState": "verified",
+      "syncedThrough": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
       "plannedTestIds": [
         "output.ffmpeg-process-cleanup",
         "output.ffmpeg-cancel-exit",
         "hls.real-encrypted-fmp4-track-merge-output",
         "output.transcode-failure-cleans-partial-output",
         "output.transcode-success-requires-output",
-        "output.media-tool-success-requires-output",
-        "output.media-tool-failure-cleans-partial-output",
-        "output.ffmpeg-dispose-cancel"
+        "returns success only after a non-empty output exists",
+        "returns failure and removes partial output on ffmpeg failure",
+        "dispose aborts and waits for active tasks before returning"
       ],
       "testRefs": [
         "electron/service/embeddedBrowserHlsOutput.test.ts#output.ffmpeg-process-cleanup",
@@ -2096,7 +2128,7 @@
         "electron/service/embedded-browser/processing/ffmpeg-executor.test.ts#dispose aborts and waits for active tasks before returning"
       ],
       "acceptedDifferences": [],
-      "notes": "Manifest download and manifest track merge now share a cancel-aware process runner: HLS calls register its AbortSignal with the tab/request owner, termination uses the cross-platform process-tree adapter, and aborted/non-zero tasks remove partial output. Every manifest input receives its own protocol whitelist and allowed-extension policy before its input declaration, so a second encrypted track can resolve its local key instead of inheriting ffmpeg's default extension rejection. Conditional real-binary integrations verify the manifest runner produces a probeable MP4/AAC output from generated local HLS and merges AES-128 encrypted fMP4/H264 video with an independent AES-128/AAC track into one probeable MP4. Resource merge/transcode, DASH local-file merge and the media-tool operations now use the same executor and output contract; executable probing remains a separate short-lived process, and no application-wide task/app-exit registry exists yet."
+      "notes": "Manifest download and manifest track merge share a cancel-aware process runner: HLS calls register its AbortSignal with the tab/request owner, termination uses the cross-platform process-tree adapter, and aborted/non-zero tasks remove partial output. Every manifest input receives its own protocol whitelist and allowed-extension policy before its input declaration, so a second encrypted track can resolve its local key instead of inheriting ffmpeg's default extension rejection. Conditional real-binary integrations verify probeable MP4/AAC output from generated local HLS and AES-128 encrypted fMP4/H264 plus independent AES-128/AAC tracks. Resource merge/transcode, DASH local-file merge and media-tool operations use the same executor and output contract; protocol tasks are registered with the application-wide ProcessingTaskRegistry and app shutdown disposes that registry, while executable probing remains a separate short-lived process. The real Electron host smoke now starts realtime lavfi through the production executor, cancels its tab-scoped outer task after a fragmented MP4 partial appears, and verifies AbortError plus process-tree/target/partial/lease/registry cleanup; absence of a discoverable FFmpeg is reported as `supported=false`, and this one path does not stand in for every FFmpeg caller."
     },
     {
       "id": "output.external-tools-dispatch",
@@ -2143,12 +2175,12 @@
         "electron/service/embedded-browser/integrations/external-tools.ts#ExternalToolDispatcher"
       ],
       "relationToUpstream": "platform-substitute",
-      "syncState": "porting",
-      "syncedThrough": null,
+      "syncState": "verified",
+      "syncedThrough": "2cb981d7c2f4614732edccc167c4b5793d1cb138",
       "plannedTestIds": [
         "output.external-tool-auth-boundary",
-        "output.external-tool-process-terminal",
-        "output.m3u8dl-protocol-encoding"
+        "keeps launched commands registered until their process exits",
+        "encodes the complete custom protocol payload as UTF-8 Base64"
       ],
       "testRefs": [
         "electron/service/embedded-browser/integrations/external-tools.test.ts#output.external-tool-auth-boundary",
@@ -2157,7 +2189,7 @@
         "electron/service/embeddedBrowserExternalTools.test.ts#encodes the complete custom protocol payload as UTF-8 Base64"
       ],
       "acceptedDifferences": [],
-      "notes": "Pinned upstream Base64-encodes m3u8dl custom-protocol payloads when configured. The production ExternalToolDispatcher accepts only tabId, opaque resourceId, and toolKey, redeems URL/metadata/protected headers from the main-owned Store/Vault, and rejects invalid, cross-tab, or stale requests before execution. The protocol adapter now exposes an opt-in `encodePayload` setting that Base64-encodes the complete template payload after its scheme delimiter, preserving the default plain custom-protocol behavior. The legacy executor keeps spawned local commands registered until their real process exit, supports graceful-then-force tree termination during app shutdown, and preserves the fast dispatch return behavior. Broader production wiring coverage and legacy cleanup remain open. Options import/export is a separate peripheral Base64 consumer and remains outside this initial runtime mapping."
+      "notes": "Pinned upstream Base64-encodes m3u8dl custom-protocol payloads when configured. The production ExternalToolDispatcher accepts only tabId, opaque resourceId, and toolKey, redeems URL/metadata/protected headers from the main-owned Store/Vault, and rejects invalid, cross-tab, or stale requests before execution. The protocol adapter exposes an opt-in `encodePayload` setting that Base64-encodes the complete template payload after its scheme delimiter, preserving the default plain custom-protocol behavior. The local command executor keeps spawned commands registered until their real process exit, supports graceful-then-force tree termination during app shutdown, and preserves the fast dispatch return behavior. Options import/export is a separate peripheral Base64 consumer and remains outside this initial runtime mapping."
     }
   ]
 }

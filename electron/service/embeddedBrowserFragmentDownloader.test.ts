@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { EmbeddedBrowserFragmentDownloader } from './embeddedBrowserFragmentDownloader'
+import { TransferEngine as EmbeddedBrowserFragmentDownloader } from './embedded-browser/cat-catch-port/processing/transfer-engine'
 
 describe('EmbeddedBrowserFragmentDownloader', () => {
   it('hls.plan-authority-fetch', async () => {

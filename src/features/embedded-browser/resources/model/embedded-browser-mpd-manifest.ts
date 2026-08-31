@@ -1,5 +1,5 @@
 /**
- * Renderer-facing MPD DTO compatibility facade.
+ * Renderer-facing MPD DOM adapter.
  *
  * Parsing behavior belongs to the pure Cat Catch port in
  * `electron/service/embedded-browser/cat-catch-port/dash/parser.ts`.
@@ -138,7 +138,7 @@ function mapManifest(parsed: DashManifest, fallbackBaseUrl: string): EmbeddedBro
   }
 }
 
-export function parseEmbeddedBrowserMpdManifest(input: {
+export function parseEmbeddedBrowserMpdDocument(input: {
   baseUrl: string
   text: string
 }): EmbeddedBrowserMpdManifest {
@@ -157,7 +157,7 @@ export function parseEmbeddedBrowserMpdManifest(input: {
   }), String(input.baseUrl || ''))
 }
 
-export function createEmbeddedBrowserMpdDownloadPlan(input: {
+export function createEmbeddedBrowserMpdPlan(input: {
   headers?: Record<string, string>
   manifest: EmbeddedBrowserMpdManifest
   manifestUrl: string

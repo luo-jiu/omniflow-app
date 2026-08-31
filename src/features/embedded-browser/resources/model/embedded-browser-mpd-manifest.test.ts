@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { parseEmbeddedBrowserMpdManifest } from './embedded-browser-mpd-manifest'
+import { parseEmbeddedBrowserMpdDocument } from './embedded-browser-mpd-manifest'
 
 type FakeElement = {
   attributes: Array<{ name: string; value: string }>
@@ -59,7 +59,7 @@ describe('embedded browser MPD model', () => {
       value: FakeDomParser,
     })
     try {
-      const manifest = parseEmbeddedBrowserMpdManifest({
+      const manifest = parseEmbeddedBrowserMpdDocument({
         baseUrl: 'https://origin.example/manifest.mpd',
         text: '<MPD />',
       })

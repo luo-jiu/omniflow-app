@@ -140,6 +140,16 @@ export default defineConfig(({ mode }) => {
       },
     },
   },
+  test: {
+    // This file is a Node `node:test` suite and is run by cat-catch:test-sync.
+    exclude: [
+      '**/node_modules/**',
+      '**/dist/**',
+      '**/cypress/**',
+      '**/.{idea,git,cache,output,temp}/**',
+      'tools/cat-catch-sync/validate.test.mjs',
+    ],
+  },
   server: {
     port: 8849,
     host: '127.0.0.1',

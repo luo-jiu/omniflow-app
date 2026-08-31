@@ -1,11 +1,17 @@
-import { copyFile, writeFile } from 'node:fs/promises'
+import { createReadStream, createWriteStream } from 'node:fs'
+import { writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { Buffer } from 'node:buffer'
+import { pipeline } from 'node:stream/promises'
 
 export type EmbeddedBrowserExtractedResourceSaveFile = {
   base64?: string
   fileName: string
   filePath?: string
+}
+
+export type EmbeddedBrowserExtractedResourceSaveOptions = {
+  signal?: AbortSignal
 }
 
 function sanitizeFileName(input: string) {
@@ -32,14 +38,25 @@ export function deriveEmbeddedBrowserExtractedResourceOutputFileName(
 export async function saveEmbeddedBrowserExtractedResourceFile(
   resource: EmbeddedBrowserExtractedResourceSaveFile,
   outputPath: string,
+  options: EmbeddedBrowserExtractedResourceSaveOptions = {},
 ) {
   if (resource.filePath) {
-    await copyFile(resource.filePath, outputPath)
+    const source = createReadStream(resource.filePath)
+    const destination = createWriteStream(outputPath)
+    if (options.signal) {
+      await pipeline(source, destination, { signal: options.signal })
+    } else {
+      await pipeline(source, destination)
+    }
     return outputPath
   }
   if (!resource.base64) {
     throw new Error('缺少可保存的资源内容')
   }
-  await writeFile(outputPath, Buffer.from(resource.base64, 'base64'))
+  await writeFile(
+    outputPath,
+    Buffer.from(resource.base64, 'base64'),
+    options.signal ? { signal: options.signal } : undefined,
+  )
   return outputPath
 }

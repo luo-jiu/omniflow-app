@@ -13,6 +13,16 @@ export function subscribeEmbeddedBrowserDownloads(
   return window.electronEmbeddedBrowser.onDownload(listener);
 }
 
+export async function listEmbeddedBrowserDownloadHandoff(): Promise<EmbeddedBrowserDownloadEvent[]> {
+  assertDesktopSupport();
+  return window.electronEmbeddedBrowser.listDownloadHandoff();
+}
+
+export async function acknowledgeEmbeddedBrowserDownloadHandoff(downloadId: string) {
+  assertDesktopSupport();
+  return window.electronEmbeddedBrowser.acknowledgeDownloadHandoff(downloadId);
+}
+
 export async function cleanupEmbeddedBrowserDownloadedFile(tempPath?: string) {
   if (!tempPath) {
     return false;

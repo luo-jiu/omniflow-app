@@ -9,8 +9,8 @@ import {
 } from '../services/embedded-browser-catch-toolkit.api';
 import {
   mergeEmbeddedBrowserCapturedMseResources,
-  saveEmbeddedBrowserCapturedResource,
 } from '../services/embedded-browser-resource.api';
+import { localSaveDeliveryAdapter } from '../../workflows/local-save-delivery-adapter';
 
 const EMPTY_TOOLKIT_STATE: EmbeddedBrowserCatchToolkitState = {
   audioResourceKey: '',
@@ -181,7 +181,7 @@ export function useEmbeddedBrowserCatchToolkit(
     mutationCountRef.current += 1;
     setLoading(true);
     try {
-      const result = await saveEmbeddedBrowserCapturedResource(activeTabId, {
+      const result = await localSaveDeliveryAdapter.run(activeTabId, {
         resourceId,
         suggestedFileName: state.currentFileName || undefined,
       });

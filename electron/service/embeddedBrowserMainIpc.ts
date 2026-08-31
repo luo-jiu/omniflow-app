@@ -49,6 +49,7 @@ import type {
 type EmbeddedBrowserMainIpcHandlers = {
   activateTab: (sender: Electron.WebContents, tabId: string | null) => void | Promise<void>
   cleanupDownloadFile: (tempPath: string) => Promise<boolean>
+  acknowledgeDownloadHandoff: (downloadId: string) => Promise<boolean>
   clearCapturedResources: (tabId: string) => unknown
   inspectResource: (
     tabId: string,
@@ -122,6 +123,7 @@ type EmbeddedBrowserMainIpcHandlers = {
   goBack: (tabId: string) => Promise<void>
   goForward: (tabId: string) => Promise<void>
   listCapturedResources: (tabId: string) => unknown
+  listDownloadHandoff: () => Promise<unknown>
   listHlsTaskSnapshots: (tabId: string) => EmbeddedBrowserHlsTaskEventPayload[]
   listDashTaskSnapshots: (tabId: string) => EmbeddedBrowserDashTaskEventPayload[]
   mergeMseResources: (
@@ -382,6 +384,12 @@ export function registerEmbeddedBrowserMainIpcHandlers(handlers: EmbeddedBrowser
   )
   ipcMain.handle('embedded-browser:close-tab', (event, tabId: string) => (
     handlers.closeTab(event.sender, tabId)
+  ))
+  ipcMain.handle('embedded-browser:download-handoff:list', async () => (
+    handlers.listDownloadHandoff()
+  ))
+  ipcMain.handle('embedded-browser:download-handoff:acknowledge', async (_event, downloadId: string) => (
+    handlers.acknowledgeDownloadHandoff(downloadId)
   ))
   ipcMain.handle('embedded-browser:cleanup-download-file', async (_event, tempPath: string) => (
     handlers.cleanupDownloadFile(tempPath)

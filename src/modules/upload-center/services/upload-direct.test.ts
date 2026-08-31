@@ -129,4 +129,29 @@ describe('runDirectUpload completion reconciliation', () => {
     expect(apiMocks.reconcileUploadCompletion).not.toHaveBeenCalled();
     expect(apiMocks.abortUploadSession).toHaveBeenCalledWith('upload-1');
   });
+
+  it('uploads a local file through the Electron host before completing the session', async () => {
+    apiMocks.completeUploadSession.mockResolvedValue({ id: 42, name: 'file.txt' });
+
+    await expect(runDirectUpload({
+      filePath: '/tmp/file.txt',
+      fileName: 'file.txt',
+      fileSize: 4,
+      libraryId: 2,
+      parentId: 9,
+    })).resolves.toEqual({ id: 42, name: 'file.txt' });
+
+    expect(electronAPI.uploadPresignedPut).toHaveBeenCalledWith({
+      byteLength: 4,
+      byteOffset: 0,
+      contentType: undefined,
+      filePath: '/tmp/file.txt',
+      partNumber: 1,
+      presignedUrl: 'http://storage.test/file.txt',
+      uploadId: 'upload-1',
+    });
+    expect(apiMocks.completeUploadSession).toHaveBeenCalledWith(expect.objectContaining({
+      uploadId: 'upload-1',
+    }));
+  });
 });

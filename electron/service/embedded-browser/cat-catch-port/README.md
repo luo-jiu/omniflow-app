@@ -28,6 +28,7 @@ mse/
 hls/
 dash/
 downloader/
+processing/
 ```
 
 模块只在第一个真实 capability 落地时创建，不预建空文件。
@@ -45,6 +46,7 @@ downloader/
 - `hls/plan.ts`：把 parser 输出投影为平台 adapter 消费的唯一 HLS 下载计划。
 - `hls/segment-query.ts`：固定 `tsAddArg` 的默认值提取和 fragment-only query 改写。
 - `dash/parser.ts`：固定 MPD 的继承 BaseURL、Period/AdaptationSet/Representation segment info、SegmentTemplate/SegmentTimeline、SegmentBase SIDX metadata、SegmentList range 与 DRM 投影语义；XML DOM 由平台 adapter 注入。`dash/sidx.ts` 负责 main task 下载 index range 后的纯 SIDX reference expansion，并暴露受限嵌套引用元数据供 task 逐层取回。
+- `processing/transfer-engine.ts`：固定 fragment transfer 的 bounded concurrency、Range、retry、单一外部 AbortSignal、队列取消、raw/processed stage、进度和 manifest-order output；HLS/DASH 通过 target owner 注入 fetch、processor 与可选 async buffer sink。sink 完成前 worker 不领取下一项，sink failure 不进入自动网络 retry；平台文件布局、顺序拼接和任务生命周期仍留在相邻 adapter。
 
 HLS 的 main/preload/renderer 共享 DTO 由 `../contracts/hls.ts` 唯一定义；生产调用方和测试直接依赖 contract/port。旧 renderer model 已随 `hls-engine` cutover 删除，Electron main 运行时不得反向依赖 renderer model。
 
@@ -56,7 +58,7 @@ Deep 的 Electron page adapter 位于 `../../capture/adapters/deep-search-page.t
 
 相邻 `page-generated-resource.ts` 是 production Deep 的 page-origin bytes owner，负责 generated manifest/key 的 signature 去重、Blob/base64、文件名和 open/export/read；非自身 key 委托给当前 MSE handler。production probe 能从 main-owned resource key 读取该 owner 的 Cat Catch 归一化 manifest bytes，旧 `probeResources` 已删除。
 
-现有 production MSE 的 page adapter 位于 `../../capture/adapters/mse-page.ts`，固定 MediaSource 观察与 per-track buffer/reset 语义位于本目录 `mse/runtime.ts`；通用 transport 和 global API 分别位于 `page-probe-runtime-core.ts` 与 `page-probe-host-api.ts`。它们由同一 probe IIFE 按唯一 owner 安装，没有第二个 MSE hook。`mse-runtime` 仍须补固定 `catch.js` 的完整差分和生产等价大媒体验证后才能关闭 unit。
+现有 production MSE 的 page adapter 位于 `../../capture/adapters/mse-page.ts`，固定 MediaSource 观察与 per-track buffer/reset 语义位于本目录 `mse/runtime.ts`；通用 transport 和 global API 分别位于 `page-probe-runtime-core.ts` 与 `page-probe-host-api.ts`。它们由同一 probe IIFE 按唯一 owner 安装，没有第二个 MSE hook。`mse-runtime` 已完成固定目标下的初始 cutover；后续只补真实页面、资料库交付和大媒体宿主证据，不再建立第二个 runtime owner。
 
 `embeddedBrowserCatchToolkitPageBridge.ts`、`embeddedBrowserResourcePageBridge.ts` 的受控脚本生成器，以及 probe template/console prefix 属于保留的平台 adapter，不是第二套 Cat Catch 算法；其 payload/resource key 转发和缺失 handler 行为由 `embeddedBrowserPageBridge.test.ts` 锁定。
 

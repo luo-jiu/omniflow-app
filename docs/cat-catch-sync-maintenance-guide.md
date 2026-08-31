@@ -6,6 +6,18 @@
 
 目标是让新的 Agent 基于已有外部记忆继续工作，而不是重新理解整个仓库，也不是自动复制所有上游提交。
 
+## 0. 当前工作节奏
+
+迁移期间以整体完成度为第一目标。先让纳入能力完成 target owner、最小集成和基本清理，允许把未阻塞后续工作的深层 parity 或稳定性问题记录为 gap；不要在单个 capability 上提前执行最终级别的地毯式补测。
+
+每个工作切片结束时必须回答：
+
+- 是否新增或关闭了 capability，或至少让一个 capability 更接近 `ported-unverified`？
+- 如果没有，代码是否直接阻塞下一个 owner 切换？如果两者都不是，应停止该切片。
+- 当前只运行最小必要测试；完整差分、极端异常、长时间稳定性、真实页面和资料库交付统一放到全部初次 port 之后。
+
+当所有纳入 capability 都已经初次 port 且 `reviewedThrough` 到达 `migrationTarget` 后，再进入地毯式补测阶段，集中处理 `ported-unverified`、accepted differences 和所有记录的 gap。
+
 ## 1. 必读输入
 
 开始同步前按顺序阅读：
@@ -14,9 +26,8 @@
 2. `docs/cat-catch-full-migration-execution-plan.md`。
 3. `docs/cat-catch/upstream-state.json`。
 4. `docs/cat-catch/capability-map.json`。
-5. 初始迁移期间存在的 `docs/cat-catch/legacy-cleanup.json`；首版完成后该文件应已删除。
-6. `electron/service/embedded-browser/cat-catch-port/README.md`。
-7. 最近一条 `docs/cat-catch-sync-log.md`。
+5. `electron/service/embedded-browser/cat-catch-port/README.md`。
+6. 最近一条 `docs/cat-catch-sync-log.md`。
 
 当前生产事实还应对照 `docs/embedded-browser-architecture.md`，不能只根据目标目录猜现状。
 
@@ -119,7 +130,6 @@ CSS 通常是 `ui-only`，但 HTML 默认值、脚本引用和 query 参数不�
 - `upstream-state.json`。
 - `capability-map.json`。
 - 新增/修改的 fixture metadata 与 test refs。
-- `legacy-cleanup.json`（仅初始 cutover 期间；全部 unit 完成后删除）。
 - `cat-catch-sync-log.md`。
 - 受影响的架构文档和第三方 notices。
 
@@ -136,7 +146,7 @@ CSS 通常是 `ui-only`，但 HTML 默认值、脚本引用和 query 参数不�
 7. 重跑 TypeScript、测试和 Electron smoke。
 8. 能力改为 `verified`，在 sync log 记录已删除的 entry/symbol。
 
-不要保留隐藏双栈。全部 unit 完成后先保留 `legacy-cleanup.json` 跑最终校验；绿灯后在最终整理提交中同时删除该文件、legacy `currentImplementationRefs` 和 validator 中只服务于 cleanup 的分支/测试。回滚使用完整 commit/release，不使用长期关闭的旧代码。
+不要保留隐藏双栈。初始 cutover 的旧实现和临时清理台账已在固定目标完成后删除；后续只维护 target owner、测试、差异和版本游标。回滚使用完整 commit/release，不使用长期关闭的旧代码。
 
 ## 6. 允许的自动化
 

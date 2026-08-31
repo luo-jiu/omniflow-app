@@ -112,6 +112,25 @@ describe('StagedOutputLeaseStore', () => {
     }
   })
 
+  it('waits for startup quarantine before creating the first lease', async () => {
+    const harness = await createStore(() => 1_000)
+    const orphanPath = path.join(harness.rootPath, 'output-lease-before-first-create')
+    try {
+      await mkdir(orphanPath, { recursive: true })
+      await writeFile(path.join(orphanPath, 'payload'), 'crashed')
+
+      const lease = await harness.store.create({
+        ownerTaskId: 'task-first-create',
+        purpose: 'library-delivery',
+      })
+
+      await expect(readFile(orphanPath)).rejects.toMatchObject({ code: 'ENOENT' })
+      await harness.store.release(lease.leaseId)
+    } finally {
+      await rm(harness.rootPath, { force: true, recursive: true })
+    }
+  })
+
   it('rejects crash quarantine while an in-process lease is active', async () => {
     const harness = await createStore(() => 1_000)
     try {
@@ -121,6 +140,36 @@ describe('StagedOutputLeaseStore', () => {
         purpose: 'library-delivery',
       })
       await expect(harness.store.quarantineOrphaned()).rejects.toThrow('活动 lease')
+    } finally {
+      await rm(harness.rootPath, { force: true, recursive: true })
+    }
+  })
+
+  it('releases active leases during normal shutdown', async () => {
+    const harness = await createStore(() => 1_000)
+    try {
+      const staged = await harness.store.create({
+        fileName: 'staged.bin',
+        ownerTaskId: 'task-1',
+        purpose: 'library-delivery',
+      })
+      const claimed = await harness.store.create({
+        fileName: 'claimed.bin',
+        ownerTaskId: 'task-2',
+        purpose: 'external-tool',
+      })
+      const claim = harness.store.claim(claimed.leaseId, 'delivery-1')
+      await Promise.all([
+        writeFile(staged.path, 'staged'),
+        writeFile(claimed.path, 'claimed'),
+      ])
+
+      await expect(harness.store.dispose()).resolves.toBeUndefined()
+      await expect(readFile(staged.path)).rejects.toMatchObject({ code: 'ENOENT' })
+      await expect(readFile(claimed.path)).rejects.toMatchObject({ code: 'ENOENT' })
+      expect(claim).not.toBeNull()
+      expect(harness.store.getSnapshot()).toEqual([])
+      await expect(harness.store.dispose()).resolves.toBeUndefined()
     } finally {
       await rm(harness.rootPath, { force: true, recursive: true })
     }

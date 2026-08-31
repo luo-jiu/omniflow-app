@@ -170,8 +170,7 @@ export async function runDirectUpload(input: DirectUploadInput): Promise<unknown
         signedByPartNumber.set(part.partNumber, part.url);
       }
 
-      await Promise.all(batchNumbers.map(async (partNumber) => {
-        if (aborted) return;
+      const batchParts = batchNumbers.map((partNumber) => {
         const presignedUrl = signedByPartNumber.get(partNumber);
         if (!presignedUrl) {
           throw new Error(`后端未返回 part ${partNumber} 的预签名 URL`);
@@ -182,21 +181,27 @@ export async function runDirectUpload(input: DirectUploadInput): Promise<unknown
           ? input.fileSize
           : Math.min(partSize, input.fileSize - byteOffset);
 
+        return { byteLength, byteOffset, partNumber, presignedUrl };
+      });
+
+      await Promise.all(batchParts.map(async (part) => {
+        if (aborted) return;
+
         const result = await window.electronAPI.uploadPresignedPut({
           uploadId,
-          partNumber,
-          presignedUrl,
+          partNumber: part.partNumber,
+          presignedUrl: part.presignedUrl,
           filePath: input.filePath,
-          byteOffset,
-          byteLength,
+          byteOffset: part.byteOffset,
+          byteLength: part.byteLength,
           contentType: input.contentType || undefined,
         });
 
         if (!result.etag) {
-          throw new Error(`MinIO 未返回 part ${partNumber} 的 ETag`);
+          throw new Error(`MinIO 未返回 part ${part.partNumber} 的 ETag`);
         }
-        collectedEtags.set(partNumber, result.etag);
-        partBytes.set(partNumber, byteLength);
+        collectedEtags.set(part.partNumber, result.etag);
+        partBytes.set(part.partNumber, part.byteLength);
         reportProgress();
       }));
     }

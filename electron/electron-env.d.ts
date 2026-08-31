@@ -517,6 +517,7 @@ type EmbeddedBrowserCatchToolkitState = {
 interface Window {
   electronEmbeddedBrowser: {
     activateTab: (tabId: string | null) => Promise<void>;
+    acknowledgeDownloadHandoff: (downloadId: string) => Promise<boolean>;
     cleanupDownloadFile: (tempPath: string) => Promise<boolean>;
     clearCapturedResources: (tabId: string) => Promise<import('./service/embedded-browser/contracts/captured-resource').ResourceStateSnapshot | null>;
     inspectCapturedResource: (tabId: string, resourceId: string, encoding: 'base64' | 'utf8') => Promise<{
@@ -535,6 +536,19 @@ interface Window {
     goBack: (tabId: string) => Promise<void>;
     goForward: (tabId: string) => Promise<void>;
     listCapturedResources: (tabId: string) => Promise<import('./service/embedded-browser/contracts/captured-resource').ResourceStateSnapshot | null>;
+    listDownloadHandoff: () => Promise<Array<{
+      downloadId: string;
+      error?: string;
+      fileName: string;
+      mimeType?: string;
+      pageUrl?: string;
+      receivedBytes: number;
+      state: 'completed';
+      tabId?: string;
+      tempPath: string;
+      totalBytes: number;
+      url: string;
+    }>>;
     listHlsTaskSnapshots: (tabId: string) => Promise<import('./service/embeddedBrowserMainTypes').EmbeddedBrowserHlsTaskEventPayload[]>;
     listDashTaskSnapshots: (tabId: string) => Promise<import('./service/embeddedBrowserMainTypes').EmbeddedBrowserDashTaskEventPayload[]>;
     navigate: (tabId: string, url: string) => Promise<void>;

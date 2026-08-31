@@ -13,7 +13,7 @@
  * dash.dynamic-drm-rejection
  */
 
-import { access, appendFile, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, mkdtemp, open, readFile, rm, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -28,7 +28,7 @@ import {
   EmbeddedBrowserFragmentDownloader,
   type EmbeddedBrowserDownloadFragment,
   type EmbeddedBrowserFragmentFetch,
-} from '../../embeddedBrowserFragmentDownloader'
+} from '../cat-catch-port/processing/transfer-engine'
 
 export type DashTaskPlan = {
   durationSeconds?: number
@@ -257,6 +257,135 @@ async function expandSegmentBaseRepresentation(
   }
 }
 
+const DASH_FILE_COPY_CHUNK_BYTES = 1024 * 1024
+
+async function downloadFragmentsToPartFiles(
+  fragments: EmbeddedBrowserDownloadFragment[],
+  partDirectoryPath: string,
+  options: {
+    fetch?: EmbeddedBrowserFragmentFetch
+    headers?: Record<string, string>
+    maxRetries: number
+    signal: AbortSignal
+    threadCount: number
+  },
+) {
+  const partPaths = fragments.map((_fragment, index) => (
+    path.join(partDirectoryPath, `${String(index).padStart(8, '0')}.part`)
+  ))
+  let bytesReceived = 0
+  let sinkError: Error | null = null
+  const downloader = new EmbeddedBrowserFragmentDownloader({
+    bufferSink: async (buffer, fragment, signal) => {
+      const partPath = partPaths[Number(fragment.index)]
+      if (!partPath) throw new Error(`DASH 分片 #${Number(fragment.index) + 1} 缺少暂存路径`)
+      try {
+        await writeFile(partPath, new Uint8Array(buffer), { signal })
+      } catch (error) {
+        await rm(partPath, { force: true }).catch(() => undefined)
+        throw error
+      }
+      bytesReceived += buffer.byteLength
+    },
+    fetch: options.fetch,
+    fragments,
+    headers: options.headers,
+    maxRetries: options.maxRetries,
+    signal: options.signal,
+    thread: options.threadCount,
+  })
+  const run = new Promise<void>((resolve, reject) => {
+    let settled = false
+    const fail = (error: Error) => {
+      if (settled) return
+      settled = true
+      reject(error)
+    }
+    downloader.on('bufferSinkError', (fragment, error) => {
+      sinkError ||= new Error(`DASH 写入分片失败：#${Number(fragment.index) + 1} ${error.message}`)
+    })
+    downloader.on('error', message => fail(new Error(message)))
+    downloader.on('aborted', () => fail(createDashAbortError()))
+    downloader.on('failed', (_failedFragments, errors) => {
+      const failedIndexes = Array.from(errors)
+        .map(fragment => Number(fragment.index) + 1)
+        .filter(Number.isFinite)
+      fail(sinkError || new Error(
+        failedIndexes.length
+          ? `DASH 分片下载失败：${failedIndexes.map(index => `#${index}`).join(', ')}`
+          : 'DASH 分片下载失败',
+      ))
+    })
+    downloader.on('allCompleted', () => {
+      if (settled) return
+      settled = true
+      resolve()
+    })
+    downloader.start()
+  })
+
+  try {
+    await run
+    return { bytesReceived, partPaths }
+  } finally {
+    downloader.destroy()
+  }
+}
+
+async function writePartFilesInOrder(
+  partPaths: string[],
+  outputPath: string,
+  options: {
+    append: boolean
+    signal: AbortSignal
+  },
+) {
+  const outputExisted = await access(outputPath).then(() => true).catch(() => false)
+  const outputHandle = await open(outputPath, options.append ? 'a+' : 'w')
+  let originalSize: number | null = options.append ? null : 0
+  let removeFailedOutput = false
+  try {
+    if (options.append) originalSize = (await outputHandle.stat()).size
+    const chunk = Buffer.allocUnsafe(DASH_FILE_COPY_CHUNK_BYTES)
+    for (const partPath of partPaths) {
+      throwIfAborted(options.signal)
+      const partHandle = await open(partPath, 'r')
+      try {
+        let reading = true
+        while (reading) {
+          throwIfAborted(options.signal)
+          const { bytesRead } = await partHandle.read(chunk, 0, chunk.byteLength, null)
+          if (bytesRead === 0) {
+            reading = false
+            continue
+          }
+          let written = 0
+          while (written < bytesRead) {
+            throwIfAborted(options.signal)
+            const result = await outputHandle.write(chunk, written, bytesRead - written, null)
+            if (result.bytesWritten <= 0) throw new Error('DASH 分片写入未取得进展')
+            written += result.bytesWritten
+          }
+        }
+      } finally {
+        await partHandle.close()
+      }
+    }
+    throwIfAborted(options.signal)
+  } catch (error) {
+    if (options.append && originalSize !== null) {
+      await outputHandle.truncate(originalSize).catch(() => undefined)
+    } else {
+      removeFailedOutput = true
+    }
+    if (!outputExisted) removeFailedOutput = true
+    throw error
+  } finally {
+    await outputHandle.close()
+    if (removeFailedOutput) await rm(outputPath, { force: true }).catch(() => undefined)
+  }
+}
+
 async function downloadRepresentation(
   representation: DashRepresentation,
   outputPath: string,
@@ -271,54 +400,18 @@ async function downloadRepresentation(
   const resolvedRepresentation = await expandSegmentBaseRepresentation(representation, options)
   const fragments = createFragments(resolvedRepresentation)
   throwIfAborted(options.signal)
-  await writeFile(outputPath, Buffer.alloc(0))
-  const downloader = new EmbeddedBrowserFragmentDownloader({
-    fetch: options.fetch,
-    fragments,
-    headers: options.headers,
-    maxRetries: options.maxRetries,
-    signal: options.signal,
-    thread: options.threadCount,
-  })
-  let writeChain = Promise.resolve()
-  let settled = false
-  const run = new Promise<void>((resolve, reject) => {
-    const fail = (error: Error) => {
-      if (settled) return
-      settled = true
-      reject(error)
-    }
-    downloader.on('sequentialPush', (buffer) => {
-      writeChain = writeChain.then(() => appendFile(outputPath, Buffer.from(buffer)))
-    })
-    downloader.on('error', message => fail(new Error(message)))
-    downloader.on('aborted', () => fail(createDashAbortError()))
-    downloader.on('failed', (_failedFragments, errors) => {
-      void writeChain.then(() => {
-        const failedIndexes = Array.from(errors)
-          .map(fragment => Number(fragment.index) + 1)
-          .filter(Number.isFinite)
-        fail(new Error(
-          failedIndexes.length
-            ? `DASH 分片下载失败：${failedIndexes.map(index => `#${index}`).join(', ')}`
-            : 'DASH 分片下载失败',
-        ))
-      }).catch(error => fail(error instanceof Error ? error : new Error(String(error))))
-    })
-    downloader.on('allCompleted', () => {
-      void writeChain.then(() => {
-        if (settled) return
-        settled = true
-        resolve()
-      }).catch(error => fail(error instanceof Error ? error : new Error(String(error))))
-    })
-    downloader.start()
-  })
-
+  const partDirectoryPath = await mkdtemp(path.join(
+    path.dirname(outputPath),
+    `${path.basename(outputPath)}.parts-`,
+  ))
   try {
-    await run
+    const { partPaths } = await downloadFragmentsToPartFiles(fragments, partDirectoryPath, options)
+    await writePartFilesInOrder(partPaths, outputPath, {
+      append: false,
+      signal: options.signal,
+    })
   } finally {
-    downloader.destroy()
+    await rm(partDirectoryPath, { force: true, recursive: true }).catch(() => undefined)
   }
 }
 
@@ -342,57 +435,25 @@ export async function appendDashRepresentationSegments(
     : fragments
   if (!selectedFragments.length) return { bytesReceived: 0, fragments: 0 }
   throwIfAborted(options.signal)
-
-  const downloader = new EmbeddedBrowserFragmentDownloader({
-    fetch: options.fetch,
-    fragments: selectedFragments,
-    headers: options.headers,
-    maxRetries: Math.max(0, Number(options.maxRetries ?? 2)),
-    signal: options.signal,
-    thread: Math.max(1, Number(options.threadCount || 8)),
-  })
-  let writeChain = Promise.resolve()
-  let bytesReceived = 0
-  let settled = false
-  const run = new Promise<void>((resolve, reject) => {
-    const fail = (error: Error) => {
-      if (settled) return
-      settled = true
-      reject(error)
-    }
-    downloader.on('sequentialPush', (buffer) => {
-      bytesReceived += buffer.byteLength
-      writeChain = writeChain.then(() => appendFile(outputPath, Buffer.from(buffer)))
-    })
-    downloader.on('error', message => fail(new Error(message)))
-    downloader.on('aborted', () => fail(createDashAbortError()))
-    downloader.on('failed', (_failedFragments, errors) => {
-      void writeChain.then(() => {
-        const failedIndexes = Array.from(errors)
-          .map(fragment => Number(fragment.index) + 1)
-          .filter(Number.isFinite)
-        fail(new Error(
-          failedIndexes.length
-            ? `DASH 分片下载失败：${failedIndexes.map(index => `#${index}`).join(', ')}`
-            : 'DASH 分片下载失败',
-        ))
-      }).catch(error => fail(error instanceof Error ? error : new Error(String(error))))
-    })
-    downloader.on('allCompleted', () => {
-      void writeChain.then(() => {
-        if (settled) return
-        settled = true
-        resolve()
-      }).catch(error => fail(error instanceof Error ? error : new Error(String(error))))
-    })
-    downloader.start()
-  })
-
+  const partDirectoryPath = await mkdtemp(path.join(
+    path.dirname(outputPath),
+    `${path.basename(outputPath)}.parts-`,
+  ))
   try {
-    await run
-    return { bytesReceived, fragments: selectedFragments.length }
+    const result = await downloadFragmentsToPartFiles(selectedFragments, partDirectoryPath, {
+      fetch: options.fetch,
+      headers: options.headers,
+      maxRetries: Math.max(0, Number(options.maxRetries ?? 2)),
+      signal: options.signal,
+      threadCount: Math.max(1, Number(options.threadCount || 8)),
+    })
+    await writePartFilesInOrder(result.partPaths, outputPath, {
+      append: true,
+      signal: options.signal,
+    })
+    return { bytesReceived: result.bytesReceived, fragments: selectedFragments.length }
   } finally {
-    downloader.destroy()
+    await rm(partDirectoryPath, { force: true, recursive: true }).catch(() => undefined)
   }
 }
 

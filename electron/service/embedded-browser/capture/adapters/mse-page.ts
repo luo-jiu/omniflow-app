@@ -79,6 +79,10 @@ export function installMsePageAdapter(input: InstallMsePageAdapterInput): MsePag
 
   const blobUrls = new Map<string, string>()
   const lastReports = new Map<string, { bufferCount: number; totalBytes: number }>()
+  const restartTimers = new Map<HTMLMediaElement, {
+    expiryTimer: ReturnType<typeof input.scope.setTimeout>
+    pollTimer: ReturnType<typeof input.scope.setInterval>
+  }>()
   const trackedMediaElements = new WeakSet<HTMLMediaElement>()
   const restartedMediaElements = new WeakSet<HTMLMediaElement>()
   let disposed = false
@@ -361,6 +365,24 @@ export function installMsePageAdapter(input: InstallMsePageAdapterInput): MsePag
     input.scope.open(blobUrl, '_blank', 'noopener,noreferrer')
     return true
   }
+  const clearRestartTimer = (element: HTMLMediaElement) => {
+    const timers = restartTimers.get(element)
+    if (!timers) return
+    input.scope.clearInterval(timers.pollTimer)
+    input.scope.clearTimeout(timers.expiryTimer)
+    restartTimers.delete(element)
+  }
+  const resetMediaElementForCapture = (element: HTMLMediaElement) => {
+    if (!input.preferences.restartAlwaysFromBeginning || restartedMediaElements.has(element)) return
+    restartedMediaElements.add(element)
+    clearRestartTimer(element)
+    clear()
+    try {
+      element.currentTime = 0
+    } catch {
+      // Some page-owned media elements reject programmatic seeking.
+    }
+  }
   const clear = () => {
     autoDownloadScheduled = false
     lastLargeOutputThreshold = 0
@@ -379,6 +401,19 @@ export function installMsePageAdapter(input: InstallMsePageAdapterInput): MsePag
   const attachMediaElement = (element: HTMLMediaElement) => {
     if (trackedMediaElements.has(element)) return
     trackedMediaElements.add(element)
+    if (!input.preferences.restartAlwaysFromBeginning) return
+    const pollTimer = input.scope.setInterval(() => {
+      if (!element.paused) resetMediaElementForCapture(element)
+    }, 500)
+    const expiryTimer = input.scope.setTimeout(() => {
+      clearRestartTimer(element)
+    }, 5000)
+    restartTimers.set(element, { expiryTimer, pollTimer })
+    element.addEventListener('play', () => {
+      resetMediaElementForCapture(element)
+    }, { once: true })
+  }
+  const attachProgressObserver = (element: HTMLMediaElement) => {
     element.addEventListener('progress', () => {
       if (!input.preferences.autoSeekToBufferedEnd) return
       try {
@@ -392,22 +427,15 @@ export function installMsePageAdapter(input: InstallMsePageAdapterInput): MsePag
         // Sparse buffer ranges can disappear while they are inspected.
       }
     })
-    const restartFromBeginning = () => {
-      if (!input.preferences.restartAlwaysFromBeginning || restartedMediaElements.has(element)) return
-      restartedMediaElements.add(element)
-      clear()
-      try {
-        element.currentTime = 0
-      } catch {
-        // Some page-owned media elements reject programmatic seeking.
-      }
-    }
-    element.addEventListener('play', restartFromBeginning, { once: true })
+  }
+  const attachMediaObservers = (element: HTMLMediaElement) => {
+    attachProgressObserver(element)
+    attachMediaElement(element)
   }
   const ensureTrackedMediaObserver = () => {
     if (!input.document || observer || typeof input.scope.MutationObserver === 'undefined') return
     input.document.querySelectorAll('video, audio').forEach((node) => {
-      if (node instanceof input.scope.HTMLMediaElement) attachMediaElement(node)
+      if (node instanceof input.scope.HTMLMediaElement) attachMediaObservers(node)
     })
     const target = input.document.body || input.document.documentElement
     if (!target) return
@@ -415,9 +443,9 @@ export function installMsePageAdapter(input: InstallMsePageAdapterInput): MsePag
       for (const mutation of mutations) {
         for (const node of mutation.addedNodes) {
           if (!(node instanceof input.scope.Element)) continue
-          if (node instanceof input.scope.HTMLMediaElement) attachMediaElement(node)
+          if (node instanceof input.scope.HTMLMediaElement) attachMediaObservers(node)
           node.querySelectorAll('video, audio').forEach((child) => {
-            if (child instanceof input.scope.HTMLMediaElement) attachMediaElement(child)
+            if (child instanceof input.scope.HTMLMediaElement) attachMediaObservers(child)
           })
         }
       }
@@ -449,6 +477,7 @@ export function installMsePageAdapter(input: InstallMsePageAdapterInput): MsePag
       autoDownloadScheduled = false
       observer?.disconnect()
       observer = null
+      for (const element of restartTimers.keys()) clearRestartTimer(element)
       for (const streamId of blobUrls.keys()) revokeBlobUrl(streamId)
       runtime.dispose()
       if (scopeRecord[adapterSentinel] === adapter) delete scopeRecord[adapterSentinel]

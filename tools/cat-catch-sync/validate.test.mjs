@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
@@ -40,25 +40,28 @@ function completeEveryUnitForTarget(documents, testId) {
   }
 }
 
-function findOpenUnitId(documents, options = {}) {
+function findOpenUnitId(documents) {
   for (const unit of documents.capabilityMap.cutoverUnits) {
     const capabilities = documents.capabilityMap.capabilities
       .filter(capability => capability.cutoverUnitId === unit.id)
     const closed = capabilities.length > 0 && capabilities
       .every(capability => ['excluded', 'verified'].includes(capability.syncState))
     if (closed || capabilities.length < 2) continue
-    if (!options.withPresentRemovableLegacy) return unit.id
-
-    const hasPresentRemovableLegacy = documents.legacyCleanup.entries.some((entry) => {
-      if (entry.cutoverUnitId !== unit.id || entry.cleanupAction !== 'remove-after-cutover') {
-        return false
-      }
-      const sourcePath = path.join(defaultAppRoot, entry.path)
-      return existsSync(sourcePath) && readFileSync(sourcePath, 'utf8').includes(entry.symbol)
-    })
-    if (hasPresentRemovableLegacy) return unit.id
+    return unit.id
   }
-  throw new Error('Expected at least one matching open cutover unit')
+  // The checked-in metadata can legitimately be fully closed. Reopen a
+  // multi-capability unit in this cloned fixture so the negative validator
+  // cases continue to exercise their intended branch.
+  const fallbackUnit = documents.capabilityMap.cutoverUnits.find((unit) => (
+    documents.capabilityMap.capabilities.filter(capability => capability.cutoverUnitId === unit.id).length >= 2
+  ))
+  if (!fallbackUnit) throw new Error('Expected at least one multi-capability cutover unit')
+  const fallbackCapabilities = documents.capabilityMap.capabilities
+    .filter(capability => capability.cutoverUnitId === fallbackUnit.id)
+  const openCapability = fallbackCapabilities.at(-1)
+  openCapability.syncState = 'porting'
+  openCapability.syncedThrough = null
+  return fallbackUnit.id
 }
 
 test('accepts the checked-in Cat Catch sync metadata', () => {
@@ -93,6 +96,16 @@ test('checks target symbols once a port exists', () => {
     .some(issue => issue.includes('targetRefs symbol does not exist')))
 })
 
+test('requires retained implementation refs to exist', () => {
+  const documents = loadClonedDocuments()
+  const capability = documents.capabilityMap.capabilities
+    .find(item => item.currentImplementationRefs.length > 0)
+  capability.currentImplementationRefs = ['package.json#DefinitelyMissingImplementation']
+
+  assert(validateDocuments({ appRoot: defaultAppRoot, ...documents })
+    .some(issue => issue.includes('currentImplementationRefs symbol does not exist')))
+})
+
 test('binds every verified planned test to a real test ref', () => {
   const documents = loadClonedDocuments()
   const capability = documents.capabilityMap.capabilities[0]
@@ -124,52 +137,6 @@ test('rejects partial unit verification', () => {
     .some(issue => issue.includes('cannot contain verified capabilities before the whole unit closes')))
 })
 
-test('rejects a closed unit while removable legacy symbols remain', () => {
-  const documents = loadClonedDocuments()
-  const unitId = findOpenUnitId(documents, { withPresentRemovableLegacy: true })
-  for (const capability of documents.capabilityMap.capabilities) {
-    if (capability.cutoverUnitId !== unitId) continue
-    capability.syncState = 'verified'
-    capability.syncedThrough = documents.state.migrationTarget
-    capability.targetRefs = ['package.json#cat-catch:validate']
-    capability.testRefs = [
-      'tools/cat-catch-sync/validate.test.mjs#rejects a closed unit while removable legacy symbols remain',
-    ]
-  }
-
-  assert(validateDocuments({ appRoot: defaultAppRoot, ...documents })
-    .some(issue => issue.includes('symbol must be removed')))
-})
-
-test('binds every cleanup entry to its capability unit', () => {
-  const documents = loadClonedDocuments()
-  documents.legacyCleanup.entries[0].cutoverUnitId = 'dash-engine'
-
-  assert(validateDocuments({ appRoot: defaultAppRoot, ...documents })
-    .some(issue => issue.includes('cutover unit must match capability')))
-})
-
-test('prevents legacy cleanup entries from being relabeled as retained integration', () => {
-  const documents = loadClonedDocuments()
-  const legacyEntry = documents.legacyCleanup.entries
-    .find(entry => entry.classification === 'legacy')
-  legacyEntry.cleanupAction = 'retain-or-adapt'
-
-  assert(validateDocuments({ appRoot: defaultAppRoot, ...documents })
-    .some(issue => issue.includes('legacy code must use cleanupAction=remove-after-cutover')))
-})
-
-test('classifies every current implementation ref during initial cutover', () => {
-  const documents = loadClonedDocuments()
-  const currentRef = documents.capabilityMap.capabilities[0].currentImplementationRefs[0]
-  documents.legacyCleanup.entries = documents.legacyCleanup.entries.filter(entry => (
-    `${entry.path}#${entry.symbol}` !== currentRef
-  ))
-
-  assert(validateDocuments({ appRoot: defaultAppRoot, ...documents })
-    .some(issue => issue.includes(`has no legacy cleanup classification: ${currentRef}`)))
-})
-
 test('prevents a cutover unit from closing entirely through exclusions', () => {
   const documents = loadClonedDocuments()
   for (const capability of documents.capabilityMap.capabilities) {
@@ -186,6 +153,7 @@ test('prevents a cutover unit from closing entirely through exclusions', () => {
 
 test('requires portedThrough when every capability closes', () => {
   const documents = loadClonedDocuments()
+  documents.state.portedThrough = null
   for (const capability of documents.capabilityMap.capabilities) {
     capability.syncState = 'excluded'
     capability.syncedThrough = documents.state.migrationTarget
@@ -197,14 +165,6 @@ test('requires portedThrough when every capability closes', () => {
     .includes('upstream-state.portedThrough must equal migrationTarget when all capabilities close'))
 })
 
-test('requires the legacy cleanup map until the initial migration completes', () => {
-  const documents = loadClonedDocuments()
-  documents.legacyCleanup = null
-
-  assert(validateDocuments({ appRoot: defaultAppRoot, ...documents })
-    .includes('legacy-cleanup.json is required while initial cleanup validation is active'))
-})
-
 test('preserves the last completed cursor while a later migration batch is open', () => {
   const documents = loadClonedDocuments()
   const previousTarget = '1'.repeat(40)
@@ -214,8 +174,6 @@ test('preserves the last completed cursor while a later migration batch is open'
   documents.state.migrationTarget = nextTarget
   documents.state.reviewedThrough = nextTarget
   documents.state.portedThrough = previousTarget
-  documents.legacyCleanup = null
-
   completeEveryUnitForTarget(
     documents,
     'preserves the last completed cursor while a later migration batch is open',
@@ -225,9 +183,7 @@ test('preserves the last completed cursor while a later migration batch is open'
   affected.syncedThrough = previousTarget
   affected.targetRefs = ['package.json#cat-catch:validate']
 
-  assert.deepEqual(validateDocuments({ appRoot: defaultAppRoot, ...documents }), [
-    'legacy-cleanup.json is required while initial cleanup validation is active',
-  ])
+  assert.deepEqual(validateDocuments({ appRoot: defaultAppRoot, ...documents }), [])
 })
 
 test('reopens a capability at the same upstream target without erasing cursors', () => {
@@ -238,14 +194,10 @@ test('reopens a capability at the same upstream target without erasing cursors',
   )
   documents.state.reviewedThrough = documents.state.migrationTarget
   documents.state.portedThrough = documents.state.migrationTarget
-  documents.legacyCleanup = null
-
   const affected = documents.capabilityMap.capabilities[0]
   affected.syncState = 'pending'
 
-  assert.deepEqual(validateDocuments({ appRoot: defaultAppRoot, ...documents }), [
-    'legacy-cleanup.json is required while initial cleanup validation is active',
-  ])
+  assert.deepEqual(validateDocuments({ appRoot: defaultAppRoot, ...documents }), [])
 })
 
 function git(sourceDir, args) {

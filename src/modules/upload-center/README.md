@@ -12,6 +12,10 @@
   - 本地验收场景（纯内存，不依赖后端）。
 - `engine/upload-manager.ts`
   - 上传引擎（队列、并发、取消、重试、事件回调）。
+  - `createBatch()` 同时返回 `done`（逐任务结果）和 `terminal`（`completed / failed / cancelled / unknown`）；需要决定是否清理本地暂存时必须使用 `terminal`，不能只看单个任务的中间状态。
+- `services/upload-delivery-adapter.ts`
+  - 冻结资料库交付目标（`libraryId / parentId / fileName / relativePath`），并把旧批次结果兼容归类为统一 delivery terminal。
+  - 浏览器下载、资源捕捉等异步交付入口应在创建 UploadManager batch 前生成一次 frozen target，避免 workspace 或资料库切换后把同一暂存文件改投到新目标。
 - `engine/upload-manager.scenario.ts`
   - Step 2 验收场景（并发与事件推送）。
 - `services/upload-session.api.ts`

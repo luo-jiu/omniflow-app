@@ -46,7 +46,7 @@ function createSession(item = new FakeDownloadItem()) {
 }
 
 describe('NativeDownloadSession', () => {
-  it('owns save path, progress, and one completed terminal event', async () => {
+  it('transfer.downloader-terminal-completion', async () => {
     const harness = createSession()
     harness.session.start()
     harness.item.emit('updated', {}, 'progressing')
@@ -59,7 +59,7 @@ describe('NativeDownloadSession', () => {
     expect(harness.onSettled).toHaveBeenCalledTimes(1)
   })
 
-  it('cancels the item, cleans staging, and emits a single cancelled terminal event', async () => {
+  it('transfer.downloader-cancel-cleanup', async () => {
     const harness = createSession()
     harness.session.start()
     harness.session.cancel()
@@ -72,7 +72,7 @@ describe('NativeDownloadSession', () => {
     expect(harness.onSettled).toHaveBeenCalledTimes(1)
   })
 
-  it('converts a save-path failure into a failed terminal event and releases the session', async () => {
+  it('transfer.downloader-save-path-failure', async () => {
     const harness = createSession()
     harness.item.setSavePath.mockImplementationOnce(() => {
       throw new Error('cannot stage download')

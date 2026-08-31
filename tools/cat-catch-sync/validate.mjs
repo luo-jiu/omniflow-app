@@ -21,8 +21,6 @@ const UPSTREAM_RELATIONS = new Set([
   'platform-substitute',
   'not-applicable',
 ])
-const CLEANUP_ACTIONS = new Set(['remove-after-cutover', 'retain-or-adapt'])
-const CLEANUP_CLASSIFICATIONS = new Set(['legacy', 'omniflow-integration'])
 const TEST_PATH_PATTERN = /\.(?:test|spec)\.(?:[cm]?[jt]sx?)$/
 
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url))
@@ -133,39 +131,11 @@ function validateLocalRef({
   }
 }
 
-function validateCleanupRef({
-  appRoot,
-  entry,
-  label,
-  issues,
-  sourceCache,
-  mustExist,
-}) {
-  if (typeof entry.path !== 'string' || entry.path.length === 0) {
-    issues.push(`${label}.path must be a non-empty string`)
-    return
-  }
-  if (typeof entry.symbol !== 'string' || entry.symbol.length === 0) {
-    issues.push(`${label}.symbol must be a non-empty string`)
-    return
-  }
-  validateLocalRef({
-    appRoot,
-    ref: `${entry.path}#${entry.symbol}`,
-    label,
-    issues,
-    sourceCache,
-    mustExist,
-    mustBeAbsent: !mustExist,
-  })
-}
-
 export function loadDocuments(appRoot = defaultAppRoot) {
   const readJson = relativePath => JSON.parse(readFileSync(path.join(appRoot, relativePath), 'utf8'))
   return {
     state: readJson('docs/cat-catch/upstream-state.json'),
     capabilityMap: readJson('docs/cat-catch/capability-map.json'),
-    legacyCleanup: readJson('docs/cat-catch/legacy-cleanup.json'),
   }
 }
 
@@ -173,11 +143,9 @@ export function validateDocuments({
   appRoot = defaultAppRoot,
   state,
   capabilityMap,
-  legacyCleanup,
 }) {
   const issues = []
   const sourceCache = new Map()
-  const hasLegacyCleanup = legacyCleanup !== null && legacyCleanup !== undefined
 
   if (!isObject(state) || state.schemaVersion !== 1) {
     issues.push('upstream-state.json must be a schemaVersion 1 object')
@@ -185,12 +153,6 @@ export function validateDocuments({
   if (!isObject(capabilityMap) || capabilityMap.schemaVersion !== 1) {
     issues.push('capability-map.json must be a schemaVersion 1 object')
   }
-  if (!hasLegacyCleanup) {
-    issues.push('legacy-cleanup.json is required while initial cleanup validation is active')
-  } else if (!isObject(legacyCleanup) || legacyCleanup.schemaVersion !== 1) {
-    issues.push('legacy-cleanup.json must be a schemaVersion 1 object')
-  }
-
   for (const field of ['baselineCursor', 'observedHead', 'migrationTarget']) {
     if (!COMMIT_PATTERN.test(String(state?.[field] || ''))) {
       issues.push(`upstream-state.${field} must be a lowercase 40-character commit`)
@@ -214,14 +176,11 @@ export function validateDocuments({
 
   const units = asArray(capabilityMap?.cutoverUnits)
   const capabilities = asArray(capabilityMap?.capabilities)
-  const cleanupEntries = hasLegacyCleanup ? asArray(legacyCleanup?.entries) : []
   const unitIds = requireUniqueIds(units, 'capabilityMap.cutoverUnits', issues)
-  const capabilityIds = requireUniqueIds(capabilities, 'capabilityMap.capabilities', issues)
-  requireUniqueIds(cleanupEntries, 'legacyCleanup.entries', issues)
+  requireUniqueIds(capabilities, 'capabilityMap.capabilities', issues)
 
   const unitCapabilities = new Map([...unitIds].map(id => [id, []]))
   const capabilityById = new Map()
-  const currentImplementationRefs = []
   for (const [index, capability] of capabilities.entries()) {
     if (!isObject(capability)) {
       issues.push(`capabilityMap.capabilities[${index}] must be an object`)
@@ -288,8 +247,14 @@ export function validateDocuments({
       issues,
     )
     for (const ref of currentRefs) {
-      currentImplementationRefs.push(ref)
-      validateLocalRef({ appRoot, ref, label: `${label}.currentImplementationRefs`, issues, sourceCache })
+      validateLocalRef({
+        appRoot,
+        ref,
+        label: `${label}.currentImplementationRefs`,
+        issues,
+        sourceCache,
+        mustExist: true,
+      })
     }
 
     const targetRefs = validateStringArray(capability.targetRefs, `${label}.targetRefs`, issues)
@@ -400,27 +365,12 @@ export function validateDocuments({
     if (isClosed && !members.some(capability => capability.syncState === 'verified')) {
       issues.push(`${label} cannot close with every capability excluded`)
     }
-    if (hasLegacyCleanup
-      && !isClosed
+    if (!isClosed
       && members.some(capability => (
         capability.syncState === 'verified'
           && capability.syncedThrough === state?.migrationTarget
       ))) {
       issues.push(`${label} cannot contain verified capabilities before the whole unit closes`)
-    }
-    if (hasLegacyCleanup && !isClosed) {
-      for (const capability of members) {
-        for (const ref of asArray(capability.currentImplementationRefs)) {
-          validateLocalRef({
-            appRoot,
-            ref,
-            label: `capability ${capability.id}.currentImplementationRefs`,
-            issues,
-            sourceCache,
-            mustExist: true,
-          })
-        }
-      }
     }
   }
   requireUniqueValues(unitOrders, 'capabilityMap.cutoverUnits.order', issues)
@@ -437,54 +387,6 @@ export function validateDocuments({
   if (state?.portedThrough !== null && state?.reviewedThrough === null) {
     issues.push('upstream-state.reviewedThrough must be set before portedThrough')
   }
-  const cleanupRefs = []
-  for (const [index, entry] of cleanupEntries.entries()) {
-    if (!isObject(entry)) {
-      issues.push(`legacyCleanup.entries[${index}] must be an object`)
-      continue
-    }
-    const label = `legacy cleanup ${String(entry.id)}`
-    const capability = capabilityById.get(entry.capabilityId)
-    if (!capabilityIds.has(entry.capabilityId)) {
-      issues.push(`${label} references unknown capability: ${String(entry.capabilityId)}`)
-    }
-    if (!unitIds.has(entry.cutoverUnitId)) {
-      issues.push(`${label} references unknown cutover unit: ${String(entry.cutoverUnitId)}`)
-    }
-    if (capability && entry.cutoverUnitId !== capability.cutoverUnitId) {
-      issues.push(`${label} cutover unit must match capability ${capability.id}`)
-    }
-    if (!CLEANUP_ACTIONS.has(entry.cleanupAction)) {
-      issues.push(`${label} has invalid cleanupAction: ${String(entry.cleanupAction)}`)
-    }
-    if (!CLEANUP_CLASSIFICATIONS.has(entry.classification)) {
-      issues.push(`${label} has invalid classification: ${String(entry.classification)}`)
-    }
-    if (entry.classification === 'legacy' && entry.cleanupAction !== 'remove-after-cutover') {
-      issues.push(`${label} legacy code must use cleanupAction=remove-after-cutover`)
-    }
-    if (entry.classification === 'omniflow-integration'
-      && entry.cleanupAction !== 'retain-or-adapt') {
-      issues.push(`${label} OmniFlow integration must use cleanupAction=retain-or-adapt`)
-    }
-    if (typeof entry.path === 'string' && typeof entry.symbol === 'string') {
-      cleanupRefs.push(`${entry.path}#${entry.symbol}`)
-    }
-
-    const removeAfterCutover = entry.cleanupAction === 'remove-after-cutover'
-    const mustExist = !removeAfterCutover || !unitClosed.get(entry.cutoverUnitId)
-    validateCleanupRef({ appRoot, entry, label, issues, sourceCache, mustExist })
-  }
-  requireUniqueValues(cleanupRefs, 'legacyCleanup path#symbol refs', issues)
-  if (hasLegacyCleanup) {
-    const cleanupRefSet = new Set(cleanupRefs)
-    for (const ref of new Set(currentImplementationRefs)) {
-      if (!cleanupRefSet.has(ref)) {
-        issues.push(`current implementation ref has no legacy cleanup classification: ${ref}`)
-      }
-    }
-  }
-
   return issues
 }
 
@@ -673,7 +575,6 @@ function run() {
     'Cat Catch sync metadata valid:',
     `${documents.capabilityMap.cutoverUnits.length} units,`,
     `${documents.capabilityMap.capabilities.length} capabilities (${openCount} open),`,
-    `${documents.legacyCleanup.entries.length} cleanup entries,`,
     `${plannedTestCount} planned tests.`,
   ].join(' '))
 }

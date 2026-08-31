@@ -22,4 +22,4 @@ embedded-browser/
 
 `orchestration/embedded-browser-capture-runtime.ts` 是 production network-capture composition root，独占 embedded browser session 的 `webRequest` listener，并组合 main-owned vault/store、page probe 和 resource access。旧 bridge/state/classifier 已删除；不得注册第二套 listener 或恢复 renderer header DTO。
 
-逐项映射见 `docs/cat-catch/capability-map.json`；初始迁移期间的旧位置处置见 `docs/cat-catch/legacy-cleanup.json`。
+逐项映射见 `docs/cat-catch/capability-map.json`；已删除的历史实现不再单独维护清理台账。

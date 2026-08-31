@@ -32,6 +32,7 @@ class FakeMediaElement {
   }
   duration = 200
   currentTime = 0
+  paused = true
 
   addEventListener(type: string, listener: () => void) {
     this.listeners.set(type, listener)
@@ -303,6 +304,84 @@ describe('MSE page adapter', () => {
     expect(mediaElement.endCalls).toEqual([0])
     expect(mediaElement.currentTime).toBe(5)
     adapter.dispose()
+  })
+
+  it('mse.auto-restart-polls-playing-media', () => {
+    vi.useFakeTimers()
+    try {
+      const mediaElement = new FakeMediaElement()
+      const clear = vi.fn(() => true)
+      const adapter = installMsePageAdapter({
+        arrayBufferToBase64: (buffer) => Buffer.from(buffer).toString('base64'),
+        combineArrayBuffers: (buffers) => {
+          const combined = new Uint8Array(buffers.reduce((total, buffer) => total + buffer.byteLength, 0))
+          let offset = 0
+          for (const buffer of buffers) {
+            const bytes = new Uint8Array(buffer)
+            combined.set(bytes, offset)
+            offset += bytes.byteLength
+          }
+          return combined.buffer
+        },
+        document: {
+          body: {},
+          documentElement: {},
+          querySelectorAll: () => [mediaElement],
+        } as unknown as Document,
+        emitCapture: vi.fn(),
+        emitControl: vi.fn(),
+        guessExtension: () => 'mp4',
+        hostProbe: {},
+        installRuntime: (runtimeInput) => {
+          const runtime = installMseRuntime(runtimeInput)
+          vi.spyOn(runtime, 'clear').mockImplementation(clear)
+          return runtime
+        },
+        preferences: {
+          autoDownloadOnComplete: false,
+          autoSeekToBufferedEnd: false,
+          clearCacheOnComplete: false,
+          manualFileName: '',
+          regexRule: '',
+          regexWarning: '',
+          restartAlwaysFromBeginning: true,
+          saveEveryGigabyte: false,
+          selectorRule: '',
+          selectorWarning: '',
+          trimExtraMediaHeaders: true,
+        },
+        resolveFileName: () => 'fixture',
+        scope: {
+          ArrayBuffer,
+          Blob,
+          Element: class FakeElement {},
+          HTMLMediaElement: FakeMediaElement,
+          MediaSource: FakeMediaSource,
+          MutationObserver: FakeMutationObserver,
+          URL: {
+            createObjectURL: () => 'blob:fixture',
+            revokeObjectURL: vi.fn(),
+          },
+          Uint8Array,
+          location: { href: 'https://page.example/watch' },
+          setInterval,
+          setTimeout,
+          clearInterval,
+          clearTimeout,
+        } as unknown as InstallMsePageAdapterInput['scope'],
+      })
+
+      mediaElement.currentTime = 37
+      mediaElement.paused = false
+      vi.advanceTimersByTime(500)
+
+      expect(mediaElement.currentTime).toBe(0)
+      expect(clear).toHaveBeenCalledTimes(1)
+      adapter.dispose()
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('mse.periodic-large-output', () => {

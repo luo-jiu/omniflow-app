@@ -4,6 +4,7 @@ import {
   createEmbeddedBrowserHlsHostLifecycle,
   EmbeddedBrowserHlsSessionOwner,
 } from './hls-session-owner'
+import { ProcessingTaskRegistry } from './task-registry'
 
 type RetrySession = {
   failedFragments: number[]
@@ -146,7 +147,8 @@ describe('EmbeddedBrowser HLS session owner', () => {
   })
 
   it('hls.active-task-tab-cancel', async () => {
-    const owner = new EmbeddedBrowserHlsSessionOwner<RetrySession, LiveSession>()
+    const taskRegistry = new ProcessingTaskRegistry()
+    const owner = new EmbeddedBrowserHlsSessionOwner<RetrySession, LiveSession>({ taskRegistry })
     let firstSignal: AbortSignal | undefined
     let secondSignal: AbortSignal | undefined
     let finishSecondTask: () => void = () => {}
@@ -171,13 +173,16 @@ describe('EmbeddedBrowser HLS session owner', () => {
       return 'second-finished'
     })
 
-    await owner.clearActive({ tabId: 'tab-1' })
+    expect(taskRegistry.getSnapshot()).toHaveLength(2)
+
+    await taskRegistry.cancel({ tabId: 'tab-1' })
 
     await expect(firstTask).resolves.toBe('first-finished')
     expect(firstSignal?.aborted).toBe(true)
     expect(secondSignal?.aborted).toBe(false)
     finishSecondTask()
     await expect(secondTask).resolves.toBe('second-finished')
+    expect(taskRegistry.size).toBe(0)
   })
 
   it.each([

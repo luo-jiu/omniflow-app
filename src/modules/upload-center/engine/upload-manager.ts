@@ -28,6 +28,33 @@ export interface UploadResult {
   taskStatus: UploadTaskStatus;
 }
 
+export type UploadBatchTerminal = 'completed' | 'failed' | 'cancelled' | 'unknown';
+
+/**
+ * Converts per-task terminal states into the delivery vocabulary used by
+ * application-scoped workflows. A partial batch is never reported as success.
+ */
+export function classifyUploadBatchResults(
+  results: ReadonlyArray<{ taskStatus?: string }>,
+): UploadBatchTerminal {
+  if (results.length === 0) {
+    return 'unknown';
+  }
+  const statuses = results.map((result) => result.taskStatus);
+  if (statuses.every((status) => status === UPLOAD_TASK_STATUS.SUCCESS)) {
+    return 'completed';
+  }
+  if (statuses.every((status) => status === UPLOAD_TASK_STATUS.CANCELED)) {
+    return 'cancelled';
+  }
+  if (statuses.some((status) => (
+    status === UPLOAD_TASK_STATUS.FAILED || status === UPLOAD_TASK_STATUS.CANCELED
+  ))) {
+    return 'failed';
+  }
+  return 'unknown';
+}
+
 export interface UploadTaskExecutorPayload {
   taskId: string;
   input: UploadTaskInput;
@@ -68,6 +95,7 @@ export interface UploadBatchHandle {
   batchId: string;
   taskIds: string[];
   done: Promise<UploadResult[]>;
+  terminal: Promise<UploadBatchTerminal>;
   cancelAll: () => void;
 }
 
@@ -186,6 +214,7 @@ export class UploadManager {
         batchId: buildBatchId(),
         taskIds: [],
         done: Promise.resolve([]),
+        terminal: Promise.resolve('unknown'),
         cancelAll: () => { /* no-op */ },
       };
     }
@@ -245,6 +274,7 @@ export class UploadManager {
       batchId,
       taskIds,
       done,
+      terminal: done.then(classifyUploadBatchResults),
       cancelAll: () => {
         taskIds.forEach((taskId) => this.cancelTask(taskId));
       },
@@ -319,6 +349,7 @@ export class UploadManager {
       batchId,
       taskIds: [taskId],
       done,
+      terminal: done.then(classifyUploadBatchResults),
       cancelAll: () => {
         this.cancelTask(taskId);
       },

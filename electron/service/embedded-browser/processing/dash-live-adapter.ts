@@ -12,7 +12,7 @@
 
 import { DOMParser } from '@xmldom/xmldom'
 
-import type { EmbeddedBrowserFragmentFetch } from '../../embeddedBrowserFragmentDownloader'
+import type { EmbeddedBrowserFragmentFetch } from '../cat-catch-port/processing/transfer-engine'
 import {
   parseDashManifest,
   type DashXmlElement,

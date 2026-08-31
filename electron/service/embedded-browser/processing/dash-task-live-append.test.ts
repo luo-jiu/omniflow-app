@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -71,6 +71,7 @@ describe('DASH live append transfer', () => {
       controller.abort()
       await expect(run).rejects.toMatchObject({ name: 'AbortError' })
       expect(observedSignal?.aborted).toBe(true)
+      expect((await readdir(directory)).some(name => name.includes('.parts-'))).toBe(false)
     } finally {
       await rm(directory, { force: true, recursive: true })
     }

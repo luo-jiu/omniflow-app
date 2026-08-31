@@ -511,6 +511,7 @@ contextBridge.exposeInMainWorld('electronSystemVideoHost', {
 
 contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
   activateTab: (tabId: string | null) => ipcRenderer.invoke('embedded-browser:activate-tab', tabId),
+  acknowledgeDownloadHandoff: (downloadId: string) => ipcRenderer.invoke('embedded-browser:download-handoff:acknowledge', downloadId),
   cleanupDownloadFile: (tempPath: string) => ipcRenderer.invoke('embedded-browser:cleanup-download-file', tempPath),
   closeAll: () => ipcRenderer.invoke('embedded-browser:close-all'),
   closeTab: (tabId: string) => ipcRenderer.invoke('embedded-browser:close-tab', tabId),
@@ -623,6 +624,7 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
   exportCapturedResource: (tabId: string, resourceId: string) =>
     ipcRenderer.invoke('embedded-browser:resource:export', tabId, resourceId),
   listCapturedResources: (tabId: string) => ipcRenderer.invoke('embedded-browser:resource:list', tabId) as Promise<import('./service/embedded-browser/contracts/captured-resource').ResourceStateSnapshot | null>,
+  listDownloadHandoff: () => ipcRenderer.invoke('embedded-browser:download-handoff:list'),
   listHlsTaskSnapshots: (tabId: string) => ipcRenderer.invoke('embedded-browser:resource:list-hls-task-snapshots', tabId) as Promise<EmbeddedBrowserHlsTaskEventPayload[]>,
   listDashTaskSnapshots: (tabId: string) => ipcRenderer.invoke('embedded-browser:resource:list-dash-task-snapshots', tabId) as Promise<EmbeddedBrowserDashTaskEventPayload[]>,
   openCapturedResource: (tabId: string, resourceId: string) =>

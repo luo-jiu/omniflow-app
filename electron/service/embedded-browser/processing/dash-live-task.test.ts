@@ -28,6 +28,57 @@ function plan(segments: DashRepresentation['segments'], overrides: Partial<DashT
 }
 
 describe('DASH live task', () => {
+  it('dash.live-bounded-continuity', async () => {
+    const snapshotCount = 32
+    const snapshots = Array.from({ length: snapshotCount }, (_, index) => plan([
+      { duration: 2, index: 0, number: 100 + index, url: `https://cdn.example/${100 + index}.m4s` },
+      { duration: 2, index: 1, number: 101 + index, url: `https://cdn.example/${101 + index}.m4s` },
+      { duration: 2, index: 2, number: 102 + index, url: `https://cdn.example/${102 + index}.m4s` },
+    ]))
+    const scheduledCallbacks: Array<() => void> = []
+    const deliveredSegments: number[] = []
+    let snapshotIndex = 0
+    const task = new DashLiveTask({
+      clearSchedule: (handle) => {
+        const callback = handle as unknown as () => void
+        const index = scheduledCallbacks.indexOf(callback)
+        if (index >= 0) scheduledCallbacks.splice(index, 1)
+      },
+      loadSnapshot: vi.fn(async () => snapshots[Math.min(snapshotIndex++, snapshots.length - 1)]!),
+      onNewSegments: (delta) => {
+        deliveredSegments.push(...(
+          delta.representations[0]?.segments.map(segment => Number(segment.number)) || []
+        ))
+      },
+      schedule: (callback) => {
+        scheduledCallbacks.push(callback)
+        return callback as unknown as ReturnType<typeof setTimeout>
+      },
+    })
+
+    await task.start()
+    for (let index = 1; index < snapshotCount; index += 1) {
+      const callback = scheduledCallbacks.shift()
+      expect(callback).toBeDefined()
+      callback?.()
+      await vi.waitFor(() => {
+        expect(snapshotIndex).toBe(index + 1)
+        expect(scheduledCallbacks).toHaveLength(1)
+      })
+    }
+
+    const result = await task.stop()
+    const expectedSegmentCount = snapshotCount + 2
+    expect(result.totalSegments).toBe(expectedSegmentCount)
+    expect(scheduledCallbacks).toHaveLength(0)
+    expect(deliveredSegments).toEqual(
+      Array.from({ length: expectedSegmentCount }, (_, index) => 100 + index),
+    )
+    expect(result.plan.representations[0]?.segments.map(segment => segment.number)).toEqual(
+      deliveredSegments,
+    )
+  })
+
   it('dash.dynamic-refresh-dedupe', async () => {
     const snapshots = [
       plan([

@@ -1,14 +1,17 @@
 import React from 'react';
 import { Toast } from '@douyinfe/semi-ui';
 import { uploadManager } from '@/utils/uploadManager';
+import {
+  createUploadTaskInput,
+  freezeUploadDeliveryTarget,
+} from '@/modules/upload-center/services/upload-delivery-adapter';
 import { runtimeLogger } from '@/utils/runtimeLogger';
-import { UPLOAD_TASK_STATUS } from '@/modules/upload-center/model/upload-task.types';
 import {
   cleanupEmbeddedBrowserDownloadedFile,
   saveEmbeddedBrowserDownloadToDesktop,
 } from '../services/embedded-browser-download.api';
 import type { EmbeddedBrowserDownloadEvent, LibraryFolderEntry } from '../types';
-import { capturedOutputWorkflowCoordinator } from '../../workflows/captured-output-workflow-coordinator';
+import { downloadHandoff } from '../services/download-handoff';
 
 type FileWithPath = File & { path: string };
 
@@ -33,9 +36,9 @@ export function useEmbeddedBrowserDownloadImport(
   options?: UseEmbeddedBrowserDownloadImportOptions,
 ) {
   const queue = React.useSyncExternalStore(
-    capturedOutputWorkflowCoordinator.subscribe,
-    capturedOutputWorkflowCoordinator.getSnapshot,
-    capturedOutputWorkflowCoordinator.getSnapshot,
+    downloadHandoff.subscribe,
+    downloadHandoff.getSnapshot,
+    downloadHandoff.getSnapshot,
   );
   const [importingDownloadId, setImportingDownloadId] = React.useState<string | null>(null);
   const [savingDownloadId, setSavingDownloadId] = React.useState<string | null>(null);
@@ -43,7 +46,7 @@ export function useEmbeddedBrowserDownloadImport(
   const activeDownload = activeItem?.download ?? null;
 
   React.useEffect(() => {
-    return capturedOutputWorkflowCoordinator.subscribeEvents((payload) => {
+    return downloadHandoff.subscribeEvents((payload) => {
       if (payload.state === 'cancelled' || payload.state === 'failed') {
         Toast.error(payload.error || `下载失败：${payload.fileName}`);
       }
@@ -53,7 +56,7 @@ export function useEmbeddedBrowserDownloadImport(
   const closeActiveDownload = React.useCallback(async (options?: { discardFile?: boolean }) => {
     const current = activeItem;
     const dismissed = current
-      ? capturedOutputWorkflowCoordinator.dismiss(current.download.downloadId)
+      ? downloadHandoff.dismiss(current.download.downloadId)
       : false;
     if (!dismissed || !current.download.tempPath || !options?.discardFile) {
       return;
@@ -70,20 +73,17 @@ export function useEmbeddedBrowserDownloadImport(
 
     setImportingDownloadId(current.download.downloadId);
     try {
-      const success = await capturedOutputWorkflowCoordinator.runDelivery(
+      const file = toUploadFile(current.download);
+      const target = freezeUploadDeliveryTarget({
+        fileName: current.download.fileName,
+        libraryId,
+        parentId: targetFolder.id,
+        relativePath: current.download.fileName,
+      });
+      const batch = uploadManager.createBatch([createUploadTaskInput(file, target)]);
+      const success = await downloadHandoff.linkUploadTask(
         current.download.downloadId,
-        'importing',
-        async () => {
-          const file = toUploadFile(current.download);
-          const batch = uploadManager.createBatch([{
-            file,
-            libraryId,
-            parentId: targetFolder.id,
-            relativePath: current.download.fileName,
-          }]);
-          const results = await batch.done;
-          return results.some((item) => item.taskStatus === UPLOAD_TASK_STATUS.SUCCESS);
-        },
+        batch,
       );
       if (!success) {
         Toast.error(`导入失败：${current.download.fileName}`);
@@ -114,7 +114,7 @@ export function useEmbeddedBrowserDownloadImport(
 
     setSavingDownloadId(current.download.downloadId);
     try {
-      const success = await capturedOutputWorkflowCoordinator.runDelivery(
+      const success = await downloadHandoff.runDelivery(
         current.download.downloadId,
         'saving',
         async () => {

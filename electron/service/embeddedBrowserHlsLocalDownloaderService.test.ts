@@ -71,6 +71,54 @@ describe('EmbeddedBrowser HLS local downloader', () => {
     }
   })
 
+  it('hls.protocol-large-media-disk-backpressure', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'omniflow-hls-large-media-test-'))
+    const stressMode = process.env.CAT_CATCH_PROTOCOL_STRESS
+    const multiGibMode = stressMode === 'multi-gib'
+    const fragmentCount = stressMode ? 256 : 24
+    const fragmentBytes = multiGibMode ? 4 * 1024 * 1024 : stressMode ? 1024 * 1024 : 256 * 1024
+    const fragments = Array.from({ length: fragmentCount }, (_item, index) => ({
+      discontinuitySequence: 0,
+      duration: 1,
+      index,
+      part: false,
+      sequence: index + 1,
+      url: `https://media.example/${index}.ts`,
+    }))
+    try {
+      const result = await downloadEmbeddedBrowserHlsToLocalWorkDirectory({
+        fetch: async (url) => {
+          const index = Number(path.basename(new URL(url).pathname, '.ts'))
+          await new Promise(resolve => setTimeout(resolve, (fragmentCount - index) % 4))
+          const bytes = new Uint8Array(fragmentBytes)
+          bytes.fill(index)
+          return new Response(bytes)
+        },
+        plan: {
+          fragments,
+          manifestUrl: 'https://media.example/playlist.m3u8',
+          suggestedThreadCount: 3,
+        },
+        workDirectoryPath: directory,
+      })
+
+      for (let index = 0; index < fragmentCount; index += 1) {
+        const bytes = await readFile(path.join(
+          result.workDirectoryPath,
+          'segments',
+          `${String(index + 1).padStart(5, '0')}.ts`,
+        ))
+        expect(bytes.byteLength).toBe(fragmentBytes)
+        expect(bytes[0]).toBe(index)
+        expect(bytes[bytes.byteLength - 1]).toBe(index)
+      }
+      const playlist = await readFile(result.playlistPath, 'utf8')
+      expect(playlist.match(/segments\//g)).toHaveLength(fragmentCount)
+    } finally {
+      await rm(directory, { force: true, recursive: true })
+    }
+  })
+
   it('hls.key-length-validation', async () => {
     const fetchImpl = vi.fn(async (url: string) => {
       if (url.endsWith('/key.bin')) {

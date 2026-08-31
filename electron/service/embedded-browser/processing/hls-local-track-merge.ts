@@ -1,7 +1,7 @@
 import path from 'node:path'
 
 import type { EmbeddedBrowserHlsDownloadPlan } from '../contracts/hls'
-import type { EmbeddedBrowserFragmentFetch } from '../../embeddedBrowserFragmentDownloader'
+import type { EmbeddedBrowserFragmentFetch } from '../cat-catch-port/processing/transfer-engine'
 import {
   defaultHlsTaskExecutor,
   type EmbeddedBrowserHlsLocalDownloadRequest,

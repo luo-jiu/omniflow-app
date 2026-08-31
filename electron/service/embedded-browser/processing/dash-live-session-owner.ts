@@ -4,6 +4,10 @@ import type {
   EmbeddedBrowserDashTaskEventInput,
   EmbeddedBrowserDashTaskEventPayload,
 } from '../../embeddedBrowserMainTypes'
+import {
+  defaultProcessingTaskRegistry,
+  type ProcessingTaskRegistry,
+} from './task-registry'
 
 export type EmbeddedBrowserDashLiveSessionBase = {
   recorder: {
@@ -29,6 +33,7 @@ type EmbeddedBrowserDashActiveTaskInput = {
 type EmbeddedBrowserDashSessionOwnerOptions = {
   maxTaskSnapshots?: number
   removeWorkDirectory?: (workDirectoryPath: string) => Promise<void>
+  taskRegistry?: ProcessingTaskRegistry
 }
 
 function matchesSession(
@@ -105,6 +110,8 @@ export class EmbeddedBrowserDashLiveSessionOwner<
 
   private readonly removeWorkDirectory: (workDirectoryPath: string) => Promise<void>
 
+  private readonly taskRegistry: ProcessingTaskRegistry
+
   private readonly taskSnapshots = new Map<string, EmbeddedBrowserDashTaskEventPayload>()
 
   constructor(options: EmbeddedBrowserDashSessionOwnerOptions = {}) {
@@ -112,6 +119,7 @@ export class EmbeddedBrowserDashLiveSessionOwner<
     this.removeWorkDirectory = options.removeWorkDirectory || (async (workDirectoryPath) => {
       await rm(workDirectoryPath, { force: true, recursive: true })
     })
+    this.taskRegistry = options.taskRegistry || defaultProcessingTaskRegistry
   }
 
   upsertLive(session: LiveSession) {
@@ -172,6 +180,13 @@ export class EmbeddedBrowserDashLiveSessionOwner<
     this.nextActiveTaskId += 1
     let markSettled: () => void = () => {}
     const settled = new Promise<void>(resolve => { markSettled = resolve })
+    const registryRegistration = this.taskRegistry.register({
+      cancel: () => abortController.abort(),
+      kind: 'dash-task',
+      requestId: input.requestId,
+      settled,
+      tabId: input.tabId,
+    })
     this.activeTasks.set(activeTaskId, {
       abortController,
       requestId: input.requestId,
@@ -185,6 +200,7 @@ export class EmbeddedBrowserDashLiveSessionOwner<
         completed = true
         this.activeTasks.delete(activeTaskId)
         markSettled()
+        registryRegistration.release()
       },
       signal: abortController.signal,
     }

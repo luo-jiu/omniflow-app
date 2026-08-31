@@ -13,6 +13,12 @@ export type ProcessingTaskRegistration = {
   release: () => void
 }
 
+export type RegisteredProcessingTaskInput = {
+  kind: string
+  requestId?: string
+  tabId?: string
+}
+
 type ProcessingTaskRecord = Omit<ProcessingTaskRegistration, 'release'> & {
   cancel: () => void
   settled: Promise<void>
@@ -81,6 +87,30 @@ export class ProcessingTaskRegistry {
       requestId: task.requestId,
       tabId: task.tabId,
     }))
+  }
+
+  async run<Result>(
+    input: RegisteredProcessingTaskInput,
+    operation: (signal: AbortSignal, taskId: string) => Promise<Result>,
+  ) {
+    const controller = new AbortController()
+    let settleTask: (() => void) | undefined
+    const settled = new Promise<void>((resolve) => {
+      settleTask = resolve
+    })
+    const registration = this.register({
+      cancel: () => controller.abort(),
+      kind: input.kind,
+      requestId: input.requestId,
+      settled,
+      tabId: input.tabId,
+    })
+    try {
+      return await operation(controller.signal, registration.id)
+    } finally {
+      settleTask?.()
+      registration.release()
+    }
   }
 
   async cancel(filter: ProcessingTaskFilter = { all: true }) {

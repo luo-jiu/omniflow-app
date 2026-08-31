@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { copyFile, mkdtemp, open, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 
@@ -110,6 +110,62 @@ describe('DASH task executor', () => {
       setTimeout(() => cancelExecutor.cancel(), 5)
       await expect(pendingCancellation).rejects.toMatchObject({ name: 'AbortError' })
       await expect(stat(cancelledOutputPath)).rejects.toThrow()
+    } finally {
+      await rm(workDirectoryPath, { force: true, recursive: true })
+    }
+  })
+
+  it('dash.protocol-large-media-disk-backpressure', async () => {
+    const workDirectoryPath = await mkdtemp(path.join(os.tmpdir(), 'omniflow-dash-large-test-'))
+    const outputPath = path.join(workDirectoryPath, 'output.mp4')
+    const stressMode = process.env.CAT_CATCH_PROTOCOL_STRESS
+    const multiGibMode = stressMode === 'multi-gib'
+    const fragmentCount = stressMode ? 256 : 24
+    const fragmentBytes = multiGibMode ? 4 * 1024 * 1024 : stressMode ? 1024 * 1024 : 256 * 1024
+    const video = representation({
+      segmentCount: fragmentCount,
+      segments: Array.from({ length: fragmentCount }, (_item, index) => ({
+        index,
+        url: `https://cdn.example/${index}.m4s`,
+      })),
+    })
+    try {
+      const executor = new DashTaskExecutor({
+        fetch: async (url) => {
+          const index = Number(path.basename(new URL(url).pathname, '.m4s'))
+          await new Promise(resolve => setTimeout(resolve, (fragmentCount - index) % 4))
+          const bytes = new Uint8Array(fragmentBytes)
+          bytes.fill(index)
+          return new Response(bytes)
+        },
+        mergeTracks: async ({ outputPath: targetPath, video: track }) => {
+          if (track) await copyFile(track.path, targetPath)
+          else await writeFile(targetPath, Buffer.alloc(0))
+          return { outputPath: targetPath }
+        },
+        outputPath,
+        plan: plan([video]),
+        selectedVideoRepresentation: video,
+        threadCount: 3,
+        workDirectoryPath,
+      })
+
+      await executor.run()
+
+      const outputHandle = await open(outputPath, 'r')
+      try {
+        expect((await outputHandle.stat()).size).toBe(fragmentCount * fragmentBytes)
+        const sample = Buffer.alloc(1)
+        for (let index = 0; index < fragmentCount; index += 1) {
+          await outputHandle.read(sample, 0, 1, index * fragmentBytes)
+          expect(sample[0]).toBe(index)
+          await outputHandle.read(sample, 0, 1, (index + 1) * fragmentBytes - 1)
+          expect(sample[0]).toBe(index)
+        }
+      } finally {
+        await outputHandle.close()
+      }
+      expect((await readdir(workDirectoryPath)).some(name => name.includes('.parts-'))).toBe(false)
     } finally {
       await rm(workDirectoryPath, { force: true, recursive: true })
     }

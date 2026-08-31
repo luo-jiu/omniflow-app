@@ -4,6 +4,7 @@ import {
   createEmbeddedBrowserDashHostLifecycle,
   EmbeddedBrowserDashLiveSessionOwner,
 } from './dash-live-session-owner'
+import { ProcessingTaskRegistry } from './task-registry'
 
 type LiveSession = {
   recorder: {
@@ -50,7 +51,8 @@ describe('EmbeddedBrowser DASH live session owner', () => {
   })
 
   it('dash.dynamic-session-owner-active-task', async () => {
-    const owner = new EmbeddedBrowserDashLiveSessionOwner<LiveSession>()
+    const taskRegistry = new ProcessingTaskRegistry()
+    const owner = new EmbeddedBrowserDashLiveSessionOwner<LiveSession>({ taskRegistry })
     let observedSignal: AbortSignal | undefined
     const task = owner.beginActiveTask({ requestId: 'active', tabId: 'tab-1' })
     const settled = new Promise<void>(resolve => {
@@ -61,10 +63,16 @@ describe('EmbeddedBrowser DASH live session owner', () => {
       }, { once: true })
     })
 
-    const clearPromise = owner.clear({ tabId: 'tab-1' })
+    expect(taskRegistry.getSnapshot()).toEqual([expect.objectContaining({
+      kind: 'dash-task',
+      requestId: 'active',
+      tabId: 'tab-1',
+    })])
+    const clearPromise = taskRegistry.cancel({ tabId: 'tab-1' })
     await settled
     await clearPromise
     expect(observedSignal?.aborted).toBe(true)
+    expect(taskRegistry.size).toBe(0)
     await owner.dispose()
   })
 })

@@ -1,13 +1,13 @@
 import os from 'node:os'
 import path from 'node:path'
-import { access, mkdir, mkdtemp, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import {
   EmbeddedBrowserFragmentDownloader,
   type EmbeddedBrowserDownloadByteRange,
   type EmbeddedBrowserDownloadFragment,
   type EmbeddedBrowserFragmentBufferProcessor,
   type EmbeddedBrowserFragmentFetch,
-} from '../../embeddedBrowserFragmentDownloader'
+} from '../cat-catch-port/processing/transfer-engine'
 import {
   createHlsDefaultIv,
   decryptHlsFullSegment,
@@ -885,8 +885,33 @@ async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(
     })
   }
 
+  let downloadError: Error | null = null
+  let downloadErrorMessage = ''
   const downloader = new EmbeddedBrowserFragmentDownloader({
     bufferProcessors,
+    bufferSink: async (buffer, fragment, signal) => {
+      const hlsFragment = fragment as EmbeddedBrowserHlsLocalDownloadFragment
+      const sourceIndex = getFragmentSourceIndex(fragment)
+      const relativePath = hlsFragment.outputRelativePath
+        || (sourceIndex >= 0 ? fragmentPaths[sourceIndex] : undefined)
+      if (!relativePath) {
+        throw new Error(`HLS 分片 #${sourceIndex + 1} 缺少输出路径`)
+      }
+      const outputPath = path.join(outputDirectoryPath, relativePath)
+      try {
+        await writeFile(outputPath, new Uint8Array(buffer), { signal })
+      } catch (error) {
+        await rm(outputPath, { force: true }).catch(() => undefined)
+        throw error
+      }
+      request.onEvent?.({
+        completedFragments: Math.min(plan.fragments.length, initialCompletedFragments + downloader.success + 1),
+        message: `已写入分片 #${sourceIndex + 1}`,
+        stage: 'downloading-fragments',
+        status: 'running',
+        totalFragments: plan.fragments.length,
+      })
+    },
     fetch: request.fetch,
     fragments: fragmentsToDownload,
     headers: plan.headers,
@@ -895,12 +920,6 @@ async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(
     thread: plan.suggestedThreadCount || 6,
   })
 
-  const pendingWrites: Array<{
-    promise: Promise<void>
-    sourceIndex: number
-  }> = []
-  let downloadError: Error | null = null
-  let downloadErrorMessage = ''
   const fragmentReceivedBytes = new Map<number, number>()
   const fragmentTotalBytes = new Map<number, number>()
   const downloadStartedAt = Date.now()
@@ -966,27 +985,10 @@ async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(
     }
     emitDownloadProgress(done)
   })
-  downloader.on('sequentialPush', (buffer, fragment) => {
-    const hlsFragment = fragment as EmbeddedBrowserHlsLocalDownloadFragment
+  downloader.on('bufferSinkError', (fragment, error) => {
     const sourceIndex = getFragmentSourceIndex(fragment)
-    const relativePath = hlsFragment.outputRelativePath || (sourceIndex >= 0 ? fragmentPaths[sourceIndex] : undefined)
-    if (!relativePath) {
-      return
-    }
-    pendingWrites.push({
-      promise: writeFile(
-        path.join(outputDirectoryPath, relativePath),
-        new Uint8Array(buffer),
-      ),
-      sourceIndex,
-    })
-    request.onEvent?.({
-      completedFragments: Math.min(plan.fragments.length, initialCompletedFragments + downloader.success + 1),
-      message: `已写入分片 #${sourceIndex + 1}`,
-      stage: 'downloading-fragments',
-      status: 'running',
-      totalFragments: plan.fragments.length,
-    })
+    downloadErrorMessage = `写入分片失败：#${sourceIndex + 1} ${error.message}`
+    downloadError ||= new Error(downloadErrorMessage)
   })
 
   if (request.signal?.aborted) {
@@ -1010,7 +1012,19 @@ async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(
         const fragmentIndex = firstErrorFragment
           ? Math.max(0, getFragmentSourceIndex(firstErrorFragment))
           : 0
-        reject(downloadError || new Error(`下载分片失败：#${fragmentIndex + 1}`))
+        const failure = downloadError || new Error(`下载分片失败：#${fragmentIndex + 1}`)
+        request.onEvent?.({
+          completedFragments: initialCompletedFragments + downloader.success,
+          error: failure.message,
+          failedFragments: Array.from(errors)
+            .map(fragment => getFragmentSourceIndex(fragment) + 1)
+            .filter(value => value > 0),
+          message: failure.message,
+          stage: 'error',
+          status: 'error',
+          totalFragments: plan.fragments.length,
+        })
+        reject(failure)
       })
       downloader.start()
     })
@@ -1018,34 +1032,6 @@ async function downloadEmbeddedBrowserHlsToLocalWorkDirectory(
     downloader.destroy()
   }
 
-  const pendingWriteResults = await Promise.allSettled(
-    pendingWrites.map((entry) => entry.promise),
-  )
-  const completedWrittenFragments = pendingWriteResults.reduce<number>((sum, result) => (
-    result.status === 'fulfilled' ? sum + 1 : sum
-  ), 0)
-  const failedWriteFragments = pendingWriteResults.reduce<number[]>((accumulator, result, index) => {
-    if (result.status === 'rejected') {
-      const sourceIndex = pendingWrites[index]?.sourceIndex
-      if (typeof sourceIndex === 'number' && sourceIndex >= 0) {
-        accumulator.push(sourceIndex + 1)
-      }
-    }
-    return accumulator
-  }, [])
-  if (failedWriteFragments.length > 0) {
-    const failureMessage = `写入分片失败：${failedWriteFragments.map((value) => `#${value}`).join(', ')}`
-    request.onEvent?.({
-      completedFragments: initialCompletedFragments + completedWrittenFragments,
-      error: failureMessage,
-      failedFragments: failedWriteFragments,
-      message: failureMessage,
-      stage: 'error',
-      status: 'error',
-      totalFragments: plan.fragments.length,
-    })
-    throw new Error(failureMessage)
-  }
   emitDownloadProgress(true)
   if (downloadError || downloader.errorItem.size > 0) {
     const failureMessage = downloadErrorMessage || `仍有 ${downloader.errorItem.size} 个分片下载失败`

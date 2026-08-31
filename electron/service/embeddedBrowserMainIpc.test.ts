@@ -96,4 +96,33 @@ describe('EmbeddedBrowser main IPC', () => {
     expect(stopDashRecording).toHaveBeenCalledWith('tab-1', { requestId: 'request-1' })
     expect(discardDashRecording).toHaveBeenCalledWith('tab-1', { requestId: 'request-1' })
   })
+
+  it('download-handoff.replay-and-ack-ipc', async () => {
+    const listDownloadHandoff = vi.fn(async () => [{
+      downloadId: 'download-1',
+      fileName: 'video.mp4',
+      receivedBytes: 4,
+      state: 'completed' as const,
+      tempPath: '/tmp/embedded-browser-downloads/video.mp4',
+      totalBytes: 4,
+      url: 'https://media.example/video.mp4',
+    }])
+    const acknowledgeDownloadHandoff = vi.fn(async () => true)
+    const fallbackHandler = vi.fn()
+    const handlers = new Proxy({ acknowledgeDownloadHandoff, listDownloadHandoff }, {
+      get: (target, property, receiver) => (
+        Reflect.has(target, property)
+          ? Reflect.get(target, property, receiver)
+          : fallbackHandler
+      ),
+    }) as unknown as Parameters<typeof registerEmbeddedBrowserMainIpcHandlers>[0]
+    registerEmbeddedBrowserMainIpcHandlers(handlers)
+
+    await expect(electronMock.handlers.get('embedded-browser:download-handoff:list')?.({}))
+      .resolves.toMatchObject([{ downloadId: 'download-1', state: 'completed' }])
+    await expect(electronMock.handlers.get('embedded-browser:download-handoff:acknowledge')?.({}, 'download-1'))
+      .resolves.toBe(true)
+    expect(listDownloadHandoff).toHaveBeenCalledOnce()
+    expect(acknowledgeDownloadHandoff).toHaveBeenCalledWith('download-1')
+  })
 })
