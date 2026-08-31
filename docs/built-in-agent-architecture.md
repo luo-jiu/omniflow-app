@@ -397,7 +397,7 @@ Agent Session Store 使用 `sqlite3` 原生依赖：
 - Electron main 构建必须 externalize `sqlite3`，不能打进单文件 bundle。
 - `tools/prepare-sqlite3-native.cjs` 在 electron-builder 的 `beforeBuild` 阶段按目标平台和架构准备官方 N-API v6 预编译文件，避免旧版 electron-builder 根据宿主 Node 版本错误重编译。缓存 metadata 同时记录 `sqlite3` 版本和 N-API 版本，任一身份变化都必须重建，不能静默复用旧 `.node`。
 - electron-builder 只打入 `sqlite3`、`bindings`、`file-uri-to-path` 的最小运行文件，并将目标 `.node` 二进制解包出 ASAR；`build/native/` 是可重建缓存，不进入 Git。
-- Tree-sitter JS runtime 随 Analyzer 由 Electron main bundle 持有；electron-builder 额外只收集 `@vscode/tree-sitter-wasm` 的许可证、`package.json`、runtime WASM、Bash grammar 和 PowerShell grammar。三份 WASM 留在 ASAR 内并由 main 通过包解析读取，不打入无关语言 grammar。
+- Tree-sitter JS runtime 必须作为 Electron main 的外部 CommonJS 依赖保留，不能被 Vite 内联进 ESM bundle；electron-builder 收集 `@vscode/tree-sitter-wasm` 的许可证、`package.json`、`wasm/tree-sitter.js`、runtime WASM、Bash grammar 和 PowerShell grammar。JS 入口与三份 WASM 留在 ASAR 内并由 main 通过包解析读取，不打入无关语言 grammar。
 - macOS / Windows 打包都要验证目标平台原生模块；从 macOS 交叉打 Windows 时必须使用 `win32-x64` 缓存，不能复用 Darwin 二进制。
 - 普通 `npm run build` 只验证 TypeScript 和 bundle，不能替代安装包内原生模块与 WASM 解析验证。
 
@@ -466,7 +466,7 @@ Agent Session Store 使用 `sqlite3` 原生依赖：
 - `electron/platform/processTree.test.ts`
 - `electron/platform/mediaExecutable.test.ts`
 
-2026-08-30 收口验证：`npm test` 共 250 个测试文件、1,585 个用例通过、3 个跳过；`npm run lint`、`npx tsc --noEmit` 和 `npm run build` 均通过。build 仍有既有的单 chunk 超过 500 kB 警告，以及 `@vscode/tree-sitter-wasm` Emscripten runtime 的 `eval` bundle 警告；源码构建成功不替代安装包 ASAR 内 runtime / grammar WASM 解析和真实 macOS 命令验收。Windows 本轮未验收。
+2026-08-31 收口验证：`npm test` 共 254 个测试文件、1,652 个用例通过、3 个跳过；`npm run lint`、`npx tsc --noEmit` 和 `npm run build` 均通过。build 仍有既有的单 chunk 超过 500 kB 警告；Tree-sitter runtime 已从 main ESM bundle 外部化，避免其依赖 `__filename` 的 CommonJS 初始化在 Electron 启动时失败。源码构建成功不替代安装包 ASAR 内 JS runtime / grammar WASM 解析和真实 macOS 命令验收。Windows 本轮未验收。
 
 完整手工路径见 `docs/frontend-validation-matrix.md` 的“内置 Agent”章节。测试资料库继续遵守 workspace 规则：任何场景禁止第一个资料库，`Win` 可用时优先使用 `Win`。
 

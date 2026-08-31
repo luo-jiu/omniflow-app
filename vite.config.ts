@@ -97,7 +97,9 @@ export default defineConfig(({ mode }) => {
           build: {
             minify: false,
             rollupOptions: {
-              external: ['sqlite3'],
+              // The Tree-sitter CommonJS runtime derives its own URL from __filename
+              // during module evaluation, so it must remain a real Node dependency.
+              external: ['sqlite3', '@vscode/tree-sitter-wasm'],
             },
           },
         },

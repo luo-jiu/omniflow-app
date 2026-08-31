@@ -944,7 +944,7 @@ src/features/agent/
 - 实时阶段仍只投影有界 tail；终态 / 恢复后支持详细日志分页。实时双流时间线仍未实现，Shell 与文件桥的专用取消结算预算已补齐。
 - macOS / Linux generic xattr、ACL、file flags 与 root guard 仍需 handle-based adapter 或 native directory anchor；当前仅本次审批明确接受残余风险，持久规则继续 fail-closed。
 - Windows reparse point / ADS / UNC / 大小写敏感 NTFS、Job Object 和真机取消验收全部延期，Windows Provider 保持不可执行。Linux 也保持不可执行，直到独立宿主验收完成。
-- 2026-08-31 已生成 unsigned macOS arm64 unpacked 包：ASAR 中该依赖只包含许可证、package metadata、runtime WASM、Bash grammar WASM 与 PowerShell grammar WASM；使用打包 Electron runtime 从 ASAR 加载后，Bash 与 PowerShell fixture 均解析为无错误 `program` 根节点。真实 macOS 非交互命令、取消、超时和退出仍需手工验收。
+- 2026-08-31 已生成 unsigned macOS arm64 unpacked 包：Tree-sitter CommonJS 入口保持为 main 的外部依赖，ASAR 中该依赖只包含许可证、package metadata、`wasm/tree-sitter.js`、runtime WASM、Bash grammar WASM 与 PowerShell grammar WASM；使用打包 Electron runtime 从 ASAR 加载后，Bash 与 PowerShell fixture 均解析为无错误 `program` 根节点。真实 macOS 非交互命令、取消、超时和退出仍需手工验收。
 
 ### Phase 1B：文件闭环
 
