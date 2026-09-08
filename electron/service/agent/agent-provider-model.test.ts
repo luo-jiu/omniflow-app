@@ -92,7 +92,7 @@ describe('agent provider model', () => {
         { content: '{"ok":true}', name: 'file.list', role: 'tool', toolCallId: 'call-1' },
         { content: '{"ok":true}', name: 'file.stat', role: 'tool', toolCallId: 'call-2' },
       ],
-      model: 'claude-sonnet-4-5',
+      model: 'claude-sonnet-4-6',
       reasoningEffort: 'medium',
       systemPrompt: 'system',
       tools: [fileListTool, fileStatTool],
@@ -300,6 +300,16 @@ describe('agent provider model', () => {
       reasoningOutputTokens: 7,
       totalTokens: 124,
     });
+  });
+
+  it('does not turn absent or null usage fields into measured zero tokens', () => {
+    const state = createAgentProviderStreamState();
+    consumeAgentProviderStreamEvent('openai', { usage: { prompt_tokens: null, completion_tokens: 7 }, choices: [] }, state);
+    expect(state.usage).toEqual({ outputTokens: 7 });
+    expect(state.usage).not.toHaveProperty('inputTokens');
+    const claude = createAgentProviderStreamState();
+    consumeAgentProviderStreamEvent('claude', { type: 'message_delta', usage: { output_tokens: 9 } }, claude);
+    expect(claude.usage).toEqual({ outputTokens: 9 });
   });
 
   it('merges Claude input/cache usage from message_start with final output usage', () => {

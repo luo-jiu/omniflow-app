@@ -219,6 +219,11 @@ function createFixture(options: {
   const requestFileAuthority = options.requestFileAuthority || vi.fn(async (
     input: RequestFileAuthorityInput,
   ): Promise<AgentFileAuthorityResultV1> => {
+    if (input.operation.operation === 'query-library-metadata') {
+      return { version: 1, operation: 'query-library-metadata', data: { libraryId: 3,
+        node: { id: input.operation.query.nodeId!, libraryId: 3, parentId: 9,
+          name: 'prompt', ext: 'md', type: 'file', path: '/文档/提示词/prompt.md' } } };
+    }
     if (input.operation.operation === 'stage-library-node') {
       return {
         ...(input.operation.includeDownloadUrl
@@ -427,7 +432,7 @@ describe('Agent Shell service runtime', () => {
   });
 
   it.each([
-    ['committed', { commitState: 'committed', node: { id: 31, name: 'prompt.md' } }, true],
+    ['committed', { commitState: 'committed', node: { id: 31, name: 'prompt', ext: 'md' } }, true],
     ['uncommitted', { commitState: 'uncommitted' }, false],
     ['commit_unknown', { commitState: 'commit_unknown' }, false],
   ] as const)('uploads a user-provided path to an exact library path and preserves %s settlement', async (
@@ -474,6 +479,7 @@ describe('Agent Shell service runtime', () => {
 
     expect(result.ok).toBe(expectedOk);
     expect(result.data).toMatchObject({ uploadCommitState: uploadResult.commitState });
+    if (expectedOk) expect(result.data).toMatchObject({ displayName: 'prompt.md', path: '/文档/提示词/prompt.md' });
     expect(vi.mocked(fixture.requestFileAuthority).mock.calls.map(
       call => call[0].operation.operation,
     ))
@@ -482,6 +488,7 @@ describe('Agent Shell service runtime', () => {
         'publish-library-file',
         'resolve-library-directory',
         'publish-library-file',
+        ...(expectedOk ? ['query-library-metadata'] : []),
       ]);
     expect(upload).toHaveBeenCalledWith(expect.objectContaining({
       target: expect.objectContaining({
@@ -695,7 +702,7 @@ describe('Agent Shell service runtime', () => {
     expect(result.ok).toBe(expectedOk);
     expect(result.data).toMatchObject({ uploadCommitState: uploadResult.commitState });
     expect(fixture.requestFileAuthority).toHaveBeenLastCalledWith(expect.objectContaining({
-      operation: expect.objectContaining({ includeCredentials: true }),
+      operation: expect.objectContaining(expectedOk ? { operation: 'query-library-metadata' } : { includeCredentials: true }),
     }));
     expect(upload).toHaveBeenCalledWith(expect.objectContaining({
       expectedUserId: 7,

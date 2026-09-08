@@ -1,4 +1,5 @@
 import { mkdir } from 'node:fs/promises';
+import { normalizeAgentContextUsage, type AgentContextUsageSnapshot } from '../../../src/shared/agent/agent-context-usage';
 import path from 'node:path';
 import sqlite3 from 'sqlite3';
 
@@ -842,6 +843,7 @@ const TOOL_RUNTIME_COLUMNS = [
 ] as const;
 
 const RUN_RUNTIME_COLUMNS = [
+  ['context_usage_json', 'TEXT'],
   ['capability_identity', "TEXT NOT NULL DEFAULT 'legacy'"],
   ['plan_json', 'TEXT'],
   ['revision', 'INTEGER NOT NULL DEFAULT 1'],
@@ -925,6 +927,7 @@ interface MessageRow {
 }
 
 interface RunRow {
+  context_usage_json: string | null;
   capability_identity: string;
   created_at: string;
   current_step: string | null;
@@ -1017,6 +1020,7 @@ export interface CreateAgentRunInput {
 }
 
 export interface AgentRunUpdate {
+  contextUsage?: AgentContextUsageSnapshot;
   currentStep?: string;
   error?: string;
   finishedAt?: string;
@@ -1484,7 +1488,9 @@ function toMessage(row: MessageRow): AgentMessage {
 
 function toRunSnapshot(row: RunRow): AgentRunSnapshot {
   const plan = parseStoredAgentRunPlan(row.plan_json);
+  const contextUsage = row.context_usage_json ? normalizeAgentContextUsage(parseStoredJson(row.context_usage_json, null)) : undefined;
   return {
+    ...(contextUsage ? { contextUsage } : {}),
     capabilityIdentity: row.capability_identity,
     createdAt: row.created_at,
     ...(row.current_step ? { currentStep: row.current_step } : {}),
@@ -2879,6 +2885,7 @@ export async function initializeAgentSessionDatabaseSchema(
         current_step TEXT,
         error TEXT,
         plan_json TEXT,
+        context_usage_json TEXT,
         revision INTEGER NOT NULL DEFAULT 1,
         skill_catalog_revision INTEGER NOT NULL DEFAULT 0,
         tool_catalog_revision INTEGER NOT NULL DEFAULT 0,
@@ -3112,6 +3119,7 @@ export async function createSQLiteAgentSessionStore(
         tool_catalog_revision,
         plan_json,
         revision,
+        context_usage_json,
         current_step,
         error,
         created_at,
@@ -3828,6 +3836,7 @@ export async function createSQLiteAgentSessionStore(
           tool_catalog_revision,
           plan_json,
           revision,
+          context_usage_json,
           current_step,
           error,
           created_at,
@@ -4242,6 +4251,8 @@ export async function createSQLiteAgentSessionStore(
 
     async updateRun(runId, update) {
       const terminal = isTerminalRunStatus(update.status);
+      const contextUsage = normalizeAgentContextUsage(update.contextUsage);
+      if (update.contextUsage !== undefined && !contextUsage) throw new Error('Agent 上下文用量快照无效');
       try {
         const result = await run(database, `
           UPDATE agent_runs
@@ -4251,7 +4262,8 @@ export async function createSQLiteAgentSessionStore(
             error = ?,
             revision = revision + 1,
             updated_at = ?,
-            finished_at = ?
+            finished_at = ?,
+            context_usage_json = COALESCE(?, context_usage_json)
           WHERE id = ?
             AND status NOT IN ('completed', 'failed', 'cancelled', 'interrupted')
         `, [
@@ -4260,6 +4272,7 @@ export async function createSQLiteAgentSessionStore(
           update.error || null,
           update.updatedAt,
           terminal ? update.finishedAt || update.updatedAt : null,
+          contextUsage ? JSON.stringify(contextUsage) : null,
           runId,
         ]);
         if (result.changes === 0) {

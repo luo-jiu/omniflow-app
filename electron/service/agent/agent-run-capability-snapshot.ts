@@ -71,6 +71,7 @@ function stableSerialize(value: unknown): string {
 }
 
 function createSnapshotIdentity(input: {
+  modelAdapterIdentity?: string;
   capabilitySnapshot: AgentCapabilitySnapshot;
   omittedSkillCount: number;
   shellPermissionMode: AgentShellPermissionMode;
@@ -117,6 +118,7 @@ function createSnapshotIdentity(input: {
     capabilityIdentity: input.capabilitySnapshot.identity,
     omittedSkillCount: input.omittedSkillCount,
     shellPermissionMode: input.shellPermissionMode,
+    ...(input.modelAdapterIdentity ? { modelAdapterIdentity: input.modelAdapterIdentity } : {}),
     ...(shellProviderMaterial ? { shellProviderSnapshot: shellProviderMaterial } : {}),
     skillRevision: input.skillRevision,
     skills: normalizedSkills,
@@ -167,6 +169,7 @@ function createEffectiveSkillSnapshot(
 }
 
 export interface AgentRunCapabilitySnapshotOptions {
+  readonly modelAdapterIdentity?: string;
   readonly capabilitySnapshot?: AgentCapabilitySnapshot;
   readonly shellPermissionMode?: AgentShellPermissionMode;
   readonly shellProviderSnapshot?: AgentShellProviderRegistrySnapshot;
@@ -432,6 +435,7 @@ export function createAgentRunCapabilitySnapshot(
     getToolKind: name => kindByName.get(normalizeId(name)) || null,
     getToolReadiness: name => toolReadiness.get(normalizeId(name)) || null,
     identity: createSnapshotIdentity({
+      modelAdapterIdentity: options.modelAdapterIdentity,
       capabilitySnapshot,
       omittedSkillCount: options.skillSnapshot.omittedSkillCount,
       shellPermissionMode,

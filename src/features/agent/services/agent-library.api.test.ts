@@ -58,9 +58,20 @@ describe('Agent library metadata queries', () => {
   });
 
   it('does not deliver oversized partial pages or invalid continuation metadata', async () => {
-    const data = { libraryId: 3, entries: Array.from({ length: 20 }, (_, i) => ({ ...song, id: 100+i, name: 'x'.repeat(500) })), hasMore: true, nextCursor: 'skip' };
+    const data = { libraryId: 3, entries: Array.from({ length: 100 }, (_, i) => ({ ...song, id: 100+i, name: 'x'.repeat(500) })), hasMore: true, nextCursor: 'skip' };
     expect(() => normalizeAgentLibraryReadResult(data, 3)).toThrow('原 cursor');
     mocks.request.mockResolvedValueOnce({ data: { root, entries: [song], hasMore: true } });
     await expect(queryLibraryMetadata(3, { mode: 'search' })).rejects.toThrow('分页');
+  });
+
+  it('automatically reduces oversized pages without skipping the original cursor', async () => {
+    mocks.request.mockImplementation(async (_url, options) => {
+      const query = JSON.parse(options.body);
+      return { data: { root, entries: Array.from({ length: query.limit }, (_, i) => ({ ...song, id: 100 + i, name: 'x'.repeat(500) })), hasMore: true, nextCursor: `after-${query.limit}` } };
+    });
+    const result = await executeAgentLibraryQuery(3, { kind: 'search', limit: 100, cursor: 'original' });
+    expect(result.entries!.length).toBeLessThan(100);
+    expect(result.nextCursor).toBe(`after-${result.entries!.length}`);
+    expect(mocks.request.mock.calls.every(([, options]) => JSON.parse(options.body).cursor === 'original')).toBe(true);
   });
 });

@@ -8,6 +8,7 @@ import {
   appendBoundedAIServiceStreamText,
 } from '../aiServiceStreamLimits';
 import type { AgentReasoningEffort } from '@/shared/agent/agent.types';
+import { resolveAgentAdapterEffort, resolveAgentModelAdapter, type AgentModelAdapter } from './agent-model-adapter';
 import {
   AGENT_PROVIDER_TOOL_NAME_MAX_LENGTH,
   toAgentProviderToolName,
@@ -26,13 +27,7 @@ export interface AgentProviderToolCall {
   name: string;
 }
 
-export interface AgentProviderTokenUsage {
-  cachedInputTokens?: number;
-  inputTokens: number;
-  outputTokens: number;
-  reasoningOutputTokens?: number;
-  totalTokens: number;
-}
+export type AgentProviderTokenUsage = import('@/shared/agent/agent-context-usage').AgentReportedTokenUsage;
 
 export type AgentProviderMessage =
   | { content: string; role: 'user' }
@@ -40,6 +35,7 @@ export type AgentProviderMessage =
   | { content: string; name: string; role: 'tool'; toolCallId: string };
 
 export interface AgentProviderTurnInput {
+  modelAdapter?: AgentModelAdapter;
   maxOutputTokens: number;
   messages: AgentProviderMessage[];
   model: string;
@@ -243,6 +239,8 @@ export function buildAgentProviderRequestBody(
   connection: AIServiceRuntimeConnection,
   input: AgentProviderTurnInput,
 ): Record<string, unknown> {
+  const adapter = input.modelAdapter || resolveAgentModelAdapter(connection, input.model);
+  if (!adapter.toolCalling && input.tools.length) throw new Error('当前模型适配未开放 Tool Calling');
   const toolNames = createProviderToolNameMap(input.tools);
   const maxOutputTokens = resolveAIServiceOutputTokenLimit(input.maxOutputTokens);
   if (maxOutputTokens === undefined) {
@@ -252,9 +250,7 @@ export function buildAgentProviderRequestBody(
     connection.providerType,
     maxOutputTokens,
   );
-  const reasoningEffort = input.reasoningEffort && input.reasoningEffort !== 'auto'
-    ? input.reasoningEffort
-    : null;
+  const reasoningEffort = resolveAgentAdapterEffort(adapter, input.reasoningEffort);
   if (connection.providerType === 'claude') {
     return {
       ...outputTokenFields,
@@ -264,6 +260,7 @@ export function buildAgentProviderRequestBody(
       stream: true,
       system: input.systemPrompt,
       ...(input.tools.length ? { tools: input.tools.map(tool => claudeTool(tool, toolNames)) } : {}),
+      ...(input.tools.length && adapter.parallelToolCalls === false ? { tool_choice: { type: 'auto', disable_parallel_tool_use: true } } : {}),
     };
   }
   return {
@@ -276,6 +273,7 @@ export function buildAgentProviderRequestBody(
       ? { stream_options: { include_usage: true } }
       : {}),
     ...(input.tools.length ? { tools: input.tools.map(tool => openAITool(tool, toolNames)) } : {}),
+    ...(input.tools.length && adapter.parallelToolCalls !== undefined ? { parallel_tool_calls: adapter.parallelToolCalls } : {}),
   };
 }
 
@@ -291,8 +289,7 @@ export function createAgentProviderStreamState(
 }
 
 function nonnegativeTokenCount(value: unknown): number | undefined {
-  const parsed = Number(value);
-  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : undefined;
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
 }
 
 function updateAgentProviderUsage(
@@ -318,13 +315,13 @@ function updateAgentProviderUsage(
       : directInputTokens + (cachedInputTokens || 0);
     const observedOutputTokens = nonnegativeTokenCount(source.output_tokens);
     if (observedInputTokens === undefined && observedOutputTokens === undefined) return;
-    const inputTokens = Math.max(state.usage?.inputTokens || 0, observedInputTokens || 0);
-    const outputTokens = Math.max(state.usage?.outputTokens || 0, observedOutputTokens || 0);
+    const inputTokens = observedInputTokens === undefined ? state.usage?.inputTokens : Math.max(state.usage?.inputTokens || 0, observedInputTokens);
+    const outputTokens = observedOutputTokens === undefined ? state.usage?.outputTokens : Math.max(state.usage?.outputTokens || 0, observedOutputTokens);
     state.usage = {
       ...(cachedInputTokens === undefined ? {} : { cachedInputTokens }),
-      inputTokens,
-      outputTokens,
-      totalTokens: inputTokens + outputTokens,
+      ...(inputTokens === undefined ? {} : { inputTokens }),
+      ...(outputTokens === undefined ? {} : { outputTokens }),
+      ...(inputTokens === undefined || outputTokens === undefined ? {} : { totalTokens: inputTokens + outputTokens }),
     };
     return;
   }
@@ -339,14 +336,15 @@ function updateAgentProviderUsage(
   const reasoningOutputTokens = nonnegativeTokenCount(
     source.completion_tokens_details?.reasoning_tokens,
   );
-  const normalizedInputTokens = inputTokens || 0;
-  const normalizedOutputTokens = outputTokens || 0;
+  const normalizedInputTokens = inputTokens ?? state.usage?.inputTokens;
+  const normalizedOutputTokens = outputTokens ?? state.usage?.outputTokens;
   state.usage = {
     ...(cachedInputTokens === undefined ? {} : { cachedInputTokens }),
-    inputTokens: normalizedInputTokens,
-    outputTokens: normalizedOutputTokens,
+    ...(normalizedInputTokens === undefined ? {} : { inputTokens: normalizedInputTokens }),
+    ...(normalizedOutputTokens === undefined ? {} : { outputTokens: normalizedOutputTokens }),
     ...(reasoningOutputTokens === undefined ? {} : { reasoningOutputTokens }),
-    totalTokens: totalTokens ?? (normalizedInputTokens + normalizedOutputTokens),
+    ...(totalTokens !== undefined ? { totalTokens } : normalizedInputTokens !== undefined && normalizedOutputTokens !== undefined
+      ? { totalTokens: normalizedInputTokens + normalizedOutputTokens } : {}),
   };
 }
 

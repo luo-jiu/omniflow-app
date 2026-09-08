@@ -13,6 +13,8 @@ import type {
 } from '@/shared/agent/agent.types';
 import type { AgentConversationSummaryV1 } from './agent-conversation-summary';
 import { createSQLiteAgentSessionStore, type AgentSessionStore } from './agent-session-store';
+import { createAgentContextUsageLedger } from './agent-context-usage-ledger';
+import { resolveAgentContextBudget } from './agent-context-projection';
 import { createAgentShellCommandHash } from './shell/agent-shell-prepared-action';
 
 function timestamp(second: number): string {
@@ -503,6 +505,24 @@ function shellPreparedAction(
 describe('SQLite Agent session store', () => {
   const stores: AgentSessionStore[] = [];
   const temporaryDirectories: string[] = [];
+
+  it('persists context usage through later updates and reopening without inventing it for legacy runs', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'agent-context-usage-'));
+    temporaryDirectories.push(directory);
+    const databasePath = path.join(directory, 'sessions.sqlite3');
+    const store = await createStore(databasePath);
+    await createSession(store, 'usage-session', 3, 'Usage');
+    await store.createRun({ id: 'usage-run', sessionId: 'usage-session', model: 'model', profileId: 'profile',
+      reasoningEffort: 'auto', userPrompt: 'test', now: timestamp(1) });
+    expect((await store.getSession('usage-session', OWNER_SCOPE, 3))?.runs[0].contextUsage).toBeUndefined();
+    const usage = createAgentContextUsageLedger(resolveAgentContextBudget({})).snapshot({ systemPrompt: 'rules', tools: [], messages: [] }, 'before-request', timestamp(2));
+    await store.updateRun('usage-run', { status: 'running', updatedAt: timestamp(2), contextUsage: usage });
+    await store.updateRun('usage-run', { status: 'failed', updatedAt: timestamp(3), error: 'fixture end' });
+    await store.close(); stores.splice(stores.indexOf(store), 1);
+    const reopened = await createStore(databasePath);
+    expect((await reopened.getSession('usage-session', OWNER_SCOPE, 3))?.runs[0].contextUsage).toEqual(usage);
+    expect(await reopened.getSession('usage-session', OWNER_SCOPE, 4)).toBeNull();
+  });
 
   afterEach(async () => {
     await Promise.all(stores.splice(0).map(store => store.close()));

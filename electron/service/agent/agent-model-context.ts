@@ -1,4 +1,5 @@
 import type { AIServiceProviderType } from '@/shared/ai-service-provider-types';
+import { findAgentModelProfile } from './agent-model-profiles';
 import {
   MAX_AGENT_CONTEXT_TOKENS, MAX_AGENT_OUTPUT_TOKENS, normalizeAgentModelBudgetOverride,
   type AgentModelBudget, type AgentModelBudgetOverride,
@@ -18,25 +19,14 @@ export interface AgentModelContextBudgetInput {
 }
 
 export interface AgentModelMetadata {
+  supportsToolCalling?: boolean;
+  supportsParallelToolCalls?: boolean;
+  supportsShellTool?: boolean;
+  reasoningEfforts?: readonly ('low' | 'medium' | 'high')[];
   contextWindowTokens?: number;
   maxContextWindowTokens?: number;
   outputReserveTokens?: number;
 }
-
-// Codex models-manager/models.json at a9519cbcdd2d. Client defaults do not
-// establish a compatible gateway's actual serving limits.
-const CODEX_MODEL_CONTEXTS: Readonly<Record<string, readonly [number, number]>> = {
-  'gpt-5.6-sol': [272_000, 872_000],
-  'gpt-5.6-terra': [272_000, 872_000],
-  'gpt-5.6-luna': [272_000, 872_000],
-  'gpt-daybreak-blue-latest': [272_000, 872_000],
-  'gpt-daybreak-red-latest': [372_000, 372_000],
-  'gpt-5.5': [272_000, 272_000],
-  'gpt-5.4': [272_000, 1_000_000],
-  'gpt-5.4-mini': [272_000, 272_000],
-  'gpt-5.2': [272_000, 272_000],
-  'codex-auto-review': [272_000, 872_000],
-};
 
 function positiveLimit(value: unknown, maximum = MAX_AGENT_CONTEXT_TOKENS): number | undefined {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 && value <= maximum
@@ -61,8 +51,18 @@ export function parseAgentModelMetadata(body: unknown): Map<string, AgentModelMe
     const outputReserveTokens = positiveLimit(
       item.max_output_tokens ?? record(item.top_provider).max_completion_tokens, 1_000_000,
     );
-    if (!contextWindowTokens && !maxContextWindowTokens && !outputReserveTokens) continue;
-    result.set(id.trim(), { contextWindowTokens, maxContextWindowTokens, outputReserveTokens });
+    const capabilities: AgentModelMetadata = {};
+    if (typeof item.supports_tool_calling === 'boolean') capabilities.supportsToolCalling = item.supports_tool_calling;
+    if (typeof item.supports_parallel_tool_calls === 'boolean') capabilities.supportsParallelToolCalls = item.supports_parallel_tool_calls;
+    if (item.shell_type === 'disabled') capabilities.supportsShellTool = false;
+    if (Array.isArray(item.supported_reasoning_levels) && item.supported_reasoning_levels.length <= 16) {
+      const levels = item.supported_reasoning_levels.map(level => typeof level === 'string' ? level : record(level).effort);
+      if (levels.every(level => typeof level === 'string' && ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'].includes(level))) {
+        capabilities.reasoningEfforts = Object.freeze(['low', 'medium', 'high'].filter(level => levels.includes(level)) as ('low' | 'medium' | 'high')[]);
+      }
+    }
+    if (!contextWindowTokens && !maxContextWindowTokens && !outputReserveTokens && !Object.keys(capabilities).length) continue;
+    result.set(id.trim(), Object.freeze({ contextWindowTokens, maxContextWindowTokens, outputReserveTokens, ...capabilities }));
   }
   return result;
 }
@@ -77,13 +77,7 @@ export function resolveAgentModelContextBudget(
     validEndpoint = ['http:', 'https:'].includes(url.protocol)
       && !url.username && !url.password && !url.search && !url.hash;
   } catch { /* Unknown endpoints cannot establish model identity. */ }
-  const model = input.model.trim().toLowerCase();
-  const catalogId = Object.keys(CODEX_MODEL_CONTEXTS).find(id => model === id)
-    || Object.keys(CODEX_MODEL_CONTEXTS).find(id => (
-      model.startsWith(`${id}-`) && /^\d{4}-\d{2}-\d{2}$/.test(model.slice(id.length + 1))
-    ));
-  const catalog = validEndpoint && input.providerType === 'openai' && catalogId
-    ? CODEX_MODEL_CONTEXTS[catalogId] : undefined;
+  const catalog = validEndpoint ? findAgentModelProfile(input.providerType, input.model)?.context : undefined;
   const metadata = validEndpoint ? input.metadata : undefined;
   const remoteWindow = positiveLimit(metadata?.contextWindowTokens)
     ?? positiveLimit(metadata?.maxContextWindowTokens);

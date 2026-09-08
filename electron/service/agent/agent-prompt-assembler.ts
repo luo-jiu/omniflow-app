@@ -1,3 +1,4 @@
+import { agentModelAdapterPrompt, type AgentModelAdapter } from './agent-model-adapter';
 import type {
   AgentAppContext,
   AgentChatRequest,
@@ -110,7 +111,13 @@ function agentFileRoutingPrompt(capabilities: readonly string[]): string {
     rules.push(`${providerToolName('file.list')} 可以按目录 ID 或资料库绝对路径分页浏览其他目录，不需要用户先展开目录树；hasMore=true 时保持查询条件并使用 nextCursor 续页。`);
   }
   if (available.has('file.search') && available.has('file.resolve')) {
-    rules.push(`名称或位置不明确时使用 ${providerToolName('file.search')} 搜索元数据；已给出 /音乐 这样的完整路径时，使用 ${providerToolName('file.resolve')} 精确定位，不先读取整棵树。查询发现的节点可继续交给文件和媒体工具，未知历史 ID 先用 ${providerToolName('file.stat')} 重新确认。`);
+    rules.push(`名称或位置不明确时使用 ${providerToolName('file.search')} 搜索元数据；已给出 /音乐 这样的完整路径时，可以直接按 path 列目录或读文件，不要固定串联 search、resolve、stat。只有确实需要节点 ID 时才使用 ${providerToolName('file.resolve')}。查询发现的节点可继续交给文件和媒体工具，未知历史 ID 先用 ${providerToolName('file.stat')} 重新确认。`);
+  }
+  if (available.has('file.read')) {
+    rules.push(`${providerToolName('file.read')} 读取正文，file.stat 只读取元数据。文件工具默认 scope=library，明确本机资源使用 scope=host 和本机绝对路径；两者使用相同的路径、分页和读取范围语义。正文 offset/column 从 1 开始；hasMore=true 时使用 nextOffset、nextColumn 和 revision 续读，不能当作读完。默认一次读取 200 行，最多 2000 行，但输出预算可能提前结束一页。不要把二进制或 PDF 当 UTF-8；本机复杂管道仍可使用 Shell。目录和名称搜索默认 50、最多 100 条，不是正文搜索，也不把 | 当作管道。`);
+  }
+  if (available.has('file.grep')) {
+    rules.push(`${providerToolName('file.grep')} 搜索正文，pattern 是单行字面文本，默认区分大小写；文件名过滤使用 glob，支持 *、**、?、字符集，含 / 时相对 path 根匹配，不含 / 时匹配任意层级 basename，内外一致。正文结果包含路径、行号、上下文和 revision，命中按行计数。hasMore 时原条件携带 nextCursor 续搜；complete=false 或 skippedFiles>0 不能下“没有匹配”的完整结论。单个文本优先直接 file.read，正文定位优先 file.grep；本机大范围或复杂正则、管道再用 Shell，不必先把内部文件导出。`);
   }
   if (available.has('media.extractAudio')) {
     rules.push(`${providerToolName('media.extractAudio')} 支持 directoryPath 或 parentId 指定当前资料库的目标目录，可直接传入用户给出的 /音乐 等路径。不要仅因目标不在当前 UI 目录就先暂存、本机提取再发布；这些替代方案只在任务本身确实需要时选择。`);
@@ -150,7 +157,9 @@ export function buildAgentSystemPrompt(
   capabilities: string[],
   skillSummaries: readonly AgentSkillSummaryV1[] = [],
   omittedSkillCount = 0,
+  modelAdapter?: AgentModelAdapter,
 ): string {
+  if (modelAdapter && !modelAdapter.toolCalling) return buildAgentFallbackSystemPrompt(context, perception, modelAdapter);
   const perceptionScope = perception
     ? '本轮只读感知范围已经准备好；需要目录或节点事实时调用对应 Tool。'
     : capabilities.includes('shell.run')
@@ -165,15 +174,16 @@ export function buildAgentSystemPrompt(
   const catalogBudgetNotice = omittedSkillCount > 0
     ? `Skill 摘要目录因上下文预算省略了 ${Math.floor(omittedSkillCount)} 个条目；未展示的 Skill 在本 Run 中不可激活。`
     : '';
-  return `${AGENT_POLICY_PROMPT}${agentFileRoutingPrompt(capabilities)}\n\n当前安全上下文：\n${JSON.stringify(promptContext(context, capabilities))}\n\n${skillCatalog}${catalogBudgetNotice ? `\n${catalogBudgetNotice}` : ''}\n\n${perceptionScope}`;
+  return `${AGENT_POLICY_PROMPT}${agentFileRoutingPrompt(capabilities)}\n\n当前安全上下文：\n${JSON.stringify(promptContext(context, capabilities))}\n\n${skillCatalog}${catalogBudgetNotice ? `\n${catalogBudgetNotice}` : ''}\n\n${perceptionScope}${agentModelAdapterPrompt(modelAdapter)}`;
 }
 
 export function buildAgentFallbackSystemPrompt(
   context: AgentAppContext,
   perception: AgentChatRequest['perception'],
+  modelAdapter?: AgentModelAdapter,
 ): string {
   const scope = perception
     ? '本轮只读感知快照将作为单独的低权限消息提供。'
     : '本轮没有可用的文件感知快照。';
-  return `${AGENT_POLICY_PROMPT}\n\n当前安全上下文：\n${JSON.stringify(promptContext(context, []))}\n\n${scope} 当前模型不支持 Tool Calling，只能依据明确提供的数据回答，不能把未列出的内容当作已知。`;
+  return `${AGENT_POLICY_PROMPT}\n\n当前安全上下文：\n${JSON.stringify(promptContext(context, []))}\n\n${scope} 当前连接按无工具兼容模式运行，只能依据明确提供的数据回答，不能把未列出的内容当作已知。${modelAdapter?.toolCalling === false ? agentModelAdapterPrompt(modelAdapter) : ''}`;
 }

@@ -1,6 +1,10 @@
 import type { AgentDirectoryEntry } from './agent.types';
 import { normalizeAgentLibraryDirectoryPath } from './agent-library-path';
 
+export class AgentLibraryPageTooLargeError extends Error {
+  constructor() { super('当前页元数据过大，请减小 limit 并使用原 cursor 重试'); }
+}
+
 export interface AgentLibraryQuery {
   kind: 'list' | 'search' | 'resolve' | 'stat';
   nodeId?: number;
@@ -65,7 +69,7 @@ export function normalizeAgentLibraryNode(input: unknown, libraryId: number): Ag
 
 export function normalizeAgentLibraryReadResult(input: unknown, libraryId: number): AgentLibraryReadResult {
   const data = record(input);
-  if (data.libraryId !== libraryId || (data.entries !== undefined && (!Array.isArray(data.entries) || data.entries.length > 50))) {
+  if (data.libraryId !== libraryId || (data.entries !== undefined && (!Array.isArray(data.entries) || data.entries.length > 100))) {
     throw new Error('资料库查询结果范围无效');
   }
   if (data.hasMore !== undefined && typeof data.hasMore !== 'boolean') throw new Error('资料库分页状态无效');
@@ -78,8 +82,8 @@ export function normalizeAgentLibraryReadResult(input: unknown, libraryId: numbe
     ...(typeof data.hasMore === 'boolean' ? { hasMore: data.hasMore } : {}),
     ...(data.hasMore ? { nextCursor: String(data.nextCursor) } : {}),
   };
-  if (new TextEncoder().encode(JSON.stringify(result)).byteLength > 8_000) {
-    throw new Error('当前页元数据过大，请减小 limit 并使用原 cursor 重试；本页未交付，不能跳到下一页');
+  if (new TextEncoder().encode(JSON.stringify(result)).byteLength > 24_000) {
+    throw new AgentLibraryPageTooLargeError();
   }
   return result;
 }

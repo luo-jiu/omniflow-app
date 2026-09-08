@@ -236,6 +236,113 @@ describe('Agent orchestrator', () => {
     });
   }
 
+  it('publishes and persists measured-input context accounting separately from cumulative usage', async () => {
+    mocks.streamAgentProviderTurn.mockResolvedValueOnce({ content: '',
+      toolCalls: [{ id: 'usage-list', name: 'file.list', input: {} }],
+      usage: { inputTokens: 10000, outputTokens: 800, reasoningOutputTokens: 700, cachedInputTokens: 5000, totalTokens: 10800 },
+    }).mockImplementationOnce(async (_connection, _input, onDelta) => {
+      onDelta('计量完成。'); return { content: '计量完成。', toolCalls: [],
+        usage: { inputTokens: 12000, outputTokens: 20, totalTokens: 12020 } };
+    });
+    const webContents = sender();
+    const orchestrator = createOrchestrator({ contextBudget: { contextWindowTokens: 32000 } });
+    const started = await orchestrator.start(webContents as never, request());
+    await waitForCompletedFinal(webContents, '计量完成。', started);
+    const session = await store.getSession(started.sessionId, OWNER_SCOPE, 3);
+    const usage = session!.runs[0].contextUsage!;
+    expect(usage).toMatchObject({ windowTokens: 32000, windowSource: 'internal', responseCount: 2,
+      lastObservedInputTokens: 12000, reportedTotalTokens: 22820, usageIncomplete: false, source: 'provider-plus-estimate' });
+    expect(usage.estimatedInputTokens).toBeGreaterThanOrEqual(12000);
+    expect(usage.estimatedInputTokens).toBeLessThan(usage.reportedTotalTokens);
+    const snapshots = webContents.send.mock.calls.map(call => call[1]).filter(event => event.type === 'run-updated').map(event => event.run.contextUsage).filter(Boolean);
+    expect(snapshots.some(snapshot => snapshot.phase === 'after-tool')).toBe(true);
+    expect(snapshots.some(snapshot => snapshot.lastUsage?.cachedInputTokens === 5000)).toBe(true);
+  });
+
+  it('freezes provider capability restrictions and uses plain-text mode without a failed tool probe', async () => {
+    const metadata = { supportsToolCalling: false, reasoningEfforts: [] as ('low' | 'medium' | 'high')[] };
+    const getModelMetadata = vi.fn(async () => metadata);
+    mocks.streamAgentProviderTurn.mockImplementationOnce(async (_connection, input, onDelta) => {
+      expect(input.tools).toEqual([]);
+      expect(input.reasoningEffort).toBe('auto');
+      expect(input.systemPrompt).toContain('无工具兼容模式');
+      expect(input.modelAdapter.toolCalling).toBe(false);
+      metadata.supportsToolCalling = true;
+      expect(input.modelAdapter.toolCalling).toBe(false);
+      onDelta('仅文本回答。'); return { content: '仅文本回答。', toolCalls: [] };
+    });
+    const webContents = sender();
+    const orchestrator = createOrchestrator({ getModelMetadata });
+    const started = await orchestrator.start(webContents as never, request());
+    await waitForCompletedFinal(webContents, '仅文本回答。', started);
+    expect(getModelMetadata).toHaveBeenCalledTimes(1);
+    expect(mocks.streamAgentProviderTurn).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses unexpected tool calls from a model restricted to text mode', async () => {
+    const readLibraryMetadata = vi.fn();
+    mocks.streamAgentProviderTurn.mockResolvedValueOnce({ content: '', toolCalls: [{ id: 'unexpected', name: 'file.list', input: {} }] });
+    const webContents = sender();
+    const orchestrator = createOrchestrator({ readLibraryMetadata, getModelMetadata: async () => ({ supportsToolCalling: false }) });
+    const started = await orchestrator.start(webContents as never, request());
+    await vi.waitFor(() => expect(webContents.send.mock.calls.map(call => call[1])).toContainEqual(expect.objectContaining({
+      type: 'error', runId: started.runId, message: expect.stringContaining('未执行任何工具'),
+    })));
+    expect(readLibraryMetadata).not.toHaveBeenCalled();
+  });
+
+  it('keeps a frozen adapter on tool continuation rather than refreshing metadata mid-run', async () => {
+    const getModelMetadata = vi.fn(async () => ({ supportsParallelToolCalls: false }));
+    let adapter: unknown;
+    mocks.streamAgentProviderTurn.mockImplementationOnce(async (_connection, input) => {
+      adapter = input.modelAdapter;
+      expect(input.systemPrompt).toContain('一次调用一个工具');
+      return { content: '', toolCalls: [{ id: 'list-adapted', name: 'file.list', input: {} }] };
+    }).mockImplementationOnce(async (_connection, input, onDelta) => {
+      expect(input.modelAdapter).toBe(adapter);
+      onDelta('适配后完成。'); return { content: '适配后完成。', toolCalls: [] };
+    });
+    const webContents = sender();
+    const orchestrator = createOrchestrator({ getModelMetadata, contextBudget: { contextWindowTokens: 32_000 } });
+    const started = await orchestrator.start(webContents as never, request());
+    await waitForCompletedFinal(webContents, '适配后完成。', started);
+    expect(getModelMetadata).toHaveBeenCalledTimes(1);
+  });
+
+  it('reads library text directly through owner-bound authority without a renderer execution', async () => {
+    const node = { id: 88, libraryId: 3, parentId: 20, name: 'read.txt', type: 'file' as const, path: '/docs/read.txt' };
+    const readLibraryMetadata = vi.fn(async () => ({ libraryId: 3, node }));
+    const readLibraryText = vi.fn(async () => Buffer.from('first\nsecond'));
+    mocks.streamAgentProviderTurn
+      .mockResolvedValueOnce({ content: '', toolCalls: [{ id: 'read-text', name: 'file.read', input: { path: '/docs/read.txt', limit: 1 } }] })
+      .mockImplementationOnce(async (_connection, _input, onDelta) => { onDelta('正文读取完成。'); return { content: '正文读取完成。', toolCalls: [] }; });
+    const webContents = sender();
+    const orchestrator = createOrchestrator({ readLibraryMetadata, readLibraryText, contextBudget: { contextWindowTokens: 32_000 } });
+    const started = await orchestrator.start(webContents as never, request());
+    await waitForCompletedFinal(webContents, '正文读取完成。', started);
+    expect(readLibraryText).toHaveBeenCalledWith(expect.objectContaining({ libraryId: 3, ownerScope: OWNER_SCOPE,
+      operation: { operation: 'stage-library-node', nodeId: 88, includeDownloadUrl: true } }));
+    expect(webContents.send.mock.calls.map(call => call[1]).some(event => event.type === 'tool-execution-requested')).toBe(false);
+  });
+
+  it('dispatches library grep through the existing owner-bound text authority', async () => {
+    const node = { id: 88, libraryId: 3, parentId: 20, name: 'read.txt', type: 'file' as const, path: '/docs/read.txt' };
+    const readLibraryMetadata = vi.fn(async () => ({ libraryId: 3, node }));
+    const readLibraryText = vi.fn(async () => Buffer.from('first\nneedle\nlast'));
+    mocks.streamAgentProviderTurn
+      .mockResolvedValueOnce({ content: '', toolCalls: [{ id: 'grep-text', name: 'file.grep', input: { path: '/docs/read.txt', pattern: 'needle' } }] })
+      .mockImplementationOnce(async (_connection, input, onDelta) => {
+        expect(JSON.stringify(input.messages)).toContain('needle');
+        onDelta('已找到正文。'); return { content: '已找到正文。', toolCalls: [] };
+      });
+    const webContents = sender();
+    const orchestrator = createOrchestrator({ readLibraryMetadata, readLibraryText, contextBudget: { contextWindowTokens: 32_000 } });
+    const started = await orchestrator.start(webContents as never, request());
+    await waitForCompletedFinal(webContents, '已找到正文。', started);
+    expect(readLibraryText).toHaveBeenCalledWith(expect.objectContaining({ libraryId: 3, ownerScope: OWNER_SCOPE,
+      operation: { operation: 'stage-library-node', nodeId: 88, includeDownloadUrl: true } }));
+  });
+
   it('lets a library search feed media inspection without changing the UI selection', async () => {
     const discovered = { id: 88, libraryId: 3, parentId: 20, name: 'outside', ext: 'mp4', type: 'file' as const, path: '/音乐/outside.mp4', fileSize: 100 };
     const readLibraryMetadata = vi.fn(async () => ({ libraryId: 3, entries: [discovered], hasMore: false }));
@@ -741,11 +848,11 @@ describe('Agent orchestrator', () => {
     const runEvents = webContents.send.mock.calls
       .map(call => call[1])
       .filter(event => event?.type === 'started' || event?.type === 'run-updated');
-    expect(runEvents.map(event => event.run.revision)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(runEvents.map(event => event.run.revision)).toEqual(runEvents.map((_, index) => index + 1));
     expect(runEvents.find(event => event.run.plan)?.run).toMatchObject({
       id: started.runId,
       plan: expect.objectContaining({ title: '检查目录内容' }),
-      revision: 3,
+      revision: expect.any(Number),
     });
   });
 
@@ -4383,7 +4490,7 @@ describe('Agent orchestrator', () => {
       expect(input.tools).toEqual([]);
       expect(input.maxOutputTokens).toBe(1_234);
       expect(input.systemPrompt).not.toContain('movie.mp4');
-      expect(input.systemPrompt).toContain('当前模型不支持 Tool Calling');
+      expect(input.systemPrompt).toContain('当前连接按无工具兼容模式运行');
       expect(JSON.stringify(input.messages)).toContain('低权限只读感知数据');
       expect(JSON.stringify(input.messages)).toContain('movie.mp4');
       expect(input.reasoningEffort).toBe('high');
@@ -5139,7 +5246,7 @@ describe('Agent orchestrator', () => {
     });
 
     const webContents = sender();
-    const orchestrator = createOrchestrator();
+    const orchestrator = createOrchestrator({ contextBudget: { contextWindowTokens: 24_000 } });
     const started = await orchestrator.start(webContents as never, {
       ...request(),
       sessionId,

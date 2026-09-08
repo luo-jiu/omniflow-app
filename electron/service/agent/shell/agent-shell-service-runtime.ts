@@ -687,6 +687,27 @@ export function createAgentShellServiceRuntime(
     });
   }
 
+  async function describePublishedNode(node: { id: number; name: string; ext?: string }, context: AgentToolExecutionContext) {
+    const displayName = node.ext && !node.name.toLowerCase().endsWith(`.${node.ext.toLowerCase()}`)
+      ? `${node.name}.${node.ext}` : node.name;
+    const identity = context.preparation?.identity;
+    if (!identity) return { displayName };
+    try {
+      const result = await requestFileAuthority({
+        libraryId: identity.libraryId, ownerScope: identity.ownerScope, runId: identity.runId,
+        sessionId: identity.sessionId, toolRunId: identity.toolRunId,
+        sender: resolveSender(identity.ownerWebContentsId),
+        signal: AbortSignal.any([context.signal, AbortSignal.timeout(5_000)]),
+        operation: { operation: 'query-library-metadata', query: { kind: 'stat', nodeId: node.id } },
+      });
+      if (result.operation === 'query-library-metadata' && result.data.node?.id === node.id
+        && result.data.node.libraryId === identity.libraryId && result.data.node.path) {
+        return { displayName, path: result.data.node.path };
+      }
+    } catch { /* The upload is committed; metadata refresh failure must not invite another upload. */ }
+    return { displayName };
+  }
+
   async function revalidateResolvedLibraryPath(input: {
     directoryPath?: string;
     identity: NonNullable<AgentToolExecutionContext['preparation']>['identity'];
@@ -1474,7 +1495,7 @@ export function createAgentShellServiceRuntime(
               nodeId: uploaded.node.id,
               parentId: action.parentId,
             },
-            displayName: uploaded.node.name,
+            ...await describePublishedNode(uploaded.node, context),
             sizeBytes: action.sizeBytes,
             sourcePath: action.sourcePath,
             uploadCommitState: 'committed',
@@ -1788,7 +1809,7 @@ export function createAgentShellServiceRuntime(
             nodeId: uploaded.node.id,
             parentId: action.parentId,
           },
-          displayName: uploaded.node.name,
+          ...await describePublishedNode(uploaded.node, context),
           sizeBytes: action.sourceSizeBytes,
           uploadCommitState: 'committed',
         },

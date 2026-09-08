@@ -1,5 +1,15 @@
 # 内置 Agent 架构
 
+上下文计量由 Run 内 main ledger 持有，既有调度预算与 UI 使用同一低估校正；快照持久化到 agent_runs.context_usage_json，经既有 revision-aware Run 更新恢复。缺失 usage 不作 0，压缩后重新建立输入基准，详见 [上下文计量](agent-context-accounting.md)。
+
+模型提示词、请求参数、负向能力收窄与 Run 冻结策略见 [模型执行适配](agent-model-adaptation.md)。远端模型目录不会提供应用系统指令或扩大工具权限，适配提示词计入所有续接与副作用前预算。
+
+文件名 glob 与独立 `file.grep` 正文搜索的执行、权限、输出与续搜边界见 [文件与正文搜索](agent-file-search.md)。它们复用既有元数据及正文读取通道，不扩展后端 CLI/HTTP 能力。
+
+`file.read` 正文、文件工具的 `library|host` scope 与有界续读见 [Agent 统一文件读取](agent-unified-file-reading.md)。本机读取由 main 持有，资料库正文复用 owner-bound file authority，不新增通用 URL 读取 IPC。
+
+资料库正文的 ETag 缓存由 main 持有，按 Run / owner 隔离，容量与 TTL 有界，Run 结束主动释放；缓存不是读取授权，续读仍重新授权并访问源存储验证。上传 / 发布成功后补全规范路径，元数据补全失败不得反转 committed 事实或触发重传。
+
 更新时间：2026-09-08
 
 计划步骤的 `toolName` 同时接受本轮已注册业务 Tool 的 canonical 名称与对应 Provider 名称（如 `file.list` / `file_list`），持久化统一使用 canonical 名称；未知或映射歧义仍拒绝，不扩大本轮能力范围。真实目录与内部保存联调结论见 [Agent 资料库目录发现](agent-library-discovery.md)。

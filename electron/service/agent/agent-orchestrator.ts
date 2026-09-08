@@ -1,4 +1,7 @@
 import crypto from 'node:crypto';
+import { createAgentContextUsageLedger, type AgentContextRequest } from './agent-context-usage-ledger';
+import type { AgentContextUsageSnapshot } from '../../../src/shared/agent/agent-context-usage';
+import { agentLibraryTextReader, readAgentLibraryText } from './agent-library-text-reader';
 import { createWriteStream } from 'node:fs';
 import { pipeline } from 'node:stream/promises';
 import type { WebContents } from 'electron';
@@ -93,7 +96,6 @@ import {
   estimateAgentProviderMessagesTokens,
   estimateAgentProviderTurnTokens,
   estimateAgentTextTokens,
-  getAgentProviderRequestTokenLimit,
   resolveAgentContextBudget,
   type AgentContextBudget,
 } from './agent-context-projection';
@@ -101,6 +103,8 @@ import { resolveAgentModelContextBudget } from './agent-model-context';
 import { agentFileAuthorityBroker, type AgentFileAuthorityBrokerRequestInput } from './agent-file-authority-broker';
 import { normalizeAgentLibraryReadResult, type AgentLibraryReadResult } from '../../../src/shared/agent/agent-library-query';
 import { agentModelCatalog } from './agent-model-catalog';
+import { resolveAgentAdapterEffort, resolveAgentModelAdapter, restrictAgentToolsForModel, restrictAgentSkillsForModel, type AgentModelAdapter } from './agent-model-adapter';
+import type { AgentModelMetadata } from './agent-model-context';
 import {
   buildAgentFallbackContextMessages,
   buildAgentFallbackSystemPrompt,
@@ -340,6 +344,8 @@ interface AgentMediaArtifactFallbackGrant {
 
 interface AgentOrchestratorOptions {
   readLibraryMetadata?: (input: AgentFileAuthorityBrokerRequestInput) => Promise<AgentLibraryReadResult>;
+  readLibraryText?: (input: AgentFileAuthorityBrokerRequestInput) => Promise<Uint8Array>;
+  getModelMetadata?: (connection: AIServiceRuntimeConnection, model: string) => Promise<AgentModelMetadata | undefined>;
   getPermissionMode?: () => AgentRunCapabilitySnapshot['shellPermissionMode'];
   approvalTimeoutMs?: number;
   contextBudget?: Partial<AgentContextBudget>;
@@ -475,6 +481,7 @@ function normalizeReasoningEffort(value: unknown): AgentReasoningEffort {
 }
 
 function estimateContinuationTokensBeforeSideEffects(input: {
+  modelAdapter?: AgentModelAdapter;
   appContext: AgentAppContext;
   capabilities: string[];
   currentPerception: AgentChatRequest['perception'];
@@ -495,6 +502,7 @@ function estimateContinuationTokensBeforeSideEffects(input: {
       input.capabilities,
       input.skillSummaries,
       input.omittedSkillCount,
+      input.modelAdapter,
     ),
     tools: input.tools,
   })));
@@ -812,7 +820,8 @@ function resolveAgentProviderToolResultPolicy(
   if (canonicalToolName === AGENT_SKILL_ACTIVATE_TOOL_NAME) {
     return { maxTokens: SKILL_PROVIDER_TOOL_RESULT_TOKENS };
   }
-  if (['file.list', 'file.search', 'file.resolve', 'file.stat'].includes(canonicalToolName)) return { maxTokens: 6_000 };
+  if (canonicalToolName === 'file.read' || canonicalToolName === 'file.grep') return { maxTokens: 10_000 };
+  if (['file.list', 'file.search', 'file.resolve', 'file.stat'].includes(canonicalToolName)) return { maxTokens: 10_000 };
   return { maxTokens: DEFAULT_PROVIDER_TOOL_RESULT_TOKENS };
 }
 
@@ -1947,13 +1956,17 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       });
     };
     const executionContext: AgentToolExecutionContext = {
+      ...(options.readLibraryText ? { readLibraryText: (nodeId: number, requestSignal: AbortSignal) =>
+        options.readLibraryText!({ sender, libraryId: Number(input.appContext.libraryId),
+          ownerScope: input.ownerScope, sessionId, runId, toolRunId, signal: requestSignal,
+          operation: { operation: 'stage-library-node', nodeId, includeDownloadUrl: true } }) } : {}),
       ...(options.readLibraryMetadata ? { readLibraryMetadata: async (query, requestSignal) => {
         const libraryId = Number(input.appContext.libraryId);
         const data = normalizeAgentLibraryReadResult(await options.readLibraryMetadata!({
           sender, libraryId, ownerScope: input.ownerScope, sessionId, runId, toolRunId,
           signal: requestSignal, operation: { operation: 'query-library-metadata', query },
         }), libraryId);
-        const known = new Map((perception?.knownNodes || []).map(node => [node.id, node]));
+        const known = new Map((executionContext.perception?.knownNodes || []).map(node => [node.id, node]));
         for (const node of [...(data.entries || []), ...(data.node ? [data.node] : []), ...(data.directory ? [data.directory] : [])]) {
           known.delete(node.id); known.set(node.id, node);
         }
@@ -2596,6 +2609,8 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     contextBudget: AgentContextBudget,
     recalledMemories: AgentMemoryItem[],
     capabilitySnapshot: AgentRunCapabilitySnapshot,
+    modelAdapter: AgentModelAdapter,
+    windowSource: AgentContextUsageSnapshot['windowSource'],
   ): Promise<void> {
     const sessionId = session.id;
     const providerMaxOutputTokens = resolveAgentProviderOutputTokens(contextBudget);
@@ -2657,7 +2672,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
             capabilitySnapshot.listBusinessTools(activeSkillId).map(tool => tool.name),
           ),
           capabilities: visibleTools.map(tool => tool.name),
-          providerTools: [agentPlanControlTool, ...visibleTools],
+          providerTools: modelAdapter.toolCalling ? [agentPlanControlTool, ...visibleTools] : [],
         };
       };
       const initialCapabilityView = getProviderCapabilityView();
@@ -2667,10 +2682,12 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         initialCapabilityView.capabilities,
         skillSummaries,
         omittedSkillCount,
+        modelAdapter,
       );
       const initialFallbackSystemPrompt = buildAgentFallbackSystemPrompt(
         input.appContext,
         input.perception,
+        modelAdapter,
       );
       const fallbackContextMessages = buildAgentFallbackContextMessages(input.perception);
       const fixedInputTokens = Math.max(
@@ -2705,26 +2722,17 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         ...contextProjection.messages,
       ];
       const activeToolResults: AgentActiveToolResultRecord[] = [];
-      const baseProviderRequestLimit = getAgentProviderRequestTokenLimit(contextBudget);
-      let observedProviderInputTokenUnderestimate = 0;
-      const getProviderRequestLimit = () => Math.max(
-        1,
-        baseProviderRequestLimit - observedProviderInputTokenUnderestimate,
-      );
-      const observeProviderInputUsage = (
-        estimatedInputTokens: number,
-        actualInputTokens: number | undefined,
-      ) => {
-        if (
-          typeof actualInputTokens !== 'number'
-          || !Number.isSafeInteger(actualInputTokens)
-          || actualInputTokens < 0
-        ) return;
-        observedProviderInputTokenUnderestimate = Math.max(
-          observedProviderInputTokenUnderestimate,
-          actualInputTokens - estimatedInputTokens,
-          0,
-        );
+      const usageLedger = createAgentContextUsageLedger(contextBudget, windowSource);
+      if (contextProjection.droppedMessageCount > 0) usageLedger.compacted();
+      const getProviderRequestLimit = usageLedger.requestLimit;
+      const publishContextUsage = async (request: AgentContextRequest, phase: AgentContextUsageSnapshot['phase']) => {
+        if (controller.signal.aborted) return;
+        const updatedAt = now();
+        await updateRunAndEmit(sender, store, sessionId, runId, {
+          contextUsage: usageLedger.snapshot(request, phase, updatedAt),
+          currentStep: phase === 'before-request' ? '请求 AI 服务' : phase === 'after-response' ? '处理模型响应' : '准备工具续接',
+          status: 'running', updatedAt,
+        });
       };
       const assertProviderTurnFitsObservedContext = (
         providerInput: {
@@ -2757,6 +2765,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         requestTokenLimit: number;
       }) => compactAgentActiveContextToFit({
         ...fitInput,
+        onCompacted: () => usageLedger.compacted(),
         messages,
         summarize: async (candidate) => {
           const payload = buildAgentActiveContextSummaryPayload({
@@ -2834,8 +2843,10 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
             roundCapabilityView.capabilities,
             skillSummaries,
             omittedSkillCount,
+            modelAdapter,
           );
           const providerTurnInput = {
+            modelAdapter,
             maxOutputTokens: providerMaxOutputTokens,
             messages,
             model: input.model,
@@ -2850,10 +2861,11 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
             }),
             requestTokenLimit: getProviderRequestLimit(),
           });
-          const estimatedProviderInputTokens = assertProviderTurnFitsObservedContext(
+          assertProviderTurnFitsObservedContext(
             providerTurnInput,
             round === 0 ? '当前 Agent 请求' : `Agent 第 ${round + 1} 轮工具续接请求`,
           );
+          await publishContextUsage(providerTurnInput, 'before-request');
           turn = await streamAgentProviderTurn(runtimeConnection, providerTurnInput, (delta) => {
             appendAndEmitAssistantDelta(delta);
           }, controller.signal, {
@@ -2862,7 +2874,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
               providerMaxOutputTokens * 4,
             ),
           });
-          observeProviderInputUsage(estimatedProviderInputTokens, turn.usage?.inputTokens);
+          usageLedger.observe(providerTurnInput, turn.usage);
         } catch (error) {
           if (
             round !== 0
@@ -2872,18 +2884,21 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
             throw error;
           }
           const fallbackInput = {
+            modelAdapter,
             maxOutputTokens: providerMaxOutputTokens,
             messages: [...fallbackContextMessages, ...plainMessages],
             model: input.model,
             profileId: input.profileId,
             reasoningEffort: input.reasoningEffort,
-            systemPrompt: buildAgentFallbackSystemPrompt(input.appContext, currentPerception),
+            systemPrompt: buildAgentFallbackSystemPrompt(input.appContext, currentPerception, modelAdapter),
           };
           assertProviderTurnFitsObservedContext(
             { ...fallbackInput, tools: [] },
             '当前 Agent 兼容模式请求',
           );
-          await streamAgentProviderTurn(runtimeConnection, { ...fallbackInput, tools: [] }, (delta) => {
+          const fallbackRequest = { ...fallbackInput, tools: [] };
+          await publishContextUsage(fallbackRequest, 'before-request');
+          const fallbackResponse = await streamAgentProviderTurn(runtimeConnection, fallbackRequest, (delta) => {
             appendAndEmitAssistantDelta(delta);
           }, controller.signal, {
             maxAssistantContentCharacters: Math.min(
@@ -2891,10 +2906,14 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
               providerMaxOutputTokens * 4,
             ),
           });
+          usageLedger.observe(fallbackRequest, fallbackResponse.usage);
+          await publishContextUsage({ ...fallbackRequest, messages: [...fallbackRequest.messages,
+            { role: 'assistant', content: fallbackResponse.content }] }, 'after-response');
           break;
         }
 
         markAgentActiveToolResultsConsumed(activeToolResults);
+        if (!modelAdapter.toolCalling && turn.toolCalls.length) throw new Error('当前模型适配未开放 Tool Calling；未执行任何工具');
         const toolCalls = turn.toolCalls.map((call, callIndex) => ({
           ...call,
           id: claimUniqueAgentToolCallId(
@@ -2909,6 +2928,9 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
           role: 'assistant',
           ...(toolCalls.length > 0 ? { toolCalls } : {}),
         });
+        await publishContextUsage({ messages, systemPrompt: buildAgentSystemPrompt(input.appContext, currentPerception,
+          roundCapabilityView.capabilities, skillSummaries, omittedSkillCount, modelAdapter),
+          tools: roundCapabilityView.providerTools }, 'after-response');
         if (toolCalls.length === 0) {
           break;
         }
@@ -2954,6 +2976,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
                 roundCapabilityView.capabilities,
                 skillSummaries,
                 omittedSkillCount,
+                modelAdapter,
               ),
               tools: roundCapabilityView.providerTools,
             }),
@@ -2968,6 +2991,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
               roundCapabilityView.capabilities,
               skillSummaries,
               omittedSkillCount,
+              modelAdapter,
             ),
             tools: roundCapabilityView.providerTools,
           }, 'Agent Skill 激活协议拒绝续接请求');
@@ -3033,6 +3057,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         }));
         await compactActiveContext({
           estimateTokens: candidateMessages => estimateContinuationTokensBeforeSideEffects({
+            modelAdapter,
             appContext: input.appContext,
             capabilities: minimumContinuationCapabilityView.capabilities,
             currentPerception,
@@ -3045,6 +3070,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
           requestTokenLimit: getProviderRequestLimit(),
         });
         const minimumContinuationTokens = estimateContinuationTokensBeforeSideEffects({
+          modelAdapter,
           appContext: input.appContext,
           capabilities: minimumContinuationCapabilityView.capabilities,
           currentPerception,
@@ -3070,6 +3096,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
           const currentMinimumResultMessage = minimumToolResultMessages[callIndex];
           await compactActiveContext({
             estimateTokens: candidateMessages => estimateContinuationTokensBeforeSideEffects({
+              modelAdapter,
               appContext: input.appContext,
               capabilities: minimumContinuationCapabilityView.capabilities,
               currentPerception,
@@ -3086,6 +3113,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
             requestTokenLimit: getProviderRequestLimit(),
           });
           const preExecutionMinimumTokens = estimateContinuationTokensBeforeSideEffects({
+            modelAdapter,
             appContext: input.appContext,
             capabilities: minimumContinuationCapabilityView.capabilities,
             currentPerception,
@@ -3132,6 +3160,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
             };
             const activationFit = await compactActiveContext({
               estimateTokens: candidateMessages => estimateContinuationTokensBeforeSideEffects({
+                modelAdapter,
                 appContext: input.appContext,
                 capabilities: expectedCapabilityView.capabilities,
                 currentPerception,
@@ -3209,6 +3238,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
             continuationCapabilityView.capabilities,
             skillSummaries,
             omittedSkillCount,
+            modelAdapter,
           );
           const emptyCurrentResultMessage: AgentProviderMessage = {
             content: '',
@@ -3225,6 +3255,12 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
             );
           if (call.name === AGENT_SKILL_ACTIVATE_TOOL_NAME && projectedResult.truncated) {
             throw new Error('Agent Skill 完整说明在 Provider 投影中被截断；已停止当前 Run');
+          }
+          if (call.name === 'file.grep' && result.ok && projectedResult.truncated) {
+            throw new Error('上下文不足以完整交付正文搜索页，不能使用未交付页面的续搜游标');
+          }
+          if (call.name === 'file.read' && result.ok && projectedResult.truncated) {
+            throw new Error('当前上下文不足以完整交付正文页；不能使用未完整交付页面的续读位置');
           }
           const preferredCurrentResultMessage: AgentProviderMessage = {
             ...emptyCurrentResultMessage,
@@ -3283,7 +3319,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
             const query = call.input as { cursor?: string; limit?: number };
             projectedResult = projectAgentToolResultForProvider({
               ok: false, message: '元数据页未完整交付；减小 limit 并重试原 cursor，不能跳到下一页',
-              data: { retryCursor: query.cursor || null, retryLimit: Math.max(1, Math.floor((query.limit || 20) / 2)) },
+              data: { retryCursor: query.cursor || null, retryLimit: Math.max(1, Math.floor((query.limit || 50) / 2)) },
             }, projectedResult.estimatedTokens);
           }
           appendAgentActiveToolResult({
@@ -3294,6 +3330,8 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
             toolName: call.name,
             toolResults: activeToolResults,
           });
+          await publishContextUsage({ messages, systemPrompt: currentSystemPrompt,
+            tools: continuationCapabilityView.providerTools }, 'after-tool');
         }
         assertToolTurnMadeProgress(toolTurnProgress);
       }
@@ -3387,6 +3425,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       }
     } finally {
       await waitForMediaArtifactSaves(save => save.runId === runId);
+      agentLibraryTextReader.releaseRun(runId);
       clearMediaArtifactFallbackGrants(grant => grant.runId === runId);
       await mediaArtifactStore.releaseRun(runId).catch(() => undefined);
       await releaseAgentShellRun(runId).catch(() => undefined);
@@ -3401,7 +3440,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     const userPrompt = String(input?.userPrompt || '').trim();
     const profileId = String(input?.profileId || '').trim();
     const model = String(input?.model || '').trim();
-    const reasoningEffort = normalizeReasoningEffort(input?.reasoningEffort);
+    let reasoningEffort = normalizeReasoningEffort(input?.reasoningEffort);
     if (!userPrompt) throw new Error('请求内容不能为空');
     if (userPrompt.length > 100_000) throw new Error('请求内容过长');
     if (containsAgentSensitiveData(userPrompt)) {
@@ -3446,8 +3485,11 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     let session: AgentSessionSnapshot | null = null;
     try {
       const runtimeConnection = { ...resolveRuntimeProfile(profileId) };
-      const contextBudget = resolveAgentContextBudget({
-        ...((options.resolveContextBudget ? resolveContextBudget({
+      const metadata = options.getModelMetadata ? await options.getModelMetadata(runtimeConnection, model)
+        : options.resolveContextBudget ? undefined : await agentModelCatalog.get(runtimeConnection, model);
+      const modelAdapter = resolveAgentModelAdapter(runtimeConnection, model, metadata);
+      reasoningEffort = resolveAgentAdapterEffort(modelAdapter, reasoningEffort) || 'auto';
+      const modelBudget = (options.resolveContextBudget ? resolveContextBudget({
           baseUrl: runtimeConnection.baseUrl,
           model,
           providerType: runtimeConnection.providerType,
@@ -3455,13 +3497,17 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
           baseUrl: runtimeConnection.baseUrl,
           model,
           providerType: runtimeConnection.providerType,
-          metadata: await agentModelCatalog.get(runtimeConnection, model),
-        })) || {}),
+          metadata,
+        })) || {};
+      const windowSource: AgentContextUsageSnapshot['windowSource'] = options.contextBudget || options.resolveContextBudget
+        ? 'internal' : 'source' in modelBudget && (modelBudget.source === 'provider' || modelBudget.source === 'catalog') ? modelBudget.source : 'fallback';
+      const contextBudget = resolveAgentContextBudget({
+        ...modelBudget,
         ...(options.contextBudget ? resolveAgentContextBudget(options.contextBudget) : {}),
       });
       resolveAIServiceOutputTokenLimit(contextBudget.outputReserveTokens);
-      const toolSnapshot = agentToolRegistry.createSnapshot();
-      const skillSnapshot = builtInAgentSkillRegistry.createRunSnapshot();
+      const toolSnapshot = restrictAgentToolsForModel(agentToolRegistry.createSnapshot(), modelAdapter);
+      const skillSnapshot = restrictAgentSkillsForModel(builtInAgentSkillRegistry.createRunSnapshot(), toolSnapshot);
       const capabilityIds = Array.from(new Set(toolSnapshot.tools.flatMap(tool => [
         ...tool.availability.requiredCapabilities,
         ...tool.availability.optionalCapabilities,
@@ -3475,6 +3521,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       throwIfAborted(controller.signal);
       const shellProviderSnapshot = getAgentShellProviderSnapshotForRun();
       const capabilitySnapshot = createAgentRunCapabilitySnapshot({
+        modelAdapterIdentity: modelAdapter.identity,
         capabilitySnapshot: environmentCapabilitySnapshot,
         shellPermissionMode: (options.getPermissionMode || getAgentShellPermissionModeForRun)(),
         ...(shellProviderSnapshot ? { shellProviderSnapshot } : {}),
@@ -3487,7 +3534,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         query: userPrompt,
       }).catch(() => []);
       const preflightVisibleTools = capabilitySnapshot.listTools();
-      const preflightTools = [agentPlanControlTool, ...preflightVisibleTools];
+      const preflightTools = modelAdapter.toolCalling ? [agentPlanControlTool, ...preflightVisibleTools] : [];
       const preflightSkillSummaries = capabilitySnapshot.skillSnapshot.listSummaries();
       const preflightOmittedSkillCount = capabilitySnapshot.skillSnapshot.omittedSkillCount;
       const preflightFallbackContextMessages = buildAgentFallbackContextMessages(perception);
@@ -3499,10 +3546,11 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
             preflightVisibleTools.map(tool => tool.name),
             preflightSkillSummaries,
             preflightOmittedSkillCount,
+            modelAdapter,
           ),
         ], preflightTools),
         estimateAgentFixedInputTokens([
-          buildAgentFallbackSystemPrompt(context, perception),
+          buildAgentFallbackSystemPrompt(context, perception, modelAdapter),
         ], []) + estimateAgentProviderMessagesTokens(preflightFallbackContextMessages),
       );
       assertAgentCurrentRunFitsContext(
@@ -3579,7 +3627,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         reasoningEffort,
         sessionId: session.id,
         userPrompt,
-      }, runtimeConnection, controller, contextBudget, recalledMemories, capabilitySnapshot);
+      }, runtimeConnection, controller, contextBudget, recalledMemories, capabilitySnapshot, modelAdapter, windowSource);
       return { runId, sessionId: session.id };
     } catch (error) {
       if (session && store && isAbortError(error, controller.signal)) {
@@ -3856,6 +3904,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
 }
 
 export const agentOrchestrator = createAgentOrchestrator({
+  readLibraryText: readAgentLibraryText,
   readLibraryMetadata: async input => {
     const result = await agentFileAuthorityBroker.request(input);
     if (result.operation !== 'query-library-metadata') throw new Error('资料库查询响应类型不匹配');

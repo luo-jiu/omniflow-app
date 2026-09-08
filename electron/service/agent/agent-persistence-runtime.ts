@@ -103,6 +103,7 @@ const REQUIRED_AGENT_DATABASE_COLUMNS = {
     'finished_at',
   ],
   agent_runs: [
+    'context_usage_json',
     'id',
     'session_id',
     'capability_identity',

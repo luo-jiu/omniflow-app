@@ -102,6 +102,8 @@ const TOOL_TITLES: Record<string, string> = {
   'file.publish': '发布 Agent 输出',
   'file.stage': '暂存文件',
   'file.stat': '读取文件信息',
+  'file.read': '读取文件正文',
+  'file.grep': '搜索文件正文',
   'file.upload': '上传本机文件',
   'interaction.request': '用户输入',
   'media.extractAudio': '提取音频',
@@ -116,6 +118,15 @@ export function buildAgentToolSummary(activity: AgentToolActivitySnapshot, libra
 } {
   const data = asRecord(activity.result?.data);
   if (activity.status !== 'completed') return { label: getAgentToolTitle(activity) };
+  if (activity.call.name === 'file.grep') return {
+    label: data?.hasMore ? '已搜索正文 · 可继续' : data?.complete === false ? '已搜索正文 · 结果不完整' : '已搜索正文',
+    subject: textValue(data?.path) || undefined,
+  };
+  if (activity.call.name === 'file.read') return { label: data?.hasMore ? '已读取正文 · 可继续' : '已读取正文', subject: textValue(data?.path) || undefined };
+  if (data?.scope === 'host') {
+    const node = asRecord(data.node) || asRecord(data.directory);
+    return { label: '已读取本机', subject: textValue(node?.path) || undefined };
+  }
   const file = activity.call.name === 'file.stat' || activity.call.name === 'file.resolve' ? data
     : activity.call.name === 'file.list' ? asRecord(data?.directory)
       : activity.call.name === 'media.inspect' ? asRecord(data?.file) : null;

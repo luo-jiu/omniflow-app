@@ -112,6 +112,7 @@ export interface AgentToolMainPreparationSealResult {
 }
 
 export interface AgentToolExecutionContext {
+  readLibraryText?: (nodeId: number, signal: AbortSignal) => Promise<Uint8Array>;
   readLibraryMetadata?: (
     query: import('@/shared/agent/agent-library-query').AgentLibraryQuery,
     signal: AbortSignal,

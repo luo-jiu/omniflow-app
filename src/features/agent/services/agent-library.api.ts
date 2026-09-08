@@ -3,6 +3,7 @@ import { ensureStorageProviderAvailable } from '@/features/resource-monitor/serv
 import { normalizeAgentLibraryDirectoryPath, splitAgentLibraryDirectoryPath } from '@/shared/agent/agent-library-path';
 import {
   normalizeAgentLibraryNode, normalizeAgentLibraryReadResult,
+  AgentLibraryPageTooLargeError,
   type AgentLibraryNode, type AgentLibraryQuery, type AgentLibraryReadResult,
 } from '@/shared/agent/agent-library-query';
 
@@ -108,8 +109,8 @@ export async function executeAgentLibraryQuery(
 ): Promise<AgentLibraryReadResult> {
   if (!Number.isSafeInteger(libraryId) || libraryId <= 0) throw new Error('资料库范围无效');
   if (!['list', 'search', 'resolve', 'stat'].includes(query.kind) || (query.path && (query.nodeId || query.directoryId))) throw new Error('资料库查询参数冲突');
-  const limit = query.limit ?? 20;
-  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50) throw new Error('limit 必须在 1 到 50 之间');
+  let limit = query.limit ?? 50;
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error('limit 必须在 1 到 100 之间');
   if (query.kind === 'resolve' || query.kind === 'stat') {
     const node = query.path ? await resolveAgentLibraryPath(libraryId, query.path, query.nodeType, read)
       : query.nodeId ? await readAgentLibraryNode(libraryId, query.nodeId, read) : null;
@@ -126,13 +127,20 @@ export async function executeAgentLibraryQuery(
   if (query.path) directory = await resolveAgentLibraryPath(libraryId, query.path, 'dir', read);
   else if (query.directoryId) directory = await readAgentLibraryNode(libraryId, query.directoryId, read);
   if (directory && directory.type !== 'dir') throw new Error('查询范围必须是目录');
-  const page = await read(libraryId, {
-    mode: query.kind === 'list' ? 'children' : 'search', limit, cursor: query.cursor,
-    ...(query.kind === 'list' ? { parentId: directory?.id } : { ancestorId: directory?.id }),
-    keyword: query.keyword, nodeType: query.nodeType, tagIds: query.tagIds, tagMatchMode: query.tagMatchMode,
-  });
-  return normalizeAgentLibraryReadResult({
-    libraryId, entries: page.entries, hasMore: page.hasMore, nextCursor: page.nextCursor,
-    ...(query.kind === 'list' ? { directory: directory || page.root } : {}),
-  }, libraryId);
+  for (;;) {
+    const page = await read(libraryId, {
+      mode: query.kind === 'list' ? 'children' : 'search', limit, cursor: query.cursor,
+      ...(query.kind === 'list' ? { parentId: directory?.id } : { ancestorId: directory?.id }),
+      keyword: query.keyword, nodeType: query.nodeType, tagIds: query.tagIds, tagMatchMode: query.tagMatchMode,
+    });
+    try {
+      return normalizeAgentLibraryReadResult({
+        libraryId, entries: page.entries, hasMore: page.hasMore, nextCursor: page.nextCursor,
+        ...(query.kind === 'list' ? { directory: directory || page.root } : {}),
+      }, libraryId);
+    } catch (error) {
+      if (!(error instanceof AgentLibraryPageTooLargeError) || limit === 1) throw error;
+      limit = Math.max(1, Math.floor(limit / 2));
+    }
+  }
 }

@@ -1,11 +1,18 @@
 import type { AgentDirectoryEntry } from '@/shared/agent/agent.types';
 import type { AgentTool } from '../agent-tool-registry';
 import type { AgentLibraryQuery } from '@/shared/agent/agent-library-query';
+import { assessFileScope, fileContentTool } from './file-content-tool';
+import { queryAgentHostFiles } from '../agent-host-file-query';
+import { agentGlobProperty, createAgentFileGlob } from '../agent-file-glob';
+import { searchAgentFiles } from '../agent-file-search';
+import { fileGrepTool } from './file-grep-tool';
 
-const pathProperty = { type: 'string', minLength: 1, maxLength: 2048, description: '当前资料库内的绝对路径，例如 /音乐；不是操作系统路径。' };
+const pathProperty = { type: 'string', minLength: 1, maxLength: 2048, description: 'scope=library 时为资料库绝对路径（如 /音乐）；scope=host 时为本机绝对路径或 ~/ 路径。' };
+const scopeProperty = { type: 'string', enum: ['library', 'host'], description: '默认 library；host 明确访问本机，并按权限模式授权。' };
 const pagingProperties = {
+  scope: scopeProperty,
   path: pathProperty,
-  limit: { type: 'integer', minimum: 1, maximum: 50, description: '每页条数，默认 20；页面过大时减小该值并重试原游标。' },
+  limit: { type: 'integer', minimum: 1, maximum: 100, description: '每页条数，默认 50，最多 100；按输出预算自动减少实际条数，hasMore 时继续 nextCursor。' },
   cursor: { type: 'string', maxLength: 256, description: '上页返回的 nextCursor；其他筛选条件保持不变。' },
   nodeType: { type: 'string', enum: ['dir', 'file'] },
 };
@@ -31,7 +38,8 @@ function findVisibleNode(
 }
 
 export const fileListTool: AgentTool = {
-  description: '分页列出当前资料库任意目录的直属节点。用目录 ID 或资料库绝对路径定位，不需要先展开 UI；省略时列当前目录。只读元数据，不依赖 MinIO 在线，hasMore=true 时使用 nextCursor 继续。',
+  assess: assessFileScope,
+  description: '分页列目录直属节点。scope 默认 library，也支持 host 本机路径；两者均返回 entries/hasMore/nextCursor。资料库可用 ID 或绝对路径，不需要展开 UI，省略时列当前目录；host 必须明确 path。资料库只读数据库，不依赖 MinIO 在线。',
   inputSchema: {
     additionalProperties: false,
     properties: {
@@ -49,6 +57,8 @@ export const fileListTool: AgentTool = {
   presentation: { groupKind: 'resource-read', operationKind: 'list' },
   risk: 'read',
   async execute(input, context) {
+    if ((input as { scope?: string })?.scope === 'host') return { ok: true,
+      data: await queryAgentHostFiles('list', queryInput(input), context.signal), message: '已列出本机目录' };
     if (context.readLibraryMetadata) {
       const query = queryInput(input);
       const result = await context.readLibraryMetadata({ ...query, kind: 'list',
@@ -82,10 +92,12 @@ export const fileListTool: AgentTool = {
 };
 
 export const fileStatTool: AgentTool = {
-  description: '按节点 ID 或资料库绝对路径读取当前资料库内的节点、规范路径和存储身份，支持搜索发现但未在 UI 选中的节点。省略参数时读取唯一选中项。只读元数据不代表文件内容已经可读；媒体工具会独立检查来源。',
+  assess: assessFileScope,
+  description: '读取元数据，不读取正文。scope 默认 library，可按节点 ID 或绝对路径查询；唯一选中项可省略。scope=host 必须提供本机 path，不接受资料库 ID。资料库元数据存在不代表存储正文可读。',
   inputSchema: {
     additionalProperties: false,
     properties: {
+      scope: scopeProperty,
       path: pathProperty,
       nodeId: {
         description: '节点 ID。只有一个选中节点时可以省略。',
@@ -100,6 +112,8 @@ export const fileStatTool: AgentTool = {
   presentation: { groupKind: 'resource-read', operationKind: 'stat' },
   risk: 'read',
   async execute(input, context) {
+    if ((input as { scope?: string })?.scope === 'host') return { ok: true,
+      data: await queryAgentHostFiles('stat', queryInput(input), context.signal), message: '已读取本机节点元数据' };
     if (context.readLibraryMetadata) {
       const query = queryInput(input);
       const selected = context.perception?.selectedNodes || [];
@@ -130,32 +144,47 @@ export const fileStatTool: AgentTool = {
 };
 
 export function getBuiltInReadTools(): AgentTool[] {
-  return [fileListTool, fileStatTool, fileSearchTool, fileResolveTool];
+  return [fileListTool, fileStatTool, fileSearchTool, fileResolveTool, fileContentTool, fileGrepTool];
 }
 
 export const fileSearchTool: AgentTool = {
+  assess: assessFileScope,
+  validate(input) {
+    try {
+      const query = input as { glob?: string; scope?: string; path?: string; directoryId?: number; tagIds?: number[] };
+      createAgentFileGlob(query.glob);
+      if (query.scope === 'host' && (!query.path || query.directoryId !== undefined || query.tagIds !== undefined)) {
+        return { ok: false, message: '本机搜索必须提供 path，不接受资料库 ID 或标签' };
+      }
+      return { ok: true };
+    } catch (error) { return { ok: false, message: error instanceof Error ? error.message : 'glob 无效' }; }
+  },
   name: 'file.search', risk: 'read', presentation: { groupKind: 'resource-read', operationKind: 'search' },
-  description: '搜索当前资料库中的文件和目录名称、类型或标签，可用 path 或 directoryId 限定子树；不搜索文件正文，不访问 MinIO。结果含节点 ID 与规范路径，分页读取，不受当前 UI 选择范围限制。',
+  description: '在 path 子树按名称字面包含、glob 和类型搜索，不搜索正文，不解释正则或管道。scope 默认 library；host 要求本机 path，不支持资料库 ID/标签。glob 内外语义一致；内部按候选页过滤，空页且 hasMore=true 不代表不存在，须继续游标。每页最多100候选，本机最多扫描5000项，更大范围用 Shell。',
   inputSchema: {
     type: 'object', additionalProperties: false, properties: {
       ...pagingProperties, directoryId: { type: 'integer', minimum: 1 },
+      glob: agentGlobProperty,
+      cursor: { type: 'string', maxLength: 4096, description: 'nextCursor 原样传回，筛选条件不变。' },
       keyword: { type: 'string', maxLength: 512, description: '名称中的字面文本，不是 Shell 命令或正则。' },
       tagIds: { type: 'array', maxItems: 50, items: { type: 'integer', minimum: 1 } },
       tagMatchMode: { type: 'string', enum: ['ANY', 'ALL'] },
     }, not: { properties: { directoryId: {}, path: {} }, required: ['directoryId', 'path'] },
   },
   async execute(input, context) {
-    if (!context.readLibraryMetadata) return { ok: false, message: '当前运行时未接入资料库查询' };
-    const result = await context.readLibraryMetadata({ ...queryInput(input), kind: 'search' }, context.signal);
+    const result = await searchAgentFiles(queryInput(input), context);
     return { ok: true, data: result, message: `找到 ${result.entries?.length || 0} 项${result.hasMore ? '，还有下一页' : ''}` };
   },
 };
 
 export const fileResolveTool: AgentTool = {
+  assess: assessFileScope,
   name: 'file.resolve', risk: 'read', presentation: { groupKind: 'resource-read', operationKind: 'search' },
-  description: '将当前资料库中的绝对路径精确解析成节点 ID 和元数据，例如 /音乐。逐段校验父子关系和类型，重名或缺失时报错，不猜测、不创建目录。',
-  inputSchema: { type: 'object', additionalProperties: false, properties: { path: pathProperty, nodeType: pagingProperties.nodeType }, required: ['path'] },
+  description: '精确定位路径并返回元数据。scope 默认 library，返回节点 ID；host 返回本机路径元数据。缺失时报错，不猜测、不创建。直接读取正文或列目录无需预先调用此工具。',
+  inputSchema: { type: 'object', additionalProperties: false, properties: { scope: scopeProperty, path: pathProperty, nodeType: pagingProperties.nodeType }, required: ['path'] },
   async execute(input, context) {
+    if ((input as { scope?: string })?.scope === 'host') return { ok: true,
+      data: await queryAgentHostFiles('resolve', queryInput(input), context.signal), message: '已定位本机路径' };
     if (!context.readLibraryMetadata) return { ok: false, message: '当前运行时未接入资料库查询' };
     const result = await context.readLibraryMetadata({ ...queryInput(input), kind: 'resolve' }, context.signal);
     return { ok: true, data: result.node, message: `已定位 ${result.node?.path || result.node?.name || '节点'}` };

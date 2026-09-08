@@ -1,8 +1,14 @@
 # 内置 Agent UI 契约
 
+上下文计量与 Run.contextUsage 持久化继续保留，但 Composer 暂不挂载统计展示，也不占位。最终展示留到 UI 收尾阶段，只保留一个必要数字，不恢复多项统计行或预算编辑入口。详细口径见 [上下文计量](agent-context-accounting.md)。
+
+`file.grep` 沿用无框工具行，hasMore 显示“可继续”，扫描结束但 complete=false 显示“结果不完整”。skipped 与续搜信息保留在规范结果中，不能把空匹配页画成完整无结果。正文搜索不新增目录树状态或宿主路径跳转能力。
+
+文件工具支持显式 host 范围及 `file.read` 正文读取，继续使用无框紧凑行。正文未读完显示“可继续”；本机结果只显示路径，不生成 `tree.revealNode`。现有审批仍绑定 main ToolRun，不由 renderer 推断 host 是否已授权。契约见 [Agent 统一文件读取](agent-unified-file-reading.md)。
+
 目录发现 Tool 沿用无框紧凑行，`file.search` / `file.resolve` 不新增目录树卡片或状态 owner；路径定位结果可显示规范路径。跨目录输出不切换 UI 当前目录，详见 [Agent 资料库目录发现](agent-library-discovery.md)。
 
-更新时间：2026-09-07
+更新时间：2026-09-08
 
 适用范围：
 

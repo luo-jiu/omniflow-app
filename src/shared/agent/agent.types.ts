@@ -77,6 +77,7 @@ export interface AgentRunPlanSnapshot {
 }
 
 export interface AgentRunSnapshot {
+  contextUsage?: import('./agent-context-usage').AgentContextUsageSnapshot;
   capabilityIdentity?: string;
   createdAt: string;
   currentStep?: string;
