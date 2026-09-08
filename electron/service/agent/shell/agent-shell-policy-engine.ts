@@ -138,12 +138,6 @@ function canUseMatchedAllow(
   return assessment.persistentRuleEligible && assessment.unresolved.length === 0;
 }
 
-function analysisComplete(assessment: AgentShellPreparedAssessment): boolean {
-  return assessment.unresolved.length === 0
-    && !assessment.facets.includes('unknown_syntax')
-    && !assessment.facets.includes('dynamic_command_head');
-}
-
 function autoModeCanAllow(input: AgentShellPolicyEvaluationInput): boolean {
   if (!input.workspaceBoundaryVerified || input.assessment.unresolved.length > 0) return false;
   return input.assessment.facets.every(facet => !AUTO_CONFIRMATION_FACETS.has(facet));
@@ -198,14 +192,6 @@ export function createAgentShellPolicyEngine() {
         reasonCodes: Object.freeze(['matched-allow'] as const),
         risk: input.assessment.risk,
         source: 'rule' as const,
-      });
-    }
-
-    if (input.mode === 'full-access' && !analysisComplete(input.assessment)) {
-      return Object.freeze({
-        behavior: 'deny' as const,
-        reasonCodes: Object.freeze(['unresolved-analysis'] as const),
-        risk: 'destructive' as const,
       });
     }
 

@@ -43,6 +43,12 @@ const FFPROBE_OUTPUT = JSON.stringify({
 });
 
 describe('Agent media inspector', () => {
+  it('detects audio beyond the bounded stream-detail projection', () => {
+    const streams = [...Array.from({ length: 32 }, () => ({ codec_type: 'video' })), { codec_type: 'audio' }];
+    const result = parseAgentFfprobeOutput(JSON.stringify({ streams }));
+    expect(result.streams).toHaveLength(32);
+    expect(result.hasAudio).toBe(true);
+  });
   it('builds bounded ffprobe arguments around a transient local URL', () => {
     const args = buildAgentFfprobeArgs('http://127.0.0.1:1234/internal-source');
     expect(args).toContain('-show_entries');
@@ -54,6 +60,7 @@ describe('Agent media inspector', () => {
     const result = parseAgentFfprobeOutput(FFPROBE_OUTPUT);
 
     expect(result).toEqual({
+      hasAudio: true,
       chapterCount: 1,
       format: {
         bitRate: 256000,
@@ -114,6 +121,7 @@ describe('Agent media inspector', () => {
       nodeId: 8,
       sourceUrl: 'https://storage.example/signed?secret=value',
     }, new AbortController().signal, {
+      checkSource: async () => undefined,
       createProxySource,
       resolveFfprobePath: async () => '/usr/local/bin/ffprobe',
       runProcess,
@@ -139,6 +147,7 @@ describe('Agent media inspector', () => {
       nodeId: 8,
       sourceUrl: 'https://storage.example/signed?secret=value',
     }, new AbortController().signal, {
+      checkSource: async () => undefined,
       createProxySource: () => ({ release, url: 'http://127.0.0.1/proxy' }),
       resolveFfprobePath: async () => '/usr/bin/ffprobe',
       runProcess: async () => ({

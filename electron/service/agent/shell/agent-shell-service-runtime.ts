@@ -17,6 +17,8 @@ import {
   AGENT_FILE_PUBLISH_PREPARED_ACTION_VERSION,
   AGENT_FILE_STAGE_PREPARED_ACTION_KIND,
   AGENT_FILE_STAGE_PREPARED_ACTION_VERSION,
+  AGENT_FILE_UPLOAD_PREPARED_ACTION_KIND,
+  AGENT_FILE_UPLOAD_PREPARED_ACTION_VERSION,
   type AgentFilePublishPreparedActionPublicV1,
   type AgentFileAuthorityNodeSnapshotV1,
   type AgentOwnerScope,
@@ -26,7 +28,12 @@ import {
 import {
   normalizeAgentFilePublishPreparedActionPublicV1,
   normalizeAgentFileStagePreparedActionPublicV1,
+  normalizeAgentFileUploadPreparedActionPublicV1,
 } from '../../../../src/shared/agent/agent-prepared-action';
+import {
+  normalizeAgentShellPreparedActionPublicV1,
+  normalizeAgentShellRunInputV1,
+} from '../../../../src/shared/agent/shell/agent-shell.types';
 import { getAIServiceRuntimeProfile } from '../../aiServiceStore';
 import { saveAgentLocalFileAs } from '../agent-media-save-as';
 import { agentFileAuthorityBroker } from '../agent-file-authority-broker';
@@ -49,7 +56,17 @@ import {
   createAgentFileBridgeTools,
   normalizeAgentFilePublishInputV1,
   normalizeAgentFileStageInputV1,
+  normalizeAgentFileUploadInputV1,
+  type AgentFilePublishInputV1,
+  type AgentFileUploadInputV1,
 } from '../tools/file-bridge-tools';
+import {
+  openAgentLocalFile,
+  type AgentLocalFileSnapshot,
+  type AgentOpenedLocalFile,
+  verifyAgentLocalFileSnapshot,
+  verifyOpenedAgentLocalFileUnchanged,
+} from '../tools/agent-local-file';
 import { createAgentShellRunTool } from '../tools/shell-run-tool';
 import { createAgentShellBindingResolver } from './agent-shell-binding-resolver';
 import { createAgentShellExecutionLeaseManager } from './agent-shell-execution-lease';
@@ -68,6 +85,7 @@ import {
   type AgentShellRuntimeResult,
 } from './agent-shell-runtime';
 import { createAgentShellSpawnPreflight } from './agent-shell-spawn-preflight';
+import type { AgentShellHostContextDependencies } from './agent-shell-host-context';
 import {
   disposeAgentShellStorageRuntime,
   getAgentShellStorageRuntime,
@@ -92,6 +110,7 @@ interface RunWorkspaceEntry {
 }
 
 interface WorkspaceUploadGrant {
+  kind: 'workspace';
   artifactId: string;
   contentHash: string;
   fileName: string;
@@ -105,9 +124,29 @@ interface WorkspaceUploadGrant {
   workspaceId: string;
 }
 
+interface LocalPathUploadGrant {
+  artifactId: string;
+  fileName: string;
+  kind: 'local-path';
+  openedFile: AgentOpenedLocalFile;
+  owner: AgentShellWorkspaceOwner;
+  ownerWebContentsId: number;
+  runId: string;
+  sessionId: string;
+  sizeBytes: number;
+}
+
+type FileUploadGrant = LocalPathUploadGrant | WorkspaceUploadGrant;
+
 interface ActiveFileBridgeOperation {
   readonly controller: AbortController;
   readonly promise: Promise<AgentToolResult>;
+  readonly runId: string;
+}
+
+interface ActiveShellExecution {
+  readonly controller: AbortController;
+  readonly promise: Promise<AgentShellRuntimeResult>;
   readonly runId: string;
 }
 
@@ -120,6 +159,9 @@ export interface CreateAgentShellServiceRuntimeOptions {
   readonly executionQuotaPollIntervalMs?: number;
   readonly getPermissionMode?: () => AgentShellPermissionMode;
   readonly hostEnvironment?: AgentShellPreparationHostEnvironment;
+  readonly hostCwd?: string;
+  readonly hostHome?: string;
+  readonly hostContextDependencies?: AgentShellHostContextDependencies;
   readonly providerRegistry: AgentShellProviderRegistry;
   readonly resolveRuntimeProfile?: typeof getAIServiceRuntimeProfile;
   readonly storageRuntime: AgentShellStorageRuntime;
@@ -319,7 +361,7 @@ async function copyOpenFileToPath(input: {
 
 function bindingObject(
   context: AgentToolExecutionContext,
-  expectedKind: 'file.publish' | 'file.stage',
+  expectedKind: 'file.publish' | 'file.stage' | 'file.upload',
 ): Record<string, unknown> {
   const binding = context.preparation?.binding;
   if (!binding || typeof binding !== 'object' || Array.isArray(binding)) {
@@ -329,6 +371,64 @@ function bindingObject(
   if (source.kind !== expectedKind) throw new Error('Agent 文件桥 prepared binding 类型无效');
   return source;
 }
+
+function localFileSnapshotFromBinding(binding: Record<string, unknown>): AgentLocalFileSnapshot {
+  const snapshot = binding.localFileSnapshot;
+  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) {
+    throw new Error('Agent 本机文件 prepared binding 无效');
+  }
+  const source = snapshot as Record<string, unknown>;
+  const stat = source.statIdentity;
+  if (!stat || typeof stat !== 'object' || Array.isArray(stat)) {
+    throw new Error('Agent 本机文件 prepared binding 无效');
+  }
+  const statSource = stat as Record<string, unknown>;
+  if (
+    typeof source.absolutePath !== 'string'
+    || typeof source.canonicalPath !== 'string'
+    || typeof source.displayPath !== 'string'
+    || typeof source.fileName !== 'string'
+    || typeof source.identityHash !== 'string'
+    || (source.kind !== 'home-relative'
+      && source.kind !== 'posix-absolute'
+      && source.kind !== 'windows-drive-absolute')
+    || typeof statSource.ctimeNs !== 'string'
+    || typeof statSource.device !== 'string'
+    || typeof statSource.inode !== 'string'
+    || typeof statSource.mode !== 'number'
+    || typeof statSource.mtimeNs !== 'string'
+    || statSource.nlink !== 1
+    || typeof statSource.sizeBytes !== 'number'
+    || !Number.isSafeInteger(statSource.sizeBytes)
+    || statSource.sizeBytes < 0
+  ) {
+    throw new Error('Agent 本机文件 prepared binding 无效');
+  }
+  return Object.freeze({
+    absolutePath: source.absolutePath,
+    canonicalPath: source.canonicalPath,
+    displayPath: source.displayPath,
+    fileName: source.fileName,
+    identityHash: source.identityHash,
+    kind: source.kind,
+    statIdentity: Object.freeze({
+      ctimeNs: statSource.ctimeNs,
+      device: statSource.device,
+      inode: statSource.inode,
+      mode: statSource.mode,
+      mtimeNs: statSource.mtimeNs,
+      nlink: 1,
+      sizeBytes: statSource.sizeBytes,
+    }),
+  });
+}
+
+type AgentLibraryPublishDestination = Exclude<
+  AgentFilePublishInputV1['destination'],
+  { kind: 'local-save-as' }
+>;
+
+type AgentLibraryUploadDestination = AgentFileUploadInputV1['destination'];
 
 export function createAgentShellServiceRuntime(
   options: CreateAgentShellServiceRuntimeOptions,
@@ -379,6 +479,9 @@ export function createAgentShellServiceRuntime(
     || createAgentShellPreparationService({
       additionalPathEntries: options.additionalPathEntries,
       hostEnvironment: options.hostEnvironment,
+      hostCwd: options.hostCwd,
+      hostHome: options.hostHome,
+      hostContextDependencies: options.hostContextDependencies,
       workspaceStore,
     });
   const processSupervisor = options.dependencies?.processSupervisor
@@ -387,12 +490,25 @@ export function createAgentShellServiceRuntime(
     const bindingResolver = createAgentShellBindingResolver({
       additionalPathEntries: options.additionalPathEntries,
       hostEnvironment: options.hostEnvironment,
+      hostCwd: options.hostCwd,
+      hostHome: options.hostHome,
+      hostContextDependencies: options.hostContextDependencies,
       providerRegistry: options.providerRegistry,
       resolveRuntimeProfile: options.resolveRuntimeProfile || getAIServiceRuntimeProfile,
     });
-    const executionLeaseManager = createAgentShellExecutionLeaseManager({ workspaceStore });
+    const providerSnapshot = options.providerRegistry.getSnapshot();
+    const executionLeaseManager = createAgentShellExecutionLeaseManager({
+      hostCwd: options.hostCwd,
+      hostHome: options.hostHome,
+      hostPlatform: providerSnapshot.platform,
+      hostContextDependencies: options.hostContextDependencies,
+      workspaceStore,
+    });
     const spawnPreflight = createAgentShellSpawnPreflight({
       bindingResolver,
+      hostCwd: options.hostCwd,
+      hostHome: options.hostHome,
+      hostContextDependencies: options.hostContextDependencies,
       workspaceStore,
     });
     return createAgentShellRuntime({
@@ -403,7 +519,7 @@ export function createAgentShellServiceRuntime(
     });
   })();
   const runWorkspaces = new Map<string, RunWorkspaceEntry>();
-  const workspaceUploadGrants = new Map<string, WorkspaceUploadGrant>();
+  const fileUploadGrants = new Map<string, FileUploadGrant>();
   const fileUploadManager = options.fileUploadManager || createAgentMediaArtifactUploadManager({
     artifactStore: {
       withOwnedFile: async <T>(
@@ -411,7 +527,7 @@ export function createAgentShellServiceRuntime(
         uploadOwner: AgentMediaArtifactOwner,
         consumer: (input: AgentMediaOwnedFile) => Promise<T>,
       ): Promise<T> => {
-        const grant = workspaceUploadGrants.get(artifactId);
+        const grant = fileUploadGrants.get(artifactId);
         if (
           !grant
           || grant.ownerWebContentsId !== uploadOwner.ownerWebContentsId
@@ -421,6 +537,22 @@ export function createAgentShellServiceRuntime(
           || grant.owner.backendScope !== uploadOwner.ownerScope.backendScope
         ) {
           throw new Error('Agent workspace 文件上传授权不存在或已经失效');
+        }
+        if (grant.kind === 'local-path') {
+          if (grant.sizeBytes !== grant.openedFile.snapshot.statIdentity.sizeBytes) {
+            throw new Error('Agent 本机上传文件已经变化，请重新准备');
+          }
+          return consumer({
+            artifact: {
+              artifactId,
+              directoryPath: path.dirname(grant.openedFile.snapshot.canonicalPath),
+              fileName: grant.fileName,
+              filePath: grant.openedFile.snapshot.canonicalPath,
+              sizeBytes: grant.sizeBytes,
+            },
+            fileHandle: grant.openedFile.fileHandle,
+            verifyUnchanged: () => verifyOpenedAgentLocalFileUnchanged(grant.openedFile),
+          });
         }
         return workspaceStore.withOwnedFile(
           grant.workspaceId,
@@ -454,6 +586,7 @@ export function createAgentShellServiceRuntime(
   });
   const activeExecutionControllers = new Set<AbortController>();
   const activeExecutions = new Set<Promise<AgentShellRuntimeResult>>();
+  const activeShellExecutions = new Set<ActiveShellExecution>();
   const activeFileBridgeOperations = new Set<ActiveFileBridgeOperation>();
   const releasedRunIds = new Set<string>();
   const runReleasePromises = new Map<string, Promise<void>>();
@@ -485,11 +618,127 @@ export function createAgentShellServiceRuntime(
     return entry;
   }
 
+  async function resolveLibraryDestination(
+    destination: AgentLibraryPublishDestination | AgentLibraryUploadDestination,
+    file: { fileName: string; sizeBytes: number },
+    context: Parameters<NonNullable<ReturnType<typeof createAgentFileBridgeTools>[number]['prepareMain']>>[2],
+  ) {
+    const libraryId = context.preparationIdentity.libraryId;
+    let parentId: number;
+    let directoryPath: string | undefined;
+    if (destination.kind === 'library-path') {
+      directoryPath = destination.directoryPath;
+      const resolved = await requestFileAuthority({
+        libraryId,
+        operation: {
+          directoryPath,
+          operation: 'resolve-library-directory',
+        },
+        ownerScope: context.ownerScope,
+        runId: context.preparationIdentity.runId,
+        sender: resolveSender(context.ownerWebContentsId),
+        sessionId: context.preparationIdentity.sessionId,
+        signal: context.signal,
+        toolRunId: context.preparationIdentity.toolRunId,
+      });
+      if (
+        resolved.operation !== 'resolve-library-directory'
+        || resolved.parent.libraryId !== libraryId
+        || resolved.parent.type !== 'dir'
+      ) {
+        throw new Error('资料库目录路径解析结果与 Agent 请求不匹配');
+      }
+      parentId = resolved.parent.id;
+    } else {
+      parentId = destination.parentId;
+    }
+    const authority = await requestFileAuthority({
+      libraryId,
+      operation: {
+        contentType: 'application/octet-stream',
+        fileName: file.fileName,
+        fileSize: file.sizeBytes,
+        includeCredentials: false,
+        operation: 'publish-library-file',
+        parentId,
+        ...(destination.providerId ? { providerId: destination.providerId } : {}),
+      },
+      ownerScope: context.ownerScope,
+      runId: context.preparationIdentity.runId,
+      sender: resolveSender(context.ownerWebContentsId),
+      sessionId: context.preparationIdentity.sessionId,
+      signal: context.signal,
+      toolRunId: context.preparationIdentity.toolRunId,
+    });
+    if (
+      authority.operation !== 'publish-library-file'
+      || authority.parent.id !== parentId
+      || authority.parent.libraryId !== libraryId
+    ) {
+      throw new Error('资料库发布目标与 Agent 请求不匹配');
+    }
+    return Object.freeze({
+      authority,
+      ...(directoryPath ? { directoryPath } : {}),
+      libraryId,
+      targetLabel: directoryPath
+        ? `资料库路径“${directoryPath}” / ${authority.providerLabel}`
+        : `资料库目录“${authority.parent.name}” / ${authority.providerLabel}`,
+    });
+  }
+
+  async function revalidateResolvedLibraryPath(input: {
+    directoryPath?: string;
+    identity: NonNullable<AgentToolExecutionContext['preparation']>['identity'];
+    libraryId: number;
+    parentId: number;
+    signal: AbortSignal;
+    targetIdentity: string;
+  }): Promise<void> {
+    if (!input.directoryPath) return;
+    const resolved = await requestFileAuthority({
+      libraryId: input.libraryId,
+      operation: {
+        directoryPath: input.directoryPath,
+        operation: 'resolve-library-directory',
+      },
+      ownerScope: input.identity.ownerScope,
+      runId: input.identity.runId,
+      sender: resolveSender(input.identity.ownerWebContentsId),
+      sessionId: input.identity.sessionId,
+      signal: input.signal,
+      toolRunId: input.identity.toolRunId,
+    });
+    if (
+      resolved.operation !== 'resolve-library-directory'
+      || resolved.parent.id !== input.parentId
+      || resolved.parent.libraryId !== input.libraryId
+      || fileAuthorityNodeIdentity(resolved.parent) !== input.targetIdentity
+    ) {
+      throw new Error('资料库目录路径在执行前已经变化，请重新准备');
+    }
+  }
+
   async function prepare(
     input: unknown,
     requestedAction: Parameters<typeof preparationService.prepare>[0]['requestedAction'],
     context: Parameters<NonNullable<ReturnType<typeof createAgentShellRunTool>['prepareMain']>>[2],
   ) {
+    const normalizedInput = normalizeAgentShellRunInputV1(input);
+    const requestedContext = requestedAction === undefined
+      ? undefined
+      : normalizeAgentShellPreparedActionPublicV1(requestedAction).cwd.kind;
+    const inputContext = normalizedInput.executionContext || 'run-workspace';
+    if (requestedContext !== undefined && requestedContext !== inputContext) {
+      throw new Error('Agent Shell 执行上下文不能在审批后改变');
+    }
+    if (inputContext === 'host') {
+      return preparationService.prepare({
+        context,
+        input: normalizedInput,
+        requestedAction,
+      });
+    }
     const owner = ownerFor({
       ownerScope: context.ownerScope,
       sessionId: context.preparationIdentity.sessionId,
@@ -498,7 +747,7 @@ export function createAgentShellServiceRuntime(
     const workspace = await entry.promise;
     return preparationService.prepare({
       context,
-      input,
+      input: normalizedInput,
       requestedAction,
       workspaceId: workspace.workspaceId,
     });
@@ -592,6 +841,67 @@ export function createAgentShellServiceRuntime(
           workspaceId: workspace.workspaceId,
         },
       };
+    }
+    if (normalizedInput.source.kind === 'local-path') {
+      let opened: AgentOpenedLocalFile | null = null;
+      try {
+        opened = await openAgentLocalFile(normalizedInput.source.path, context.signal);
+        const { snapshot } = opened;
+        const defaultAction = normalizeAgentFileStagePreparedActionPublicV1({
+          kind: AGENT_FILE_STAGE_PREPARED_ACTION_KIND,
+          sourceDisplayName: snapshot.fileName,
+          sourceIdentity: snapshot.identityHash,
+          sourceKind: 'local-path',
+          sourcePath: snapshot.displayPath,
+          sourceSizeBytes: snapshot.statIdentity.sizeBytes,
+          targetLabel: '当前任务 input 目录',
+          version: AGENT_FILE_STAGE_PREPARED_ACTION_VERSION,
+        });
+        if (defaultAction.sourceKind !== 'local-path') {
+          throw new Error('Agent 本机路径暂存动作归一化失败');
+        }
+        const action = requestedAction === undefined
+          ? defaultAction
+          : normalizeAgentFileStagePreparedActionPublicV1(requestedAction);
+        if (JSON.stringify(action) !== JSON.stringify(defaultAction)) {
+          throw new Error('Agent 本机文件暂存来源或目标已经变化');
+        }
+        return {
+          binding: {
+            generation: workspace.generation,
+            kind: AGENT_FILE_STAGE_PREPARED_ACTION_KIND,
+            localFileSnapshot: snapshot,
+            sourceKind: 'local-path',
+            workspaceId: workspace.workspaceId,
+          },
+          decision: {
+            behavior: 'ask' as const,
+            preview: {
+              description: `将把本机文件“${snapshot.fileName}”复制到当前任务工作区。`,
+              details: [
+                { label: '来源', value: snapshot.displayPath },
+                { label: '文件', value: snapshot.fileName },
+                { label: '大小', value: `${snapshot.statIdentity.sizeBytes} bytes` },
+                { label: '进入', value: defaultAction.targetLabel },
+              ],
+              risk: 'write' as const,
+              title: '暂存本机文件',
+            },
+            risk: 'write' as const,
+          },
+          publicAction: action,
+          snapshotMaterial: {
+            generation: workspace.generation,
+            sourceIdentity: snapshot.identityHash,
+            sourcePath: snapshot.displayPath,
+            workspaceId: workspace.workspaceId,
+          },
+        };
+      } catch (error) {
+        rethrowSafeFileBridgeError(error, '无法读取指定的本机文件');
+      } finally {
+        await opened?.fileHandle.close().catch(() => undefined);
+      }
     }
     const defaultAction = normalizeAgentFileStagePreparedActionPublicV1({
       kind: AGENT_FILE_STAGE_PREPARED_ACTION_KIND,
@@ -753,6 +1063,50 @@ export function createAgentShellServiceRuntime(
         await rm(temporaryDirectory, { force: true, recursive: true }).catch(() => undefined);
       }
     }
+    if (action.sourceKind === 'local-path') {
+      if (
+        binding.sourceKind !== 'local-path'
+        || typeof binding.workspaceId !== 'string'
+        || typeof binding.generation !== 'number'
+        || !Number.isSafeInteger(binding.generation)
+        || binding.generation <= 0
+      ) {
+        throw new Error('Agent 本机文件暂存 prepared binding 无效');
+      }
+      const expectedSnapshot = localFileSnapshotFromBinding(binding);
+      let opened: AgentOpenedLocalFile | null = null;
+      try {
+        context.onProgress({ message: '正在验证本机文件' });
+        opened = await openAgentLocalFile(action.sourcePath, context.signal);
+        await verifyAgentLocalFileSnapshot(opened, expectedSnapshot);
+        context.onProgress({ message: '正在把本机文件暂存到任务工作区' });
+        const staged = await workspaceStore.stageFileFromHandle({
+          displayName: action.sourceDisplayName,
+          expectedGeneration: binding.generation,
+          expectedRunId: preparation.identity.runId,
+          owner,
+          provenance: `local-path:${preparation.identity.toolRunId}:${action.sourceIdentity}`,
+          signal: context.signal,
+          sourceFileHandle: opened.fileHandle,
+          workspaceId: binding.workspaceId,
+        });
+        return {
+          data: {
+            contentHash: staged.contentHash,
+            displayName: staged.displayName,
+            logicalPath: staged.logicalPath,
+            sizeBytes: staged.sizeBytes,
+            sourceKind: 'local-path',
+          },
+          message: `已将“${staged.displayName}”暂存到 ${staged.logicalPath}`,
+          ok: true,
+        };
+      } catch (error) {
+        rethrowSafeFileBridgeError(error, '无法把指定的本机文件暂存到任务工作区');
+      } finally {
+        await opened?.fileHandle.close().catch(() => undefined);
+      }
+    }
     if (
       action.sourceKind !== 'local-picker'
       || binding.sourceKind !== 'local-picker'
@@ -830,35 +1184,15 @@ export function createAgentShellServiceRuntime(
       }),
       context.signal,
     );
-    if (normalizedInput.destination.kind === 'library') {
-      const libraryId = context.preparationIdentity.libraryId;
+    if (normalizedInput.destination.kind !== 'local-save-as') {
       const fileName = normalizedInput.destination.fileName || metadata.displayName;
-      const authority = await requestFileAuthority({
-        libraryId,
-        operation: {
-          contentType: 'application/octet-stream',
-          fileName,
-          fileSize: metadata.sizeBytes,
-          includeCredentials: false,
-          operation: 'publish-library-file',
-          parentId: normalizedInput.destination.parentId,
-          ...(normalizedInput.destination.providerId
-            ? { providerId: normalizedInput.destination.providerId }
-            : {}),
-        },
-        ownerScope: context.ownerScope,
-        runId: context.preparationIdentity.runId,
-        sender: resolveSender(context.ownerWebContentsId),
-        sessionId: context.preparationIdentity.sessionId,
-        signal: context.signal,
-        toolRunId: context.preparationIdentity.toolRunId,
-      });
-      if (
-        authority.operation !== 'publish-library-file'
-        || authority.parent.id !== normalizedInput.destination.parentId
-        || authority.parent.libraryId !== libraryId
-      ) {
-        throw new Error('资料库发布目标与 Agent 请求不匹配');
+      const resolvedTarget = await resolveLibraryDestination(normalizedInput.destination, {
+        fileName,
+        sizeBytes: metadata.sizeBytes,
+      }, context);
+      const { authority, libraryId } = resolvedTarget;
+      if (authority.operation !== 'publish-library-file') {
+        throw new Error('Agent 资料库文件发布目标解析失败');
       }
       const defaultAction = normalizeAgentFilePublishPreparedActionPublicV1({
         conflictPolicy: normalizedInput.destination.conflictPolicy || 'rename',
@@ -872,7 +1206,7 @@ export function createAgentShellServiceRuntime(
         sizeBytes: metadata.sizeBytes,
         sourcePath: normalizedInput.sourcePath,
         suggestedFileName: fileName,
-        targetLabel: `资料库目录“${authority.parent.name}” / ${authority.providerLabel}`,
+        targetLabel: resolvedTarget.targetLabel,
         version: AGENT_FILE_PUBLISH_PREPARED_ACTION_VERSION,
       });
       if (defaultAction.destinationKind !== 'library') {
@@ -902,6 +1236,9 @@ export function createAgentShellServiceRuntime(
           sourcePath: normalizedInput.sourcePath,
           suggestedFileName: action.suggestedFileName,
           targetIdentity,
+          ...(resolvedTarget.directoryPath
+            ? { targetDirectoryPath: resolvedTarget.directoryPath }
+            : {}),
           workspaceId: workspace.workspaceId,
         },
         decision: {
@@ -927,6 +1264,9 @@ export function createAgentShellServiceRuntime(
           sizeBytes: metadata.sizeBytes,
           sourcePath: normalizedInput.sourcePath,
           targetIdentity,
+          ...(resolvedTarget.directoryPath
+            ? { targetDirectoryPath: resolvedTarget.directoryPath }
+            : {}),
           workspaceId: workspace.workspaceId,
         },
       };
@@ -1015,10 +1355,22 @@ export function createAgentShellServiceRuntime(
         || binding.contentHash !== action.contentHash
         || binding.suggestedFileName !== action.suggestedFileName
         || typeof binding.generation !== 'number'
+        || (binding.targetDirectoryPath !== undefined
+          && typeof binding.targetDirectoryPath !== 'string')
       ) {
         throw new Error('Agent 资料库文件发布 prepared binding 无效');
       }
       const sender = resolveSender(preparation.identity.ownerWebContentsId);
+      await revalidateResolvedLibraryPath({
+        ...(typeof binding.targetDirectoryPath === 'string'
+          ? { directoryPath: binding.targetDirectoryPath }
+          : {}),
+        identity: preparation.identity,
+        libraryId: action.libraryId,
+        parentId: action.parentId,
+        signal: context.signal,
+        targetIdentity: binding.targetIdentity,
+      });
       const authority = await requestFileAuthority({
         libraryId: action.libraryId,
         operation: {
@@ -1050,11 +1402,12 @@ export function createAgentShellServiceRuntime(
       const artifactId = `file-publish-${crypto.createHash('sha256').update(
         `${preparation.identity.runId}\u0000${preparation.identity.toolRunId}`,
       ).digest('hex')}`;
-      workspaceUploadGrants.set(artifactId, {
+      fileUploadGrants.set(artifactId, {
         artifactId,
         contentHash: action.contentHash,
         fileName: action.suggestedFileName,
         generation: binding.generation,
+        kind: 'workspace',
         logicalPath: action.sourcePath,
         owner,
         ownerWebContentsId: preparation.identity.ownerWebContentsId,
@@ -1132,7 +1485,7 @@ export function createAgentShellServiceRuntime(
       } catch (error) {
         rethrowSafeFileBridgeError(error, '无法将 Agent 输出发布到资料库');
       } finally {
-        workspaceUploadGrants.delete(artifactId);
+        fileUploadGrants.delete(artifactId);
       }
     }
     if (
@@ -1202,6 +1555,254 @@ export function createAgentShellServiceRuntime(
     };
   }
 
+  async function prepareFileUpload(
+    input: unknown,
+    requestedAction: AgentPreparedActionPublic | undefined,
+    context: Parameters<NonNullable<ReturnType<typeof createAgentFileBridgeTools>[number]['prepareMain']>>[2],
+  ) {
+    const normalizedInput = normalizeAgentFileUploadInputV1(input);
+    let opened: AgentOpenedLocalFile | null = null;
+    try {
+      opened = await openAgentLocalFile(normalizedInput.source.path, context.signal);
+      const { snapshot } = opened;
+      const outputFileName = normalizedInput.destination.fileName || snapshot.fileName;
+      const resolvedTarget = await resolveLibraryDestination(normalizedInput.destination, {
+        fileName: outputFileName,
+        sizeBytes: snapshot.statIdentity.sizeBytes,
+      }, context);
+      if (resolvedTarget.authority.operation !== 'publish-library-file') {
+        throw new Error('Agent 本机文件上传目标解析失败');
+      }
+      const authority = resolvedTarget.authority;
+      const defaultAction = normalizeAgentFileUploadPreparedActionPublicV1({
+        conflictPolicy: normalizedInput.destination.conflictPolicy || 'rename',
+        kind: AGENT_FILE_UPLOAD_PREPARED_ACTION_KIND,
+        libraryId: resolvedTarget.libraryId,
+        outputFileName,
+        parentId: authority.parent.id,
+        providerId: authority.providerId,
+        sourceDisplayName: snapshot.fileName,
+        sourceIdentity: snapshot.identityHash,
+        sourceKind: 'local-path',
+        sourcePath: snapshot.displayPath,
+        sourceSizeBytes: snapshot.statIdentity.sizeBytes,
+        targetLabel: resolvedTarget.targetLabel,
+        version: AGENT_FILE_UPLOAD_PREPARED_ACTION_VERSION,
+      });
+      const action = requestedAction === undefined
+        ? defaultAction
+        : normalizeAgentFileUploadPreparedActionPublicV1(requestedAction);
+      if (JSON.stringify(action) !== JSON.stringify(defaultAction)) {
+        throw new Error('Agent 本机文件上传来源或目标已经变化');
+      }
+      const targetIdentity = fileAuthorityNodeIdentity(authority.parent);
+      return {
+        binding: {
+          conflictPolicy: action.conflictPolicy,
+          kind: AGENT_FILE_UPLOAD_PREPARED_ACTION_KIND,
+          libraryId: action.libraryId,
+          localFileSnapshot: snapshot,
+          outputFileName: action.outputFileName,
+          parentId: action.parentId,
+          providerId: action.providerId,
+          targetIdentity,
+          ...(resolvedTarget.directoryPath
+            ? { targetDirectoryPath: resolvedTarget.directoryPath }
+            : {}),
+        },
+        decision: {
+          behavior: 'ask' as const,
+          preview: {
+            description: `将把本机文件“${snapshot.fileName}”原样上传到${action.targetLabel}。`,
+            details: [
+              { label: '来源', value: snapshot.displayPath },
+              { label: '文件名', value: action.outputFileName },
+              { label: '大小', value: `${snapshot.statIdentity.sizeBytes} bytes` },
+              { label: '位置', value: action.targetLabel },
+            ],
+            risk: 'write' as const,
+            title: '上传本机文件到资料库',
+          },
+          risk: 'write' as const,
+        },
+        publicAction: action,
+        snapshotMaterial: {
+          outputFileName: action.outputFileName,
+          sourceIdentity: snapshot.identityHash,
+          sourcePath: snapshot.displayPath,
+          targetIdentity,
+          ...(resolvedTarget.directoryPath
+            ? { targetDirectoryPath: resolvedTarget.directoryPath }
+            : {}),
+        },
+      };
+    } catch (error) {
+      rethrowSafeFileBridgeError(error, '无法准备本机文件上传');
+    } finally {
+      await opened?.fileHandle.close().catch(() => undefined);
+    }
+  }
+
+  async function executeFileUploadInternal(
+    context: AgentToolExecutionContext,
+  ): Promise<AgentToolResult> {
+    const preparation = context.preparation;
+    if (!preparation) throw new Error('Agent 本机文件上传缺少 prepared execution');
+    const action = normalizeAgentFileUploadPreparedActionPublicV1(preparation.publicAction);
+    const binding = bindingObject(context, AGENT_FILE_UPLOAD_PREPARED_ACTION_KIND);
+    if (
+      binding.libraryId !== action.libraryId
+      || binding.parentId !== action.parentId
+      || binding.providerId !== action.providerId
+      || binding.conflictPolicy !== action.conflictPolicy
+      || binding.outputFileName !== action.outputFileName
+      || typeof binding.targetIdentity !== 'string'
+      || (binding.targetDirectoryPath !== undefined
+        && typeof binding.targetDirectoryPath !== 'string')
+    ) {
+      throw new Error('Agent 本机文件上传 prepared binding 无效');
+    }
+    const expectedSnapshot = localFileSnapshotFromBinding(binding);
+    if (
+      expectedSnapshot.displayPath !== action.sourcePath
+      || expectedSnapshot.fileName !== action.sourceDisplayName
+      || expectedSnapshot.identityHash !== action.sourceIdentity
+      || expectedSnapshot.statIdentity.sizeBytes !== action.sourceSizeBytes
+    ) {
+      throw new Error('Agent 本机文件上传 prepared binding 无效');
+    }
+    await revalidateResolvedLibraryPath({
+      ...(typeof binding.targetDirectoryPath === 'string'
+        ? { directoryPath: binding.targetDirectoryPath }
+        : {}),
+      identity: preparation.identity,
+      libraryId: action.libraryId,
+      parentId: action.parentId,
+      signal: context.signal,
+      targetIdentity: binding.targetIdentity,
+    });
+    const authority = await requestFileAuthority({
+      libraryId: action.libraryId,
+      operation: {
+        contentType: 'application/octet-stream',
+        fileName: action.outputFileName,
+        fileSize: action.sourceSizeBytes,
+        includeCredentials: true,
+        operation: 'publish-library-file',
+        parentId: action.parentId,
+        providerId: action.providerId,
+      },
+      ownerScope: preparation.identity.ownerScope,
+      runId: preparation.identity.runId,
+      sender: resolveSender(preparation.identity.ownerWebContentsId),
+      sessionId: preparation.identity.sessionId,
+      signal: context.signal,
+      toolRunId: preparation.identity.toolRunId,
+    });
+    if (
+      authority.operation !== 'publish-library-file'
+      || !authority.credentials
+      || authority.parent.id !== action.parentId
+      || authority.parent.libraryId !== action.libraryId
+      || authority.providerId !== action.providerId
+      || fileAuthorityNodeIdentity(authority.parent) !== binding.targetIdentity
+    ) {
+      throw new Error('资料库上传目标在执行前已经变化，请重新准备');
+    }
+    const owner = ownerFor({
+      ownerScope: preparation.identity.ownerScope,
+      sessionId: preparation.identity.sessionId,
+    });
+    let opened: AgentOpenedLocalFile | null = null;
+    const artifactId = `file-upload-${crypto.createHash('sha256').update(
+      `${preparation.identity.runId}\u0000${preparation.identity.toolRunId}`,
+    ).digest('hex')}`;
+    try {
+      context.onProgress({ message: '正在验证本机文件' });
+      opened = await openAgentLocalFile(action.sourcePath, context.signal);
+      await verifyAgentLocalFileSnapshot(opened, expectedSnapshot);
+      fileUploadGrants.set(artifactId, {
+        artifactId,
+        fileName: action.outputFileName,
+        kind: 'local-path',
+        openedFile: opened,
+        owner,
+        ownerWebContentsId: preparation.identity.ownerWebContentsId,
+        runId: preparation.identity.runId,
+        sessionId: preparation.identity.sessionId,
+        sizeBytes: action.sourceSizeBytes,
+      });
+      context.onProgress({ message: '正在上传本机文件到资料库' });
+      const uploaded = await fileUploadManager.upload({
+        artifactId,
+        credentials: authority.credentials,
+        expectedUserId: resolveOwnerUserId(owner),
+        onProgress: (uploadedBytes, totalBytes) => {
+          if (totalBytes <= 0) return;
+          context.onProgress({
+            message: '正在上传本机文件到资料库',
+            percent: Math.max(1, Math.min(99, Math.floor((uploadedBytes / totalBytes) * 99))),
+          });
+        },
+        owner: {
+          executionId: preparation.identity.toolRunId,
+          ownerScope: preparation.identity.ownerScope,
+          ownerWebContentsId: preparation.identity.ownerWebContentsId,
+          runId: preparation.identity.runId,
+          sessionId: preparation.identity.sessionId,
+        },
+        signal: context.signal,
+        target: {
+          conflictPolicy: action.conflictPolicy === 'rename' ? 'auto_rename' : 'error',
+          contentType: 'application/octet-stream',
+          fileName: action.outputFileName,
+          libraryId: action.libraryId,
+          parentId: action.parentId,
+          storageProvider: action.providerId,
+        },
+      });
+      if (uploaded.commitState === 'commit_unknown') {
+        return {
+          data: {
+            destination: { kind: 'library', parentId: action.parentId },
+            uploadCommitState: 'commit_unknown',
+          },
+          message: '文件上传的提交状态暂时无法确认；请稍后检查目标目录，不要重复执行',
+          ok: false,
+        };
+      }
+      if (uploaded.commitState === 'uncommitted') {
+        return {
+          data: {
+            destination: { kind: 'library', parentId: action.parentId },
+            uploadCommitState: 'uncommitted',
+          },
+          message: '文件未能提交到资料库',
+          ok: false,
+        };
+      }
+      return {
+        data: {
+          destination: {
+            kind: 'library',
+            nodeId: uploaded.node.id,
+            parentId: action.parentId,
+          },
+          displayName: uploaded.node.name,
+          sizeBytes: action.sourceSizeBytes,
+          uploadCommitState: 'committed',
+        },
+        message: `已将“${uploaded.node.name}”上传到资料库`,
+        ok: true,
+      };
+    } catch (error) {
+      return rethrowSafeFileBridgeError(error, '无法将指定的本机文件上传到资料库');
+    } finally {
+      fileUploadGrants.delete(artifactId);
+      await opened?.fileHandle.close().catch(() => undefined);
+    }
+  }
+
   async function executeRun(
     context: AgentToolExecutionContext,
     executionController: AbortController,
@@ -1212,6 +1813,33 @@ export function createAgentShellServiceRuntime(
       ownerScope: preparation.identity.ownerScope,
       sessionId: preparation.identity.sessionId,
     });
+    const action = preparation.publicAction;
+    if (action.kind !== 'shell.run') throw new Error('Agent Shell prepared action 类型无效');
+    if (action.cwd.kind === 'host') {
+      // A host run deliberately bypasses the virtual workspace lifecycle. It
+      // still uses the same lease, preflight, supervisor, log and cancellation
+      // boundaries, but must never acquire workspace quota or cleanup rights.
+      const forwardAbort = () => executionController.abort();
+      if (context.signal.aborted) forwardAbort();
+      else context.signal.addEventListener('abort', forwardAbort, { once: true });
+      try {
+        return await runtime.run({
+          onEvent: (event) => {
+            if (event.kind !== 'state') return;
+            const message = shellProgressMessage(event.state);
+            if (message) context.onProgress({ message });
+          },
+          owner,
+          preparation,
+          runCapabilityIdentity: preparation.identity.runCapabilityIdentity,
+          signal: executionController.signal,
+          toolRunId: preparation.identity.toolRunId,
+          workspaceId: undefined,
+        });
+      } finally {
+        context.signal.removeEventListener('abort', forwardAbort);
+      }
+    }
     const entry = runWorkspaces.get(preparation.identity.runId);
     if (!entry || !sameOwner(entry.owner, owner)) {
       throw new Error('Agent Shell Run workspace 不存在或已释放');
@@ -1222,8 +1850,6 @@ export function createAgentShellServiceRuntime(
       error.name = 'AbortError';
       throw error;
     }
-    const action = preparation.publicAction;
-    if (action.kind !== 'shell.run') throw new Error('Agent Shell prepared action 类型无效');
     const executionQuota = await workspaceStore.beginExecutionQuota(
       workspace.workspaceId,
       executionGrowthBytes,
@@ -1338,17 +1964,28 @@ export function createAgentShellServiceRuntime(
 
   function execute(context: AgentToolExecutionContext): Promise<AgentShellRuntimeResult> {
     if (!accepting) return Promise.reject(new Error('Agent Shell Service 正在关闭'));
+    const runId = String(context.preparation?.identity.runId || '');
+    if (!runId) return Promise.reject(new Error('Agent Shell execution 缺少 Run 身份'));
+    if (releasedRunIds.has(runId)) return Promise.reject(new Error('Agent Shell Run 已经释放'));
     const executionController = new AbortController();
     activeExecutionControllers.add(executionController);
     const operation = executeRun(context, executionController);
+    const activeExecution = Object.freeze({
+      controller: executionController,
+      promise: operation,
+      runId,
+    });
+    activeShellExecutions.add(activeExecution);
     activeExecutions.add(operation);
     void operation.then(
       () => {
         activeExecutionControllers.delete(executionController);
+        activeShellExecutions.delete(activeExecution);
         activeExecutions.delete(operation);
       },
       () => {
         activeExecutionControllers.delete(executionController);
+        activeShellExecutions.delete(activeExecution);
         activeExecutions.delete(operation);
       },
     );
@@ -1389,6 +2026,10 @@ export function createAgentShellServiceRuntime(
     return executeFileBridge(context, executeFilePublishInternal);
   }
 
+  function executeFileUpload(context: AgentToolExecutionContext): Promise<AgentToolResult> {
+    return executeFileBridge(context, executeFileUploadInternal);
+  }
+
   function releaseRun(runId: string): Promise<void> {
     const normalizedRunId = String(runId || '');
     if (!normalizedRunId) return Promise.resolve();
@@ -1396,6 +2037,11 @@ export function createAgentShellServiceRuntime(
     if (currentRelease) return currentRelease;
     releasedRunIds.add(normalizedRunId);
     const release = (async () => {
+      const executions = Array.from(activeShellExecutions).filter(
+        execution => execution.runId === normalizedRunId,
+      );
+      executions.forEach(execution => execution.controller.abort());
+      await Promise.allSettled(executions.map(execution => execution.promise));
       const operations = Array.from(activeFileBridgeOperations).filter(
         operation => operation.runId === normalizedRunId,
       );
@@ -1421,7 +2067,7 @@ export function createAgentShellServiceRuntime(
       await processSupervisor.interruptAll();
       await Promise.allSettled(Array.from(activeExecutions));
       await Promise.allSettled(Array.from(activeFileBridgeOperations, operation => operation.promise));
-      workspaceUploadGrants.clear();
+      fileUploadGrants.clear();
       const releases = Array.from(runWorkspaces.keys()).map(runId => releaseRun(runId));
       await Promise.allSettled(releases);
     })();
@@ -1433,11 +2079,13 @@ export function createAgentShellServiceRuntime(
     execute,
     executeFilePublish,
     executeFileStage,
+    executeFileUpload,
     getPermissionMode: permissionMode,
     getProviderSnapshot: () => options.providerRegistry.getSnapshot(),
     prepare,
     prepareFilePublish,
     prepareFileStage,
+    prepareFileUpload,
     releaseRun,
   });
 }
@@ -1484,11 +2132,15 @@ export async function initializeAgentShellServiceRuntime(): Promise<boolean> {
     const fileBridgeTools = createAgentFileBridgeTools({
       executePublish: context => runtime.executeFilePublish(context),
       executeStage: context => runtime.executeFileStage(context),
+      executeUpload: context => runtime.executeFileUpload(context),
       preparePublish: (input, requestedAction, context) => (
         runtime.prepareFilePublish(input, requestedAction, context)
       ),
       prepareStage: (input, requestedAction, context) => (
         runtime.prepareFileStage(input, requestedAction, context)
+      ),
+      prepareUpload: (input, requestedAction, context) => (
+        runtime.prepareFileUpload(input, requestedAction, context)
       ),
     });
     const tools = [tool, ...fileBridgeTools];

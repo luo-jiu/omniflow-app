@@ -10,6 +10,24 @@ vi.mock('@/features/file-explorer/services/file.api', () => mocks);
 import { readAgentPerception } from './agent-context.api';
 
 describe('readAgentPerception', () => {
+  it('includes only safe storage identity and availability, deduplicating node probes', async () => {
+    const node = { id: 8, name: 'video.mp4', type: 'file', storageProvider: 'win', storageProviderLabel: 'Win', secretKey: 'private' };
+    mocks.getChildrenByNodeId.mockResolvedValue([node]);
+    mocks.fetchNodeDetailById.mockResolvedValue(node);
+    const checkStorage = vi.fn(async () => ({ available: false, status: 'error' as const, message: 'private endpoint' }));
+    const result = await readAgentPerception({ currentDirectory: { id: 10, name: 'fixture' }, libraryId: 3, platform: 'darwin', selectedNodeIds: [8] }, { checkStorage });
+    expect(result.selectedNodes[0].storage).toMatchObject({ providerAlias: 'win', providerLabel: 'Win', availability: 'unavailable' });
+    expect(checkStorage).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(result)).not.toContain('private');
+  });
+  it('preserves the directory total and marks a bounded snapshot incomplete', async () => {
+    mocks.getChildrenByNodeId.mockResolvedValue(Array.from({ length: 201 }, (_, index) => ({
+      id: index + 1000, name: `file-${index}`, type: 'file',
+    })));
+    const result = await readAgentPerception({ currentDirectory: { id: 99, name: 'fixture' }, libraryId: 3, platform: 'darwin', selectedNodeIds: [] });
+    expect(result.currentDirectory).toMatchObject({ entryCount: 201, truncated: true });
+    expect(result.currentDirectory?.entries).toHaveLength(200);
+  });
   beforeEach(() => {
     mocks.fetchNodeDetailById.mockReset();
     mocks.getChildrenByNodeId.mockReset();

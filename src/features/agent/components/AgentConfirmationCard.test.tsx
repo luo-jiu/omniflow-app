@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type {
   AgentFilePublishPreparedActionPublicV1,
   AgentFileStagePreparedActionPublicV1,
+  AgentFileUploadPreparedActionPublicV1,
   AgentMediaExtractAudioPreparedActionPublicV1,
   AgentPreparedActionPublic,
   AgentShellPreparedActionPublicV1,
@@ -71,7 +72,7 @@ function approval(action?: unknown): AgentToolApprovalSnapshot {
   };
 }
 
-function shellAction(): AgentShellPreparedActionPublicV1 {
+function shellAction(command = 'pwd\nprintf "done"'): AgentShellPreparedActionPublicV1 {
   return {
     aiDestination: {
       identityHash: `v1:${'a'.repeat(64)}`,
@@ -85,7 +86,7 @@ function shellAction(): AgentShellPreparedActionPublicV1 {
       risk: 'read',
       unresolved: [],
     },
-    command: 'pwd\nprintf "done"',
+    command,
     commandHash: `sha256:${'b'.repeat(64)}`,
     cwd: { kind: 'run-workspace', path: 'work' },
     dataScope: { stagedInputs: [], unresolvedWorkspaceRead: false },
@@ -97,11 +98,43 @@ function shellAction(): AgentShellPreparedActionPublicV1 {
   };
 }
 
-function fileStageAction(): AgentFileStagePreparedActionPublicV1 {
+function fileStageAction(
+  sourceKind: 'local-path' | 'local-picker' = 'local-picker',
+): AgentFileStagePreparedActionPublicV1 {
+  if (sourceKind === 'local-path') {
+    return {
+      kind: 'file.stage',
+      sourceDisplayName: 'frontend-separation-playbook.md',
+      sourceIdentity: `sha256:${'d'.repeat(64)}`,
+      sourceKind,
+      sourcePath: '~/Downloads/frontend-separation-playbook.md',
+      sourceSizeBytes: 1024,
+      targetLabel: '当前任务 input 目录',
+      version: 1,
+    };
+  }
   return {
     kind: 'file.stage',
-    sourceKind: 'local-picker',
+    sourceKind,
     targetLabel: '当前任务 input 目录',
+    version: 1,
+  };
+}
+
+function fileUploadAction(): AgentFileUploadPreparedActionPublicV1 {
+  return {
+    conflictPolicy: 'rename',
+    kind: 'file.upload',
+    libraryId: 3,
+    outputFileName: 'frontend-separation-playbook.md',
+    parentId: 10,
+    providerId: 'local-minio',
+    sourceDisplayName: 'frontend-separation-playbook.md',
+    sourceIdentity: `sha256:${'e'.repeat(64)}`,
+    sourceKind: 'local-path',
+    sourcePath: '~/Downloads/frontend-separation-playbook.md',
+    sourceSizeBytes: 1024,
+    targetLabel: '资料库路径“/文档/提示词” / 本机 MinIO',
     version: 1,
   };
 }
@@ -147,6 +180,16 @@ afterEach(() => {
 });
 
 describe('AgentConfirmationCard', () => {
+  it('allows changing a local default to a library target without guessing a parent node', () => {
+    const action = mediaAction({ destination: 'local', fallbackPolicy: 'none', targetLabel: '本机' });
+    delete action.parentId;
+    const { renderer } = renderCard(approval(action));
+    const library = renderer.root.findAllByType('button').find(button => textContent(button) === '资料库')!;
+    expect(library.props.disabled).toBe(false);
+    act(() => library.props.onClick());
+    expect(textContent(renderer.root)).toContain('选择资料库目录');
+    expect(renderer.root.findAllByType('button').find(button => textContent(button) === '允许')!.props.disabled).toBe(true);
+  });
   it('shows the complete immutable Shell action and allows approval without an editable draft', () => {
     const input = approval(shellAction());
     input.call = { id: 'call-shell', input: { command: 'pwd' }, name: 'shell.run' };
@@ -162,19 +205,45 @@ describe('AgentConfirmationCard', () => {
     expect(onResolve).toHaveBeenCalledWith(true, undefined);
   });
 
+  it('uses the safe Shell display projection for control and bidi characters', () => {
+    const input = approval(shellAction("printf 'a  b'\tline\nnext\u001b\u202e"));
+    input.call = { id: 'call-shell', input: {}, name: 'shell.run' };
+    const { renderer } = renderCard(input);
+    const command = renderer.root.findByProps({ className: 'agent-confirmation-shell-command' });
+
+    expect(textContent(command)).toBe("printf 'a  b'\\tline\\nnext\\u001b\\u202e");
+  });
+
   it.each([
     ['file.stage', fileStageAction()],
+    ['file.stage local path', fileStageAction('local-path')],
     ['file.publish', filePublishAction()],
-  ])('supports the immutable %s prepared action on the generic preview path', (toolName, action) => {
+    ['file.upload', fileUploadAction()],
+  ])('supports the immutable %s prepared action on the generic preview path', (label, action) => {
     const input = approval(action);
-    input.call = { id: `call-${toolName}`, input: {}, name: toolName };
-    input.preview.details = [{ label: '位置', value: action.targetLabel }];
+    input.call = { id: `call-${label}`, input: {}, name: action.kind };
+    input.preview.title = action.kind === 'file.upload'
+      ? '上传本机文件到资料库'
+      : action.kind === 'file.publish'
+        ? '保存 Agent 输出'
+        : action.sourceKind === 'local-picker'
+          ? '选择并暂存文件'
+          : '暂存本机文件';
+    input.preview.details = [
+      ...('sourcePath' in action ? [{ label: '来源', value: action.sourcePath }] : []),
+      { label: '位置', value: action.targetLabel },
+    ];
     const { onResolve, renderer } = renderCard(input);
     const allow = renderer.root.findAllByType('button')
       .find(button => textContent(button) === '允许');
 
     expect(renderer.root.findAllByProps({ role: 'alert' })).toHaveLength(0);
+    expect(textContent(renderer.root)).toContain(input.preview.title);
     expect(textContent(renderer.root)).toContain(action.targetLabel);
+    if ('sourcePath' in action) {
+      expect(textContent(renderer.root)).toContain(action.sourcePath);
+    }
+    expect(renderer.root.findAllByProps({ 'data-testid': 'library-node-picker' })).toHaveLength(0);
     expect(allow?.props.disabled).toBe(false);
     act(() => allow?.props.onClick());
     expect(onResolve).toHaveBeenCalledWith(true, undefined);

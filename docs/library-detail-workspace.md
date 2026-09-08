@@ -11,7 +11,7 @@
 
 - 文件树侧栏
 - 文件预览
-- 搜索主页
+- 内置 Agent 默认工作区（内部兼容状态名为 `search-home`）
 - 内置浏览器
 - 浏览器资源面板和下载导入
 - 系统工作区视图（设置、个人主页、上传中心、回收站等）
@@ -101,6 +101,8 @@
 - `DirectorySidebar`
   - 文件树与选择入口
   - 将当前资料库根节点 ID 独立投影给页面 owner；该投影不依赖用户先选择目录，供工具区保存目标和 Agent 上下文回退使用
+- `AgentWorkspace`
+  - 当前 `search-home` 的实际内容，持有 Agent 页面编排并消费 main 的会话投影
 - `SearchWorkspace`
   - 搜索主页和搜索模式切换
 - `EmbeddedBrowserPanel`
@@ -115,13 +117,15 @@
 
 ### 4.1 `search-home`
 
-表示当前显示搜索主页，不显示文件预览，也不显示浏览器页面。
+表示当前显示内置 Agent 默认工作区，不显示文件预览、工具区、系统视图或浏览器页面。`search-home` 是兼容状态名，不得据此重新接回旧 `SearchWorkspace`，也不得新增并行的 `agent-home` 模式。
 
 典型进入路径：
 
 - 页面初始无 active file / 无 browser
-- 文件模式返回搜索主页
-- 搜索模式明确切回主页
+- 点击主内容头部的主页 / 网格按钮
+- 文件或系统模式在没有可恢复目标时回到默认 Agent 工作区
+
+现有 `showSearchHome`、`searchMode` 和“搜索主页”tooltip 等名称属于旧兼容命名；修改相关 UI 时可以收敛显示文案，但不能改变 `search-home` 作为当前 Agent 落点的状态语义。
 
 ### 4.2 `file-viewer`
 
@@ -192,9 +196,9 @@
 - 系统视图按类型唯一；再次打开同一视图时聚焦已有 tab，打开不同系统视图时可以和普通文件 tab 并存在同一条工作区 tab 栏里，且支持和普通文件 tab 混排拖拽。
 - 系统 tab 只和文件 tab 共用视觉容器，不进入 `FileViewerContext`，也不进入浏览器 tab 列表；系统视图状态仍由 `library detail` 页面层持有。
 - 工作区 tab 的视觉顺序由 `library detail` 页面层统一维护；新打开的文件 tab 和系统 tab 都追加到最右侧，不能让文件 tab 与系统 tab 各自按不同默认分组插入。
-- 关闭 system tab 或点击系统视图内部关闭按钮后，优先回到打开前的工作区模式；来源不可用时按现有 fallback 回到文件模式或搜索主页。
+- 关闭 system tab 或点击系统视图内部关闭按钮后，优先回到打开前的工作区模式；来源不可用时按现有 fallback 回到文件模式或 Agent 默认工作区。
 - 第一版不持久化 `systemWorkspaceTabs` / `activeSystemWorkspaceView`；刷新 / 重启后不会自动恢复到设置或上传视图。
-- 切到文件、搜索主页或工具区时，已打开的系统 tab 不会被自动清空；用户需要通过 tab 的 `x` 或视图内部关闭按钮显式关闭。
+- 切到文件、Agent 默认工作区或工具区时，已打开的系统 tab 不会被自动清空；用户需要通过 tab 的 `x` 或视图内部关闭按钮显式关闭。
 - 浏览器模式仍使用浏览器自己的 tab 栏；切回文件 / 系统工作区后，普通文件 tab 和系统 tab 会重新显示在同一条工作区 tab 栏里。
 
 入口规则：
@@ -243,8 +247,8 @@
 
 主内容头部按钮只表达页面级工作区模式，不单独创造第二份状态：
 
-- 搜索主页按钮在 `workspaceDisplayMode = search-home` 时高亮。
-- 文件按钮只在 `workspaceDisplayMode = file-viewer` 时高亮；如果没有活动文件 tab，它会禁用，避免和搜索主页产生同页但双入口的歧义。
+- Agent 主页按钮在 `workspaceDisplayMode = search-home` 时高亮。
+- 文件按钮只在 `workspaceDisplayMode = file-viewer` 时高亮；如果没有活动文件 tab，它会禁用，避免和 Agent 默认工作区产生同页但双入口的歧义。
 - 归档返回按钮会替代文件按钮位置，但只保留绿色返回箭头，不复用模式按钮的 active 背景。
 - 工具按钮在 `workspaceDisplayMode = tools` 时高亮。
 - 浏览器入口进入浏览器后会被浏览器 tab 栏替代，不做常驻高亮。
@@ -369,7 +373,7 @@
 - `setBrowserModeOpen(false)`
 - `deactivate()` 原生浏览器 view
 - 若当前有 active file，则切到 `file-viewer`
-- 否则回 `search-home(files)`
+- 否则回 `search-home`；括号中的旧 `searchMode` 只保留兼容数据，不改变当前 Agent 页面
 
 这说明“回到文件区”本质上是工作区级切换，而不是只把浏览器组件隐藏掉。
 
@@ -477,5 +481,5 @@
 后续如果继续治理这页，优先方向应该是：
 
 - 固定“哪些状态是页面 owner，哪些只是子组件消费”
-- 把浏览器、文件预览、搜索主页之间的切换规则继续显式化
+- 把浏览器、文件预览、Agent 默认工作区之间的切换规则继续显式化
 - 避免把页面级复合动作拆成多个互相不知道对方的局部 `setState`

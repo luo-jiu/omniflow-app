@@ -14,14 +14,15 @@ import type {
   AgentToolApprovalSnapshot,
 } from '@/shared/agent/agent.types';
 import { normalizeAgentPreparedActionPublic } from '@/shared/agent/agent-prepared-action';
+import { formatAgentShellCommandForDisplay } from '../agent-shell-command-display';
 
 const ConfirmationCard = styled.article`
   width: min(620px, 100%);
   align-self: flex-start;
-  padding: 14px;
-  border: 1px solid color-mix(in srgb, var(--semi-color-warning) 42%, var(--app-border));
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--semi-color-warning-light-default) 35%, var(--app-bg-elevated));
+  padding: 4px 3px 8px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 
   .agent-confirmation-heading {
     display: flex;
@@ -30,14 +31,14 @@ const ConfirmationCard = styled.article`
   }
 
   .agent-confirmation-icon {
-    width: 32px;
-    height: 32px;
+    width: 20px;
+    height: 20px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     flex: none;
     border-radius: var(--app-radius-small);
-    background: color-mix(in srgb, var(--semi-color-warning) 14%, transparent);
+    background: transparent;
     color: var(--semi-color-warning);
   }
 
@@ -135,6 +136,8 @@ const ConfirmationCard = styled.article`
     line-height: 1.5;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
+    direction: ltr;
+    unicode-bidi: isolate;
   }
 
   .agent-confirmation-destination {
@@ -271,25 +274,15 @@ function isFileBridgePreparedAction(
   if (!action) return false;
   try {
     const normalized = normalizeAgentPreparedActionPublic(action);
-    return (normalized.kind === 'file.stage' || normalized.kind === 'file.publish')
+    return (
+      normalized.kind === 'file.stage'
+      || normalized.kind === 'file.publish'
+      || normalized.kind === 'file.upload'
+    )
       && normalized.version === 1;
   } catch {
     return false;
   }
-}
-
-function formatAgentShellCommandForApproval(command: string): string {
-  return Array.from(command).map((character) => {
-    if (character === '\\') return '\\\\';
-    if (character === '\n') return '\\n';
-    if (character === '\r') return '\\r';
-    if (character === '\t') return '\\t';
-    const code = character.codePointAt(0) || 0;
-    if (code < 0x20 || code === 0x7f) {
-      return `\\u${code.toString(16).padStart(4, '0')}`;
-    }
-    return character;
-  }).join('');
 }
 
 function replaceOutputExtension(fileName: string, format: string): string {
@@ -333,10 +326,9 @@ export default function AgentConfirmationCard({
   const unsupportedPreparation = Boolean(
     preparation && !initialAction && !shellAction && !fileBridgeAction,
   );
-  const libraryAvailable = initialAction?.destination === 'library';
   const libraryTargetRef = React.useRef<LibraryTargetDraft>({
     parentId: initialAction?.parentId,
-    targetLabel: initialAction?.targetLabel || '当前目录',
+    targetLabel: initialAction?.destination === 'library' ? initialAction.targetLabel : '选择资料库目录',
   });
 
   React.useEffect(() => {
@@ -427,7 +419,7 @@ export default function AgentConfirmationCard({
         ) : shellAction ? (
           <div className="agent-confirmation-shell">
             <pre className="agent-confirmation-shell-command">
-              {formatAgentShellCommandForApproval(shellAction.command)}
+              {formatAgentShellCommandForDisplay(shellAction.command)}
             </pre>
             <dl>
               <dt>Provider</dt>
@@ -451,7 +443,7 @@ export default function AgentConfirmationCard({
             <div className="agent-confirmation-destination" role="group" aria-label="保存位置">
               <button
                 data-active={preparedAction.destination === 'library'}
-                disabled={busy || !libraryAvailable}
+                disabled={busy}
                 onClick={() => updateDestination('library')}
                 type="button"
               >
@@ -548,7 +540,8 @@ export default function AgentConfirmationCard({
           </button>
           <button
             className="agent-confirmation-allow"
-            disabled={busy || unsupportedPreparation || Boolean(initialAction && !preparedAction)}
+            disabled={busy || unsupportedPreparation || Boolean(initialAction && !preparedAction)
+              || (preparedAction?.destination === 'library' && !(Number.isSafeInteger(preparedAction.parentId) && Number(preparedAction.parentId) > 0))}
             onClick={() => onResolve(true, shellAction ? undefined : preparedAction)}
             type="button"
           >

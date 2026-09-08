@@ -6,6 +6,7 @@ import type { WebContents } from 'electron';
 import type {
   AgentActionPreview,
   AgentAppContext,
+  AgentAssistantItemSnapshot,
   AgentChatRequest,
   AgentChatStartResult,
   AgentChatStreamEvent,
@@ -27,6 +28,7 @@ import type {
   AgentMediaAudioExtractionRequest,
   AgentMediaAudioExtractionResult,
   AgentMessage,
+  AgentNonAssistantMessage,
   AgentMediaInspectionRequest,
   AgentOwnerScope,
   AgentPreparedActionPublic,
@@ -59,15 +61,34 @@ import {
   resolveAIServiceOutputTokenLimit,
   type AIServiceRuntimeConnection,
 } from '../aiServiceClientModel';
-import { appendBoundedAIServiceStreamText } from '../aiServiceStreamLimits';
+import {
+  AIServiceStreamLimitError,
+  appendBoundedAIServiceStreamText,
+} from '../aiServiceStreamLimits';
 import { aiServiceRunSessionRegistry } from '../aiServiceRunSession';
 import { getAIServiceRuntimeProfile } from '../aiServiceStore';
 import { streamAgentProviderTurn } from './agent-provider-client';
-import type { AgentProviderMessage, AgentProviderToolCall } from './agent-provider-model';
+import {
+  AGENT_PROVIDER_TOOL_CALL_ID_MAX_LENGTH,
+  type AgentProviderMessage,
+  type AgentProviderToolCall,
+} from './agent-provider-model';
+import {
+  appendAgentActiveToolResult,
+  compactAgentActiveContextToFit,
+  markAgentActiveToolResultsConsumed,
+  type AgentActiveToolResultRecord,
+} from './agent-active-context';
+import {
+  AGENT_ACTIVE_CONTEXT_SUMMARY_MAX_CHARACTERS,
+  AGENT_ACTIVE_CONTEXT_SUMMARY_MAX_OUTPUT_TOKENS,
+  AGENT_ACTIVE_CONTEXT_SUMMARY_SYSTEM_PROMPT,
+  buildAgentActiveContextSummaryPayload,
+  normalizeAgentActiveContextSummary,
+} from './agent-active-context-summary';
 import { createAgentContextManager, type AgentContextManager } from './agent-context-manager';
 import {
   assertAgentCurrentRunFitsContext,
-  assertAgentProviderTurnFitsContext,
   estimateAgentFixedInputTokens,
   estimateAgentProviderMessagesTokens,
   estimateAgentProviderTurnTokens,
@@ -76,6 +97,10 @@ import {
   resolveAgentContextBudget,
   type AgentContextBudget,
 } from './agent-context-projection';
+import { resolveAgentModelContextBudget } from './agent-model-context';
+import { agentFileAuthorityBroker, type AgentFileAuthorityBrokerRequestInput } from './agent-file-authority-broker';
+import { normalizeAgentLibraryReadResult, type AgentLibraryReadResult } from '../../../src/shared/agent/agent-library-query';
+import { agentModelCatalog } from './agent-model-catalog';
 import {
   buildAgentFallbackContextMessages,
   buildAgentFallbackSystemPrompt,
@@ -110,7 +135,7 @@ import {
   normalizeAgentInteractionRequest,
   normalizeAgentInteractionResponse,
 } from './agent-interaction-model';
-import { assessAgentToolPermission } from './agent-permission-gate';
+import { assessAgentToolPermission, resolveAgentRunPermissionDecision } from './agent-permission-gate';
 import {
   containsAgentSensitiveData,
   sanitizeAgentSensitiveText,
@@ -192,13 +217,19 @@ import type {
   AgentShellLogPageRequestV1,
   AgentShellLogPageV1,
 } from '@/shared/agent/shell/agent-shell.types';
+import { AGENT_SHELL_RUN_TOOL_NAME } from '../../../src/shared/agent/shell/agent-shell.types';
 
-const MAX_TOOL_CALLS = 8;
-// One Skill activation turn, eight serial business Tool turns, then a final answer.
-const MAX_PROVIDER_TURNS = 10;
+const AGENT_TOOL_PROGRESS_MAX_CYCLE_LENGTH = 8;
+const AGENT_TOOL_PROGRESS_REQUIRED_CYCLE_REPETITIONS = 3;
+const AGENT_TOOL_PROGRESS_HISTORY_LIMIT = (
+  AGENT_TOOL_PROGRESS_MAX_CYCLE_LENGTH * AGENT_TOOL_PROGRESS_REQUIRED_CYCLE_REPETITIONS
+);
 const MAX_ASSISTANT_TURN_CHARACTERS = 64_000;
 const MAX_ASSISTANT_RUN_CHARACTERS = 64_000;
-const MAX_PROVIDER_TOOL_RESULT_TOKENS = 1_024;
+const MAX_AGENT_PROVIDER_OUTPUT_TOKENS = Math.floor(MAX_ASSISTANT_TURN_CHARACTERS / 4);
+const DEFAULT_PROVIDER_TOOL_RESULT_TOKENS = 1_024;
+const SKILL_PROVIDER_TOOL_RESULT_TOKENS = 10_000;
+const SHELL_PROVIDER_TOOL_RESULT_TOKENS = 40_000;
 const MAX_AGENT_MODEL_CHARACTERS = 200;
 const MAX_AGENT_PROFILE_ID_CHARACTERS = 200;
 const MAX_AGENT_SESSION_ID_CHARACTERS = 200;
@@ -220,6 +251,7 @@ const AVAILABLE_PERCEPTION_BUDGET_PROBE: AgentPerceptionSnapshot = {
 ensureBuiltInAgentCapabilities();
 
 interface ActiveAgentRun {
+  assistantWriter?: AgentAssistantTurnWriter;
   controller: AbortController;
   ownerWebContentsId: number;
   runId: string;
@@ -307,6 +339,8 @@ interface AgentMediaArtifactFallbackGrant {
 }
 
 interface AgentOrchestratorOptions {
+  readLibraryMetadata?: (input: AgentFileAuthorityBrokerRequestInput) => Promise<AgentLibraryReadResult>;
+  getPermissionMode?: () => AgentRunCapabilitySnapshot['shellPermissionMode'];
   approvalTimeoutMs?: number;
   contextBudget?: Partial<AgentContextBudget>;
   contextManager?: AgentContextManager;
@@ -324,6 +358,7 @@ interface AgentOrchestratorOptions {
     input: AgentCapabilitySnapshotRequest,
   ) => Promise<AgentCapabilitySnapshot>;
   resolveContextBudget?: (input: {
+    baseUrl: string;
     model: string;
     providerType: AIServiceRuntimeConnection['providerType'];
   }) => Partial<AgentContextBudget> | undefined;
@@ -336,6 +371,38 @@ interface AgentOrchestratorOptions {
 
 function now(): string {
   return new Date().toISOString();
+}
+
+function resolveAgentProviderOutputTokens(contextBudget: AgentContextBudget): number {
+  return Math.min(contextBudget.outputReserveTokens, MAX_AGENT_PROVIDER_OUTPUT_TOKENS);
+}
+
+function claimUniqueAgentToolCallId(
+  preferredId: string,
+  seenIds: Set<string>,
+  roundOrdinal: number,
+  callOrdinal: number,
+): string {
+  const base = String(preferredId || `tool-call-${roundOrdinal}-${callOrdinal}`)
+    .slice(0, AGENT_PROVIDER_TOOL_CALL_ID_MAX_LENGTH);
+  if (!seenIds.has(base)) {
+    seenIds.add(base);
+    return base;
+  }
+
+  for (let attempt = 1; attempt <= seenIds.size + 1; attempt += 1) {
+    const suffix = `-${roundOrdinal}-${callOrdinal}-${attempt}`
+      .slice(-AGENT_PROVIDER_TOOL_CALL_ID_MAX_LENGTH);
+    const candidate = `${base.slice(
+      0,
+      AGENT_PROVIDER_TOOL_CALL_ID_MAX_LENGTH - suffix.length,
+    )}${suffix}`;
+    if (seenIds.has(candidate)) continue;
+    seenIds.add(candidate);
+    return candidate;
+  }
+
+  throw new Error('Agent 无法分配唯一的 Tool 调用 ID');
 }
 
 function resolveOwnerUserId(ownerScope: AgentOwnerScope): number {
@@ -446,7 +513,19 @@ function normalizePerception(
     const type = source.type === 'dir' || source.type === 'file' ? source.type : null;
     if (!type) return null;
     const fileSize = Number(source.fileSize);
+    const storage = source.storage && typeof source.storage === 'object' && !Array.isArray(source.storage)
+      ? source.storage as Record<string, unknown> : undefined;
+    const providerAlias = sanitizeAgentSensitiveText(String(storage?.providerAlias || '')).trim().slice(0, 160);
+    const providerLabel = sanitizeAgentSensitiveText(String(storage?.providerLabel || '')).trim().slice(0, 160);
+    const availability: 'available' | 'unavailable' | 'unknown' = storage?.availability === 'available'
+      || storage?.availability === 'unavailable' ? storage.availability : 'unknown';
     return {
+      ...(providerAlias ? { storage: {
+        providerAlias,
+        ...(providerLabel ? { providerLabel } : {}),
+        availability,
+        ...(typeof storage?.observedAt === 'string' ? { observedAt: storage.observedAt.slice(0, 80) } : {}),
+      } } : {}),
       ...(source.ext ? { ext: String(source.ext).slice(0, 80) } : {}),
       ...(Number.isFinite(fileSize) && fileSize >= 0 ? { fileSize } : {}),
       id,
@@ -470,11 +549,19 @@ function normalizePerception(
     : [];
   const directoryId = Number(input.currentDirectory?.id);
   const directoryName = String(input.currentDirectory?.name || '').trim();
+  const suppliedCount = input.currentDirectory?.entryCount;
+  const entryCount = Math.max(
+    entries.length,
+    typeof suppliedCount === 'number' && Number.isSafeInteger(suppliedCount) && suppliedCount >= 0
+      ? suppliedCount : 0,
+    Array.isArray(input.currentDirectory?.entries) ? input.currentDirectory.entries.length : 0,
+  );
   return {
     ...(Number.isFinite(directoryId) && directoryId > 0 && directoryName
       ? {
           currentDirectory: {
-            entryCount: entries.length,
+            entryCount,
+            truncated: input.currentDirectory?.truncated === true || entryCount > entries.length,
             entries,
             id: directoryId,
             name: directoryName.slice(0, 500),
@@ -531,10 +618,10 @@ function normalizeAgentErrorMessage(error: unknown, fallback: string): string {
 function createMessage(
   sessionId: string,
   runId: string,
-  role: AgentMessage['role'],
+  role: AgentNonAssistantMessage['role'],
   content: string,
   tool?: { callId: string; name: string },
-): AgentMessage {
+): AgentNonAssistantMessage {
   return {
     content,
     createdAt: now(),
@@ -543,6 +630,64 @@ function createMessage(
     runId,
     sessionId,
     ...(tool ? { toolCallId: tool.callId, toolName: tool.name } : {}),
+  };
+}
+
+interface AgentAssistantTurnWriterSnapshot {
+  content: string;
+  expectedRevision: number;
+  id: string;
+}
+
+interface AgentAssistantTurnWriter {
+  append: (delta: string) => number;
+  close: () => AgentAssistantTurnWriterSnapshot;
+  discard: () => AgentAssistantTurnWriterSnapshot;
+  getSnapshot: () => AgentAssistantItemSnapshot;
+}
+
+async function createAgentAssistantTurnWriter(
+  store: AgentSessionStore,
+  runId: string,
+): Promise<AgentAssistantTurnWriter> {
+  const item = await store.startAssistantItem({
+    id: crypto.randomUUID(),
+    now: now(),
+    runId,
+  });
+  let liveContent = '';
+  let closed = false;
+  const getSnapshot = (): AgentAssistantItemSnapshot => ({
+    ...item,
+    content: liveContent,
+  });
+  const snapshot = (content: string): AgentAssistantTurnWriterSnapshot => ({
+    content,
+    expectedRevision: item.assistantItem.revision,
+    id: item.id,
+  });
+
+  return {
+    append(delta) {
+      if (closed) throw new Error('Agent assistant turn 已关闭');
+      const offset = liveContent.length;
+      liveContent = appendBoundedAIServiceStreamText(
+        liveContent,
+        delta,
+        MAX_ASSISTANT_TURN_CHARACTERS,
+        'Agent 单轮回答',
+      );
+      return offset;
+    },
+    close() {
+      closed = true;
+      return snapshot(liveContent);
+    },
+    discard() {
+      closed = true;
+      return snapshot('');
+    },
+    getSnapshot,
   };
 }
 
@@ -582,11 +727,97 @@ function stableJson(value: unknown): string {
   return serialized === undefined ? 'null' : serialized;
 }
 
+const AGENT_SHELL_PROGRESS_VOLATILE_DATA_FIELDS = new Set([
+  'durationMs',
+  'executionId',
+  'logRef',
+]);
+
+interface AgentToolTurnProgressEntry {
+  input: unknown;
+  name: string;
+  result: unknown;
+}
+
+function projectAgentToolTurnProgressEntry(
+  entry: AgentToolTurnProgressEntry,
+): AgentToolTurnProgressEntry {
+  if (entry.name !== AGENT_SHELL_RUN_TOOL_NAME) return entry;
+  const result = entry.result;
+  if (!result || typeof result !== 'object' || Array.isArray(result)) return entry;
+  const resultData = (result as Record<string, unknown>).data;
+  if (!resultData || typeof resultData !== 'object' || Array.isArray(resultData)) return entry;
+  return {
+    ...entry,
+    result: {
+      ...(result as Record<string, unknown>),
+      data: Object.fromEntries(
+        Object.entries(resultData as Record<string, unknown>)
+          .filter(([key]) => !AGENT_SHELL_PROGRESS_VOLATILE_DATA_FIELDS.has(key)),
+      ),
+    },
+  };
+}
+
 function hashToolInput(value: unknown): string {
   return crypto.createHash('sha256').update(stableJson(value)).digest('hex');
 }
 
+function hashAgentToolTurnProgress(entries: AgentToolTurnProgressEntry[]): string {
+  return hashToolInput(entries.map(projectAgentToolTurnProgressEntry));
+}
+
+function hasRepeatedAgentToolProgressCycle(history: readonly string[]): boolean {
+  for (
+    let cycleLength = 1;
+    cycleLength <= AGENT_TOOL_PROGRESS_MAX_CYCLE_LENGTH;
+    cycleLength += 1
+  ) {
+    const repeatedLength = cycleLength * AGENT_TOOL_PROGRESS_REQUIRED_CYCLE_REPETITIONS;
+    if (history.length < repeatedLength) continue;
+    const cycleStart = history.length - cycleLength;
+    let matches = true;
+    for (
+      let repetition = 2;
+      repetition <= AGENT_TOOL_PROGRESS_REQUIRED_CYCLE_REPETITIONS && matches;
+      repetition += 1
+    ) {
+      const repeatedStart = history.length - (cycleLength * repetition);
+      for (let offset = 0; offset < cycleLength; offset += 1) {
+        if (history[repeatedStart + offset] !== history[cycleStart + offset]) {
+          matches = false;
+          break;
+        }
+      }
+    }
+    if (matches) return true;
+  }
+  return false;
+}
+
+interface AgentProviderToolResultPolicy {
+  maxTokens: number;
+  projectionOptions?: { mode: 'shell' };
+}
+
+function resolveAgentProviderToolResultPolicy(
+  canonicalToolName: string,
+): AgentProviderToolResultPolicy {
+  if (canonicalToolName === AGENT_SHELL_RUN_TOOL_NAME) {
+    return {
+      maxTokens: SHELL_PROVIDER_TOOL_RESULT_TOKENS,
+      projectionOptions: { mode: 'shell' },
+    };
+  }
+  if (canonicalToolName === AGENT_SKILL_ACTIVATE_TOOL_NAME) {
+    return { maxTokens: SKILL_PROVIDER_TOOL_RESULT_TOKENS };
+  }
+  if (['file.list', 'file.search', 'file.resolve', 'file.stat'].includes(canonicalToolName)) return { maxTokens: 6_000 };
+  return { maxTokens: DEFAULT_PROVIDER_TOOL_RESULT_TOKENS };
+}
+
 interface CreatePreparedRuntimeOptions {
+  permissionMode?: AgentRunCapabilitySnapshot['shellPermissionMode'];
   identity?: AgentToolMainPreparationIdentity;
   preparedActionId?: string;
   sealMain?: (input: {
@@ -644,7 +875,7 @@ function createPreparedRuntime(
   ));
   const approvalSemantics = Object.freeze({
     action,
-    behavior: result.decision.behavior,
+    behavior: resolveAgentRunPermissionDecision(expectedToolName, result.decision, options.permissionMode, action).behavior,
     preview,
     risk: result.decision.risk,
   });
@@ -693,7 +924,7 @@ function createPreparedRuntime(
     executionInput,
     ...(mainPreparationCapability ? { mainPreparationCapability } : {}),
     ...(mainPreparationIdentity ? { mainPreparationIdentity } : {}),
-    permissionBehavior: result.decision.behavior,
+    permissionBehavior: approvalSemantics.behavior as 'allow' | 'ask',
     preparationMode,
     preparedActionId,
     preview,
@@ -772,6 +1003,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
   const saveMediaArtifactAs = options.saveMediaArtifactAs || saveAgentMediaArtifactAs;
   const resolveCapabilitySnapshot = options.resolveCapabilitySnapshot
     || createBuiltInAgentCapabilitySnapshot;
+  const resolveContextBudget = options.resolveContextBudget || resolveAgentModelContextBudget;
   const contextManager = options.contextManager || createAgentContextManager({
     budget: options.contextBudget,
   });
@@ -1423,6 +1655,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       throw new Error('音频提取目标与受权节点不匹配');
     }
     return extractMediaAudioSource({
+      nodeId,
       executionId: input.executionId,
       fileName,
       ...(executionInput.mimeType ? { mimeType: String(executionInput.mimeType) } : {}),
@@ -1714,6 +1947,21 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       });
     };
     const executionContext: AgentToolExecutionContext = {
+      ...(options.readLibraryMetadata ? { readLibraryMetadata: async (query, requestSignal) => {
+        const libraryId = Number(input.appContext.libraryId);
+        const data = normalizeAgentLibraryReadResult(await options.readLibraryMetadata!({
+          sender, libraryId, ownerScope: input.ownerScope, sessionId, runId, toolRunId,
+          signal: requestSignal, operation: { operation: 'query-library-metadata', query },
+        }), libraryId);
+        const known = new Map((perception?.knownNodes || []).map(node => [node.id, node]));
+        for (const node of [...(data.entries || []), ...(data.node ? [data.node] : []), ...(data.directory ? [data.directory] : [])]) {
+          known.delete(node.id); known.set(node.id, node);
+        }
+        const next = { selectedNodes: [], collectedAt: now(), ...perception, knownNodes: Array.from(known.values()).slice(-500) };
+        executionContext.perception = next;
+        onPerception(next);
+        return data;
+      } } satisfies Pick<AgentToolExecutionContext, 'readLibraryMetadata'> : {}),
       activeSkillId,
       appContext: input.appContext,
       onProgress: persistAndEmitProgress,
@@ -1887,7 +2135,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
           ) => Promise<AgentPreparedRuntime>;
           if (preparationMode === 'renderer') {
             finalizePrepared = async (requestedAction, preparedActionId = crypto.randomUUID()) => {
-              const prepareInput = tool.createRendererPrepareRequest!(call.input, executionContext);
+              const prepareInput = tool.createRendererPrepareRequest!(call.input, executionContext, requestedAction);
               const preparation = toolPrepareBroker.prepareRenderer({
                 appContext: input.appContext,
                 callId: call.id,
@@ -1933,6 +2181,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
                   );
                   throwIfAborted(preparationSignal);
                   return createPreparedRuntime(result, call.name, tool.risk, tool.preparedRisk, 'renderer', {
+                    permissionMode: capabilitySnapshot.shellPermissionMode,
                     preparedActionId,
                   });
                 },
@@ -1983,6 +2232,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
                   );
                   throwIfAborted(preparationSignal);
                   return createPreparedRuntime(result, call.name, tool.risk, tool.preparedRisk, 'main', {
+                    permissionMode: capabilitySnapshot.shellPermissionMode,
                     identity: preparationIdentity,
                     sealMain: sealInput => capabilitySnapshot.sealMainPreparedExecution(
                       call.name,
@@ -2092,6 +2342,9 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
           }
         }
       }
+    }
+    if (preparationMode === 'none') {
+      decision = resolveAgentRunPermissionDecision(call.name, decision, capabilitySnapshot.shellPermissionMode);
     }
     if (decision.behavior === 'ask') {
       decision = {
@@ -2345,22 +2598,32 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     capabilitySnapshot: AgentRunCapabilitySnapshot,
   ): Promise<void> {
     const sessionId = session.id;
-    let content = '';
-    let persistedContentLength = 0;
-    const persistPendingAssistantContent = async () => {
-      const pendingContent = content.slice(persistedContentLength);
-      if (!pendingContent) return;
-      await store.appendMessage(createMessage(sessionId, runId, 'assistant', pendingContent));
-      persistedContentLength = content.length;
+    const providerMaxOutputTokens = resolveAgentProviderOutputTokens(contextBudget);
+    let assistantRunCharacterCount = 0;
+    let activeAssistantWriter: AgentAssistantTurnWriter | null = null;
+    const exposeActiveAssistantWriter = (writer: AgentAssistantTurnWriter | null) => {
+      const active = activeRuns.get(sessionId);
+      if (!active || active.runId !== runId) return;
+      if (writer) active.assistantWriter = writer;
+      else delete active.assistantWriter;
     };
     const appendAndEmitAssistantDelta = (delta: string) => {
-      content = appendBoundedAIServiceStreamText(
-        content,
+      if (!activeAssistantWriter) {
+        throw new Error('Agent assistant turn 尚未开始');
+      }
+      if (delta.length > MAX_ASSISTANT_RUN_CHARACTERS - assistantRunCharacterCount) {
+        throw new AIServiceStreamLimitError('Agent 单次运行回答', MAX_ASSISTANT_RUN_CHARACTERS);
+      }
+      const offset = activeAssistantWriter.append(delta);
+      assistantRunCharacterCount += delta.length;
+      emit(sender, {
         delta,
-        MAX_ASSISTANT_RUN_CHARACTERS,
-        'Agent 单次运行回答',
-      );
-      emit(sender, { delta, runId, sessionId, type: 'delta' });
+        itemId: activeAssistantWriter.getSnapshot().id,
+        offset,
+        runId,
+        sessionId,
+        type: 'assistant-item-delta',
+      });
     };
     const readCanonicalRunProjection = async (): Promise<{
       messages?: AgentMessage[];
@@ -2441,24 +2704,128 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         ...memoryContextMessages,
         ...contextProjection.messages,
       ];
+      const activeToolResults: AgentActiveToolResultRecord[] = [];
+      const baseProviderRequestLimit = getAgentProviderRequestTokenLimit(contextBudget);
+      let observedProviderInputTokenUnderestimate = 0;
+      const getProviderRequestLimit = () => Math.max(
+        1,
+        baseProviderRequestLimit - observedProviderInputTokenUnderestimate,
+      );
+      const observeProviderInputUsage = (
+        estimatedInputTokens: number,
+        actualInputTokens: number | undefined,
+      ) => {
+        if (
+          typeof actualInputTokens !== 'number'
+          || !Number.isSafeInteger(actualInputTokens)
+          || actualInputTokens < 0
+        ) return;
+        observedProviderInputTokenUnderestimate = Math.max(
+          observedProviderInputTokenUnderestimate,
+          actualInputTokens - estimatedInputTokens,
+          0,
+        );
+      };
+      const assertProviderTurnFitsObservedContext = (
+        providerInput: {
+          messages: readonly AgentProviderMessage[];
+          systemPrompt: string;
+          tools: readonly unknown[];
+        },
+        phase: string,
+      ) => {
+        const estimatedTokens = estimateAgentProviderTurnTokens(providerInput);
+        const requestTokenLimit = getProviderRequestLimit();
+        if (estimatedTokens > requestTokenLimit) {
+          throw new Error(
+            `${phase}超过模型上下文窗口：请求预计 ${estimatedTokens} token，`
+            + `当前最多可使用 ${requestTokenLimit} token；已停止调用，未静默省略当前任务内容`,
+          );
+        }
+        return estimatedTokens;
+      };
       const plainMessages = messages.map(message => ({
         content: message.content,
         role: message.role as 'user' | 'assistant',
       }));
-      let toolCallCount = 0;
-      let completed = false;
       let currentPerception = input.perception;
       let activeSkillId: string | undefined;
       const seenToolCallIds = new Set<string>();
+      const compactActiveContext = async (fitInput: {
+        estimateTokens: (candidateMessages: readonly AgentProviderMessage[]) => number;
+        preserveLatestToolResult?: boolean;
+        requestTokenLimit: number;
+      }) => compactAgentActiveContextToFit({
+        ...fitInput,
+        messages,
+        summarize: async (candidate) => {
+          const payload = buildAgentActiveContextSummaryPayload({
+            candidate,
+            userPrompt: input.userPrompt,
+          });
+          const summaryRequestTokens = estimateAgentProviderTurnTokens({
+            messages: [{ content: payload, role: 'user' }],
+            systemPrompt: AGENT_ACTIVE_CONTEXT_SUMMARY_SYSTEM_PROMPT,
+            tools: [],
+          });
+          if (
+            summaryRequestTokens + AGENT_ACTIVE_CONTEXT_SUMMARY_MAX_OUTPUT_TOKENS
+            > contextBudget.contextWindowTokens
+          ) {
+            throw new Error('Agent 当前 Run 语义压缩超过模型上下文，无法安全继续');
+          }
+          await updateRunAndEmit(sender, store, sessionId, runId, {
+            currentStep: '整理当前任务上下文',
+            status: 'running',
+            updatedAt: now(),
+          });
+          const output = await streamAIServiceProfile({
+            maxOutputTokens: AGENT_ACTIVE_CONTEXT_SUMMARY_MAX_OUTPUT_TOKENS,
+            messages: [{ content: payload, role: 'user' }],
+            model: input.model,
+            profileId: input.profileId,
+            reasoningEffort: 'auto',
+            systemPrompt: AGENT_ACTIVE_CONTEXT_SUMMARY_SYSTEM_PROMPT,
+            temperature: 0,
+          }, () => undefined, runtimeConnection, controller.signal, {
+            maxContentCharacters: AGENT_ACTIVE_CONTEXT_SUMMARY_MAX_CHARACTERS,
+          });
+          return normalizeAgentActiveContextSummary(output);
+        },
+        toolResults: activeToolResults,
+      });
+      const recentToolTurnProgressHashes: string[] = [];
+      const assertToolTurnMadeProgress = (entries: AgentToolTurnProgressEntry[]) => {
+        recentToolTurnProgressHashes.push(hashAgentToolTurnProgress(entries));
+        if (recentToolTurnProgressHashes.length > AGENT_TOOL_PROGRESS_HISTORY_LIMIT) {
+          recentToolTurnProgressHashes.shift();
+        }
+        if (hasRepeatedAgentToolProgressCycle(recentToolTurnProgressHashes)) {
+          throw new Error(
+            'Agent 工具调用与结果形成重复且无进展的调用周期；已停止当前 Run 以避免无进展循环',
+          );
+        }
+      };
 
-      for (let round = 0; round < MAX_PROVIDER_TURNS; round += 1) {
+      for (let round = 0; ; round += 1) {
         const roundCapabilityView = getProviderCapabilityView(activeSkillId);
         await updateRunAndEmit(sender, store, sessionId, runId, {
           currentStep: round === 0 ? '请求 AI 服务' : '根据工具结果继续思考',
           status: 'running',
           updatedAt: now(),
         });
-        const contentBeforeTurn = content;
+        activeAssistantWriter = await createAgentAssistantTurnWriter(
+          store,
+          runId,
+        );
+        exposeActiveAssistantWriter(activeAssistantWriter);
+        emit(sender, {
+          item: activeAssistantWriter.getSnapshot(),
+          runId,
+          sessionId,
+          type: 'assistant-item-started',
+        });
+        const characterCountBeforeTurn = assistantRunCharacterCount;
         let turn;
         try {
           const systemPrompt = buildAgentSystemPrompt(
@@ -2469,16 +2836,22 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
             omittedSkillCount,
           );
           const providerTurnInput = {
-            maxOutputTokens: contextBudget.outputReserveTokens,
+            maxOutputTokens: providerMaxOutputTokens,
             messages,
             model: input.model,
             reasoningEffort: input.reasoningEffort,
             systemPrompt,
             tools: roundCapabilityView.providerTools,
           };
-          assertAgentProviderTurnFitsContext(
+          await compactActiveContext({
+            estimateTokens: candidateMessages => estimateAgentProviderTurnTokens({
+              ...providerTurnInput,
+              messages: [...candidateMessages],
+            }),
+            requestTokenLimit: getProviderRequestLimit(),
+          });
+          const estimatedProviderInputTokens = assertProviderTurnFitsObservedContext(
             providerTurnInput,
-            contextBudget,
             round === 0 ? '当前 Agent 请求' : `Agent 第 ${round + 1} 轮工具续接请求`,
           );
           turn = await streamAgentProviderTurn(runtimeConnection, providerTurnInput, (delta) => {
@@ -2486,72 +2859,108 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
           }, controller.signal, {
             maxAssistantContentCharacters: Math.min(
               MAX_ASSISTANT_TURN_CHARACTERS,
-              contextBudget.outputReserveTokens * 4,
+              providerMaxOutputTokens * 4,
             ),
           });
+          observeProviderInputUsage(estimatedProviderInputTokens, turn.usage?.inputTokens);
         } catch (error) {
-          if (round !== 0 || content !== contentBeforeTurn || !isToolProtocolUnsupported(error)) {
+          if (
+            round !== 0
+            || assistantRunCharacterCount !== characterCountBeforeTurn
+            || !isToolProtocolUnsupported(error)
+          ) {
             throw error;
           }
           const fallbackInput = {
-            maxOutputTokens: contextBudget.outputReserveTokens,
+            maxOutputTokens: providerMaxOutputTokens,
             messages: [...fallbackContextMessages, ...plainMessages],
             model: input.model,
             profileId: input.profileId,
             reasoningEffort: input.reasoningEffort,
             systemPrompt: buildAgentFallbackSystemPrompt(input.appContext, currentPerception),
           };
-          assertAgentProviderTurnFitsContext(
+          assertProviderTurnFitsObservedContext(
             { ...fallbackInput, tools: [] },
-            contextBudget,
             '当前 Agent 兼容模式请求',
           );
-          await streamAIServiceProfile(fallbackInput, (delta) => {
+          await streamAgentProviderTurn(runtimeConnection, { ...fallbackInput, tools: [] }, (delta) => {
             appendAndEmitAssistantDelta(delta);
-          }, runtimeConnection, controller.signal, {
-            maxContentCharacters: Math.min(
+          }, controller.signal, {
+            maxAssistantContentCharacters: Math.min(
               MAX_ASSISTANT_TURN_CHARACTERS,
-              contextBudget.outputReserveTokens * 4,
+              providerMaxOutputTokens * 4,
             ),
           });
-          completed = true;
           break;
         }
 
-        const toolCalls = turn.toolCalls.map((call, callIndex) => {
-          let id = call.id || `tool-call-${round + 1}-${callIndex + 1}`;
-          if (seenToolCallIds.has(id)) id = `${id}-${round + 1}-${callIndex + 1}`;
-          seenToolCallIds.add(id);
-          return { ...call, id };
-        });
+        markAgentActiveToolResultsConsumed(activeToolResults);
+        const toolCalls = turn.toolCalls.map((call, callIndex) => ({
+          ...call,
+          id: claimUniqueAgentToolCallId(
+            call.id,
+            seenToolCallIds,
+            round + 1,
+            callIndex + 1,
+          ),
+        }));
         messages.push({
           content: turn.content,
           role: 'assistant',
           ...(toolCalls.length > 0 ? { toolCalls } : {}),
         });
         if (toolCalls.length === 0) {
-          completed = true;
           break;
         }
-        await persistPendingAssistantContent();
-        if (round === MAX_PROVIDER_TURNS - 1) {
-          throw new Error('Agent Provider 轮数超过安全上限');
-        }
+        const commentary = activeAssistantWriter.close();
+        const finishedCommentary = await store.finishAssistantCommentary({
+          content: commentary.content,
+          expectedRevision: commentary.expectedRevision,
+          id: commentary.id,
+          now: now(),
+        });
+        activeAssistantWriter = null;
+        exposeActiveAssistantWriter(null);
+        emit(sender, {
+          item: finishedCommentary,
+          runId,
+          sessionId,
+          type: 'assistant-item-finished',
+        });
         const activationCalls = toolCalls.filter(
           call => call.name === AGENT_SKILL_ACTIVATE_TOOL_NAME,
         );
         if (activationCalls.length > 0 && toolCalls.length !== 1) {
-          const rejection = projectAgentToolResultForProvider({
+          const rejectionResult: AgentToolResult = {
             message: 'skill.activate 必须独占一次 Tool 调用；本轮所有 Tool 均未执行，请下一轮只调用 skill.activate',
             ok: false,
-          }, MAX_PROVIDER_TOOL_RESULT_TOKENS);
+          };
+          const rejection = projectAgentToolResultForProvider(
+            rejectionResult,
+            DEFAULT_PROVIDER_TOOL_RESULT_TOKENS,
+          );
           const rejectedToolMessages: AgentProviderMessage[] = toolCalls.map(call => ({
             content: rejection.content,
             name: call.name,
             role: 'tool',
             toolCallId: call.id,
           }));
-          assertAgentProviderTurnFitsContext({
+          await compactActiveContext({
+            estimateTokens: candidateMessages => estimateAgentProviderTurnTokens({
+              messages: [...candidateMessages, ...rejectedToolMessages],
+              systemPrompt: buildAgentSystemPrompt(
+                input.appContext,
+                currentPerception,
+                roundCapabilityView.capabilities,
+                skillSummaries,
+                omittedSkillCount,
+              ),
+              tools: roundCapabilityView.providerTools,
+            }),
+            preserveLatestToolResult: false,
+            requestTokenLimit: getProviderRequestLimit(),
+          });
+          assertProviderTurnFitsObservedContext({
             messages: [...messages, ...rejectedToolMessages],
             systemPrompt: buildAgentSystemPrompt(
               input.appContext,
@@ -2561,16 +2970,23 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
               omittedSkillCount,
             ),
             tools: roundCapabilityView.providerTools,
-          }, contextBudget, 'Agent Skill 激活协议拒绝续接请求');
-          messages.push(...rejectedToolMessages);
+          }, 'Agent Skill 激活协议拒绝续接请求');
+          toolCalls.forEach((call) => {
+            appendAgentActiveToolResult({
+              allowCompaction: true,
+              messages,
+              projectedResult: rejection,
+              toolCallId: call.id,
+              toolName: call.name,
+              toolResults: activeToolResults,
+            });
+          });
+          assertToolTurnMadeProgress(toolCalls.map(call => ({
+            input: call.input,
+            name: call.name,
+            result: rejection.content,
+          })));
           continue;
-        }
-        const businessToolCallsInRound = toolCalls.filter(
-          call => call.name !== AGENT_PLAN_CONTROL_TOOL_NAME
-            && capabilitySnapshot.getToolKind(call.name) !== 'control',
-        ).length;
-        if (toolCallCount + businessToolCallsInRound > MAX_TOOL_CALLS) {
-          throw new Error('Agent 工具调用次数超过安全上限；本轮未执行工具');
         }
 
         let expectedExclusiveActivationResult: AgentToolResult | undefined;
@@ -2615,6 +3031,19 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
           role: 'tool',
           toolCallId: call.id,
         }));
+        await compactActiveContext({
+          estimateTokens: candidateMessages => estimateContinuationTokensBeforeSideEffects({
+            appContext: input.appContext,
+            capabilities: minimumContinuationCapabilityView.capabilities,
+            currentPerception,
+            messages: [...candidateMessages, ...minimumToolResultMessages],
+            omittedSkillCount,
+            skillSummaries,
+            tools: minimumContinuationCapabilityView.providerTools,
+          }),
+          preserveLatestToolResult: false,
+          requestTokenLimit: getProviderRequestLimit(),
+        });
         const minimumContinuationTokens = estimateContinuationTokensBeforeSideEffects({
           appContext: input.appContext,
           capabilities: minimumContinuationCapabilityView.capabilities,
@@ -2624,17 +3053,38 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
           skillSummaries,
           tools: minimumContinuationCapabilityView.providerTools,
         });
-        const providerRequestLimit = getAgentProviderRequestTokenLimit(contextBudget);
-        if (minimumContinuationTokens > providerRequestLimit) {
+        if (minimumContinuationTokens > getProviderRequestLimit()) {
           throw new Error(
             `Agent 工具调用已占满模型上下文：完整续接协议预计至少 ${minimumContinuationTokens} token，`
-            + `当前最多可使用 ${providerRequestLimit} token；本轮未执行工具`,
+            + `当前最多可使用 ${getProviderRequestLimit()} token；本轮未执行工具`,
           );
         }
 
+        const toolTurnProgress: Array<{
+          input: unknown;
+          name: string;
+          result: AgentToolResult;
+        }> = [];
         for (const [callIndex, call] of toolCalls.entries()) {
           const futureMinimumResultMessages = minimumToolResultMessages.slice(callIndex + 1);
           const currentMinimumResultMessage = minimumToolResultMessages[callIndex];
+          await compactActiveContext({
+            estimateTokens: candidateMessages => estimateContinuationTokensBeforeSideEffects({
+              appContext: input.appContext,
+              capabilities: minimumContinuationCapabilityView.capabilities,
+              currentPerception,
+              messages: [
+                ...candidateMessages,
+                currentMinimumResultMessage,
+                ...futureMinimumResultMessages,
+              ],
+              omittedSkillCount,
+              skillSummaries,
+              tools: minimumContinuationCapabilityView.providerTools,
+            }),
+            preserveLatestToolResult: false,
+            requestTokenLimit: getProviderRequestLimit(),
+          });
           const preExecutionMinimumTokens = estimateContinuationTokensBeforeSideEffects({
             appContext: input.appContext,
             capabilities: minimumContinuationCapabilityView.capabilities,
@@ -2648,53 +3098,56 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
             skillSummaries,
             tools: minimumContinuationCapabilityView.providerTools,
           });
-          if (preExecutionMinimumTokens > providerRequestLimit) {
+          if (preExecutionMinimumTokens > getProviderRequestLimit()) {
             throw new Error(
               `Agent Tool 结果没有足够的模型上下文预算：完整续接协议至少需要 `
               + `${preExecutionMinimumTokens} token，当前最多可使用 `
-              + `${providerRequestLimit} token；当前工具未执行`,
+              + `${getProviderRequestLimit()} token；当前工具未执行`,
             );
           }
           const expectedActivationResult = call === exclusiveActivationCall
             ? expectedExclusiveActivationResult
             : undefined;
+          let expectedActivationProjection: ReturnType<
+            typeof projectAgentToolResultForProvider
+          > | undefined;
           if (expectedActivationResult) {
             const expectedCapabilityView = minimumContinuationCapabilityView;
-            const requestWithEmptyActivationResultTokens = estimateAgentProviderTurnTokens({
-              messages: [
-                ...messages,
-                {
-                  content: '',
-                  name: call.name,
-                  role: 'tool',
-                  toolCallId: call.id,
-                },
-              ],
-              systemPrompt: buildAgentSystemPrompt(
-                input.appContext,
-                currentPerception,
-                expectedCapabilityView.capabilities,
-                skillSummaries,
-                omittedSkillCount,
-              ),
-              tools: expectedCapabilityView.providerTools,
-            });
-            const exactActivationResultBudget = Math.min(
-              MAX_PROVIDER_TOOL_RESULT_TOKENS,
-              providerRequestLimit
-                - requestWithEmptyActivationResultTokens
-                + estimateAgentTextTokens(''),
+            const activationResultPolicy = resolveAgentProviderToolResultPolicy(call.name);
+            expectedActivationProjection = projectAgentToolResultForProvider(
+              expectedActivationResult,
+              activationResultPolicy.maxTokens,
+              activationResultPolicy.projectionOptions,
             );
-            if (exactActivationResultBudget < MINIMUM_AGENT_PROVIDER_TOOL_RESULT_TOKENS) {
+            if (expectedActivationProjection.truncated) {
               throw new Error(
-                `Agent Skill 完整说明没有足够的模型上下文预算；当前 Skill 未激活`,
+                `Agent Skill 完整说明无法放入当前模型上下文；当前 Skill 未激活`,
               );
             }
-            const expectedProjection = projectAgentToolResultForProvider(
-              expectedActivationResult,
-              exactActivationResultBudget,
-            );
-            if (expectedProjection.truncated) {
+            const expectedActivationMessage: AgentProviderMessage = {
+              content: expectedActivationProjection.content,
+              name: call.name,
+              role: 'tool',
+              toolCallId: call.id,
+            };
+            const activationFit = await compactActiveContext({
+              estimateTokens: candidateMessages => estimateContinuationTokensBeforeSideEffects({
+                appContext: input.appContext,
+                capabilities: expectedCapabilityView.capabilities,
+                currentPerception,
+                messages: [
+                  ...candidateMessages,
+                  expectedActivationMessage,
+                  ...futureMinimumResultMessages,
+                ],
+                omittedSkillCount,
+                skillSummaries,
+                tools: expectedCapabilityView.providerTools,
+              }),
+              preserveLatestToolResult: false,
+              requestTokenLimit: getProviderRequestLimit(),
+            });
+            if (!activationFit.fits) {
               throw new Error(
                 `Agent Skill 完整说明无法放入当前模型上下文；当前 Skill 未激活`,
               );
@@ -2710,34 +3163,38 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
                 call,
                 roundCapabilityView.availableBusinessToolNames,
               )
-            : await (async () => {
-                if (capabilitySnapshot.getToolKind(call.name) !== 'control') {
-                  toolCallCount += 1;
-                  if (toolCallCount > MAX_TOOL_CALLS) {
-                    throw new Error('Agent 工具调用次数超过安全上限');
-                  }
-                }
-                return executeToolCall(
-                  sender,
-                  store,
-                  sessionId,
-                  runId,
-                  call,
-                  input,
-                  controller.signal,
-                  currentPerception,
-                  capabilitySnapshot,
-                  activeSkillId,
-                  createAgentAiDestinationSnapshot({
-                    model: input.model,
-                    profileId: input.profileId,
-                    runtimeConnection,
-                  }),
-                  (nextPerception) => {
-                    currentPerception = nextPerception;
-                  },
-                );
-              })();
+            : await executeToolCall(
+                sender,
+                store,
+                sessionId,
+                runId,
+                call,
+                input,
+                controller.signal,
+                currentPerception,
+                capabilitySnapshot,
+                activeSkillId,
+                createAgentAiDestinationSnapshot({
+                  model: input.model,
+                  profileId: input.profileId,
+                  runtimeConnection,
+                }),
+                (nextPerception) => {
+                  currentPerception = nextPerception ? {
+                    ...nextPerception,
+                    knownNodes: Array.from(new Map([
+                      ...(currentPerception?.knownNodes || []),
+                      ...(nextPerception.knownNodes || []),
+                    ].filter(node => node.libraryId === input.appContext.libraryId)
+                      .map(node => [node.id, node])).values()).slice(-500),
+                  } : currentPerception;
+                },
+              );
+          toolTurnProgress.push({
+            input: call.input,
+            name: call.name,
+            result,
+          });
           if (expectedActivationResult) {
             if (stableJson(result) !== stableJson(expectedActivationResult)) {
               throw new Error('Agent Skill 激活结果与预检不一致；当前 Skill 未激活');
@@ -2759,52 +3216,119 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
             role: 'tool',
             toolCallId: call.id,
           };
-          const requestWithEmptyCurrentResultTokens = estimateAgentProviderTurnTokens({
-            messages: [
-              ...messages,
-              emptyCurrentResultMessage,
-              ...futureMinimumResultMessages,
-            ],
-            systemPrompt: currentSystemPrompt,
-            tools: continuationCapabilityView.providerTools,
-          });
-          const resultTokenBudget = Math.min(
-            MAX_PROVIDER_TOOL_RESULT_TOKENS,
-            providerRequestLimit
-              - requestWithEmptyCurrentResultTokens
-              + estimateAgentTextTokens(''),
-          );
-          if (resultTokenBudget < MINIMUM_AGENT_PROVIDER_TOOL_RESULT_TOKENS) {
-            throw new Error(
-              `Agent Tool 结果没有足够的模型上下文预算：至少需要 `
-              + `${MINIMUM_AGENT_PROVIDER_TOOL_RESULT_TOKENS} token，当前仅剩 `
-              + `${Math.max(0, resultTokenBudget)} token`,
+          const resultPolicy = resolveAgentProviderToolResultPolicy(call.name);
+          let projectedResult = expectedActivationProjection
+            || projectAgentToolResultForProvider(
+              result,
+              resultPolicy.maxTokens,
+              resultPolicy.projectionOptions,
             );
-          }
-          const projectedResult = projectAgentToolResultForProvider(result, resultTokenBudget);
           if (call.name === AGENT_SKILL_ACTIVATE_TOOL_NAME && projectedResult.truncated) {
             throw new Error('Agent Skill 完整说明在 Provider 投影中被截断；已停止当前 Run');
           }
-          messages.push({
+          const preferredCurrentResultMessage: AgentProviderMessage = {
+            ...emptyCurrentResultMessage,
             content: projectedResult.content,
-            name: call.name,
-            role: 'tool',
+          };
+          const preferredResultFit = await compactActiveContext({
+            estimateTokens: candidateMessages => estimateAgentProviderTurnTokens({
+              messages: [
+                ...candidateMessages,
+                preferredCurrentResultMessage,
+                ...futureMinimumResultMessages,
+              ],
+              systemPrompt: currentSystemPrompt,
+              tools: continuationCapabilityView.providerTools,
+            }),
+            preserveLatestToolResult: false,
+            requestTokenLimit: getProviderRequestLimit(),
+          });
+          if (!preferredResultFit.fits) {
+            const requestWithEmptyCurrentResultTokens = estimateAgentProviderTurnTokens({
+              messages: [
+                ...messages,
+                emptyCurrentResultMessage,
+                ...futureMinimumResultMessages,
+              ],
+              systemPrompt: currentSystemPrompt,
+              tools: continuationCapabilityView.providerTools,
+            });
+            const resultTokenBudget = Math.min(
+              resultPolicy.maxTokens,
+              getProviderRequestLimit()
+                - requestWithEmptyCurrentResultTokens
+                + estimateAgentTextTokens(''),
+            );
+            if (resultTokenBudget < MINIMUM_AGENT_PROVIDER_TOOL_RESULT_TOKENS) {
+              throw new Error(
+                `Agent Tool 结果没有足够的模型上下文预算：至少需要 `
+                + `${MINIMUM_AGENT_PROVIDER_TOOL_RESULT_TOKENS} token，当前仅剩 `
+                + `${Math.max(0, resultTokenBudget)} token`,
+              );
+            }
+            projectedResult = projectAgentToolResultForProvider(
+              result,
+              resultTokenBudget,
+              resultPolicy.projectionOptions,
+            );
+          }
+          if (call.name === AGENT_SKILL_ACTIVATE_TOOL_NAME && projectedResult.truncated) {
+            throw new Error('Agent Skill 完整说明在 Provider 投影中被截断；已停止当前 Run');
+          }
+          if (options.readLibraryMetadata && result.ok && projectedResult.truncated
+            && ['file.list', 'file.search', 'file.resolve', 'file.stat'].includes(call.name)) {
+            if (call.name === 'file.resolve' || call.name === 'file.stat') {
+              throw new Error('当前上下文不足以完整交付节点元数据，未把截断的路径作为可用结果');
+            }
+            const query = call.input as { cursor?: string; limit?: number };
+            projectedResult = projectAgentToolResultForProvider({
+              ok: false, message: '元数据页未完整交付；减小 limit 并重试原 cursor，不能跳到下一页',
+              data: { retryCursor: query.cursor || null, retryLimit: Math.max(1, Math.floor((query.limit || 20) / 2)) },
+            }, projectedResult.estimatedTokens);
+          }
+          appendAgentActiveToolResult({
+            allowCompaction: call.name !== AGENT_SKILL_ACTIVATE_TOOL_NAME,
+            messages,
+            projectedResult,
             toolCallId: call.id,
+            toolName: call.name,
+            toolResults: activeToolResults,
           });
         }
+        assertToolTurnMadeProgress(toolTurnProgress);
       }
 
-      if (!completed) throw new Error('Agent 未能在安全轮数内完成任务');
-      await persistPendingAssistantContent();
+      if (!activeAssistantWriter) {
+        throw new Error('Agent 最终回答缺少 assistant item');
+      }
+      const finalItem = activeAssistantWriter.close();
       const finishedAt = now();
-      await updateRunAndEmit(sender, store, sessionId, runId, {
+      const completedResult = await store.finishRunWithAssistantFinal({
+        content: finalItem.content,
         currentStep: '已完成',
-        finishedAt,
-        status: 'completed',
-        updatedAt: finishedAt,
+        expectedRevision: finalItem.expectedRevision,
+        id: finalItem.id,
+        now: finishedAt,
+        runId,
+      });
+      activeAssistantWriter = null;
+      exposeActiveAssistantWriter(null);
+      if (!completedResult.assistantItem) {
+        throw new Error('Agent final assistant item 终态缺失');
+      }
+      emit(sender, {
+        item: completedResult.assistantItem,
+        runId,
+        sessionId,
+        type: 'assistant-item-finished',
       });
       emit(sender, {
-        content,
+        run: completedResult.run,
+        runId,
+        sessionId,
+        type: 'run-updated',
+      });
+      emit(sender, {
         ...await readCanonicalRunProjection(),
         runId,
         sessionId,
@@ -2812,33 +3336,48 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       });
     } catch (error) {
       const finishedAt = now();
-      if (isAbortError(error, controller.signal)) {
-        await persistPendingAssistantContent();
-        await updateRunAndEmit(sender, store, sessionId, runId, {
-          currentStep: '已取消',
-          finishedAt,
-          status: 'cancelled',
-          updatedAt: finishedAt,
-        });
+      const effectiveError = error;
+      const cancelled = isAbortError(error, controller.signal);
+      let failedAssistantItem: AgentAssistantTurnWriterSnapshot | undefined;
+      if (activeAssistantWriter) {
+        failedAssistantItem = activeAssistantWriter.discard();
+      }
+      const terminalResult = await store.finishRunWithAssistantFailure({
+        ...(failedAssistantItem ? { assistantItem: failedAssistantItem } : {}),
+        currentStep: cancelled ? '已取消' : '执行失败',
+        ...(!cancelled
+          ? { error: normalizeAgentErrorMessage(effectiveError, 'Agent 请求失败') }
+          : {}),
+        now: finishedAt,
+        runId,
+        status: cancelled ? 'cancelled' : 'failed',
+      });
+      activeAssistantWriter = null;
+      exposeActiveAssistantWriter(null);
+      if (terminalResult.assistantItem) {
         emit(sender, {
-          content,
+          item: terminalResult.assistantItem,
+          runId,
+          sessionId,
+          type: 'assistant-item-finished',
+        });
+      }
+      emit(sender, {
+        run: terminalResult.run,
+        runId,
+        sessionId,
+        type: 'run-updated',
+      });
+      if (cancelled) {
+        emit(sender, {
           ...await readCanonicalRunProjection(),
           runId,
           sessionId,
           type: 'cancelled',
         });
       } else {
-        const message = normalizeAgentErrorMessage(error, 'Agent 请求失败');
-        await persistPendingAssistantContent();
-        await updateRunAndEmit(sender, store, sessionId, runId, {
-          currentStep: '执行失败',
-          error: message,
-          finishedAt,
-          status: 'failed',
-          updatedAt: finishedAt,
-        });
+        const message = normalizeAgentErrorMessage(effectiveError, 'Agent 请求失败');
         emit(sender, {
-          content,
           message,
           ...await readCanonicalRunProjection(),
           runId,
@@ -2908,11 +3447,17 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     try {
       const runtimeConnection = { ...resolveRuntimeProfile(profileId) };
       const contextBudget = resolveAgentContextBudget({
-        ...options.contextBudget,
-        ...options.resolveContextBudget?.({
+        ...((options.resolveContextBudget ? resolveContextBudget({
+          baseUrl: runtimeConnection.baseUrl,
           model,
           providerType: runtimeConnection.providerType,
-        }),
+        }) : resolveAgentModelContextBudget({
+          baseUrl: runtimeConnection.baseUrl,
+          model,
+          providerType: runtimeConnection.providerType,
+          metadata: await agentModelCatalog.get(runtimeConnection, model),
+        })) || {}),
+        ...(options.contextBudget ? resolveAgentContextBudget(options.contextBudget) : {}),
       });
       resolveAIServiceOutputTokenLimit(contextBudget.outputReserveTokens);
       const toolSnapshot = agentToolRegistry.createSnapshot();
@@ -2931,7 +3476,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       const shellProviderSnapshot = getAgentShellProviderSnapshotForRun();
       const capabilitySnapshot = createAgentRunCapabilitySnapshot({
         capabilitySnapshot: environmentCapabilitySnapshot,
-        shellPermissionMode: getAgentShellPermissionModeForRun(),
+        shellPermissionMode: (options.getPermissionMode || getAgentShellPermissionModeForRun)(),
         ...(shellProviderSnapshot ? { shellProviderSnapshot } : {}),
         skillSnapshot,
         toolSnapshot,
@@ -3137,7 +3682,14 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       libraryId,
     );
     if (!session) throw new Error('Agent 会话不存在或不属于当前资料库');
-    return projectAgentSessionForRenderer(session);
+    const activeWriter = activeRuns.get(session.id)?.assistantWriter;
+    if (!activeWriter) return projectAgentSessionForRenderer(session);
+    const activeItem = activeWriter.getSnapshot();
+    const itemIndex = session.messages.findIndex(message => message.id === activeItem.id);
+    const messages = itemIndex >= 0
+      ? session.messages.map(message => message.id === activeItem.id ? activeItem : message)
+      : [...session.messages, activeItem];
+    return projectAgentSessionForRenderer({ ...session, messages });
   }
 
   async function renameSession(
@@ -3303,4 +3855,10 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
   };
 }
 
-export const agentOrchestrator = createAgentOrchestrator();
+export const agentOrchestrator = createAgentOrchestrator({
+  readLibraryMetadata: async input => {
+    const result = await agentFileAuthorityBroker.request(input);
+    if (result.operation !== 'query-library-metadata') throw new Error('资料库查询响应类型不匹配');
+    return result.data;
+  },
+});

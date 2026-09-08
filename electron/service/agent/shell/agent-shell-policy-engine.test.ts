@@ -110,7 +110,7 @@ describe('Agent shell policy engine', () => {
     });
   });
 
-  it('does not let full access bypass incomplete analysis', () => {
+  it('allows full access to continue when analysis is incomplete', () => {
     expect(evaluate({
       assessment: assessment({
         facets: ['unknown_syntax', 'external_path', 'network'],
@@ -121,9 +121,10 @@ describe('Agent shell policy engine', () => {
       mode: 'full-access',
       workspaceBoundaryVerified: false,
     })).toEqual({
-      behavior: 'deny',
-      reasonCodes: ['unresolved-analysis'],
-      risk: 'destructive',
+      behavior: 'allow',
+      reasonCodes: ['mode-full-access'],
+      risk: 'external',
+      source: 'full-access',
     });
   });
 
@@ -131,6 +132,41 @@ describe('Agent shell policy engine', () => {
     expect(evaluate({
       assessment: assessment({
         facets: ['external_path', 'network', 'system_configuration'],
+        persistentRuleEligible: false,
+        risk: 'external',
+      }),
+      mode: 'full-access',
+      workspaceBoundaryVerified: false,
+    })).toEqual({
+      behavior: 'allow',
+      reasonCodes: ['mode-full-access'],
+      risk: 'external',
+      source: 'full-access',
+    });
+  });
+
+  it.each<AgentShellPermissionMode>(['ask', 'auto'])(
+    'keeps a fully analyzed external file read supervised in %s mode',
+    (mode) => {
+      expect(evaluate({
+        assessment: assessment({
+          facets: ['filesystem.read', 'external_path'],
+          persistentRuleEligible: false,
+          risk: 'external',
+        }),
+        mode,
+        workspaceBoundaryVerified: false,
+      })).toMatchObject({
+        behavior: 'ask',
+        risk: 'external',
+      });
+    },
+  );
+
+  it('allows a fully analyzed external file read without confirmation in full access mode', () => {
+    expect(evaluate({
+      assessment: assessment({
+        facets: ['filesystem.read', 'external_path'],
         persistentRuleEligible: false,
         risk: 'external',
       }),

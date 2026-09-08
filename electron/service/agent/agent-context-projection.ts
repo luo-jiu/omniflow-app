@@ -3,23 +3,38 @@ import type {
   AgentRunSnapshot,
   AgentToolActivitySnapshot,
 } from '@/shared/agent/agent.types';
+import { isAgentConversationMessage } from '../../../src/shared/agent/agent.types';
 import {
   renderAgentConversationSummary,
   sanitizeAgentMemoryText,
   type AgentConversationSummaryV1,
 } from './agent-conversation-summary';
 import type { AgentProviderMessage } from './agent-provider-model';
+import {
+  MINIMUM_AGENT_PROVIDER_TOOL_RESULT_TOKENS,
+  projectAgentToolResultForProvider,
+} from './agent-tool-result-projection';
+import { estimateAgentTextTokens } from './agent-token-estimator';
 import { AGENT_SKILL_ACTIVATE_TOOL_NAME } from './skills/agent-skill.types';
+import { AGENT_SHELL_RUN_TOOL_NAME } from '../../../src/shared/agent/shell/agent-shell.types';
+import { normalizeAgentPreparedActionPublic } from '../../../src/shared/agent/agent-prepared-action';
+
+export { estimateAgentTextTokens } from './agent-token-estimator';
 
 export const DEFAULT_AGENT_CONTEXT_WINDOW_TOKENS = 16_384;
+const DEFAULT_EFFECTIVE_CONTEXT_WINDOW_PERCENT = 100;
 const DEFAULT_OUTPUT_RESERVE_TOKENS = 4_096;
 const DEFAULT_TOOL_LOOP_RESERVE_TOKENS = 2_048;
 const DEFAULT_RECENT_HISTORY_TOKENS = 8_000;
 const DEFAULT_SUMMARY_RESERVE_TOKENS = 3_000;
 const MESSAGE_OVERHEAD_TOKENS = 8;
 const REQUEST_OVERHEAD_TOKENS = 16;
-const MAX_EXECUTION_FACTS = 12;
 const MAX_EXECUTION_FACT_LENGTH = 500;
+const MAX_EXECUTION_FACTS_TOTAL_TOKENS = 48_000;
+const DEFAULT_EXECUTION_FACT_RESULT_TOKENS = 1_024;
+const SHELL_EXECUTION_FACT_RESULT_TOKENS = 40_000;
+const MAX_EXECUTION_FACT_COMMAND_TOKENS = 2_048;
+const EXECUTION_FACT_SEPARATOR_TOKENS = 1;
 
 const TERMINAL_RUN_STATUSES = new Set<AgentRunSnapshot['status']>([
   'cancelled',
@@ -38,6 +53,7 @@ const TRUNCATED_CONTEXT_MARKER = '\n[... 内容因上下文安全预算被省略
 
 export interface AgentContextBudget {
   contextWindowTokens: number;
+  effectiveContextWindowPercent: number;
   outputReserveTokens: number;
   recentHistoryTokens: number;
   summaryReserveTokens: number;
@@ -75,8 +91,32 @@ export interface AgentContextProjectionInput {
 }
 
 interface AgentExecutionFact {
-  content: string;
-  toolName?: string;
+  operation?: { command: string; truncated?: true };
+  ordinal: number;
+  result: unknown;
+  runId: string;
+  status: AgentToolActivitySnapshot['status'];
+  toolName: string;
+}
+
+function shellExecutionOperation(
+  activity: AgentToolActivitySnapshot,
+  tokenBudget: number,
+): AgentExecutionFact['operation'] {
+  if (activity.call.name !== AGENT_SHELL_RUN_TOOL_NAME) return undefined;
+  try {
+    const action = normalizeAgentPreparedActionPublic(activity.preparation?.action);
+    if (action.kind !== AGENT_SHELL_RUN_TOOL_NAME) return undefined;
+    const safeCommand = sanitizeAgentMemoryText(action.command);
+    if (!safeCommand.trim()) return undefined;
+    const command = truncateMessageContent(safeCommand, tokenBudget);
+    return {
+      command,
+      ...(command === safeCommand ? {} : { truncated: true }),
+    };
+  } catch {
+    return undefined;
+  }
 }
 
 interface MessageGroup {
@@ -91,6 +131,13 @@ function normalizePositiveInteger(value: unknown, fallback: number): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function normalizeContextWindowPercent(value: unknown): number {
+  const parsed = Math.floor(Number(value));
+  return Number.isFinite(parsed) && parsed > 0 && parsed <= 100
+    ? parsed
+    : DEFAULT_EFFECTIVE_CONTEXT_WINDOW_PERCENT;
+}
+
 export function resolveAgentContextBudget(
   input: Partial<AgentContextBudget> | undefined,
 ): AgentContextBudget {
@@ -98,6 +145,9 @@ export function resolveAgentContextBudget(
     contextWindowTokens: normalizePositiveInteger(
       input?.contextWindowTokens,
       DEFAULT_AGENT_CONTEXT_WINDOW_TOKENS,
+    ),
+    effectiveContextWindowPercent: normalizeContextWindowPercent(
+      input?.effectiveContextWindowPercent,
     ),
     outputReserveTokens: normalizePositiveInteger(
       input?.outputReserveTokens,
@@ -116,20 +166,6 @@ export function resolveAgentContextBudget(
       DEFAULT_TOOL_LOOP_RESERVE_TOKENS,
     ),
   };
-}
-
-function isNonAsciiCharacter(character: string): boolean {
-  return Number(character.codePointAt(0)) > 0x7f;
-}
-
-export function estimateAgentTextTokens(value: string): number {
-  let nonAsciiCharacters = 0;
-  let otherCharacters = 0;
-  for (const character of String(value || '')) {
-    if (isNonAsciiCharacter(character)) nonAsciiCharacters += 1;
-    else otherCharacters += 1;
-  }
-  return Math.max(1, Math.ceil((nonAsciiCharacters * 1.1) + (otherCharacters / 3.5)));
 }
 
 export function estimateAgentProviderMessagesTokens(
@@ -178,7 +214,10 @@ export function estimateAgentProviderTurnTokens(input: {
 }
 
 export function getAgentProviderRequestTokenLimit(budget: AgentContextBudget): number {
-  const limit = budget.contextWindowTokens - budget.outputReserveTokens;
+  const maximumInputTokens = budget.contextWindowTokens - budget.outputReserveTokens;
+  const limit = Math.floor(
+    (maximumInputTokens * budget.effectiveContextWindowPercent) / 100,
+  );
   if (limit <= 0) {
     throw new Error(
       `模型上下文窗口（${budget.contextWindowTokens} token）不足以保留回答预算`
@@ -196,8 +235,7 @@ export function getAgentHistoryTokenBudget(
     0,
     Math.floor(Number(fixedInputTokens) || 0),
   );
-  const historyBudgetTokens = budget.contextWindowTokens
-    - budget.outputReserveTokens
+  const historyBudgetTokens = getAgentProviderRequestTokenLimit(budget)
     - budget.toolLoopReserveTokens
     - normalizedFixedInputTokens;
   if (historyBudgetTokens <= 0) {
@@ -248,7 +286,7 @@ export function assertAgentProviderTurnFitsContext(
 }
 
 function toProviderMessage(message: AgentMessage): AgentProviderMessage | null {
-  if (message.role !== 'user' && message.role !== 'assistant') return null;
+  if (!isAgentConversationMessage(message)) return null;
   return { content: sanitizeAgentMemoryText(message.content), role: message.role };
 }
 
@@ -300,18 +338,41 @@ function checkpointTail(
 function summarizeToolActivities(
   activities: readonly AgentToolActivitySnapshot[],
   terminalIds: ReadonlySet<string>,
+  tokenBudget: number,
 ): AgentExecutionFact[] {
-  return activities
+  const candidates = activities
     .filter(activity => terminalIds.has(activity.runId))
     .filter(activity => activity.status !== 'preparing'
       && activity.status !== 'running'
       && activity.status !== 'awaiting_approval'
-      && activity.status !== 'awaiting_interaction')
-    .slice(-MAX_EXECUTION_FACTS)
-    .map((activity) => {
+      && activity.status !== 'awaiting_interaction');
+  const selected: AgentExecutionFact[] = [];
+  let remainingTokens = Math.max(0, Math.min(
+    MAX_EXECUTION_FACTS_TOTAL_TOKENS,
+    Math.floor(Number(tokenBudget) || 0),
+  ));
+
+  for (let index = candidates.length - 1; index >= 0; index -= 1) {
+    const activity = candidates[index];
+    const toolName = sanitizeAgentMemoryText(activity.call.name).trim().slice(0, 80);
+    const operation = shellExecutionOperation(
+      activity,
+      Math.max(32, Math.min(
+        MAX_EXECUTION_FACT_COMMAND_TOKENS,
+        Math.floor(remainingTokens / 4),
+      )),
+    );
+    const factBase = {
+      ...(operation ? { operation } : {}),
+      ordinal: activity.ordinal,
+      runId: activity.runId,
+      status: activity.status,
+      toolName,
+    };
+    let result: unknown;
+    if (activity.call.name === AGENT_SKILL_ACTIVATE_TOOL_NAME) {
       if (
-        activity.call.name === AGENT_SKILL_ACTIVATE_TOOL_NAME
-        && activity.result?.ok
+        activity.result?.ok
         && activity.result.data
         && typeof activity.result.data === 'object'
         && !Array.isArray(activity.result.data)
@@ -322,43 +383,93 @@ function summarizeToolActivities(
         const instructionsHash = /^[a-f0-9]{64}$/u.test(String(data.instructionsHash || ''))
           ? String(data.instructionsHash)
           : '';
-        if (skillId && version && instructionsHash) {
-          return {
-            content: JSON.stringify({
-              instructionsHash,
-              ok: true,
-              runId: activity.runId,
-              skillId,
-              status: activity.status,
-              version,
-            }),
-            toolName: AGENT_SKILL_ACTIVATE_TOOL_NAME,
-          };
-        }
+        result = skillId && version && instructionsHash
+          ? { data: { instructionsHash, skillId, version }, ok: true }
+          : { ok: true };
+      } else {
+        const message = sanitizeAgentMemoryText(activity.result?.message || '')
+          .replace(/\s+/gu, ' ')
+          .trim()
+          .slice(0, MAX_EXECUTION_FACT_LENGTH);
+        result = {
+          ...(message ? { message } : {}),
+          ok: false,
+        };
       }
-      const rawMessage = activity.result?.message
-        || (activity.status === 'completed' ? 'Tool 已完成' : `Tool 状态：${activity.status}`);
-      const content = sanitizeAgentMemoryText(rawMessage)
-        .replace(/\s+/g, ' ')
-        .trim()
-        .slice(0, MAX_EXECUTION_FACT_LENGTH);
-      return {
-        content: JSON.stringify({
-          message: content,
-          ok: activity.result?.ok ?? activity.status === 'completed',
-          runId: activity.runId,
-          status: activity.status,
-        }),
-        toolName: sanitizeAgentMemoryText(activity.call.name).trim().slice(0, 80),
+    } else if (activity.result) {
+      const envelopeTokens = estimateAgentTextTokens(JSON.stringify({
+        ...factBase,
+        result: null,
+      }));
+      let resultTokenBudget = Math.min(
+        activity.call.name === AGENT_SHELL_RUN_TOOL_NAME
+          ? SHELL_EXECUTION_FACT_RESULT_TOKENS
+          : DEFAULT_EXECUTION_FACT_RESULT_TOKENS,
+        remainingTokens - envelopeTokens - EXECUTION_FACT_SEPARATOR_TOKENS,
+      );
+      if (resultTokenBudget < MINIMUM_AGENT_PROVIDER_TOOL_RESULT_TOKENS) break;
+
+      let fittedFact: AgentExecutionFact | null = null;
+      let fittedTokens = 0;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const projection = projectAgentToolResultForProvider(
+          activity.result,
+          resultTokenBudget,
+          activity.call.name === AGENT_SHELL_RUN_TOOL_NAME ? { mode: 'shell' } : {},
+        );
+        try {
+          result = JSON.parse(projection.content);
+        } catch {
+          result = { ok: activity.result.ok === true };
+        }
+        const fact: AgentExecutionFact = { ...factBase, result };
+        const tokens = estimateAgentTextTokens(JSON.stringify(fact))
+          + EXECUTION_FACT_SEPARATOR_TOKENS;
+        if (tokens <= remainingTokens) {
+          fittedFact = fact;
+          fittedTokens = tokens;
+          break;
+        }
+        const nextBudget = resultTokenBudget - (tokens - remainingTokens) - 2;
+        if (nextBudget < MINIMUM_AGENT_PROVIDER_TOOL_RESULT_TOKENS) break;
+        resultTokenBudget = nextBudget;
+      }
+      if (!fittedFact) break;
+      selected.unshift(fittedFact);
+      remainingTokens -= fittedTokens;
+      continue;
+    } else {
+      const rawMessage = activity.status === 'completed'
+        ? 'Tool 已完成'
+        : `Tool 状态：${activity.status}`;
+      result = {
+        message: sanitizeAgentMemoryText(rawMessage)
+          .replace(/\s+/g, ' ')
+          .trim()
+          .slice(0, MAX_EXECUTION_FACT_LENGTH),
+        ok: activity.status === 'completed',
       };
-    });
+    }
+
+    const fact: AgentExecutionFact = {
+      ...factBase,
+      result,
+    };
+    const tokens = estimateAgentTextTokens(JSON.stringify(fact))
+      + EXECUTION_FACT_SEPARATOR_TOKENS;
+    if (tokens > remainingTokens) break;
+    selected.unshift(fact);
+    remainingTokens -= tokens;
+  }
+  return selected;
 }
 
 function createMemoryMessages(
   checkpoint: AgentContextCheckpointProjection | undefined,
   executionFacts: readonly AgentExecutionFact[],
+  includeEmptyExecutionFacts = false,
 ): AgentProviderMessage[] {
-  if (!checkpoint && executionFacts.length === 0) return [];
+  if (!checkpoint && executionFacts.length === 0 && !includeEmptyExecutionFacts) return [];
   return [
     { content: HISTORY_CONTEXT_MARKER, role: 'user' },
     {
@@ -366,12 +477,9 @@ function createMemoryMessages(
         ...(checkpoint
           ? { conversationSummary: renderAgentConversationSummary(checkpoint.summary) }
           : {}),
-        ...(executionFacts.length > 0
+        ...(executionFacts.length > 0 || includeEmptyExecutionFacts
           ? {
-              recentExecutionFacts: executionFacts.map(fact => ({
-                content: fact.content,
-                toolName: fact.toolName,
-              })),
+              recentExecutionFacts: executionFacts,
             }
           : {}),
         version: 1,
@@ -390,14 +498,28 @@ function providerMessagesFor(
   checkpoint: AgentContextCheckpointProjection | undefined,
   activities: readonly AgentToolActivitySnapshot[],
   terminalIds: ReadonlySet<string>,
+  tokenBudget: number,
 ): AgentProviderMessage[] {
-  const executionFacts = summarizeToolActivities(activities, terminalIds);
+  const conversationMessages = messages.flatMap(message => {
+    const projected = toProviderMessage(message);
+    return projected ? [projected] : [];
+  });
+  const memoryEnvelope = createMemoryMessages(checkpoint, [], true);
+  const factTokenBudget = Math.max(0, Math.min(
+    MAX_EXECUTION_FACTS_TOTAL_TOKENS,
+    tokenBudget - estimateAgentProviderMessagesTokens([
+      ...memoryEnvelope,
+      ...conversationMessages,
+    ]),
+  ));
+  const executionFacts = summarizeToolActivities(
+    activities,
+    terminalIds,
+    factTokenBudget,
+  );
   return [
     ...createMemoryMessages(checkpoint, executionFacts),
-    ...messages.flatMap(message => {
-      const projected = toProviderMessage(message);
-      return projected ? [projected] : [];
-    }),
+    ...conversationMessages,
   ];
 }
 
@@ -507,6 +629,7 @@ export function createAgentContextProjection(
     undefined,
     [],
     terminalIds,
+    historyBudgetTokens,
   );
   assertAgentCurrentRunFitsContext(protectedProviderMessages, fixedInputTokens, budget);
   const initialMessages = providerMessagesFor(
@@ -514,6 +637,7 @@ export function createAgentContextProjection(
     checkpoint,
     input.toolActivities,
     terminalIds,
+    historyBudgetTokens,
   );
   const initialTokens = estimateAgentProviderMessagesTokens(initialMessages);
   if (initialTokens <= historyBudgetTokens) {
@@ -547,6 +671,7 @@ export function createAgentContextProjection(
     checkpoint,
     input.toolActivities,
     terminalIds,
+    historyBudgetTokens,
   );
   const bounded = boundProviderMessages(fallbackMessages, historyBudgetTokens);
   return {

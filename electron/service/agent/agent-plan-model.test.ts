@@ -11,6 +11,19 @@ const AVAILABLE_TOOLS = new Set(['file.list', 'file.stat', 'media.inspect']);
 const CREATED_AT = '2026-08-23T01:02:03.000Z';
 
 describe('Agent plan model', () => {
+  it('resolves provider names to canonical names only within the available tools', () => {
+    const steps = [
+      { title: '浏览目录', toolName: 'file_list' },
+      { title: '检查文件', toolName: 'media_inspect' },
+    ];
+    const plan = normalizeAgentRunPlan({ steps }, AVAILABLE_TOOLS, CREATED_AT);
+    expect(plan.steps.map(step => step.expectedToolName)).toEqual(['file.list', 'media.inspect']);
+    expect(() => normalizeAgentRunPlan({ steps }, new Set(['file.list']), CREATED_AT))
+      .toThrow('本轮不可用的 Tool');
+    expect(() => normalizeAgentRunPlan({ steps }, new Set([...AVAILABLE_TOOLS, 'file_list']), CREATED_AT))
+      .toThrow('名称有歧义');
+  });
+
   it('normalizes bounded steps and owns plan identity in main', () => {
     let id = 0;
     const plan = normalizeAgentRunPlan({

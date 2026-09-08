@@ -362,12 +362,12 @@ describe('Agent Shell PreparationService', () => {
   });
 
   it.each<{
-    expectedBehavior: 'ask' | 'deny';
+    expectedBehavior: 'ask' | 'allow' | 'deny';
     mode: AgentShellPermissionMode;
   }>([
     { expectedBehavior: 'ask', mode: 'ask' },
     { expectedBehavior: 'ask', mode: 'auto' },
-    { expectedBehavior: 'deny', mode: 'full-access' },
+    { expectedBehavior: 'allow', mode: 'full-access' },
   ])('uses the Run-frozen $mode permission mode', async ({ expectedBehavior, mode }) => {
     const provider = providerFixture();
     const snapshot = runCapabilitySnapshot(provider, mode);

@@ -88,4 +88,178 @@ describe('Agent Tool result provider projection', () => {
     expect(() => projectAgentToolResultForProvider({ ok: true }, 2))
       .toThrow('没有足够的模型上下文预算');
   });
+
+  it('keeps an ordinary Markdown document complete for Shell within a 10k token budget', () => {
+    const document = Array.from(
+      { length: 287 },
+      (_, index) => `## ${index + 1}\n${'x'.repeat(92)}\n`,
+    ).join('');
+    const projection = projectAgentToolResultForProvider({
+      data: {
+        droppedOutputBytes: 1_234,
+        executionId: 'execution-secret',
+        logRef: `log:v1:${'e'.repeat(64)}`,
+        previewTruncated: true,
+        providerOutput: {
+          stderr: {
+            head: '',
+            omittedBytes: 0,
+            tail: '',
+            totalBytes: 0,
+            truncated: false,
+          },
+          stdout: {
+            head: document,
+            omittedBytes: 0,
+            tail: '',
+            totalBytes: Buffer.byteLength(document, 'utf8'),
+            truncated: false,
+          },
+          version: 1,
+        },
+        status: 'completed',
+        stderrTail: 'renderer stderr',
+        stdoutTail: 'renderer stdout',
+        tailTruncated: true,
+      },
+      message: 'Shell 命令执行完成',
+      ok: true,
+    }, 10_000, { mode: 'shell' });
+    const payload = JSON.parse(projection.content);
+
+    expect(Buffer.byteLength(document, 'utf8')).toBeGreaterThan(27 * 1_024);
+    expect(projection.truncated).toBe(false);
+    expect(projection.estimatedTokens).toBeLessThanOrEqual(10_000);
+    expect(payload.data.output.stdout).toEqual({
+      content: document,
+      omittedBytes: 0,
+      totalBytes: Buffer.byteLength(document, 'utf8'),
+      truncated: false,
+    });
+    expect(payload.data.output.stdout).not.toHaveProperty('head');
+    expect(payload.data.output.stdout).not.toHaveProperty('tail');
+    expect(payload.data).not.toHaveProperty('executionId');
+    expect(payload.data).not.toHaveProperty('logRef');
+    expect(payload.data).not.toHaveProperty('providerOutput');
+    expect(payload.data).not.toHaveProperty('stderrTail');
+    expect(payload.data).not.toHaveProperty('stdoutTail');
+    expect(payload.data).not.toHaveProperty('tailTruncated');
+    expect(payload.data).not.toHaveProperty('previewTruncated');
+    expect(payload.data).not.toHaveProperty('droppedOutputBytes');
+  });
+
+  it('retains both ends of oversized Shell text when provider context is tighter', () => {
+    const output = `document-start\n${'x'.repeat(80_000)}\ndocument-end`;
+    const projection = projectAgentToolResultForProvider({
+      data: {
+        providerOutput: {
+          stderr: {
+            head: '',
+            omittedBytes: 0,
+            tail: '',
+            totalBytes: 0,
+            truncated: false,
+          },
+          stdout: {
+            head: output,
+            omittedBytes: 0,
+            tail: '',
+            totalBytes: Buffer.byteLength(output, 'utf8'),
+            truncated: false,
+          },
+          version: 1,
+        },
+        status: 'completed',
+      },
+      ok: true,
+    }, 2_000, { mode: 'shell' });
+    const payload = JSON.parse(projection.content);
+    const projectedOutput = payload.data.output.stdout;
+    const retainedBytes = Buffer.byteLength(projectedOutput.head, 'utf8')
+      + Buffer.byteLength(projectedOutput.tail, 'utf8');
+
+    expect(projection.truncated).toBe(true);
+    expect(projection.estimatedTokens).toBeLessThanOrEqual(2_000);
+    expect(projectedOutput.head).toMatch(/^document-start/u);
+    expect(projectedOutput.tail).toMatch(/document-end$/u);
+    expect(projectedOutput.truncated).toBe(true);
+    expect(projectedOutput.omittedBytes).toBe(projectedOutput.totalBytes - retainedBytes);
+    expect(payload._omniflowProjection).toMatchObject({
+      reason: 'provider_context_budget',
+      truncated: true,
+      version: 1,
+    });
+  });
+
+  it('recomputes Shell omitted bytes after a previously truncated source is projected again', () => {
+    const source = {
+      stderr: {
+        head: '',
+        omittedBytes: 0,
+        tail: '',
+        totalBytes: 0,
+        truncated: false,
+      },
+      stdout: {
+        head: `document-start\n${'h'.repeat(45_000)}`,
+        omittedBytes: 89_972,
+        tail: `${'t'.repeat(45_000)}\ndocument-end`,
+        totalBytes: 180_000,
+        truncated: true,
+      },
+      version: 1,
+    } as const;
+    const projection = projectAgentToolResultForProvider({
+      data: { providerOutput: source, status: 'completed' },
+      ok: true,
+    }, 2_000, { mode: 'shell' });
+    const output = JSON.parse(projection.content).data.output.stdout;
+    const retainedBytes = Buffer.byteLength(output.head, 'utf8')
+      + Buffer.byteLength(output.tail, 'utf8');
+
+    expect(projection.truncated).toBe(true);
+    expect(output.head).toMatch(/^document-start/u);
+    expect(output.tail).toMatch(/document-end$/u);
+    expect(output.omittedBytes).toBe(output.totalBytes - retainedBytes);
+    expect(output.omittedBytes).toBeGreaterThan(source.stdout.omittedBytes);
+  });
+
+  it('preserves both Shell streams under one tight provider budget', () => {
+    const projection = projectAgentToolResultForProvider({
+      data: {
+        providerOutput: {
+          stderr: {
+            head: `stderr-start\n${'e'.repeat(30_000)}\nstderr-end`,
+            omittedBytes: 0,
+            tail: '',
+            totalBytes: 30_024,
+            truncated: false,
+          },
+          stdout: {
+            head: `stdout-start\n${'o'.repeat(30_000)}\nstdout-end`,
+            omittedBytes: 0,
+            tail: '',
+            totalBytes: 30_024,
+            truncated: false,
+          },
+          version: 1,
+        },
+        status: 'completed',
+      },
+      ok: true,
+    }, 1_500, { mode: 'shell' });
+    const output = JSON.parse(projection.content).data.output;
+
+    for (const stream of [output.stdout, output.stderr]) {
+      const retainedBytes = Buffer.byteLength(stream.head, 'utf8')
+        + Buffer.byteLength(stream.tail, 'utf8');
+      expect(retainedBytes).toBeGreaterThan(0);
+      expect(stream.truncated).toBe(true);
+      expect(stream.omittedBytes).toBe(stream.totalBytes - retainedBytes);
+    }
+    expect(output.stdout.head).toMatch(/^stdout-start/u);
+    expect(output.stdout.tail).toMatch(/stdout-end$/u);
+    expect(output.stderr.head).toMatch(/^stderr-start/u);
+    expect(output.stderr.tail).toMatch(/stderr-end$/u);
+  });
 });

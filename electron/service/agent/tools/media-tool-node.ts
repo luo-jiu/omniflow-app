@@ -15,6 +15,7 @@ function visibleNode(
   const directoryEntries = context.perception?.currentDirectory?.entries || [];
   return selectedNodes.find(node => node.id === nodeId)
     || directoryEntries.find(node => node.id === nodeId)
+    || context.perception?.knownNodes?.find(node => node.id === nodeId && node.libraryId === context.appContext.libraryId)
     || null;
 }
 
@@ -27,7 +28,7 @@ export function resolveAgentMediaNode(
     || (selectedNodes.length === 1 ? selectedNodes[0].id : null);
   if (!nodeId) throw new Error('请指定当前可见媒体文件的 nodeId');
   const node = visibleNode(nodeId, context);
-  if (!node) throw new Error('目标节点不在当前选中项或当前目录的感知范围内');
+  if (!node) throw new Error('目标节点尚未读取，请先用 file.stat 或 file.resolve 获取当前资料库中的节点信息');
   if (node.type !== 'file') throw new Error('媒体工具只能处理单个文件');
   return node;
 }

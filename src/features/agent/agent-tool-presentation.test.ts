@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import type { AgentToolActivitySnapshot } from '@/shared/agent/agent.types';
-import { buildAgentToolPresentation } from './agent-tool-presentation';
+import {
+  buildAgentToolPresentation,
+  getAgentToolNameTitle,
+} from './agent-tool-presentation';
 
 function completedActivity(
   toolName: string,
@@ -23,6 +26,14 @@ function completedActivity(
 }
 
 describe('Agent Tool presentation registry', () => {
+  it.each([
+    ['file.stage', '暂存文件'],
+    ['file.publish', '发布 Agent 输出'],
+    ['file.upload', '上传本机文件'],
+  ])('uses a readable title for %s', (toolName, title) => {
+    expect(getAgentToolNameTitle(toolName)).toBe(title);
+  });
+
   it('shows preparation as an active state instead of a failure', () => {
     const activity = completedActivity('media.extractAudio', {});
     activity.status = 'preparing';
@@ -82,6 +93,24 @@ describe('Agent Tool presentation registry', () => {
     }), 3);
 
     expect(blocks).toEqual([{ message: '完成', tone: 'success', type: 'notice' }]);
+  });
+
+  it('keeps Shell result metadata and output out of the generic presentation registry', () => {
+    const blocks = buildAgentToolPresentation(completedActivity('shell.run', {
+      durationMs: 13,
+      exitCode: 0,
+      status: 'completed',
+      stderrTail: 'private stderr',
+      stdoutTail: 'private stdout',
+      previewTruncated: true,
+    }), 3);
+
+    expect(blocks).toEqual([{ message: '完成', tone: 'success', type: 'notice' }]);
+    expect(JSON.stringify(blocks)).not.toContain('durationMs');
+    expect(JSON.stringify(blocks)).not.toContain('exitCode');
+    expect(JSON.stringify(blocks)).not.toContain('private stderr');
+    expect(JSON.stringify(blocks)).not.toContain('private stdout');
+    expect(JSON.stringify(blocks)).not.toContain('previewTruncated');
   });
 
   it('projects only controlled choice fields from a persisted interaction', () => {

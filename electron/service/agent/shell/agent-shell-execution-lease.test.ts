@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import type { AgentToolMainPreparedExecution } from '../agent-tool-registry';
+import {
+  createAgentToolRegistry,
+  hashAgentToolInputForPreparation,
+  type AgentToolMainPreparedExecution,
+} from '../agent-tool-registry';
+import type { AgentShellPreparedActionPublicV1 } from '../../../../src/shared/agent/shell/agent-shell.types';
 import { createAgentShellExecutionLeaseManager } from './agent-shell-execution-lease';
 import { createAgentShellCommandHash } from './agent-shell-prepared-action';
 import type {
@@ -32,7 +37,9 @@ function workspace(): AgentShellWorkspacePreparationContext {
   });
 }
 
-function prepared(workspaceContext = workspace()): AgentToolMainPreparedExecution {
+function prepared(workspaceContext = workspace()): AgentToolMainPreparedExecution & {
+  readonly publicAction: AgentShellPreparedActionPublicV1;
+} {
   const command = 'printf hello';
   const commandHash = createAgentShellCommandHash(command);
   return {
@@ -67,9 +74,9 @@ function prepared(workspaceContext = workspace()): AgentToolMainPreparedExecutio
       runCapabilityIdentity: `v1:${'7'.repeat(64)}`,
       runId: 'run-1',
       sessionId: 'session-1',
-      toolInputHash: `sha256:${'8'.repeat(64)}`,
+      toolInputHash: '8'.repeat(64),
       toolName: 'shell.run',
-      toolRegistrationId: 'omniflow.shell.run.v1',
+      toolRegistrationId: 'shell.run@1',
       toolRunId: 'tool-run-1',
     },
     preparedActionId: 'prepared-1',
@@ -96,7 +103,7 @@ function prepared(workspaceContext = workspace()): AgentToolMainPreparedExecutio
       timeoutMs: 10_000,
       version: 1,
     },
-    snapshotHash: `sha256:${'9'.repeat(64)}`,
+    snapshotHash: '9'.repeat(64),
   };
 }
 
@@ -106,7 +113,72 @@ function storeFixture(current: () => AgentShellWorkspacePreparationContext = wor
 }
 
 describe('Agent Shell execution lease', () => {
-  it('re-scans the workspace when acquiring and consuming a one-shot lease', async () => {
+  it('accepts the snapshot hash emitted by a real Registry main seal', async () => {
+    const source = prepared();
+    const toolInput = { command: source.publicAction.command };
+    const manager = createAgentShellExecutionLeaseManager({
+      createId: () => 'lease-registry',
+      workspaceStore: storeFixture(),
+    });
+    const registry = createAgentToolRegistry([{
+      description: 'Shell Registry-to-lease contract',
+      execute: async (_input, context) => {
+        if (!context.preparation) throw new Error('missing preparation');
+        const lease = await manager.acquire({
+          owner: OWNER,
+          preparation: context.preparation,
+          runCapabilityIdentity: context.preparation.identity.runCapabilityIdentity,
+          toolRunId: context.preparation.identity.toolRunId,
+          workspaceId: 'workspace-1',
+        });
+        const grant = await manager.consume(lease, OWNER);
+        return { data: { command: grant.command }, ok: true };
+      },
+      inputSchema: {
+        additionalProperties: false,
+        properties: { command: { type: 'string' } },
+        required: ['command'],
+        type: 'object',
+      },
+      name: 'shell.run',
+      prepareMain: async () => { throw new Error('not executed'); },
+      preparedRisk: 'dynamic',
+      registrationId: 'shell.run@1',
+      risk: 'destructive',
+    }]);
+    const snapshot = registry.createSnapshot();
+    const sealed = snapshot.sealMainPreparedExecution('shell.run', {
+      approvalSemantics: {
+        action: source.publicAction,
+        behavior: 'ask',
+        risk: source.publicAction.assessment.risk,
+      },
+      binding: source.binding,
+      identity: {
+        ...source.identity,
+        ownerScope: {
+          accountScope: OWNER.accountScope,
+          backendScope: OWNER.backendScope,
+        },
+        toolInputHash: hashAgentToolInputForPreparation(toolInput),
+      },
+      publicAction: source.publicAction,
+    });
+
+    expect(sealed.snapshotHash).toMatch(/^[a-f0-9]{64}$/u);
+    await expect(snapshot.execute('shell.run', toolInput, {
+      appContext: { libraryId: 3, platform: 'darwin', selectedNodeIds: [] },
+      mainPreparationCapability: sealed.capability,
+      mainPreparationIdentity: sealed.identity,
+      onProgress: vi.fn(),
+      signal: new AbortController().signal,
+    })).resolves.toEqual({
+      data: { command: 'printf hello' },
+      ok: true,
+    });
+  });
+
+  it('accepts the bare main-seal snapshot hash and re-scans a one-shot lease', async () => {
     const store = storeFixture();
     const manager = createAgentShellExecutionLeaseManager({
       createId: () => 'lease-1',

@@ -2,7 +2,16 @@ import {
   type AgentPreparedActionPublic,
   type AgentToolResult,
 } from '../../../../src/shared/agent/agent.types';
+import {
+  AGENT_LIBRARY_DIRECTORY_PATH_MAX_BYTES,
+  normalizeAgentLibraryDirectoryPath,
+} from '../../../../src/shared/agent/agent-library-path';
 import { normalizeAgentShellLogicalPath } from '../../../../src/shared/agent/shell/agent-shell.types';
+import {
+  AGENT_LOCAL_PATH_MAX_BYTES,
+  normalizeAgentLocalPathExpression,
+} from './agent-local-file';
+import { toAgentProviderToolName } from '../agent-provider-tool-name';
 import type {
   AgentTool,
   AgentToolExecutionContext,
@@ -12,12 +21,14 @@ import type {
 
 const FILE_STAGE_REGISTRATION_ID = 'file.stage@1';
 const FILE_PUBLISH_REGISTRATION_ID = 'file.publish@1';
+const FILE_UPLOAD_REGISTRATION_ID = 'file.upload@1';
 const MAX_LOGICAL_PATH_BYTES = 1_024;
 const MAX_FILE_NAME_BYTES = 240;
 
 export interface AgentFileBridgeToolRuntime {
   readonly executePublish: (context: AgentToolExecutionContext) => Promise<AgentToolResult>;
   readonly executeStage: (context: AgentToolExecutionContext) => Promise<AgentToolResult>;
+  readonly executeUpload: (context: AgentToolExecutionContext) => Promise<AgentToolResult>;
   readonly preparePublish: (
     input: unknown,
     requestedAction: AgentPreparedActionPublic | undefined,
@@ -28,23 +39,51 @@ export interface AgentFileBridgeToolRuntime {
     requestedAction: AgentPreparedActionPublic | undefined,
     context: AgentToolMainPreparationContext,
   ) => Promise<AgentToolMainPreparationResult>;
+  readonly prepareUpload: (
+    input: unknown,
+    requestedAction: AgentPreparedActionPublic | undefined,
+    context: AgentToolMainPreparationContext,
+  ) => Promise<AgentToolMainPreparationResult>;
 }
 
 export interface AgentFileStageInputV1 {
-  source: { kind: 'library-node'; nodeId: number } | { kind: 'local-picker' };
+  source:
+    | { kind: 'library-node'; nodeId: number }
+    | { kind: 'local-path'; path: string }
+    | { kind: 'local-picker' };
+}
+
+interface AgentLibraryDestinationOptions {
+  conflictPolicy?: 'fail' | 'rename';
+  fileName?: string;
+  providerId?: string;
 }
 
 export interface AgentFilePublishInputV1 {
   destination:
-    | {
-        conflictPolicy?: 'fail' | 'rename';
-        fileName?: string;
+    | (AgentLibraryDestinationOptions & {
         kind: 'library';
         parentId: number;
-        providerId?: string;
-      }
+      })
+    | (AgentLibraryDestinationOptions & {
+        directoryPath: string;
+        kind: 'library-path';
+      })
     | { kind: 'local-save-as'; suggestedFileName?: string };
   sourcePath: string;
+}
+
+export interface AgentFileUploadInputV1 {
+  destination:
+    | (AgentLibraryDestinationOptions & {
+        kind: 'library';
+        parentId: number;
+      })
+    | (AgentLibraryDestinationOptions & {
+        directoryPath: string;
+        kind: 'library-path';
+      });
+  source: { kind: 'local-path'; path: string };
 }
 
 function isStrictObject(input: unknown): input is Record<string, unknown> {
@@ -67,6 +106,13 @@ export function normalizeAgentFileStageInputV1(input: unknown): AgentFileStageIn
     return { source: { kind: 'local-picker' } };
   }
   if (
+    source.kind === 'local-path'
+    && exactKeys(source, ['kind', 'path'])
+  ) {
+    const localPath = normalizeAgentLocalPathExpression(source.path);
+    return { source: { kind: 'local-path', path: localPath.displayPath } };
+  }
+  if (
     source.kind === 'library-node'
     && exactKeys(source, ['kind', 'nodeId'])
     && typeof source.nodeId === 'number'
@@ -76,6 +122,45 @@ export function normalizeAgentFileStageInputV1(input: unknown): AgentFileStageIn
     return { source: { kind: 'library-node', nodeId: source.nodeId } };
   }
   throw new Error('文件暂存来源无效');
+}
+
+function normalizeLibraryDestination(
+  input: Record<string, unknown>,
+): AgentFileUploadInputV1['destination'] {
+  const commonValid = (input.conflictPolicy === undefined
+      || input.conflictPolicy === 'rename'
+      || input.conflictPolicy === 'fail')
+    && (input.providerId === undefined
+      || (typeof input.providerId === 'string'
+        && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(input.providerId)));
+  if (!commonValid) throw new Error('资料库文件目标无效');
+  const options = {
+    ...(input.conflictPolicy ? { conflictPolicy: input.conflictPolicy as 'fail' | 'rename' } : {}),
+    ...(safeFileName(input.fileName, '发布文件名')
+      ? { fileName: safeFileName(input.fileName, '发布文件名') }
+      : {}),
+    ...(input.providerId ? { providerId: input.providerId as string } : {}),
+  };
+  if (
+    input.kind === 'library'
+    && exactKeys(input, ['conflictPolicy', 'fileName', 'kind', 'parentId', 'providerId'])
+    && typeof input.parentId === 'number'
+    && Number.isSafeInteger(input.parentId)
+    && input.parentId > 0
+  ) {
+    return { kind: 'library', parentId: input.parentId, ...options };
+  }
+  if (
+    input.kind === 'library-path'
+    && exactKeys(input, ['conflictPolicy', 'directoryPath', 'fileName', 'kind', 'providerId'])
+  ) {
+    return {
+      directoryPath: normalizeAgentLibraryDirectoryPath(input.directoryPath),
+      kind: 'library-path',
+      ...options,
+    };
+  }
+  throw new Error('资料库文件目标无效');
 }
 
 function safeFileName(value: unknown, label: string): string | undefined {
@@ -124,41 +209,35 @@ export function normalizeAgentFilePublishInputV1(input: unknown): AgentFilePubli
       sourcePath,
     };
   }
+  return { destination: normalizeLibraryDestination(destination), sourcePath };
+}
+
+export function normalizeAgentFileUploadInputV1(input: unknown): AgentFileUploadInputV1 {
   if (
-    destination.kind === 'library'
-    && exactKeys(destination, ['conflictPolicy', 'fileName', 'kind', 'parentId', 'providerId'])
-    && typeof destination.parentId === 'number'
-    && Number.isSafeInteger(destination.parentId)
-    && destination.parentId > 0
-    && (destination.conflictPolicy === undefined
-      || destination.conflictPolicy === 'rename'
-      || destination.conflictPolicy === 'fail')
-    && (destination.providerId === undefined
-      || (typeof destination.providerId === 'string'
-        && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(destination.providerId)))
+    !isStrictObject(input)
+    || !exactKeys(input, ['destination', 'source'])
+    || !isStrictObject(input.destination)
+    || !isStrictObject(input.source)
+    || input.source.kind !== 'local-path'
+    || !exactKeys(input.source, ['kind', 'path'])
   ) {
-    return {
-      destination: {
-        kind: 'library',
-        parentId: destination.parentId,
-        ...(destination.conflictPolicy ? { conflictPolicy: destination.conflictPolicy } : {}),
-        ...(safeFileName(destination.fileName, '发布文件名')
-          ? { fileName: safeFileName(destination.fileName, '发布文件名') }
-          : {}),
-        ...(destination.providerId ? { providerId: destination.providerId } : {}),
-      },
-      sourcePath,
-    };
+    throw new Error('文件上传参数无效');
   }
-  throw new Error('文件发布目标无效');
+  const localPath = normalizeAgentLocalPathExpression(input.source.path);
+  return {
+    destination: normalizeLibraryDestination(input.destination),
+    source: { kind: 'local-path', path: localPath.displayPath },
+  };
 }
 
 const stageInputSchema = {
   additionalProperties: false,
   properties: {
     source: {
+      description: '要进入当前 Run input 目录的单个普通文件来源。用户已经给出本机路径时使用 local-path；没有路径且需要用户选择时才使用 local-picker。',
       oneOf: [{
         additionalProperties: false,
+        description: '当前 OmniFlow 资料库中已知节点 ID 对应的普通文件。',
         properties: {
           kind: { const: 'library-node', type: 'string' },
           nodeId: { minimum: 1, type: 'integer' },
@@ -167,6 +246,21 @@ const stageInputSchema = {
         type: 'object',
       }, {
         additionalProperties: false,
+        description: '用户在当前请求中明确给出的当前平台绝对路径或 ~/ 路径。',
+        properties: {
+          kind: { const: 'local-path', type: 'string' },
+          path: {
+            description: '当前平台绝对路径或 ~/ 路径；不能是相对路径或目录。',
+            maxLength: AGENT_LOCAL_PATH_MAX_BYTES,
+            minLength: 1,
+            type: 'string',
+          },
+        },
+        required: ['kind', 'path'],
+        type: 'object',
+      }, {
+        additionalProperties: false,
+        description: '仅当用户没有提供本机路径时，执行阶段打开系统文件选择器。',
         properties: { kind: { const: 'local-picker', type: 'string' } },
         required: ['kind'],
         type: 'object',
@@ -181,6 +275,7 @@ const publishInputSchema = {
   additionalProperties: false,
   properties: {
     destination: {
+      description: '工作区输出文件的落点；资料库可用已知目录节点 ID 或从根开始的绝对逻辑路径，本机位置由系统 Save As 选择。',
       oneOf: [{
         additionalProperties: false,
         properties: {
@@ -199,6 +294,28 @@ const publishInputSchema = {
         type: 'object',
       }, {
         additionalProperties: false,
+        description: '从当前资料库根开始的已存在目录逻辑路径。',
+        properties: {
+          conflictPolicy: { enum: ['rename', 'fail'], type: 'string' },
+          directoryPath: {
+            description: '以 / 开头的资料库目录路径，不是本机文件系统路径。',
+            maxLength: AGENT_LIBRARY_DIRECTORY_PATH_MAX_BYTES,
+            minLength: 1,
+            type: 'string',
+          },
+          fileName: { maxLength: MAX_FILE_NAME_BYTES, minLength: 1, type: 'string' },
+          kind: { const: 'library-path', type: 'string' },
+          providerId: {
+            maxLength: 128,
+            minLength: 1,
+            pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$',
+            type: 'string',
+          },
+        },
+        required: ['kind', 'directoryPath'],
+        type: 'object',
+      }, {
+        additionalProperties: false,
         properties: {
           kind: { const: 'local-save-as', type: 'string' },
           suggestedFileName: { maxLength: MAX_FILE_NAME_BYTES, minLength: 1, type: 'string' },
@@ -213,18 +330,48 @@ const publishInputSchema = {
   type: 'object',
 } as const;
 
+const uploadInputSchema = {
+  additionalProperties: false,
+  properties: {
+    destination: {
+      description: '当前资料库中已存在的目标目录。',
+      oneOf: publishInputSchema.properties.destination.oneOf.slice(0, 2),
+    },
+    source: {
+      additionalProperties: false,
+      description: '要保持原字节传输的单个本机普通文件；必须使用用户已经给出的路径，不打开系统文件选择器。',
+      properties: {
+        kind: { const: 'local-path', type: 'string' },
+        path: {
+          description: '当前平台绝对路径或 ~/ 路径；不能是相对路径或目录。',
+          maxLength: AGENT_LOCAL_PATH_MAX_BYTES,
+          minLength: 1,
+          type: 'string',
+        },
+      },
+      required: ['kind', 'path'],
+      type: 'object',
+    },
+  },
+  required: ['destination', 'source'],
+  type: 'object',
+} as const;
+
 export function createAgentFileBridgeTools(runtime: AgentFileBridgeToolRuntime): readonly AgentTool[] {
   if (
     !runtime?.prepareStage
     || !runtime.executeStage
     || !runtime.preparePublish
     || !runtime.executePublish
+    || !runtime.prepareUpload
+    || !runtime.executeUpload
   ) {
     throw new Error('Agent 文件桥 Tool 缺少生产运行时');
   }
+  const providerToolName = toAgentProviderToolName;
   const stageTool: AgentTool = {
     cancellationSettleTimeoutMs: 45_000,
-    description: '把一个本机普通文件或当前资料库中的普通文件暂存到当前 Run 的 input 目录，返回逻辑路径、大小和 SHA-256。资料库文件需指定节点 ID；本机文件由用户通过系统文件选择器确认。',
+    description: `把一个本机普通文件或当前资料库中的普通文件暂存到当前 Run 的 input 目录，返回逻辑路径、大小和 SHA-256。本机来源可使用用户明确给出的绝对路径或 ~/ 路径；只有用户没有给路径时才使用系统文件选择器。此 Tool 只用于需要工作副本的修改、转换或生成流程；仅查看、概括或分析用户明确给出的宿主绝对路径时，应使用 ${providerToolName('shell.run')} 直接读取原路径，不要暂存。原样传输应使用 ${providerToolName('file.upload')}。`,
     execute: async (_input, context) => runtime.executeStage(context),
     executor: 'main',
     inputSchema: stageInputSchema,
@@ -251,7 +398,7 @@ export function createAgentFileBridgeTools(runtime: AgentFileBridgeToolRuntime):
   };
   const publishTool: AgentTool = {
     cancellationSettleTimeoutMs: 45_000,
-    description: '把当前 Run 的 output 目录中的一个普通文件发布到资料库目录或通过系统 Save As 保存到本机，返回安全的文件名、大小和 SHA-256。',
+    description: `把当前 Run 的 output 目录中的一个普通文件发布到资料库目录或通过系统 Save As 保存到本机。资料库目标既可使用目录节点 ID，也可使用从当前资料库根开始的绝对目录路径；不要用 ${providerToolName('file.list')} 猜测嵌套目录。`,
     execute: async (_input, context) => runtime.executePublish(context),
     executor: 'main',
     inputSchema: publishInputSchema,
@@ -276,13 +423,42 @@ export function createAgentFileBridgeTools(runtime: AgentFileBridgeToolRuntime):
       }
     },
   };
+  const uploadTool: AgentTool = {
+    cancellationSettleTimeoutMs: 45_000,
+    description: `原样传输一个用户明确给出绝对路径或 ~/ 路径的本机普通文件到当前 OmniFlow 资料库。资料库目标可用目录节点 ID 或从根开始的绝对目录路径；此 Tool 直接完成传输，不需要先 ${providerToolName('file.stage')}，也不会打开系统文件选择器。需要先查看或检查原文件时，使用 ${providerToolName('shell.run')} 直接读取原路径，确认无需修改后仍可使用本 Tool；只有需要工作副本来修改、转换或生成新文件时，才使用 ${providerToolName('file.stage')}、${providerToolName('shell.run')} 和 ${providerToolName('file.publish')}。`,
+    execute: async (_input, context) => runtime.executeUpload(context),
+    executor: 'main',
+    inputSchema: uploadInputSchema,
+    name: 'file.upload',
+    prepareMain: (input, requestedAction, context) => runtime.prepareUpload(
+      input,
+      requestedAction,
+      context,
+    ),
+    registrationId: FILE_UPLOAD_REGISTRATION_ID,
+    risk: 'write',
+    timeoutMs: 30 * 60 * 1_000,
+    validate(input) {
+      try {
+        normalizeAgentFileUploadInputV1(input);
+        return { ok: true as const };
+      } catch (error) {
+        return {
+          message: error instanceof Error ? error.message : '文件上传参数无效',
+          ok: false as const,
+        };
+      }
+    },
+  };
   return Object.freeze([
     Object.freeze(stageTool),
     Object.freeze(publishTool),
+    Object.freeze(uploadTool),
   ]);
 }
 
 export const __agentFileBridgeToolTestOnly = Object.freeze({
   normalizeFilePublishInput: normalizeAgentFilePublishInputV1,
   normalizeFileStageInput: normalizeAgentFileStageInputV1,
+  normalizeFileUploadInput: normalizeAgentFileUploadInputV1,
 });

@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type {
   AgentFilePublishPreparedActionPublicV1,
   AgentFileStagePreparedActionPublicV1,
-  AgentMessage,
+  AgentFileUploadPreparedActionPublicV1,
   AgentRunPlanSnapshot,
   AgentShellPreparedActionPublicV1,
 } from '@/shared/agent/agent.types';
@@ -320,21 +320,21 @@ async function readDatabaseRow<T>(
   return row;
 }
 
-function message(
-  sessionId: string,
+async function finishAssistantTurn(
+  store: AgentSessionStore,
   runId: string,
-  sequence: number,
-  role: AgentMessage['role'],
+  id: string,
   content: string,
-): AgentMessage {
-  return {
+  second: number,
+) {
+  const started = await store.startAssistantItem({ id, now: timestamp(second), runId });
+  return store.finishRunWithAssistantFinal({
     content,
-    createdAt: timestamp(sequence),
-    id: `${sessionId}-message-${sequence}`,
-    role,
+    expectedRevision: started.assistantItem.revision,
+    id,
+    now: timestamp(second + 1),
     runId,
-    sessionId,
-  };
+  });
 }
 
 function runPlan(
@@ -397,6 +397,37 @@ function libraryFileStagePreparedAction(): AgentFileStagePreparedActionPublicV1 
     sourceNodeId: 8,
     sourceSizeBytes: 12,
     targetLabel: '当前任务 input 目录',
+    version: 1,
+  };
+}
+
+function localPathFileStagePreparedAction(): AgentFileStagePreparedActionPublicV1 {
+  return {
+    kind: 'file.stage',
+    sourceDisplayName: 'source.txt',
+    sourceIdentity: `sha256:${'d'.repeat(64)}`,
+    sourceKind: 'local-path',
+    sourcePath: '~/Downloads/source.txt',
+    sourceSizeBytes: 12,
+    targetLabel: '当前任务 input 目录',
+    version: 1,
+  };
+}
+
+function fileUploadPreparedAction(): AgentFileUploadPreparedActionPublicV1 {
+  return {
+    conflictPolicy: 'rename',
+    kind: 'file.upload',
+    libraryId: 3,
+    outputFileName: 'source.txt',
+    parentId: 9,
+    providerId: 'local',
+    sourceDisplayName: 'source.txt',
+    sourceIdentity: `sha256:${'e'.repeat(64)}`,
+    sourceKind: 'local-path',
+    sourcePath: '~/Downloads/source.txt',
+    sourceSizeBytes: 12,
+    targetLabel: '资料库目录“Output” / 本机存储',
     version: 1,
   };
 }
@@ -627,22 +658,16 @@ describe('SQLite Agent session store', () => {
       sessionId,
       userPrompt: `问题 ${runId}`,
     });
-    const assistantMessage = message(
-      sessionId,
+    const assistantMessageId = `${sessionId}-message-${startSecond + 1}`;
+    await finishAssistantTurn(
+      store,
       runId,
-      startSecond + 1,
-      'assistant',
+      assistantMessageId,
       `回答 ${runId}`,
+      startSecond + 1,
     );
-    await store.appendMessage(assistantMessage);
-    await store.updateRun(runId, {
-      currentStep: '已完成',
-      finishedAt: timestamp(startSecond + 2),
-      status: 'completed',
-      updatedAt: timestamp(startSecond + 2),
-    });
     return {
-      assistantMessageId: assistantMessage.id,
+      assistantMessageId,
       userMessageId: `${runId}:user`,
     };
   }
@@ -660,13 +685,13 @@ describe('SQLite Agent session store', () => {
       sessionId: 'session-win',
       userPrompt: '列出文件',
     });
-    await store.appendMessage(message('session-win', 'run-1', 3, 'assistant', '共有三个文件'));
-    await store.updateRun('run-1', {
-      currentStep: '已完成',
-      finishedAt: timestamp(4),
-      status: 'completed',
-      updatedAt: timestamp(4),
-    });
+    await finishAssistantTurn(
+      store,
+      'run-1',
+      'session-win-message-3',
+      '共有三个文件',
+      3,
+    );
 
     expect((await store.listSessions(OWNER_SCOPE, 3)).sessions).toEqual([
       expect.objectContaining({
@@ -694,6 +719,172 @@ describe('SQLite Agent session store', () => {
       userPrompt: '列出文件',
     })]);
     expect(await store.getSession('session-win', OWNER_SCOPE, 4)).toBeNull();
+  });
+
+  it('persists assistant turns only at completed boundaries with CAS and conversation-only Session semantics', async () => {
+    const store = await createStore();
+    await createSession(store, 'session-assistant-turns', 3, '结构化回答');
+    await store.createRun({
+      id: 'run-assistant-turns',
+      model: 'model-a',
+      now: timestamp(1),
+      profileId: 'profile-a',
+      reasoningEffort: 'auto',
+      sessionId: 'session-assistant-turns',
+      userPrompt: '检查目录并回答',
+    });
+
+    const commentary = await store.startAssistantItem({
+      id: 'assistant-commentary',
+      now: timestamp(2),
+      runId: 'run-assistant-turns',
+    });
+    expect(commentary.assistantItem).toMatchObject({
+      phase: 'unknown',
+      revision: 1,
+      status: 'streaming',
+      turnOrdinal: 1,
+    });
+    expect(await store.getSession('session-assistant-turns', OWNER_SCOPE, 3)).toMatchObject({
+      lastMessagePreview: '检查目录并回答',
+      messageCount: 1,
+    });
+
+    await expect(store.finishAssistantCommentary({
+      content: '我先检查当前目录。',
+      expectedRevision: 2,
+      id: commentary.id,
+      now: timestamp(3),
+    })).rejects.toThrow('revision 已过期');
+    const finishedCommentary = await store.finishAssistantCommentary({
+      content: '我先检查当前目录。',
+      expectedRevision: commentary.assistantItem.revision,
+      id: commentary.id,
+      now: timestamp(4),
+    });
+    expect(finishedCommentary.assistantItem).toMatchObject({
+      phase: 'commentary',
+      revision: 2,
+      status: 'completed',
+      turnOrdinal: 1,
+    });
+    await expect(store.finishAssistantCommentary({
+      content: `${finishedCommentary.content}迟到`,
+      expectedRevision: finishedCommentary.assistantItem.revision,
+      id: commentary.id,
+      now: timestamp(5),
+    })).rejects.toThrow('已结束');
+
+    const finalItem = await store.startAssistantItem({
+      id: 'assistant-final',
+      now: timestamp(5),
+      runId: 'run-assistant-turns',
+    });
+    expect(finalItem.assistantItem.turnOrdinal).toBe(2);
+    const terminal = await store.finishRunWithAssistantFinal({
+      content: '目录中有三个文件。',
+      expectedRevision: finalItem.assistantItem.revision,
+      id: finalItem.id,
+      now: timestamp(6),
+      runId: 'run-assistant-turns',
+    });
+    expect(terminal.run.status).toBe('completed');
+    expect(terminal.assistantItem).toMatchObject({
+      content: '目录中有三个文件。',
+      assistantItem: { phase: 'final', revision: 2, status: 'completed' },
+    });
+    expect(await store.getSession('session-assistant-turns', OWNER_SCOPE, 3)).toMatchObject({
+      lastMessagePreview: '目录中有三个文件。',
+      messageCount: 2,
+      messages: [
+        expect.objectContaining({ role: 'user' }),
+        expect.objectContaining({
+          assistantItem: expect.objectContaining({ phase: 'commentary' }),
+        }),
+        expect.objectContaining({
+          assistantItem: expect.objectContaining({ phase: 'final' }),
+        }),
+      ],
+    });
+    await expect(store.startAssistantItem({
+      id: 'assistant-late',
+      now: timestamp(7),
+      runId: 'run-assistant-turns',
+    })).rejects.toThrow('已经结束');
+  });
+
+  it('rolls back final publication atomically and preserves preview on failure', async () => {
+    const store = await createStore();
+    await createSession(store, 'session-assistant-atomic', 3, '原子终态');
+    await store.createRun({
+      id: 'run-assistant-atomic',
+      model: 'model-a',
+      now: timestamp(1),
+      profileId: 'profile-a',
+      reasoningEffort: 'auto',
+      sessionId: 'session-assistant-atomic',
+      userPrompt: '执行后回答',
+    });
+    const item = await store.startAssistantItem({
+      id: 'assistant-atomic',
+      now: timestamp(2),
+      runId: 'run-assistant-atomic',
+    });
+    await store.createToolRun({
+      callId: 'call-atomic',
+      id: 'tool-atomic',
+      input: {},
+      now: timestamp(3),
+      permissionBehavior: 'allow',
+      runId: 'run-assistant-atomic',
+      status: 'running',
+      toolName: 'file.list',
+    });
+
+    await expect(store.finishRunWithAssistantFinal({
+      content: '不应发布的回答',
+      expectedRevision: item.assistantItem.revision,
+      id: item.id,
+      now: timestamp(4),
+      runId: 'run-assistant-atomic',
+    })).rejects.toThrow('未完成 Tool');
+    expect(await store.getSession('session-assistant-atomic', OWNER_SCOPE, 3)).toMatchObject({
+      lastMessagePreview: '执行后回答',
+      messageCount: 1,
+      messages: [
+        expect.objectContaining({ role: 'user' }),
+        expect.objectContaining({
+          assistantItem: expect.objectContaining({ revision: 1, status: 'streaming' }),
+          content: '',
+        }),
+      ],
+      runs: [expect.objectContaining({ status: 'running' })],
+    });
+
+    await store.finishRunWithAssistantFailure({
+      assistantItem: {
+        content: '已产生但未完成的部分',
+        expectedRevision: item.assistantItem.revision,
+        id: item.id,
+      },
+      error: '工具执行失败',
+      now: timestamp(5),
+      runId: 'run-assistant-atomic',
+      status: 'failed',
+    });
+    expect(await store.getSession('session-assistant-atomic', OWNER_SCOPE, 3)).toMatchObject({
+      lastMessagePreview: '执行后回答',
+      messageCount: 1,
+      messages: [
+        expect.objectContaining({ role: 'user' }),
+        expect.objectContaining({
+          assistantItem: expect.objectContaining({ phase: 'unknown', status: 'failed' }),
+          content: '已产生但未完成的部分',
+        }),
+      ],
+      runs: [expect.objectContaining({ status: 'failed' })],
+      toolActivities: [expect.objectContaining({ status: 'interrupted' })],
+    });
   });
 
   it('persists one owner-scoped checkpoint without changing the Session projection', async () => {
@@ -814,14 +1005,11 @@ describe('SQLite Agent session store', () => {
       sessionId: 'session-checkpoint-boundary',
       userPrompt: '仍在运行',
     });
-    const activeAssistant = message(
-      'session-checkpoint-boundary',
-      'run-checkpoint-active',
-      2,
-      'assistant',
-      '尚未收口',
-    );
-    await store.appendMessage(activeAssistant);
+    const activeAssistant = await store.startAssistantItem({
+      id: 'session-checkpoint-boundary-message-2',
+      now: timestamp(2),
+      runId: 'run-checkpoint-active',
+    });
     await expect(store.beginContextCheckpoint({
       id: 'checkpoint-active-run',
       libraryId: 3,
@@ -833,11 +1021,12 @@ describe('SQLite Agent session store', () => {
       throughMessageId: activeAssistant.id,
     })).rejects.toThrow('cannot include an active Run');
 
-    await store.updateRun('run-checkpoint-active', {
-      currentStep: '已完成',
-      finishedAt: timestamp(3),
-      status: 'completed',
-      updatedAt: timestamp(3),
+    await store.finishRunWithAssistantFinal({
+      content: '尚未收口',
+      expectedRevision: activeAssistant.assistantItem.revision,
+      id: activeAssistant.id,
+      now: timestamp(3),
+      runId: 'run-checkpoint-active',
     });
     await expect(store.beginContextCheckpoint({
       id: 'checkpoint-split-run',
@@ -2054,6 +2243,11 @@ describe('SQLite Agent session store', () => {
       sessionId: 'session-running',
       userPrompt: '继续执行',
     });
+    await firstStore.startAssistantItem({
+      id: 'assistant-running',
+      now: timestamp(2),
+      runId: 'run-running',
+    });
     await firstStore.createToolRun({
       callId: 'call-running',
       id: 'tool-running',
@@ -2069,7 +2263,20 @@ describe('SQLite Agent session store', () => {
 
     const reopenedStore = await createStore(databasePath);
     expect(await reopenedStore.getSession('session-running', OWNER_SCOPE, 3)).toMatchObject({
+      lastMessagePreview: '继续执行',
       lastRunStatus: 'interrupted',
+      messageCount: 1,
+      messages: [
+        expect.objectContaining({ role: 'user' }),
+        expect.objectContaining({
+          assistantItem: expect.objectContaining({
+            phase: 'unknown',
+            revision: 2,
+            status: 'interrupted',
+          }),
+          content: '',
+        }),
+      ],
       runs: [expect.objectContaining({
         currentStep: '上次运行已中断',
         id: 'run-running',
@@ -2383,6 +2590,10 @@ describe('SQLite Agent session store', () => {
       id: 'tool-file-stage-prepared',
       name: 'file.stage',
     }, {
+      action: localPathFileStagePreparedAction(),
+      id: 'tool-file-stage-local-path-prepared',
+      name: 'file.stage',
+    }, {
       action: libraryFileStagePreparedAction(),
       id: 'tool-file-stage-library-prepared',
       name: 'file.stage',
@@ -2394,6 +2605,10 @@ describe('SQLite Agent session store', () => {
       action: libraryFilePublishPreparedAction(),
       id: 'tool-file-publish-library-prepared',
       name: 'file.publish',
+    }, {
+      action: fileUploadPreparedAction(),
+      id: 'tool-file-upload-prepared',
+      name: 'file.upload',
     }] as const;
     await createSession(store, sessionId, 3, '文件桥准备动作');
     await store.createRun({
@@ -2443,31 +2658,73 @@ describe('SQLite Agent session store', () => {
       value: { ...actions[0].action, sourceKind: 'library-node' },
     }, {
       id: actions[1].id,
-      value: { ...actions[1].action, sourceIdentity: `sha256:${'C'.repeat(64)}` },
+      value: { ...actions[1].action, sourcePath: ' ~/Downloads/source.txt ' },
     }, {
       id: actions[1].id,
-      value: { ...actions[1].action, sourceNodeId: 0 },
+      value: { ...actions[1].action, sourceDisplayName: '../source.txt' },
+    }, {
+      id: actions[1].id,
+      value: { ...actions[1].action, sourceSizeBytes: -1 },
+    }, {
+      id: actions[1].id,
+      value: { ...actions[1].action, libraryId: 3 },
     }, {
       id: actions[2].id,
-      value: { ...actions[2].action, contentHash: `sha256:${'C'.repeat(64)}` },
+      value: { ...actions[2].action, sourceIdentity: `sha256:${'C'.repeat(64)}` },
     }, {
       id: actions[2].id,
-      value: { ...actions[2].action, sourcePath: 'output/../private.txt' },
-    }, {
-      id: actions[2].id,
-      value: { ...actions[2].action, sizeBytes: -1 },
-    }, {
-      id: actions[2].id,
-      value: { ...actions[2].action, suggestedFileName: '../result.txt' },
+      value: { ...actions[2].action, sourceNodeId: 0 },
     }, {
       id: actions[3].id,
-      value: { ...actions[3].action, providerId: '../local' },
+      value: { ...actions[3].action, contentHash: `sha256:${'C'.repeat(64)}` },
     }, {
       id: actions[3].id,
-      value: { ...actions[3].action, parentId: 0 },
+      value: { ...actions[3].action, sourcePath: 'output/../private.txt' },
     }, {
       id: actions[3].id,
-      value: { ...actions[3].action, conflictPolicy: 'replace' },
+      value: { ...actions[3].action, sizeBytes: -1 },
+    }, {
+      id: actions[3].id,
+      value: { ...actions[3].action, suggestedFileName: '../result.txt' },
+    }, {
+      id: actions[4].id,
+      value: { ...actions[4].action, providerId: '../local' },
+    }, {
+      id: actions[4].id,
+      value: { ...actions[4].action, parentId: 0 },
+    }, {
+      id: actions[4].id,
+      value: { ...actions[4].action, conflictPolicy: 'replace' },
+    }, {
+      id: actions[5].id,
+      value: { ...actions[5].action, unexpected: true },
+    }, {
+      id: actions[5].id,
+      value: { ...actions[5].action, sourceKind: 'local-picker' },
+    }, {
+      id: actions[5].id,
+      value: { ...actions[5].action, sourcePath: `~/${'😀'.repeat(1_024)}` },
+    }, {
+      id: actions[5].id,
+      value: { ...actions[5].action, sourceIdentity: `sha256:${'E'.repeat(64)}` },
+    }, {
+      id: actions[5].id,
+      value: { ...actions[5].action, outputFileName: '../source.txt' },
+    }, {
+      id: actions[5].id,
+      value: { ...actions[5].action, libraryId: 0 },
+    }, {
+      id: actions[5].id,
+      value: { ...actions[5].action, parentId: Number.MAX_SAFE_INTEGER + 1 },
+    }, {
+      id: actions[5].id,
+      value: { ...actions[5].action, providerId: '../local' },
+    }, {
+      id: actions[5].id,
+      value: { ...actions[5].action, conflictPolicy: 'replace' },
+    }, {
+      id: actions[5].id,
+      value: { ...actions[5].action, sourceSizeBytes: -1 },
     }];
     for (const entry of malformed) {
       await expect(runDatabaseSql(databasePath, `
@@ -3224,7 +3481,7 @@ describe('SQLite Agent session store', () => {
       .toEqual(['scoped-session']);
   });
 
-  it('backfills runtime columns and stable Tool ordinals in an existing v2 database', async () => {
+  it('resets existing v2 Session history while backfilling the current schema', async () => {
     const directory = await mkdtemp(path.join(tmpdir(), 'omniflow-agent-session-v2-'));
     temporaryDirectories.push(directory);
     const databasePath = path.join(directory, 'agent-sessions.sqlite3');
@@ -3252,42 +3509,12 @@ describe('SQLite Agent session store', () => {
       FROM pragma_table_info('agent_tool_runs')
       WHERE name IN ('prepared_action_id', 'prepared_action_json', 'prepared_snapshot_hash')
     `)).toEqual({ count: 3 });
-    expect(await store.getSession('preexisting-session', OWNER_SCOPE, 3)).toMatchObject({
-      runs: [expect.objectContaining({ id: 'preexisting-run', revision: 1 })],
-      toolActivities: [
-        expect.objectContaining({ id: 'preexisting-tool-first', ordinal: 1, revision: 1 }),
-        expect.objectContaining({ id: 'preexisting-tool-second', ordinal: 2, revision: 1 }),
-        expect.objectContaining({ id: 'preexisting-tool-activation', ordinal: 3, revision: 1 }),
-      ],
-    });
+    expect(await store.getSession('preexisting-session', OWNER_SCOPE, 3)).toBeNull();
     expect(await readDatabaseRow<{ tool_kind: string }>(
       databasePath,
       'SELECT tool_kind FROM agent_tool_runs WHERE id = ?',
       ['preexisting-tool-activation'],
-    )).toEqual({ tool_kind: 'control' });
-    const legacyAssistant = message(
-      'preexisting-session',
-      'preexisting-run',
-      4,
-      'assistant',
-      '既有会话数据仍然可读',
-    );
-    await store.appendMessage(legacyAssistant);
-    await store.beginContextCheckpoint({
-      id: 'checkpoint-preexisting-v2',
-      libraryId: 3,
-      model: 'model-a',
-      now: timestamp(5),
-      ownerScope: OWNER_SCOPE,
-      profileId: 'profile-a',
-      sessionId: 'preexisting-session',
-      throughMessageId: legacyAssistant.id,
-    });
-    await store.completeContextCheckpoint(
-      'checkpoint-preexisting-v2',
-      checkpointSummary('保留旧数据'),
-      timestamp(6),
-    );
+    )).toBeUndefined();
     await createSession(store, 'session-approval', 3, '等待确认');
     await store.createRun({
       id: 'run-approval',
@@ -3350,23 +3577,12 @@ describe('SQLite Agent session store', () => {
     stores.splice(stores.indexOf(store), 1);
 
     const reopenedStore = await createStore(databasePath);
-    expect(await reopenedStore.getSession('preexisting-session', OWNER_SCOPE, 3)).toMatchObject({
-      messages: [expect.objectContaining({ content: '既有会话数据仍然可读' })],
-      runs: [expect.objectContaining({ id: 'preexisting-run', revision: 1 })],
-      toolActivities: [
-        expect.objectContaining({ id: 'preexisting-tool-first', ordinal: 1, revision: 1 }),
-        expect.objectContaining({ id: 'preexisting-tool-second', ordinal: 2, revision: 1 }),
-        expect.objectContaining({ id: 'preexisting-tool-activation', ordinal: 3, revision: 1 }),
-      ],
-    });
+    expect(await reopenedStore.getSession('preexisting-session', OWNER_SCOPE, 3)).toBeNull();
     expect(await reopenedStore.readContextCheckpointState(
       'preexisting-session',
       OWNER_SCOPE,
       3,
-    )).toMatchObject({
-      consecutiveFailureCount: 0,
-      latestCompleted: { id: 'checkpoint-preexisting-v2', status: 'completed' },
-    });
+    )).toBeNull();
     await reopenedStore.close();
     stores.splice(stores.indexOf(reopenedStore), 1);
 

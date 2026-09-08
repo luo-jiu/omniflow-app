@@ -7,7 +7,9 @@ import type {
   AgentFileAuthorityResultV1,
   AgentOwnerScope,
 } from '@/shared/agent/agent.types';
+import { normalizeAgentLibraryDirectoryPath } from '../../../src/shared/agent/agent-library-path';
 import { normalizeAgentOwnerScope } from '../../../src/shared/agent/agent-owner-scope';
+import { normalizeAgentLibraryReadResult } from '../../../src/shared/agent/agent-library-query';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
@@ -31,7 +33,9 @@ const OWNER_SCOPE_FIELDS = ['accountScope', 'backendScope'] as const;
 
 type AgentFileAuthorityRequestBaseKeys = keyof AgentFileAuthorityRequestBase;
 type AgentFileAuthorityOperationInput =
+  | Omit<Extract<AgentFileAuthorityRequestV1, { operation: 'query-library-metadata' }>, AgentFileAuthorityRequestBaseKeys>
   | Omit<Extract<AgentFileAuthorityRequestV1, { operation: 'stage-library-node' }>, AgentFileAuthorityRequestBaseKeys>
+  | Omit<Extract<AgentFileAuthorityRequestV1, { operation: 'resolve-library-directory' }>, AgentFileAuthorityRequestBaseKeys>
   | Omit<Extract<AgentFileAuthorityRequestV1, { operation: 'publish-library-file' }>, AgentFileAuthorityRequestBaseKeys>;
 
 export interface AgentFileAuthorityBrokerRequestInput {
@@ -136,10 +140,15 @@ function normalizeNode(input: unknown) {
 function normalizeResult(
   input: unknown,
   expectedOperation: AgentFileAuthorityRequestV1['operation'],
+  expectedLibraryId: number,
 ): AgentFileAuthorityResultV1 {
   const source = strictObject(input, 'Agent 资料库文件授权结果');
   if (source.version !== 1 || source.operation !== expectedOperation) {
     throw new Error('Agent 资料库文件授权结果类型不匹配');
+  }
+  if (expectedOperation === 'query-library-metadata') {
+    exactKeys(source, ['operation', 'data', 'version']);
+    return { operation: expectedOperation, version: 1, data: normalizeAgentLibraryReadResult(source.data, expectedLibraryId) };
   }
   if (expectedOperation === 'stage-library-node') {
     exactKeys(source, ['downloadUrl', 'node', 'operation', 'version']);
@@ -157,6 +166,7 @@ function normalizeResult(
     }
     const node = normalizeNode(source.node);
     if (node.type !== 'file') throw new Error('资料库来源不是普通文件');
+    if (node.libraryId !== expectedLibraryId) throw new Error('资料库来源不属于当前资料库');
     return {
       ...(downloadUrl ? { downloadUrl } : {}),
       node,
@@ -164,9 +174,21 @@ function normalizeResult(
       version: 1,
     };
   }
+  if (expectedOperation === 'resolve-library-directory') {
+    exactKeys(source, ['operation', 'parent', 'version']);
+    const parent = normalizeNode(source.parent);
+    if (parent.type !== 'dir') throw new Error('资料库目标不是目录');
+    if (parent.libraryId !== expectedLibraryId) throw new Error('资料库目标不属于当前资料库');
+    return {
+      operation: expectedOperation,
+      parent,
+      version: 1,
+    };
+  }
   exactKeys(source, ['credentials', 'operation', 'parent', 'providerId', 'providerLabel', 'version']);
   const parent = normalizeNode(source.parent);
   if (parent.type !== 'dir') throw new Error('资料库目标不是目录');
+  if (parent.libraryId !== expectedLibraryId) throw new Error('资料库目标不属于当前资料库');
   let credentials: { token: string; username: string } | undefined;
   if (source.credentials !== undefined) {
     const rawCredentials = strictObject(source.credentials, 'Agent 资料库凭据');
@@ -219,8 +241,14 @@ export function createAgentFileAuthorityBroker(options: AgentFileAuthorityBroker
       return Promise.reject(new Error('Agent 资料库文件授权身份无效'));
     }
     const ownerScope = normalizeAgentOwnerScope(input.ownerScope);
+    const operation = input.operation.operation === 'resolve-library-directory'
+      ? Object.freeze({
+        directoryPath: normalizeAgentLibraryDirectoryPath(input.operation.directoryPath),
+        operation: input.operation.operation,
+      })
+      : input.operation;
     const requestPayload = Object.freeze({
-      ...input.operation,
+      ...operation,
       authorityId,
       libraryId: input.libraryId,
       ownerScope,
@@ -294,7 +322,7 @@ export function createAgentFileAuthorityBroker(options: AgentFileAuthorityBroker
       return true;
     }
     if (!completion.result) throw new Error('Agent 资料库文件授权结果缺失');
-    current.resolve(normalizeResult(completion.result, current.operation));
+    current.resolve(normalizeResult(completion.result, current.operation, current.libraryId));
     return true;
   }
 

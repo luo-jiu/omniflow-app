@@ -12,7 +12,8 @@ import styled from 'styled-components';
 import type { AgentRunStatus, AgentSessionSummary } from '@/shared/agent/agent.types';
 
 const Manager = styled.section`
-  width: min(900px, 100%);
+  width: min(1120px, 100%);
+  min-width: 0;
   min-height: 100%;
   margin-inline: auto;
   display: flex;
@@ -70,7 +71,9 @@ const Manager = styled.section`
   }
 
   .agent-session-search {
-    height: 34px;
+    width: 100%;
+    min-width: 0;
+    height: 36px;
     display: flex;
     align-items: center;
     gap: 8px;
@@ -80,6 +83,10 @@ const Manager = styled.section`
     border-radius: 8px;
     background: var(--app-bg-elevated);
     color: var(--app-text-muted);
+  }
+
+  .agent-session-search:focus-within {
+    border-color: var(--semi-color-primary);
   }
 
   .agent-session-search input {
@@ -93,7 +100,13 @@ const Manager = styled.section`
     font-size: 13px;
   }
 
+  .agent-session-search input::placeholder {
+    color: var(--app-text-muted);
+  }
+
   .agent-session-list {
+    width: 100%;
+    min-width: 0;
     display: flex;
     flex-direction: column;
     gap: 6px;
@@ -111,6 +124,7 @@ const Manager = styled.section`
     border-radius: 8px;
     background: color-mix(in srgb, var(--app-bg-elevated) 68%, transparent);
     color: var(--app-text);
+    overflow: hidden;
     text-align: left;
   }
 
@@ -121,7 +135,9 @@ const Manager = styled.section`
   }
 
   .agent-session-open {
+    width: 100%;
     min-width: 0;
+    max-width: 100%;
     flex: 1;
     align-self: stretch;
     display: flex;
@@ -132,32 +148,52 @@ const Manager = styled.section`
     border: 0;
     background: transparent;
     color: inherit;
+    overflow: hidden;
     text-align: left;
     cursor: pointer;
   }
 
   .agent-session-row-title {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
     overflow: hidden;
     font-size: 14px;
     font-weight: 600;
+    line-height: 1.4;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
   .agent-session-preview {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    display: -webkit-box;
     overflow: hidden;
     color: var(--app-text-muted);
     font-size: 12px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    white-space: normal;
   }
 
   .agent-session-meta {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 8px;
     color: var(--app-text-muted);
     font-size: 11px;
+  }
+
+  .agent-session-meta > span {
     white-space: nowrap;
   }
 
@@ -169,6 +205,7 @@ const Manager = styled.section`
     display: flex;
     align-items: center;
     gap: 2px;
+    flex: none;
     opacity: 0;
     transition: opacity 120ms ease;
   }
@@ -247,7 +284,7 @@ function formatSessionTime(value: string): string {
     .format(timestamp);
 }
 
-interface AgentSessionManagerProps {
+export interface AgentSessionManagerProps {
   activeSessionId: string | null;
   hasMore: boolean;
   loading: boolean;
@@ -370,8 +407,11 @@ export default function AgentSessionManager({
                   />
                 ) : (
                   <button className="agent-session-open" onClick={() => onOpen(session)} type="button">
-                    <span className="agent-session-row-title">{session.title}</span>
-                    <span className="agent-session-preview">
+                    <span className="agent-session-row-title" title={session.title}>{session.title}</span>
+                    <span
+                      className="agent-session-preview"
+                      title={session.lastMessagePreview || '尚无消息'}
+                    >
                       {session.lastMessagePreview || '尚无消息'}
                     </span>
                     <span className="agent-session-meta">

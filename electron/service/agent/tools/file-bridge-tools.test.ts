@@ -5,14 +5,17 @@ import {
   createAgentFileBridgeTools,
   normalizeAgentFilePublishInputV1,
   normalizeAgentFileStageInputV1,
+  normalizeAgentFileUploadInputV1,
 } from './file-bridge-tools';
 
 function createRuntime() {
   return {
     executePublish: vi.fn(async () => ({ ok: true as const })),
     executeStage: vi.fn(async () => ({ ok: true as const })),
+    executeUpload: vi.fn(async () => ({ ok: true as const })),
     preparePublish: vi.fn(async () => ({}) as never),
     prepareStage: vi.fn(async () => ({}) as never),
+    prepareUpload: vi.fn(async () => ({}) as never),
   };
 }
 
@@ -40,18 +43,65 @@ describe('Agent file bridge tools', () => {
       kind: 'business',
       name: 'file.publish',
       registrationId: 'file.publish@1',
+    }, {
+      cancellationSettleTimeoutMs: 45_000,
+      executor: 'main',
+      kind: 'business',
+      name: 'file.upload',
+      registrationId: 'file.upload@1',
     }]);
+    expect(tools.find(tool => tool.name === 'file.stage')?.description)
+      .toContain('使用 shell_run 直接读取原路径，不要暂存');
+    expect(tools.find(tool => tool.name === 'file.upload')?.description)
+      .toContain('先查看或检查原文件时，使用 shell_run 直接读取原路径');
+    expect(tools.find(tool => tool.name === 'file.upload')?.description)
+      .toContain('只有需要工作副本来修改、转换或生成新文件时');
+    expect(tools.find(tool => tool.name === 'file.upload')?.description)
+      .toContain('file_stage、shell_run 和 file_publish');
   });
 
-  it('accepts only the path-free local stage branch', () => {
+  it('accepts the picker and explicit local-path stage branches', () => {
     expect(normalizeAgentFileStageInputV1({ source: { kind: 'local-picker' } }))
       .toEqual({ source: { kind: 'local-picker' } });
+    expect(normalizeAgentFileStageInputV1({ source: { kind: 'local-path', path: '~/input.txt' } }))
+      .toEqual({ source: { kind: 'local-path', path: '~/input.txt' } });
     expect(() => normalizeAgentFileStageInputV1({
       source: { kind: 'local-picker', path: '/tmp/private.txt' },
     })).toThrow('来源无效');
     expect(() => normalizeAgentFileStageInputV1({
       source: { kind: 'library-node', nodeId: 0 },
     })).toThrow('来源无效');
+  });
+
+  it('normalizes an explicit local file upload to an exact library path', () => {
+    expect(normalizeAgentFileUploadInputV1({
+      destination: { directoryPath: '/文档/提示词', kind: 'library-path' },
+      source: { kind: 'local-path', path: '~/Downloads/prompt.md' },
+    })).toEqual({
+      destination: { directoryPath: '/文档/提示词', kind: 'library-path' },
+      source: { kind: 'local-path', path: '~/Downloads/prompt.md' },
+    });
+  });
+
+  it.each([
+    ['relative source', {
+      destination: { directoryPath: '/文档', kind: 'library-path' },
+      source: { kind: 'local-path', path: 'Downloads/prompt.md' },
+    }],
+    ['non-absolute library destination', {
+      destination: { directoryPath: '文档', kind: 'library-path' },
+      source: { kind: 'local-path', path: '~/Downloads/prompt.md' },
+    }],
+    ['mixed destination fields', {
+      destination: { directoryPath: '/文档', kind: 'library-path', parentId: 3 },
+      source: { kind: 'local-path', path: '~/Downloads/prompt.md' },
+    }],
+    ['picker source', {
+      destination: { directoryPath: '/文档', kind: 'library-path' },
+      source: { kind: 'local-picker' },
+    }],
+  ])('rejects malformed direct upload input: %s', (_label, input) => {
+    expect(() => normalizeAgentFileUploadInputV1(input)).toThrow();
   });
 
   it('normalizes strict publish branches without injecting defaults', () => {

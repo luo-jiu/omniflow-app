@@ -1,8 +1,8 @@
 # 内置 Agent Skill V1 设计与决策记录
 
-更新时间：2026-08-24
+更新时间：2026-08-26
 
-状态：WIP 验证中。Registry、环境 Capability Probe、Effective Tool / Skill Run snapshot、摘要投影、`skill.activate`、能力收窄、Run 诊断身份持久化、renderer 安全投影、provider 总轮次和首条内置 catalog 已实现；真实 provider 与媒体端到端验证尚未完成，因此不能把 Skill V1 视为已经验收。
+状态：历史设计与验收记录。Registry、环境 Capability Probe、Effective Tool / Skill Run snapshot、摘要投影、`skill.activate`、能力收窄、Run 诊断身份持久化、renderer 安全投影、provider 总轮次和首条内置 catalog 已实现；2026-08-25 已完成真实 provider 与 macOS 非第一个资料库媒体主路径验收。当前事实以 `docs/built-in-agent-architecture.md` 为准。
 
 适用范围：
 
@@ -11,7 +11,7 @@
 - 第一批内置媒体 Skill，以及后续字幕翻译等流程配方。
 - Skill 在 Agent 时间线中的受控展示。
 
-已落地的 Agent 事实、IPC、持久化和安全边界以 `docs/built-in-agent-architecture.md` 为准。本文保留 Skill V1 的设计理由、实现对照和剩余验证门禁；不能把“代码路径存在”误写成“功能已经验收”。
+已落地的 Agent 事实、IPC、持久化和安全边界以 `docs/built-in-agent-architecture.md` 为准。本文保留 Skill V1 的设计理由、实现对照和验收记录，不再维护另一套当前状态。
 
 ## 1. 结论
 
@@ -35,7 +35,7 @@ Skill 只回答两个问题：
 
 ### 1.1 当前实现收口状态
 
-截至 2026-08-24，以下能力已经落地并有自动化测试覆盖：
+截至 2026-08-25，以下能力已经落地并有自动化测试覆盖：
 
 - 数据化、仅内置来源的 Skill 定义，注册校验、预算校验、深拷贝冻结和稳定目录。
 - Tool 的 `business / control` 封闭分类、registration identity、不可变 Tool snapshot 和 stale identity 拒绝。
@@ -49,7 +49,7 @@ Skill 只回答两个问题：
 - provider 总上限固定为 10 turn，可容纳一次 Skill 激活、8 个串行业务 Tool turn 和最终回答；8 次业务 Tool 调用仍是独立硬上限，控制 Tool 不能无限续接。
 - 首条 catalog 已统一默认格式语义：用户未指定时直接使用 `m4a`，只有目标不唯一或明确要求不支持格式时才请求交互。
 
-仍待收口的验收项：真实 provider 是否能稳定选择并执行该 Skill；macOS 非首个资料库与 Windows 的媒体端到端路径；拒绝、停止、刷新失败和重启中断等手工边界。Run 已持久化 capability identity、Tool catalog revision 与 Skill catalog revision；Skill 注册期尚未提前验证 provider Tool 名映射冲突，这属于后续提前失败能力，不改变当前 provider materialization 的运行时拒绝边界。
+2026-08-25 真实验收确认：provider 能选择并激活 `media-extract-audio`，在 macOS 本机 MinIO 的非第一个资料库完成媒体检查、音频提取、资料库上传、目录树刷新和节点定位，也能通过系统 Save As 保存到本机。Windows 媒体差异、新增 provider / 格式以及后续发现的真实环境边界继续按需补定向验收；拒绝、停止、刷新失败和重启中断由自动化门禁覆盖。Run 已持久化 capability identity、Tool catalog revision 与 Skill catalog revision；Skill 注册期尚未提前验证 provider Tool 名映射冲突，这属于后续提前失败能力，不改变当前 provider materialization 的运行时拒绝边界。
 
 ## 2. 为什么现在需要 Skill
 
@@ -417,7 +417,7 @@ Renderer 仅在未来确实需要 Skill 管理或快捷入口时增加新的业�
 - main 到 renderer 的集中安全投影会剥离完整 instructions 和 allowlist。
 - provider 总 turn 固定为 10，业务 Tool 调用继续独立限制为 8，既允许控制激活，又不允许控制调用无限续接。
 
-### 阶段 C：首条媒体 Skill（实现已落地，端到端待验证）
+### 阶段 C：首条媒体 Skill（已落地并完成主路径验收）
 
 - 注册 `media-extract-audio`。
 - 复用现有 `media.inspect`、`interaction.request`、`media.extractAudio`。
@@ -431,7 +431,7 @@ Renderer 仅在未来确实需要 Skill 管理或快捷入口时增加新的业�
 
 ## 14. 验证门禁
 
-截至 2026-08-24，完整验证结果为：`npm test` 共 136 个测试文件、779 个用例通过、1 个跳过；`npm run lint` 和 `npm run build` 均通过，build 中的 `tsc` 同时完成 TypeScript 检查。build 只有既有的单 chunk 超过 500 kB 警告。自动化门禁已经收口，但仍没有真实 provider / 媒体端到端记录。
+2026-08-25 收口验证结果为：`npm test` 共 144 个测试文件、859 个用例通过、1 个跳过；`npm run lint` 和 `npm run build` 均通过，build 中的 `tsc` 同时完成 TypeScript 检查。build 只有既有的单 chunk 超过 500 kB 警告。真实 provider 和 macOS 非第一个资料库媒体主路径也已完成验收，记录见 `docs/built-in-agent-architecture.md`。
 
 现有自动化已经覆盖或部分覆盖：
 
@@ -492,7 +492,7 @@ Renderer 仅在未来确实需要 Skill 管理或快捷入口时增加新的业�
 | 多 Skill 组合 | 单个真实任务必须组合两个已稳定 Skill，且并集收窄规则通过验证。 |
 | Workflow 层 | 出现跨 Run 重试、共享产物、跨多轮暂停恢复或跨 Session 编排，而现有 Run / ToolRun 无法表达。 |
 | 子 Agent | 有必须隔离上下文或并行委派的真实任务，并先设计深度、权限继承、取消、恢复和配额。 |
-| 通用 Shell | 高层 domain Tool 无法合理覆盖的高级用户需求长期存在，并完成工作目录、环境、网络、命令和 OS 沙箱设计。 |
+| 通用 Shell | 该触发条件已经出现，独立目标架构已冻结在 `docs/built-in-agent-shell-architecture.md`。Shell 仍是 Registry Tool，不进入 Skill 定义，也不允许 Skill 生成权限。 |
 | Skill 管理 UI | Skill 来源和数量增长到用户确实需要启停、检查版本或解决冲突；完整正文仍不由 renderer 执行。 |
 
 ## 17. 维护与溯源规则

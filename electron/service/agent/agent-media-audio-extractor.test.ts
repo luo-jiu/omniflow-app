@@ -19,6 +19,7 @@ const OWNER = {
 function input() {
   return {
     ...OWNER,
+    nodeId: 8,
     fileName: 'movie.mp4',
     mimeType: 'video/mp4',
     outputFileName: 'movie-audio.m4a',
@@ -28,6 +29,18 @@ function input() {
 }
 
 describe('Agent media audio extractor', () => {
+  it.each([
+    { ok: false, message: '[source_unreachable] unavailable' },
+    { ok: true, message: 'video only', data: { streams: [{ type: 'video' }] } },
+  ])('does not create output or launch ffmpeg before readable audio is established', async inspection => {
+    const create = vi.fn(); const runProcess = vi.fn();
+    await expect(extractAgentMediaAudio(input(), new AbortController().signal, vi.fn(), {
+      resolveFfmpegPath: async () => '/fixture/ffmpeg', inspectSource: async () => inspection,
+      artifactStore: { create, finalize: vi.fn(), release: vi.fn() }, runProcess,
+    })).rejects.toThrow(inspection.ok ? 'no_audio' : 'source_unreachable');
+    expect(create).not.toHaveBeenCalled();
+    expect(runProcess).not.toHaveBeenCalled();
+  });
   it('builds fixed ffmpeg arguments without invoking a shell', () => {
     const args = buildAgentExtractAudioArgs({
       outputFormat: 'mp3',
@@ -72,6 +85,8 @@ describe('Agent media audio extractor', () => {
       new AbortController().signal,
       onProgress,
       {
+        inspectSource: async () => ({ ok: true, message: 'Audio available', data: { streams: [{ type: 'audio' }] } }),
+        checkSource: async () => undefined,
         artifactStore: {
           create: vi.fn(async () => ({
             artifactId: 'artifact-1',
@@ -122,6 +137,8 @@ describe('Agent media audio extractor', () => {
       new AbortController().signal,
       vi.fn(),
       {
+        inspectSource: async () => ({ ok: true, message: 'Audio available', data: { streams: [{ type: 'audio' }] } }),
+        checkSource: async () => undefined,
         artifactStore: {
           create: vi.fn(async () => ({
             artifactId: 'artifact-failed',

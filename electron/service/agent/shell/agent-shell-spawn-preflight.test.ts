@@ -1,4 +1,8 @@
-import { describe, expect, it, vi } from 'vitest';
+import { mkdir, mkdtemp, rename, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { AgentToolMainPreparedExecution } from '../agent-tool-registry';
 import { createAgentShellExecutionLeaseManager } from './agent-shell-execution-lease';
@@ -7,6 +11,8 @@ import {
   createAgentShellSpawnPreflight,
   type AgentShellSpawnPreflightCurrentBinding,
 } from './agent-shell-spawn-preflight';
+import { resolveAgentShellHostContext } from './agent-shell-host-context';
+import type { AgentShellPreparedActionPublicV1 } from '../../../../src/shared/agent/shell/agent-shell.types';
 import type {
   AgentShellWorkspaceOwner,
   AgentShellWorkspacePreparationContext,
@@ -16,6 +22,21 @@ const OWNER: AgentShellWorkspaceOwner = Object.freeze({
   accountScope: 'user:7',
   backendScope: 'https://example.com/api',
   sessionId: 'session-1',
+});
+
+const macOnlyIt = process.platform === 'darwin' ? it : it.skip;
+const temporaryDirectories: string[] = [];
+
+async function temporaryDirectory(): Promise<string> {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'omniflow-shell-preflight-'));
+  temporaryDirectories.push(directory);
+  return directory;
+}
+
+afterEach(async () => {
+  await Promise.all(temporaryDirectories.splice(0).map(directory => (
+    rm(directory, { force: true, recursive: true })
+  )));
 });
 
 function workspace(): AgentShellWorkspacePreparationContext {
@@ -92,9 +113,9 @@ function prepared(): AgentToolMainPreparedExecution {
       runCapabilityIdentity: `v1:${'7'.repeat(64)}`,
       runId: 'run-1',
       sessionId: 'session-1',
-      toolInputHash: `sha256:${'8'.repeat(64)}`,
+      toolInputHash: '8'.repeat(64),
       toolName: 'shell.run',
-      toolRegistrationId: 'omniflow.shell.run.v1',
+      toolRegistrationId: 'shell.run@1',
       toolRunId: 'tool-run-1',
     },
     preparedActionId: 'prepared-1',
@@ -121,7 +142,7 @@ function prepared(): AgentToolMainPreparedExecution {
       timeoutMs: 10_000,
       version: 1,
     },
-    snapshotHash: `sha256:${'9'.repeat(64)}`,
+    snapshotHash: '9'.repeat(64),
   };
 }
 
@@ -130,7 +151,9 @@ function currentBinding(input: AgentToolMainPreparedExecution): AgentShellSpawnP
   const analysis = binding.analysis;
   const environment = binding.effectiveEnvironment;
   const provider = binding.provider;
+  const host = binding.host;
   return {
+    ...(host ? { executionContextIdentity: host.contextIdentity } : {}),
     aiDestinationConfigurationIdentity: binding.aiDestination.configurationIdentity,
     aiDestinationIdentity: input.identity.aiDestinationIdentity,
     analysisIdentity: analysis.analysisIdentity,
@@ -158,6 +181,54 @@ function currentBinding(input: AgentToolMainPreparedExecution): AgentShellSpawnP
     providerEnvironmentPolicyRevision: environment.providerPolicyRevision,
     serviceEnvironmentPolicyRevision: environment.servicePolicyRevision,
   };
+}
+
+async function hostPrepared(
+  root: string,
+  cwd: string,
+): Promise<AgentToolMainPreparedExecution> {
+  const base = prepared();
+  const host = await resolveAgentShellHostContext({
+    defaultCwd: root,
+    environment: { source: { PATH: '/usr/bin' } },
+    homedir: root,
+    platform: 'darwin',
+    requestedCwd: cwd,
+  });
+  const binding = { ...(base.binding as Record<string, unknown>) };
+  delete binding.workspace;
+  binding.host = host;
+  const baseAction = base.publicAction as AgentShellPreparedActionPublicV1;
+  const publicAction: AgentShellPreparedActionPublicV1 = {
+    ...baseAction,
+    cwd: { kind: 'host', path: cwd },
+    dataScope: { ...baseAction.dataScope, unresolvedWorkspaceRead: true },
+  };
+  return {
+    ...base,
+    binding,
+    publicAction,
+  };
+}
+
+async function hostGrantFor(
+  input: AgentToolMainPreparedExecution,
+  root: string,
+) {
+  const manager = createAgentShellExecutionLeaseManager({
+    createId: () => 'host-lease-1',
+    hostCwd: root,
+    hostHome: root,
+    hostPlatform: 'darwin',
+    ttlMs: 60_000,
+  });
+  const lease = await manager.acquire({
+    owner: OWNER,
+    preparation: input,
+    runCapabilityIdentity: input.identity.runCapabilityIdentity,
+    toolRunId: input.identity.toolRunId,
+  });
+  return manager.consume(lease, OWNER);
 }
 
 async function grantFor(input: AgentToolMainPreparedExecution) {
@@ -293,5 +364,123 @@ describe('Agent Shell spawn preflight', () => {
       workspaceId: 'workspace-1',
     });
     expect(() => controller.abort()).not.toThrow();
+  });
+
+  macOnlyIt('accepts a host grant without requiring a workspace store', async () => {
+    const root = await temporaryDirectory();
+    const cwd = path.join(root, 'cwd');
+    await mkdir(cwd);
+    const preparation = await hostPrepared(root, cwd);
+    const resolveCurrentBinding = vi.fn(async () => currentBinding(preparation));
+    const preflight = createAgentShellSpawnPreflight({
+      bindingResolver: { resolveCurrentBinding },
+      hostCwd: root,
+      hostHome: root,
+      observationWindowMs: 0,
+    });
+
+    const grant = await hostGrantFor(preparation, root);
+    await expect(preflight.assertReady({
+      grant,
+      owner: OWNER,
+      preparation,
+      runCapabilityIdentity: preparation.identity.runCapabilityIdentity,
+      signal: new AbortController().signal,
+      toolRunId: preparation.identity.toolRunId,
+    })).resolves.toBe(grant);
+    expect(resolveCurrentBinding).toHaveBeenCalledTimes(2);
+  });
+
+  macOnlyIt('rejects a host action whose cwd representation differs from the lease', async () => {
+    const root = await temporaryDirectory();
+    const cwd = path.join(root, 'cwd');
+    await mkdir(cwd);
+    const preparation = await hostPrepared(root, cwd);
+    const grant = await hostGrantFor(preparation, root);
+    const forgedPreparation = {
+      ...preparation,
+      publicAction: {
+        ...(preparation.publicAction as AgentShellPreparedActionPublicV1),
+        cwd: { kind: 'host' as const, path: path.join(root, 'other') },
+      },
+    };
+    const preflight = createAgentShellSpawnPreflight({
+      bindingResolver: {
+        resolveCurrentBinding: vi.fn(async () => currentBinding(forgedPreparation)),
+      },
+      hostCwd: root,
+      hostHome: root,
+      observationWindowMs: 0,
+    });
+
+    await expect(preflight.assertReady({
+      grant,
+      owner: OWNER,
+      preparation: forgedPreparation,
+      runCapabilityIdentity: forgedPreparation.identity.runCapabilityIdentity,
+      signal: new AbortController().signal,
+      toolRunId: forgedPreparation.identity.toolRunId,
+    })).rejects.toThrow('host prepared execution 与 grant 不匹配');
+  });
+
+  macOnlyIt('rejects a host binding whose context identity differs from the lease', async () => {
+    const root = await temporaryDirectory();
+    const cwd = path.join(root, 'cwd');
+    await mkdir(cwd);
+    const preparation = await hostPrepared(root, cwd);
+    const grant = await hostGrantFor(preparation, root);
+    const host = (preparation.binding as Record<string, any>).host;
+    const forgedPreparation = {
+      ...preparation,
+      binding: {
+        ...(preparation.binding as Record<string, unknown>),
+        host: { ...host, contextIdentity: `v1:${'f'.repeat(64)}` },
+      },
+    };
+    const preflight = createAgentShellSpawnPreflight({
+      bindingResolver: {
+        resolveCurrentBinding: vi.fn(async () => currentBinding(forgedPreparation)),
+      },
+      hostCwd: root,
+      hostHome: root,
+      observationWindowMs: 0,
+    });
+
+    await expect(preflight.assertReady({
+      grant,
+      owner: OWNER,
+      preparation: forgedPreparation,
+      runCapabilityIdentity: forgedPreparation.identity.runCapabilityIdentity,
+      signal: new AbortController().signal,
+      toolRunId: forgedPreparation.identity.toolRunId,
+    })).rejects.toThrow('host prepared execution 与 grant 不匹配');
+  });
+
+  macOnlyIt('rejects a host grant when its cwd identity drifts before spawn', async () => {
+    const root = await temporaryDirectory();
+    const cwd = path.join(root, 'cwd');
+    const replacement = path.join(root, 'cwd-replacement');
+    await mkdir(cwd);
+    const preparation = await hostPrepared(root, cwd);
+    const preflight = createAgentShellSpawnPreflight({
+      bindingResolver: {
+        resolveCurrentBinding: vi.fn(async () => currentBinding(preparation)),
+      },
+      hostCwd: root,
+      hostHome: root,
+      observationWindowMs: 0,
+    });
+
+    const grant = await hostGrantFor(preparation, root);
+    await rename(cwd, replacement);
+    await mkdir(cwd);
+    await expect(preflight.assertReady({
+      grant,
+      owner: OWNER,
+      preparation,
+      runCapabilityIdentity: preparation.identity.runCapabilityIdentity,
+      signal: new AbortController().signal,
+      toolRunId: preparation.identity.toolRunId,
+    })).rejects.toThrow('host cwd 无法确认');
   });
 });

@@ -3,6 +3,7 @@ import TestRenderer, { act } from 'react-test-renderer';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type {
+  AgentAssistantItemSnapshot,
   AgentChatStreamEvent,
   AgentMediaExtractAudioPreparedActionPublicV1,
   AgentRunSnapshot,
@@ -84,6 +85,31 @@ function activity(
     runId: 'run-1',
     sessionId: 'session-1',
     status,
+  };
+}
+
+function assistantItem(
+  id: string,
+  turnOrdinal: number,
+  content = '',
+  phase: AgentAssistantItemSnapshot['assistantItem']['phase'] = 'unknown',
+  status: AgentAssistantItemSnapshot['assistantItem']['status'] = 'streaming',
+): AgentAssistantItemSnapshot {
+  return {
+    assistantItem: {
+      ...(status === 'streaming' ? {} : { finishedAt: '2026-08-23T00:00:03.000Z' }),
+      phase,
+      revision: status === 'streaming' ? 1 : 2,
+      status,
+      turnOrdinal,
+      updatedAt: '2026-08-23T00:00:03.000Z',
+    },
+    content,
+    createdAt: '2026-08-23T00:00:02.000Z',
+    id,
+    role: 'assistant',
+    runId: 'run-1',
+    sessionId: 'session-1',
   };
 }
 
@@ -179,6 +205,18 @@ function renderSessionHook() {
 }
 
 describe('useAgentSession event coordination', () => {
+  it('preserves a new draft typed while preparing a request that then fails', async () => {
+    const started = deferred<never>();
+    apiMocks.startAgentChat.mockReturnValueOnce(started.promise);
+    const hook = renderSessionHook();
+    let submission!: Promise<void>;
+    await act(async () => { submission = hook.current.submit('first request'); });
+    act(() => { hook.current.setDraft('next draft'); });
+    await act(async () => { started.reject(new Error('offline')); await submission; });
+    expect(hook.current.draft).toBe('next draft');
+    expect(hook.current.error).toBe('offline');
+    hook.unmount();
+  });
   let listener: ((event: AgentChatStreamEvent) => void) | null;
 
   beforeEach(() => {
@@ -246,6 +284,81 @@ describe('useAgentSession event coordination', () => {
     hook.unmount();
   });
 
+  it('repairs an assistant delta gap from the active main snapshot and replays buffered events', async () => {
+    const initialSnapshot = sessionSnapshot();
+    const repairRequest = deferred<AgentSessionSnapshot>();
+    apiMocks.getAgentSession
+      .mockResolvedValueOnce(initialSnapshot)
+      .mockReturnValueOnce(repairRequest.promise);
+    const hook = renderSessionHook();
+    await act(async () => {
+      await hook.current.restore('session-1');
+    });
+
+    const streamingItem = assistantItem('assistant-repair', 1);
+    act(() => {
+      listener?.({
+        item: streamingItem,
+        runId: 'run-1',
+        sessionId: 'session-1',
+        type: 'assistant-item-started',
+      });
+      listener?.({
+        delta: 'ab',
+        itemId: streamingItem.id,
+        offset: 0,
+        runId: 'run-1',
+        sessionId: 'session-1',
+        type: 'assistant-item-delta',
+      });
+      listener?.({
+        delta: 'ef',
+        itemId: streamingItem.id,
+        offset: 4,
+        runId: 'run-1',
+        sessionId: 'session-1',
+        type: 'assistant-item-delta',
+      });
+    });
+    expect(apiMocks.getAgentSession).toHaveBeenCalledTimes(2);
+
+    act(() => {
+      listener?.({
+        delta: 'gh',
+        itemId: streamingItem.id,
+        offset: 6,
+        runId: 'run-1',
+        sessionId: 'session-1',
+        type: 'assistant-item-delta',
+      });
+      listener?.({
+        run: run(2, 'running'),
+        runId: 'run-1',
+        sessionId: 'session-1',
+        type: 'run-updated',
+      });
+    });
+
+    await act(async () => {
+      repairRequest.resolve({
+        ...initialSnapshot,
+        messages: [
+          ...initialSnapshot.messages,
+          { ...streamingItem, content: 'abcdef' },
+        ],
+      });
+      await repairRequest.promise;
+      await Promise.resolve();
+    });
+
+    expect(hook.current.messages.at(-1)).toMatchObject({
+      content: 'abcdefgh',
+      id: streamingItem.id,
+    });
+    expect(hook.current.runs).toEqual([run(2, 'running')]);
+    hook.unmount();
+  });
+
   it('buffers started and Run updates that arrive before a new-session start returns', async () => {
     const startRequest = deferred<{ runId: string; sessionId: string }>();
     apiMocks.startAgentChat.mockReturnValue(startRequest.promise);
@@ -264,10 +377,24 @@ describe('useAgentSession event coordination', () => {
         type: 'started',
       });
       listener?.({
-        delta: '工具调用前',
+        item: assistantItem('assistant-1', 1),
         runId: 'run-1',
         sessionId: 'session-1',
-        type: 'delta',
+        type: 'assistant-item-started',
+      });
+      listener?.({
+        delta: '工具调用前',
+        itemId: 'assistant-1',
+        offset: 0,
+        runId: 'run-1',
+        sessionId: 'session-1',
+        type: 'assistant-item-delta',
+      });
+      listener?.({
+        item: assistantItem('assistant-1', 1, '工具调用前', 'commentary', 'completed'),
+        runId: 'run-1',
+        sessionId: 'session-1',
+        type: 'assistant-item-finished',
       });
       listener?.({
         activity: activity(1, 'running'),
@@ -277,10 +404,18 @@ describe('useAgentSession event coordination', () => {
         type: 'tool-started',
       });
       listener?.({
-        delta: '工具调用后',
+        item: assistantItem('assistant-2', 2),
         runId: 'run-1',
         sessionId: 'session-1',
-        type: 'delta',
+        type: 'assistant-item-started',
+      });
+      listener?.({
+        delta: '工具调用后',
+        itemId: 'assistant-2',
+        offset: 0,
+        runId: 'run-1',
+        sessionId: 'session-1',
+        type: 'assistant-item-delta',
       });
       listener?.({
         run: run(2, 'awaiting_approval'),

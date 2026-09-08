@@ -44,6 +44,6 @@ describe('media.inspect tool', () => {
     await expect(assessAgentToolPermission(mediaInspectTool, { nodeId: 9 }, context([])))
       .resolves.toMatchObject({ behavior: 'deny', message: expect.stringContaining('单个文件') });
     await expect(assessAgentToolPermission(mediaInspectTool, { nodeId: 99 }, context([])))
-      .resolves.toMatchObject({ behavior: 'deny', message: expect.stringContaining('感知范围') });
+      .resolves.toMatchObject({ behavior: 'deny', message: expect.stringContaining('先用 file.stat 或 file.resolve') });
   });
 });

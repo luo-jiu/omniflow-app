@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   AGENT_FILE_PUBLISH_PREPARED_ACTION_KIND,
@@ -55,6 +55,20 @@ function libraryFileStageAction(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function localPathFileStageAction(overrides: Record<string, unknown> = {}) {
+  return {
+    kind: AGENT_FILE_STAGE_PREPARED_ACTION_KIND,
+    sourceDisplayName: 'source.txt',
+    sourceIdentity: `sha256:${'c'.repeat(64)}`,
+    sourceKind: 'local-path',
+    sourcePath: '/Users/example/Documents/source.txt',
+    sourceSizeBytes: 12,
+    targetLabel: '当前任务 input 目录',
+    version: AGENT_FILE_STAGE_PREPARED_ACTION_VERSION,
+    ...overrides,
+  };
+}
+
 function filePublishAction(overrides: Record<string, unknown> = {}) {
   return {
     contentHash: `sha256:${'a'.repeat(64)}`,
@@ -99,6 +113,19 @@ describe('Agent prepared action public contract', () => {
     expect(normalizeAgentPreparedActionPublic(libraryFilePublishAction({
       providerId: ' local ',
     }))).toEqual(libraryFilePublishAction());
+  });
+
+  it('normalizes renderer-side local paths without a Node Buffer global', () => {
+    vi.stubGlobal('Buffer', undefined);
+    try {
+      expect(normalizeAgentPreparedActionPublic(localPathFileStageAction({
+        sourcePath: ' /Users/example/Documents/字幕.txt ',
+      }))).toEqual(localPathFileStageAction({
+        sourcePath: '/Users/example/Documents/字幕.txt',
+      }));
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it.each([

@@ -1,4 +1,7 @@
 import type { AgentToolProgress } from '@/shared/agent/agent.types';
+import { AgentMediaError, classifyAgentMediaProcessFailure } from '../../../src/shared/agent/agent-media-error';
+import { inspectAgentMediaSource } from './agent-media-inspector';
+import { assertAgentMediaSourceReadable } from './agent-media-source-check';
 import { resolveDesktopFfmpegPath } from '../../platform/mediaExecutable';
 import {
   AGENT_MEDIA_MAX_ARTIFACT_BYTES,
@@ -21,6 +24,7 @@ const FFMPEG_TIMEOUT_MS = 6 * 60 * 60 * 1_000;
 const FFMPEG_MAX_OUTPUT_BYTES = 2 * 1024 * 1024;
 
 export interface AgentMediaAudioExtractionInput extends AgentMediaArtifactOwner {
+  nodeId: number;
   fileName: string;
   mimeType?: string;
   outputFileName: string;
@@ -36,6 +40,8 @@ export interface AgentMediaAudioExtractionResult {
 }
 
 interface AgentMediaAudioExtractorDependencies {
+  inspectSource?: typeof inspectAgentMediaSource;
+  checkSource?: typeof assertAgentMediaSourceReadable;
   artifactStore?: Pick<AgentMediaArtifactStore, 'create' | 'finalize' | 'release'>;
   createProxySource?: (input: {
     fileName: string;
@@ -123,6 +129,16 @@ export async function extractAgentMediaAudio(
   if (!ffmpegPath) {
     throw new Error('未找到可用的 ffmpeg，请安装 FFmpeg 或配置 OMNIFLOW_FFMPEG_PATH');
   }
+  onProgress({ message: '检查源文件与音轨' });
+  const inspection = await (dependencies.inspectSource || inspectAgentMediaSource)({
+    fileName: input.fileName, nodeId: input.nodeId, mimeType: input.mimeType, sourceUrl: input.sourceUrl,
+  }, signal);
+  signal.throwIfAborted();
+  if (!inspection.ok) throw new Error(inspection.message);
+  const inspectedData = inspection.data as { hasAudio?: boolean; streams?: Array<{ type?: string }> } | undefined;
+  if (!Array.isArray(inspectedData?.streams)) throw new AgentMediaError('source_unknown');
+  const hasAudio = inspectedData.hasAudio ?? inspectedData.streams.some(stream => stream.type === 'audio');
+  if (!hasAudio) throw new AgentMediaError('no_audio');
   const artifactStore = dependencies.artifactStore || agentMediaArtifactStore;
   const artifact = await artifactStore.create(input.outputFileName, input);
   let retained = false;
@@ -133,6 +149,7 @@ export async function extractAgentMediaAudio(
       ...(input.mimeType ? { mimeType: input.mimeType } : {}),
       sourceUrl: input.sourceUrl,
     });
+    await (dependencies.checkSource || assertAgentMediaSourceReadable)(proxy.url, signal);
     onProgress({ message: '正在通过 ffmpeg 提取音频', percent: 5 });
     const runProcess = dependencies.runProcess || (request => agentLocalProcessRunner.run(request));
     const processResult = await runProcess({
@@ -148,7 +165,7 @@ export async function extractAgentMediaAudio(
       timeoutMs: FFMPEG_TIMEOUT_MS,
     });
     if (processResult.exitCode !== 0) {
-      throw new Error(`无法提取音频（ffmpeg 退出码 ${processResult.exitCode ?? 'unknown'}）`);
+      throw classifyAgentMediaProcessFailure(processResult.stderr, processResult.exitCode);
     }
     const finalized = await artifactStore.finalize(artifact.artifactId);
     retained = true;

@@ -1,6 +1,8 @@
 import React from 'react';
 import {
   IconAlertCircle,
+  IconChevronDown,
+  IconChevronRight,
   IconFile,
   IconFolder,
   IconSpin,
@@ -8,6 +10,8 @@ import {
 } from '@douyinfe/semi-icons';
 import styled from 'styled-components';
 
+import { workspaceScrollbarStyles } from '@/components/ui/workspace-scrollbar';
+import { normalizeAgentPreparedActionPublic } from '@/shared/agent/agent-prepared-action';
 import type {
   AgentOwnerScope,
   AgentPresentationAction,
@@ -19,8 +23,9 @@ import type {
 import type { AgentShellOutputFrameV1 } from '@/shared/agent/shell/agent-shell.types';
 import {
   buildAgentToolPresentation,
-  getAgentToolTitle,
+  buildAgentToolSummary,
 } from '../agent-tool-presentation';
+import { formatAgentShellCommandForDisplay } from '../agent-shell-command-display';
 import AgentConfirmationCard from './AgentConfirmationCard';
 import AgentInteractionBlock from './AgentInteractionBlock';
 import { readAgentShellLogPage } from '../services/agent.api';
@@ -28,16 +33,17 @@ import { readAgentShellLogPage } from '../services/agent.api';
 const ActivityCard = styled.article`
   width: min(620px, 100%);
   align-self: flex-start;
-  padding: 12px 14px;
-  border: 1px solid var(--app-border);
-  border-radius: 8px;
-  background: var(--app-bg-elevated);
+  min-width: 0;
+  padding: 2px 3px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 
   .agent-activity-header {
     display: flex;
     align-items: center;
-    gap: 9px;
-    min-height: 24px;
+    gap: 7px;
+    min-height: 28px;
   }
 
   .agent-activity-status-icon {
@@ -51,7 +57,7 @@ const ActivityCard = styled.article`
   }
 
   &[data-status='completed'] .agent-activity-status-icon {
-    color: var(--semi-color-success);
+    color: var(--app-text-muted);
   }
 
   &[data-status='failed'] .agent-activity-status-icon {
@@ -80,10 +86,25 @@ const ActivityCard = styled.article`
     min-width: 0;
     flex: 1;
     margin: 0;
-    font-size: 14px;
+    font-size: 13px;
     line-height: 1.4;
-    font-weight: 600;
+    font-weight: 400;
+    color: var(--app-text-muted);
+    display: flex;
+    align-items: baseline;
+    gap: 5px;
   }
+
+  .agent-activity-title > span:first-child { flex: none; }
+  .agent-activity-subject {
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    background: transparent; border: 0; padding: 0; color: inherit; font: inherit;
+  }
+  button.agent-activity-subject { text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+  .agent-activity-expand { width: 24px; height: 24px; flex: none; padding: 0; border: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: transparent; color: var(--app-text-muted); cursor: pointer; }
+  button:focus-visible { outline: 2px solid var(--semi-color-primary); outline-offset: 2px; }
 
   .agent-activity-state {
     flex: none;
@@ -93,8 +114,8 @@ const ActivityCard = styled.article`
 
   .agent-activity-body {
     display: grid;
-    gap: 10px;
-    margin-top: 10px;
+    gap: 6px;
+    margin: 4px 0 4px 27px;
   }
 
   .agent-activity-message {
@@ -138,14 +159,25 @@ const ActivityCard = styled.article`
     overflow-wrap: anywhere;
   }
 
+  .agent-activity-details dd[data-output-preview] {
+    font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+  }
+
+  .agent-activity-details dd[data-output-stream='stderr'] {
+    color: var(--semi-color-danger);
+  }
+
   .agent-activity-artifact {
     min-width: 0;
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 8px 10px;
-    border-radius: var(--app-radius-small);
-    background: color-mix(in srgb, var(--app-text-muted) 7%, transparent);
+    padding: 2px 0;
+    border-radius: 0;
+    background: transparent;
   }
 
   .agent-activity-artifact-icon {
@@ -186,53 +218,153 @@ const ActivityCard = styled.article`
     color: var(--app-text);
   }
 
-  .agent-shell-log-actions {
-    display: flex;
-    align-items: center;
-    gap: 8px;
+  @media (prefers-reduced-motion: reduce) {
+    .agent-activity-status-icon svg {
+      animation: none !important;
+    }
   }
 
-  .agent-shell-log {
+  @keyframes agent-activity-spin {
+    to { transform: rotate(360deg); }
+  }
+`;
+
+const ShellActivity = styled.section`
+  width: min(620px, 100%);
+  min-width: 0;
+  align-self: flex-start;
+
+  .agent-shell-summary {
+    width: 100%;
     min-width: 0;
+    min-height: 28px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 2px 3px;
+    border: 0;
+    border-radius: var(--app-radius-medium);
+    background: transparent;
+    color: var(--app-text);
+    font: inherit;
+    text-align: left;
+  }
+
+  button.agent-shell-summary {
+    cursor: pointer;
+  }
+
+  button.agent-shell-summary:hover .agent-shell-summary-command {
+    color: var(--app-text);
+  }
+
+  button.agent-shell-summary:focus-visible {
+    outline: 2px solid var(--semi-color-focus-border);
+    outline-offset: 1px;
+  }
+
+  &[data-status='failed'] .agent-shell-summary-label {
+    color: var(--semi-color-danger);
+  }
+
+  &[data-status='cancelled'] .agent-shell-summary-label,
+  &[data-status='interrupted'] .agent-shell-summary-label {
+    color: var(--semi-color-warning);
+  }
+
+  .agent-shell-summary-label {
+    flex: none;
+    color: var(--app-text-secondary);
+    font-size: 13px;
+    line-height: 1.4;
+  }
+
+  .agent-shell-summary-command {
+    min-width: 0;
+    flex: 1;
     overflow: hidden;
+    color: var(--app-text);
+    font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    text-overflow: ellipsis;
+    white-space: pre;
+    direction: ltr;
+    unicode-bidi: isolate;
+  }
+
+  .agent-shell-terminal {
+    ${workspaceScrollbarStyles}
+
+    max-height: 156px;
+    margin-top: 4px;
+    padding: 8px 10px;
+    overflow: auto;
     border: 1px solid var(--app-border);
     border-radius: var(--app-radius-small);
     background: color-mix(in srgb, var(--app-text) 5%, var(--app-bg));
-  }
-
-  .agent-shell-log-output {
-    max-height: 280px;
-    margin: 0;
-    padding: 10px 12px;
-    overflow: auto;
     color: var(--app-text);
     font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Consolas, monospace;
     font-size: 12px;
-    line-height: 1.55;
+    line-height: 1.5;
+  }
+
+  .agent-shell-terminal-command,
+  .agent-shell-terminal-output {
+    margin: 0;
+    font: inherit;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
   }
 
-  .agent-shell-log-output [data-stream='stderr'] {
+  .agent-shell-terminal-command {
+    direction: ltr;
+    unicode-bidi: isolate;
+  }
+
+  .agent-shell-terminal-prompt {
+    color: var(--semi-color-primary);
+    user-select: none;
+  }
+
+  .agent-shell-terminal-output {
+    margin-top: 7px;
+    padding-top: 7px;
+    border-top: 1px solid var(--app-border);
+  }
+
+  .agent-shell-terminal-output [data-stream='stderr'] {
     color: var(--semi-color-danger);
   }
 
   .agent-shell-log-empty,
   .agent-shell-log-notice {
-    margin: 0;
-    padding: 9px 12px;
-    color: var(--app-text-muted);
+    margin: 7px 0 0;
+    padding-top: 7px;
+    border-top: 1px solid var(--app-border);
+    color: var(--app-text-secondary);
+    font-family: inherit;
     font-size: 12px;
     line-height: 1.5;
   }
 
-  .agent-shell-log-notice + .agent-shell-log-output,
-  .agent-shell-log-output + .agent-shell-log-notice {
-    border-top: 1px solid var(--app-border);
+  .agent-shell-log-more {
+    min-height: 24px;
+    margin-top: 7px;
+    padding: 0 7px;
+    border: 0;
+    border-radius: var(--app-radius-medium);
+    background: transparent;
+    color: var(--app-text-secondary);
+    font: inherit;
+    cursor: pointer;
   }
 
-  @keyframes agent-activity-spin {
-    to { transform: rotate(360deg); }
+  .agent-shell-log-more:hover,
+  .agent-shell-log-more:focus-visible {
+    outline: 0;
+    background: var(--app-hover-bg);
+    color: var(--app-text);
   }
 `;
 
@@ -258,10 +390,18 @@ function ActivityStatusIcon({ status }: { status: AgentToolActivitySnapshot['sta
 function renderBlock(
   block: AgentPresentationBlock,
   index: number,
+  interactive: boolean,
   interactionBusy: boolean,
   onAction?: (action: AgentPresentationAction) => void,
 ) {
   if (block.type === 'choice' || block.type === 'form') {
+    if (!interactive) {
+      return (
+        <p className="agent-activity-message" key={`${block.type}:${block.interactionId}`}>
+          请在当前任务栏中完成输入
+        </p>
+      );
+    }
     return (
       <AgentInteractionBlock
         block={block}
@@ -297,7 +437,14 @@ function renderBlock(
         {block.entries.map(entry => (
           <React.Fragment key={`${entry.label}:${entry.value}`}>
             <dt>{entry.label}</dt>
-            <dd>{entry.value}</dd>
+            <dd
+              data-output-preview={
+                entry.label === '标准输出' || entry.label === '错误输出' ? true : undefined
+              }
+              data-output-stream={entry.label === '错误输出' ? 'stderr' : undefined}
+            >
+              {entry.value}
+            </dd>
           </React.Fragment>
         ))}
       </dl>
@@ -339,6 +486,7 @@ function renderBlock(
 interface AgentToolActivityCardProps {
   activity: AgentToolActivitySnapshot;
   approvalBusy: boolean;
+  interactive?: boolean;
   interactionBusy: boolean;
   libraryId: number;
   onAction?: (action: AgentPresentationAction) => void;
@@ -350,13 +498,33 @@ interface AgentToolActivityCardProps {
   ) => void;
 }
 
-interface AgentShellLogDetailsProps {
+interface AgentShellActivityProps {
   activity: AgentToolActivitySnapshot;
   libraryId: number;
-  ownerScope: AgentOwnerScope;
+  ownerScope: AgentOwnerScope | null;
 }
 
-function AgentShellLogDetails({ activity, libraryId, ownerScope }: AgentShellLogDetailsProps) {
+const SHELL_ACTIVITY_LABELS: Record<AgentToolActivitySnapshot['status'], string> = {
+  preparing: '准备执行',
+  awaiting_approval: '等待执行',
+  awaiting_interaction: '等待执行',
+  cancelled: '已取消',
+  completed: '执行了',
+  failed: '执行失败',
+  interrupted: '执行中断',
+  running: '正在执行',
+};
+
+function shellCommand(activity: AgentToolActivitySnapshot): string {
+  try {
+    const action = normalizeAgentPreparedActionPublic(activity.preparation?.action);
+    return action.kind === 'shell.run' ? action.command : '';
+  } catch {
+    return '';
+  }
+}
+
+function AgentShellActivity({ activity, libraryId, ownerScope }: AgentShellActivityProps) {
   const [open, setOpen] = React.useState(false);
   const [loaded, setLoaded] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
@@ -365,8 +533,16 @@ function AgentShellLogDetails({ activity, libraryId, ownerScope }: AgentShellLog
   const [expired, setExpired] = React.useState(false);
   const [unavailableThrough, setUnavailableThrough] = React.useState<number | null>(null);
   const [error, setError] = React.useState('');
+  const requestGenerationRef = React.useRef(0);
+  const loadingRef = React.useRef(false);
+  const command = shellCommand(activity);
+  const displayCommand = formatAgentShellCommandForDisplay(command);
+  const commandSummary = displayCommand || 'Shell 命令';
+  const canExpand = Boolean(activity.result && ownerScope);
 
-  React.useEffect(() => {
+  React.useLayoutEffect(() => {
+    requestGenerationRef.current += 1;
+    loadingRef.current = false;
     setOpen(false);
     setLoaded(false);
     setLoading(false);
@@ -375,10 +551,22 @@ function AgentShellLogDetails({ activity, libraryId, ownerScope }: AgentShellLog
     setExpired(false);
     setUnavailableThrough(null);
     setError('');
-  }, [activity.id]);
+    return () => {
+      requestGenerationRef.current += 1;
+      loadingRef.current = false;
+    };
+  }, [
+    activity.id,
+    libraryId,
+    ownerScope?.accountScope,
+    ownerScope?.backendScope,
+  ]);
 
   const loadPage = async (cursor?: string) => {
-    if (loading) return;
+    if (loadingRef.current || !ownerScope) return;
+    const generation = requestGenerationRef.current;
+    const requestOwnerScope = { ...ownerScope };
+    loadingRef.current = true;
     setLoading(true);
     setError('');
     try {
@@ -387,12 +575,13 @@ function AgentShellLogDetails({ activity, libraryId, ownerScope }: AgentShellLog
         libraryId,
         maxBytes: 128 * 1024,
         maxFrames: 128,
-        ownerScope,
+        ownerScope: requestOwnerScope,
         runId: activity.runId,
         sessionId: activity.sessionId,
         toolRunId: activity.id,
         version: 1,
       });
+      if (generation !== requestGenerationRef.current) return;
       setFrames(current => {
         const merged = new Map(current.map(frame => [frame.sequence, frame]));
         page.frames.forEach(frame => merged.set(frame.sequence, frame));
@@ -406,37 +595,61 @@ function AgentShellLogDetails({ activity, libraryId, ownerScope }: AgentShellLog
           : Math.max(current || 0, page.unavailableThrough)
       ));
       setLoaded(true);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : '详细日志读取失败');
+    } catch {
+      if (generation !== requestGenerationRef.current) return;
+      setError('详细输出读取失败');
     } finally {
-      setLoading(false);
+      if (generation === requestGenerationRef.current) {
+        loadingRef.current = false;
+        setLoading(false);
+      }
     }
   };
 
   const toggle = () => {
+    if (!canExpand) return;
     const nextOpen = !open;
     setOpen(nextOpen);
     if (nextOpen && !loaded && !loading) void loadPage();
   };
 
-  return (
+  const summaryContent = (
     <>
-      <div className="agent-shell-log-actions">
-        <button className="agent-activity-action" onClick={toggle} type="button">
-          {open ? '收起详细日志' : '查看详细日志'}
+      <span className="agent-shell-summary-label">{SHELL_ACTIVITY_LABELS[activity.status]}</span>
+      <code className="agent-shell-summary-command" title={commandSummary}>
+        {commandSummary}
+      </code>
+    </>
+  );
+
+  return (
+    <ShellActivity data-status={activity.status}>
+      {canExpand ? (
+        <button
+          aria-expanded={open}
+          aria-label={`${SHELL_ACTIVITY_LABELS[activity.status]} ${commandSummary}`}
+          className="agent-shell-summary"
+          onClick={toggle}
+          type="button"
+        >
+          {summaryContent}
         </button>
-      </div>
+      ) : (
+        <div className="agent-shell-summary">{summaryContent}</div>
+      )}
       {open ? (
-        <div className="agent-shell-log">
+        <div aria-label="Shell 输出" className="agent-shell-terminal" role="region">
+          <pre className="agent-shell-terminal-command">
+            <span aria-hidden="true" className="agent-shell-terminal-prompt">$ </span>
+            {displayCommand || '命令内容不可用'}
+          </pre>
           {expired ? (
-            <p className="agent-shell-log-notice">详细日志已过期</p>
+            <p className="agent-shell-log-notice">详细输出已清理</p>
           ) : unavailableThrough !== null ? (
-            <p className="agent-shell-log-notice">
-              序号 {unavailableThrough} 及以前的部分输出已不可用
-            </p>
+            <p className="agent-shell-log-notice">部分早期输出不可用</p>
           ) : null}
           {frames.length > 0 ? (
-            <pre className="agent-shell-log-output">
+            <pre className="agent-shell-terminal-output">
               {frames.map(frame => (
                 <span data-stream={frame.stream} key={frame.sequence}>{frame.text}</span>
               ))}
@@ -445,32 +658,38 @@ function AgentShellLogDetails({ activity, libraryId, ownerScope }: AgentShellLog
             <p className="agent-shell-log-empty">命令没有产生输出</p>
           ) : null}
           {error ? <p className="agent-shell-log-notice" role="alert">{error}</p> : null}
-          {loading ? <p className="agent-shell-log-notice" role="status">正在读取日志...</p> : null}
+          {loading ? <p className="agent-shell-log-notice" role="status">正在读取输出...</p> : null}
           {!loading && nextCursor ? (
             <button
-              className="agent-activity-action"
+              className="agent-shell-log-more"
               onClick={() => { void loadPage(nextCursor); }}
               type="button"
             >
-              加载更多
+              继续读取
             </button>
           ) : null}
         </div>
       ) : null}
-    </>
+    </ShellActivity>
   );
 }
 
 export default function AgentToolActivityCard({
   activity,
   approvalBusy,
+  interactive = true,
   interactionBusy,
   libraryId,
   onAction,
   onResolveApproval,
   ownerScope,
 }: AgentToolActivityCardProps) {
-  if (activity.status === 'awaiting_approval' && activity.approval?.status === 'pending') {
+  const [expanded, setExpanded] = React.useState(false);
+  if (
+    interactive
+    && activity.status === 'awaiting_approval'
+    && activity.approval?.status === 'pending'
+  ) {
     const approval: AgentToolApprovalSnapshot = {
       approvalId: activity.approval.approvalId,
       call: activity.call,
@@ -491,28 +710,52 @@ export default function AgentToolActivityCard({
     );
   }
 
+  if (activity.call.name === 'shell.run') {
+    return (
+      <AgentShellActivity
+        activity={activity}
+        libraryId={libraryId}
+        ownerScope={ownerScope}
+      />
+    );
+  }
+
   const blocks = buildAgentToolPresentation(activity, libraryId);
+  const summary = buildAgentToolSummary(activity, libraryId);
+  const forcedBody = activity.status === 'failed' || activity.status === 'interrupted'
+    || activity.status === 'cancelled' || Boolean(activity.interaction)
+    || (activity.status === 'running' && Boolean(activity.progress));
+  const showBody = expanded || forcedBody;
   return (
     <ActivityCard data-status={activity.status}>
       <div className="agent-activity-header">
         <span className="agent-activity-status-icon">
-          <ActivityStatusIcon status={activity.status} />
+          {activity.status === 'completed' && activity.toolMetadata?.risk === 'read'
+            ? <IconFile aria-hidden="true" /> : <ActivityStatusIcon status={activity.status} />}
         </span>
-        <h3 className="agent-activity-title">{getAgentToolTitle(activity)}</h3>
-        <span className="agent-activity-state">{STATUS_LABELS[activity.status]}</span>
-      </div>
-      {blocks.length > 0 ? (
-        <div className="agent-activity-body">
-          {blocks.map((block, index) => renderBlock(block, index, interactionBusy, onAction))}
+        <div className="agent-activity-title">
+          <span>{summary.label}</span>
+          {summary.subject ? summary.action && onAction ? (
+            <button className="agent-activity-subject" type="button" title={summary.subject}
+              onClick={() => onAction(summary.action!)}>{summary.subject}</button>
+          ) : <span className="agent-activity-subject" title={summary.subject}>{summary.subject}</span> : null}
         </div>
-      ) : null}
-      {activity.call.name === 'shell.run' && activity.result && ownerScope ? (
+        {activity.status !== 'completed' ? <span className="agent-activity-state">{STATUS_LABELS[activity.status]}</span> : null}
+        {blocks.length > 0 && !forcedBody ? <button type="button" className="agent-activity-expand"
+          aria-label={expanded ? '收起工具详情' : '展开工具详情'} title={expanded ? '收起工具详情' : '展开工具详情'}
+          aria-expanded={showBody} onClick={() => setExpanded(value => !value)}>
+          {showBody ? <IconChevronDown aria-hidden="true" /> : <IconChevronRight aria-hidden="true" />}
+        </button> : null}
+      </div>
+      {blocks.length > 0 && showBody ? (
         <div className="agent-activity-body">
-          <AgentShellLogDetails
-            activity={activity}
-            libraryId={libraryId}
-            ownerScope={ownerScope}
-          />
+          {blocks.map((block, index) => renderBlock(
+            block,
+            index,
+            interactive,
+            interactionBusy,
+            onAction,
+          ))}
         </div>
       ) : null}
     </ActivityCard>

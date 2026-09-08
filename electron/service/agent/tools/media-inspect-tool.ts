@@ -24,13 +24,14 @@ export const mediaInspectTool: AgentTool = {
     additionalProperties: false,
     properties: {
       nodeId: {
-        description: '当前选中项或当前目录直属文件的节点 ID；只有一个选中节点时可以省略。',
+        description: '当前选中项或通过资料库查询读取的文件 ID；唯一选中节点可省略。',
         type: 'integer',
       },
     },
     type: 'object',
   },
   name: 'media.inspect',
+  presentation: { groupKind: 'resource-read', operationKind: 'stat' },
   risk: 'read',
   timeoutMs: 60_000,
   validate(input, context) {

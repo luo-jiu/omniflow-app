@@ -1,6 +1,6 @@
 # 内置 Agent Skill 管理与能力可用性路线图
 
-更新时间：2026-08-25
+更新时间：2026-08-26
 
 状态：阶段 A、B 已实现并通过自动化门禁；阶段 C 的真实媒体、本机 Save As 和非首个资料库上传核心路径已完成用户验收；阶段 D、E 尚未开始。
 
@@ -12,7 +12,7 @@
 - Agent Tool 的环境预检、动作确认和 renderer-safe 投影
 - 后续只读 Skill 管理页与本机启停偏好
 
-当前 Skill V1 的实现事实与安全边界以 `docs/built-in-agent-architecture.md` 为准；V1 的设计理由和剩余验收以 `docs/wip/built-in-agent-skill-v1-design.md` 为准。本文只规划 V1 之上的能力可用性、执行目标准备和管理层，不重新设计已经落地的 Registry 与激活协议。
+当前 Skill V1 的实现事实与安全边界以 `docs/built-in-agent-architecture.md` 为准；V1 的设计理由和历史验收记录见 `docs/wip/built-in-agent-skill-v1-design.md`。本文只规划 V1 之上的能力可用性、执行目标准备和管理层，不重新设计已经落地的 Registry 与激活协议。
 
 ## 1. 结论
 
@@ -121,7 +121,7 @@ Claude Code 的 `/skills` 更接近只读清单，不是适合 OmniFlow 的完�
 - `directory / url / embedded` 三种动态来源。
 - 同名 Skill 静默覆盖。
 - 缺少签名和内容哈希的远程索引。
-- 通用 Bash 或宿主级 Shell 能力。
+- 由 Skill 直接提供通用 Bash 或宿主级 Shell。后续独立 `shell.run` 的目标契约见 `docs/built-in-agent-shell-architecture.md`，它不属于 Skill executor，也不能由 Skill 授权。
 - 尚未收口的 MCP、插件和 Session 级动态 Tool 注册。
 
 OpenCode 没有通用 Skill 环境依赖系统。它在 Formatter 等具体能力内部实现探测，因此 OmniFlow 的统一 Capability 层需要自行设计。

@@ -21,6 +21,10 @@ import type {
 import type { AgentShellWorkspaceOwner } from './agent-shell-workspace-store';
 import type { AgentToolMainPreparedExecution } from '../agent-tool-registry';
 import type { AgentShellSpawnPreflight } from './agent-shell-spawn-preflight';
+import {
+  createAgentShellOutputProjectionCollector,
+  type AgentShellProviderOutputV1,
+} from './agent-shell-output-projection';
 
 export type AgentShellRuntimeStatus =
   | 'completed'
@@ -65,7 +69,7 @@ export interface AgentShellRuntimeRunInput {
   readonly runCapabilityIdentity: string;
   readonly signal: AbortSignal;
   readonly toolRunId: string;
-  readonly workspaceId: string;
+  readonly workspaceId?: string;
 }
 
 export interface AgentShellRuntimeResult {
@@ -77,6 +81,7 @@ export interface AgentShellRuntimeResult {
   readonly exitCode: number | null;
   readonly logRef: string;
   readonly outputBytes: number;
+  readonly outputProjection: AgentShellProviderOutputV1;
   readonly outputTail: AgentShellOutputTailV1;
   readonly processStatus: AgentShellProcessResult['status'];
   readonly status: AgentShellRuntimeStatus;
@@ -169,11 +174,17 @@ function createLogIdentity(
   grant: AgentShellExecutionLeaseGrant,
   executionId: string,
 ): AgentShellLogIdentity {
+  const owner = grant.owner || grant.workspace?.owner;
+  const runId = grant.runId || grant.workspace?.runId;
+  const sessionId = grant.sessionId || owner?.sessionId || grant.workspace?.owner.sessionId;
+  if (!owner || !runId || !sessionId) {
+    throw new Error('Agent Shell execution grant identity 缺失');
+  }
   return Object.freeze({
     executionId,
-    owner: grant.workspace.owner,
-    runId: grant.workspace.runId,
-    sessionId: grant.workspace.owner.sessionId,
+    owner,
+    runId,
+    sessionId,
     toolRunId: input.preparation.identity.toolRunId,
   });
 }
@@ -209,6 +220,7 @@ export function createAgentShellRuntime(options: AgentShellRuntimeOptions) {
     let logFailure: unknown;
     let droppedDetailedBytes = 0;
     let logReady = false;
+    const outputProjectionCollector = createAgentShellOutputProjectionCollector();
     let terminalStateEvent: AgentShellProcessStateEvent | undefined;
     const pendingEvents: AgentShellProcessEvent[] = [];
     const requestProcessCancellation = (): void => {
@@ -252,6 +264,7 @@ export function createAgentShellRuntime(options: AgentShellRuntimeOptions) {
         return;
       }
       droppedDetailedBytes += appended.droppedDetailedBytes;
+      outputProjectionCollector.append(appended.frames);
       if (appended.frames.length === 0 && appended.droppedDetailedBytes === 0) return;
       emitSafely(input.onEvent, Object.freeze({
         droppedDetailedBytes: appended.droppedDetailedBytes,
@@ -287,6 +300,7 @@ export function createAgentShellRuntime(options: AgentShellRuntimeOptions) {
     try {
       const finished = log.finish();
       droppedDetailedBytes += finished.droppedDetailedBytes;
+      outputProjectionCollector.append(finished.frames);
       if (finished.frames.length > 0) {
         emitSafely(input.onEvent, Object.freeze({
           droppedDetailedBytes: finished.droppedDetailedBytes,
@@ -343,6 +357,7 @@ export function createAgentShellRuntime(options: AgentShellRuntimeOptions) {
       logRef: log.logRef,
       ok: status === 'completed',
       outputBytes: processResult.outputBytes,
+      outputProjection: outputProjectionCollector.snapshot(),
       outputTail,
       processStatus: processResult.status,
       status,

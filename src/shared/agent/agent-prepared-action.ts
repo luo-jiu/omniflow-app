@@ -3,12 +3,15 @@ import {
   AGENT_FILE_PUBLISH_PREPARED_ACTION_VERSION,
   AGENT_FILE_STAGE_PREPARED_ACTION_KIND,
   AGENT_FILE_STAGE_PREPARED_ACTION_VERSION,
+  AGENT_FILE_UPLOAD_PREPARED_ACTION_KIND,
+  AGENT_FILE_UPLOAD_PREPARED_ACTION_VERSION,
   AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_KIND,
   AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_VERSION,
   AGENT_SHELL_PREPARED_ACTION_VERSION,
   AGENT_SHELL_RUN_TOOL_NAME,
   type AgentFilePublishPreparedActionPublicV1,
   type AgentFileStagePreparedActionPublicV1,
+  type AgentFileUploadPreparedActionPublicV1,
   type AgentMediaExtractAudioOutputFormat,
   type AgentMediaExtractAudioPreparedActionPublicV1,
   type AgentPreparedActionPublic,
@@ -18,8 +21,13 @@ import { normalizeAgentShellPreparedActionPublicV1 } from './shell/agent-shell.t
 const MAX_OUTPUT_FILE_NAME_CHARACTERS = 255;
 const MAX_TARGET_LABEL_CHARACTERS = 500;
 const MAX_LOGICAL_PATH_UTF8_BYTES = 1_024;
+const UTF8_ENCODER = new TextEncoder();
 const CONTENT_HASH_PATTERN = /^sha256:[a-f0-9]{64}$/u;
 const FILE_STAGE_LOCAL_FIELDS = new Set(['kind', 'sourceKind', 'targetLabel', 'version']);
+const FILE_STAGE_LOCAL_PATH_FIELDS = new Set([
+  'kind', 'sourceDisplayName', 'sourceIdentity', 'sourceKind', 'sourcePath',
+  'sourceSizeBytes', 'targetLabel', 'version',
+]);
 const FILE_STAGE_LIBRARY_FIELDS = new Set([
   'kind', 'libraryId', 'sourceDisplayName', 'sourceIdentity', 'sourceKind',
   'sourceNodeId', 'sourceSizeBytes', 'targetLabel', 'version',
@@ -38,6 +46,11 @@ const FILE_PUBLISH_FIELDS = new Set([
   'suggestedFileName',
   'targetLabel',
   'version',
+]);
+const FILE_UPLOAD_FIELDS = new Set([
+  'conflictPolicy', 'kind', 'libraryId', 'outputFileName', 'parentId', 'providerId',
+  'sourceDisplayName', 'sourceIdentity', 'sourceKind', 'sourcePath', 'sourceSizeBytes',
+  'targetLabel', 'version',
 ]);
 const MEDIA_EXTRACT_AUDIO_FIELDS = new Set([
   'conflictPolicy',
@@ -113,10 +126,21 @@ function safeTargetLabel(value: unknown): string {
   return normalized;
 }
 
+function safeLocalPathLabel(value: unknown): string {
+  const normalized = boundedText(value, '本机文件路径', 4_096);
+  if (
+    UTF8_ENCODER.encode(normalized).byteLength > 4_096
+    || Array.from(normalized).some(character => character.charCodeAt(0) < 32)
+  ) {
+    throw new Error('本机文件路径无效');
+  }
+  return normalized;
+}
+
 function safeLogicalOutputPath(value: unknown): string {
   const normalized = boundedText(value, '工作区输出路径', MAX_LOGICAL_PATH_UTF8_BYTES);
   if (
-    Buffer.byteLength(normalized, 'utf8') > MAX_LOGICAL_PATH_UTF8_BYTES
+    UTF8_ENCODER.encode(normalized).byteLength > MAX_LOGICAL_PATH_UTF8_BYTES
     || !normalized.startsWith('output/')
     || normalized.includes('\\')
     || normalized.split('/').some(segment => !segment || segment === '.' || segment === '..')
@@ -159,6 +183,19 @@ export function normalizeAgentFileStagePreparedActionPublicV1(
       version: AGENT_FILE_STAGE_PREPARED_ACTION_VERSION,
     };
   }
+  if (source.sourceKind === 'local-path') {
+    assertExactFields(source, FILE_STAGE_LOCAL_PATH_FIELDS);
+    return {
+      kind: AGENT_FILE_STAGE_PREPARED_ACTION_KIND,
+      sourceDisplayName: safeFileName(source.sourceDisplayName),
+      sourceIdentity: safeContentHash(source.sourceIdentity),
+      sourceKind: 'local-path',
+      sourcePath: safeLocalPathLabel(source.sourcePath),
+      sourceSizeBytes: safeSizeBytes(source.sourceSizeBytes),
+      targetLabel: safeTargetLabel(source.targetLabel),
+      version: AGENT_FILE_STAGE_PREPARED_ACTION_VERSION,
+    };
+  }
   if (source.sourceKind !== 'library-node') throw new Error('文件来源无效');
   assertExactFields(source, FILE_STAGE_LIBRARY_FIELDS);
   return {
@@ -171,6 +208,45 @@ export function normalizeAgentFileStagePreparedActionPublicV1(
     sourceSizeBytes: safeSizeBytes(source.sourceSizeBytes),
     targetLabel: safeTargetLabel(source.targetLabel),
     version: AGENT_FILE_STAGE_PREPARED_ACTION_VERSION,
+  };
+}
+
+export function normalizeAgentFileUploadPreparedActionPublicV1(
+  input: unknown,
+): AgentFileUploadPreparedActionPublicV1 {
+  const source = strictObject(input);
+  if (
+    source.kind !== AGENT_FILE_UPLOAD_PREPARED_ACTION_KIND
+    || source.version !== AGENT_FILE_UPLOAD_PREPARED_ACTION_VERSION
+  ) {
+    throw new Error('Agent prepared action 类型或版本不受支持');
+  }
+  assertExactFields(source, FILE_UPLOAD_FIELDS);
+  const conflictPolicy = source.conflictPolicy === 'fail' || source.conflictPolicy === 'rename'
+    ? source.conflictPolicy
+    : null;
+  const providerId = boundedText(source.providerId, '存储服务', 128);
+  if (
+    !conflictPolicy
+    || source.sourceKind !== 'local-path'
+    || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(providerId)
+  ) {
+    throw new Error('本机文件上传动作无效');
+  }
+  return {
+    conflictPolicy,
+    kind: AGENT_FILE_UPLOAD_PREPARED_ACTION_KIND,
+    libraryId: positiveId(source.libraryId, '资料库'),
+    outputFileName: safeFileName(source.outputFileName),
+    parentId: positiveId(source.parentId, '目标目录'),
+    providerId,
+    sourceDisplayName: safeFileName(source.sourceDisplayName),
+    sourceIdentity: safeContentHash(source.sourceIdentity),
+    sourceKind: 'local-path',
+    sourcePath: safeLocalPathLabel(source.sourcePath),
+    sourceSizeBytes: safeSizeBytes(source.sourceSizeBytes),
+    targetLabel: safeTargetLabel(source.targetLabel),
+    version: AGENT_FILE_UPLOAD_PREPARED_ACTION_VERSION,
   };
 }
 
@@ -299,6 +375,12 @@ export function normalizeAgentPreparedActionPublic(
     && source.version === AGENT_FILE_PUBLISH_PREPARED_ACTION_VERSION
   ) {
     return normalizeAgentFilePublishPreparedActionPublicV1(source);
+  }
+  if (
+    source.kind === AGENT_FILE_UPLOAD_PREPARED_ACTION_KIND
+    && source.version === AGENT_FILE_UPLOAD_PREPARED_ACTION_VERSION
+  ) {
+    return normalizeAgentFileUploadPreparedActionPublicV1(source);
   }
   if (
     source.kind === AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_KIND

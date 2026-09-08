@@ -14,6 +14,22 @@ export type AgentMessageRole = 'system' | 'user' | 'assistant' | 'tool';
 
 export type AgentToolRisk = 'read' | 'write' | 'destructive' | 'external';
 
+export type AgentToolDisplayGroupKind = 'resource-read';
+
+export type AgentToolDisplayOperationKind = 'list' | 'stat' | 'read' | 'search';
+
+export interface AgentToolDisplayMetadata {
+  groupKind: AgentToolDisplayGroupKind;
+  operationKind: AgentToolDisplayOperationKind;
+}
+
+export interface AgentToolRendererMetadata {
+  groupKind?: AgentToolDisplayGroupKind;
+  kind: 'business' | 'control';
+  operationKind?: AgentToolDisplayOperationKind;
+  risk: AgentToolRisk;
+}
+
 export type AgentToolPermissionBehavior = 'allow' | 'ask' | 'deny';
 
 export type AgentToolActivityStatus =
@@ -148,15 +164,66 @@ export interface AgentAppContext {
   selectedNodeIds: number[];
 }
 
-export interface AgentMessage {
+export type AgentAssistantPhase = 'unknown' | 'commentary' | 'final';
+
+export type AgentAssistantStatus =
+  | 'streaming'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+  | 'interrupted';
+
+export interface AgentAssistantItemState {
+  finishedAt?: string;
+  phase: AgentAssistantPhase;
+  revision: number;
+  status: AgentAssistantStatus;
+  turnOrdinal: number;
+  updatedAt: string;
+}
+
+interface AgentMessageBase {
   content: string;
   createdAt: string;
   id: string;
-  role: AgentMessageRole;
   runId?: string;
   sessionId: string;
   toolCallId?: string;
   toolName?: string;
+}
+
+export type AgentNonAssistantMessage = AgentMessageBase & {
+  assistantItem?: never;
+  role: Exclude<AgentMessageRole, 'assistant'>;
+};
+
+export type AgentAssistantItemSnapshot = AgentMessageBase & {
+  assistantItem: AgentAssistantItemState;
+  role: 'assistant';
+  runId: string;
+};
+
+export type AgentMessage =
+  | AgentNonAssistantMessage
+  | AgentAssistantItemSnapshot;
+
+export type AgentConversationMessage =
+  | (AgentNonAssistantMessage & { role: 'user' })
+  | AgentAssistantItemSnapshot;
+
+export function isAgentAssistantItem(
+  message: AgentMessage,
+): message is AgentAssistantItemSnapshot {
+  return message.role === 'assistant' && message.assistantItem !== undefined;
+}
+
+export function isAgentConversationMessage(
+  message: AgentMessage,
+): message is AgentConversationMessage {
+  if (message.role === 'user') return true;
+  if (message.role !== 'assistant') return false;
+  return message.assistantItem.phase === 'final'
+    && message.assistantItem.status === 'completed';
 }
 
 export interface AgentChatRequest {
@@ -176,6 +243,12 @@ export interface AgentChatStartResult {
 }
 
 export interface AgentDirectoryEntry {
+  storage?: {
+    providerAlias: string;
+    providerLabel?: string;
+    availability: 'available' | 'unavailable' | 'unknown';
+    observedAt?: string;
+  };
   ext?: string;
   fileSize?: number;
   id: number;
@@ -186,8 +259,10 @@ export interface AgentDirectoryEntry {
 }
 
 export interface AgentPerceptionSnapshot {
+  knownNodes?: import('./agent-library-query').AgentLibraryNode[];
   currentDirectory?: {
     entryCount: number;
+    truncated?: boolean;
     entries: AgentDirectoryEntry[];
     id: number;
     name: string;
@@ -228,6 +303,10 @@ export const AGENT_FILE_PUBLISH_PREPARED_ACTION_KIND = 'file.publish' as const;
 
 export const AGENT_FILE_PUBLISH_PREPARED_ACTION_VERSION = 1 as const;
 
+export const AGENT_FILE_UPLOAD_PREPARED_ACTION_KIND = 'file.upload' as const;
+
+export const AGENT_FILE_UPLOAD_PREPARED_ACTION_VERSION = 1 as const;
+
 export const AGENT_PREPARED_ACTION_PUBLIC_IDENTITIES = [{
   kind: AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_KIND,
   version: AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_VERSION,
@@ -240,6 +319,9 @@ export const AGENT_PREPARED_ACTION_PUBLIC_IDENTITIES = [{
 }, {
   kind: AGENT_FILE_PUBLISH_PREPARED_ACTION_KIND,
   version: AGENT_FILE_PUBLISH_PREPARED_ACTION_VERSION,
+}, {
+  kind: AGENT_FILE_UPLOAD_PREPARED_ACTION_KIND,
+  version: AGENT_FILE_UPLOAD_PREPARED_ACTION_VERSION,
 }] as const;
 
 export type AgentMediaExtractAudioOutputFormat = 'm4a' | 'mp3' | 'wav';
@@ -265,6 +347,13 @@ export type AgentFileStagePreparedActionPublicV1 = {
 } & (
   | { sourceKind: 'local-picker' }
   | {
+      sourceDisplayName: string;
+      sourceIdentity: string;
+      sourceKind: 'local-path';
+      sourcePath: string;
+      sourceSizeBytes: number;
+    }
+  | {
       libraryId: number;
       sourceDisplayName: string;
       sourceIdentity: string;
@@ -273,6 +362,22 @@ export type AgentFileStagePreparedActionPublicV1 = {
       sourceSizeBytes: number;
     }
 );
+
+export interface AgentFileUploadPreparedActionPublicV1 {
+  conflictPolicy: 'fail' | 'rename';
+  kind: typeof AGENT_FILE_UPLOAD_PREPARED_ACTION_KIND;
+  libraryId: number;
+  outputFileName: string;
+  parentId: number;
+  providerId: string;
+  sourceDisplayName: string;
+  sourceIdentity: string;
+  sourceKind: 'local-path';
+  sourcePath: string;
+  sourceSizeBytes: number;
+  targetLabel: string;
+  version: typeof AGENT_FILE_UPLOAD_PREPARED_ACTION_VERSION;
+}
 
 export type AgentFilePublishPreparedActionPublicV1 = {
   contentHash: string;
@@ -321,9 +426,17 @@ interface AgentFileAuthorityRequestBaseV1 {
 
 export type AgentFileAuthorityRequestV1 = AgentFileAuthorityRequestBaseV1 & (
   | {
+      operation: 'query-library-metadata';
+      query: import('./agent-library-query').AgentLibraryQuery;
+    }
+  | {
       includeDownloadUrl: boolean;
       nodeId: number;
       operation: 'stage-library-node';
+    }
+  | {
+      directoryPath: string;
+      operation: 'resolve-library-directory';
     }
   | {
       contentType?: string;
@@ -338,9 +451,19 @@ export type AgentFileAuthorityRequestV1 = AgentFileAuthorityRequestBaseV1 & (
 
 export type AgentFileAuthorityResultV1 =
   | {
+      operation: 'query-library-metadata';
+      data: import('./agent-library-query').AgentLibraryReadResult;
+      version: 1;
+    }
+  | {
       downloadUrl?: string;
       node: AgentFileAuthorityNodeSnapshotV1;
       operation: 'stage-library-node';
+      version: 1;
+    }
+  | {
+      operation: 'resolve-library-directory';
+      parent: AgentFileAuthorityNodeSnapshotV1;
       version: 1;
     }
   | {
@@ -367,6 +490,7 @@ export interface AgentFileAuthorityCompletionV1 {
 export type AgentPreparedActionPublic =
   | AgentFilePublishPreparedActionPublicV1
   | AgentFileStagePreparedActionPublicV1
+  | AgentFileUploadPreparedActionPublicV1
   | AgentMediaExtractAudioPreparedActionPublicV1
   | AgentShellPreparedActionPublicV1;
 
@@ -469,6 +593,7 @@ export interface AgentToolActivitySnapshot {
   runId: string;
   sessionId: string;
   status: AgentToolActivityStatus;
+  toolMetadata?: AgentToolRendererMetadata;
 }
 
 export interface AgentInteractionSubmissionRequest {
@@ -655,7 +780,26 @@ export interface AgentToolExecutionProgressRequest {
 export type AgentChatStreamEvent =
   | { run: AgentRunSnapshot; runId: string; sessionId: string; type: 'started' }
   | { run: AgentRunSnapshot; runId: string; sessionId: string; type: 'run-updated' }
-  | { delta: string; runId: string; sessionId: string; type: 'delta' }
+  | {
+      item: AgentAssistantItemSnapshot;
+      runId: string;
+      sessionId: string;
+      type: 'assistant-item-started';
+    }
+  | {
+      delta: string;
+      itemId: string;
+      offset: number;
+      runId: string;
+      sessionId: string;
+      type: 'assistant-item-delta';
+    }
+  | {
+      item: AgentAssistantItemSnapshot;
+      runId: string;
+      sessionId: string;
+      type: 'assistant-item-finished';
+    }
   | {
       activity?: AgentToolActivitySnapshot;
       call: AgentToolCallSnapshot;
@@ -733,7 +877,6 @@ export type AgentChatStreamEvent =
       type: 'tool-completed';
     }
   | {
-      content: string;
       messages?: AgentMessage[];
       run?: AgentRunSnapshot;
       runId: string;
@@ -742,7 +885,6 @@ export type AgentChatStreamEvent =
       type: 'completed';
     }
   | {
-      content: string;
       messages?: AgentMessage[];
       run?: AgentRunSnapshot;
       runId: string;
@@ -751,7 +893,6 @@ export type AgentChatStreamEvent =
       type: 'cancelled';
     }
   | {
-      content: string;
       message: string;
       messages?: AgentMessage[];
       run?: AgentRunSnapshot;

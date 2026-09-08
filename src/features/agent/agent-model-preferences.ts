@@ -1,6 +1,7 @@
 import type { AIServiceReasoningEffort } from '@/features/ai-services/ai-service.types';
 
 const AGENT_MODEL_PREFERENCES_KEY = 'agent-model-preferences:v1';
+const LEGACY_MODEL_BUDGET_PREFIX = 'agent-model-budget:v1:';
 
 export interface AgentModelPreferences {
   model: string;
@@ -14,6 +15,13 @@ function normalizeReasoningEffort(value: unknown): AIServiceReasoningEffort {
 export function loadAgentModelPreferences(): AgentModelPreferences {
   const fallback: AgentModelPreferences = { model: '', reasoningEffort: 'auto' };
   if (typeof localStorage === 'undefined') return fallback;
+  try {
+    // Retire only the removed Composer preference, leaving other app data intact.
+    for (let index = localStorage.length - 1; index >= 0; index -= 1) {
+      const key = localStorage.key(index);
+      if (key?.startsWith(LEGACY_MODEL_BUDGET_PREFIX)) localStorage.removeItem(key);
+    }
+  } catch { /* Unavailable storage cannot re-enable client-side budget overrides. */ }
   const raw = localStorage.getItem(AGENT_MODEL_PREFERENCES_KEY);
   if (!raw) return fallback;
   try {

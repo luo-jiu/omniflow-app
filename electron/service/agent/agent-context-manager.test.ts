@@ -5,7 +5,10 @@ import type {
   AgentRunSnapshot,
 } from '@/shared/agent/agent.types';
 import type { AIServiceRuntimeConnection } from '../aiServiceClientModel';
-import { AGENT_CONVERSATION_SUMMARY_LIMITS } from './agent-conversation-summary';
+import {
+  AGENT_CONVERSATION_SUMMARY_LIMITS,
+  AGENT_CONVERSATION_SUMMARY_MAX_OUTPUT_TOKENS,
+} from './agent-conversation-summary';
 import {
   createAgentContextManager,
   type PrepareAgentContextInput,
@@ -41,14 +44,28 @@ function message(
   role: AgentMessage['role'],
   content: string,
 ): AgentMessage {
-  return {
+  const base = {
     content,
     createdAt: '2026-08-23T00:00:00.000Z',
     id,
-    role,
     runId,
     sessionId: 'session-1',
   };
+  if (role === 'assistant') {
+    return {
+      ...base,
+      assistantItem: {
+        finishedAt: '2026-08-23T00:00:00.000Z',
+        phase: 'final',
+        revision: 2,
+        status: 'completed',
+        turnOrdinal: 1,
+        updatedAt: '2026-08-23T00:00:00.000Z',
+      },
+      role,
+    };
+  }
+  return { ...base, role };
 }
 
 function run(id: string, status: AgentRunSnapshot['status']): AgentRunSnapshot {
@@ -185,6 +202,22 @@ describe('Agent context manager', () => {
     contextInput.messages.splice(
       1,
       0,
+      {
+        assistantItem: {
+          finishedAt: '2026-08-23T00:00:00.000Z',
+          phase: 'commentary',
+          revision: 2,
+          status: 'completed',
+          turnOrdinal: 1,
+          updatedAt: '2026-08-23T00:00:00.000Z',
+        },
+        content: 'COMMENTARY_MUST_NOT_BE_SUMMARIZED',
+        createdAt: '2026-08-23T00:00:00.000Z',
+        id: 'm-commentary',
+        role: 'assistant',
+        runId: 'run-1',
+        sessionId: 'session-1',
+      },
       message('m-tool', 'run-1', 'tool', 'CANONICAL_TOOL_MESSAGE'),
     );
     contextInput.toolActivities = [{
@@ -211,12 +244,16 @@ describe('Agent context manager', () => {
       '2026-08-23T00:00:00.000Z',
     );
     const summaryInput = summarize.mock.calls[0]?.[0];
-    expect(summaryInput?.maxOutputTokens).toBe(1_000);
+    expect(summaryInput?.maxOutputTokens)
+      .toBe(AGENT_CONVERSATION_SUMMARY_MAX_OUTPUT_TOKENS);
     expect(summaryInput?.systemPrompt).toContain('没有任何 Tool');
     expect(summaryInput?.messages[0].content).not.toContain('super-secret-token');
     expect(summaryInput?.messages[0].content).toContain('[REDACTED]');
     expect(summaryInput?.messages[0].content).not.toContain('CANONICAL_TOOL_FACT');
     expect(summaryInput?.messages[0].content).not.toContain('CANONICAL_TOOL_MESSAGE');
+    expect(summaryInput?.messages[0].content).not.toContain(
+      'COMMENTARY_MUST_NOT_BE_SUMMARIZED',
+    );
     expect(summarize.mock.calls[0]).toEqual([
       expect.objectContaining({
         model: 'model-a',

@@ -7,15 +7,20 @@ import {
   AGENT_FILE_PUBLISH_PREPARED_ACTION_VERSION,
   AGENT_FILE_STAGE_PREPARED_ACTION_KIND,
   AGENT_FILE_STAGE_PREPARED_ACTION_VERSION,
+  AGENT_FILE_UPLOAD_PREPARED_ACTION_KIND,
+  AGENT_FILE_UPLOAD_PREPARED_ACTION_VERSION,
   AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_KIND,
   AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_VERSION,
   AGENT_PREPARED_ACTION_PUBLIC_IDENTITIES,
   type AgentActionPreview,
   type AgentAppContext,
+  type AgentAssistantItemSnapshot,
+  type AgentAssistantStatus,
   type AgentInteractionRequest,
   type AgentInteractionResponse,
   type AgentInteractionStatus,
   type AgentMessage,
+  type AgentNonAssistantMessage,
   type AgentOwnerScope,
   type AgentPreparedActionPublic,
   type AgentReasoningEffort,
@@ -67,6 +72,7 @@ const MAX_CONTEXT_CHECKPOINT_ID_LENGTH = 200;
 const MAX_CONTEXT_CHECKPOINT_PROFILE_ID_LENGTH = 200;
 const MAX_CONTEXT_CHECKPOINT_MODEL_LENGTH = 500;
 const MAX_CONTEXT_CHECKPOINT_SUMMARY_BYTES = 64 * 1024;
+const MAX_ASSISTANT_ITEM_ID_LENGTH = 200;
 const MAX_SAFE_SQLITE_AGENT_ID = Number.MAX_SAFE_INTEGER;
 
 function sqlText(value: string): string {
@@ -137,7 +143,8 @@ function preparedActionFileNameInvalidSql(jsonPath: string): string {
 
 const FILE_STAGE_PREPARED_ACTION_INVALID_SQL = `
   COALESCE(json_type(NEW.prepared_action_json, '$.sourceKind'), '') <> 'text'
-  OR json_extract(NEW.prepared_action_json, '$.sourceKind') NOT IN ('local-picker', 'library-node')
+  OR json_extract(NEW.prepared_action_json, '$.sourceKind')
+    NOT IN ('local-picker', 'local-path', 'library-node')
   OR (${preparedActionBoundedTextInvalidSql('$.targetLabel', 500)})
   OR (
     json_extract(NEW.prepared_action_json, '$.sourceKind') = 'local-picker'
@@ -147,6 +154,30 @@ const FILE_STAGE_PREPARED_ACTION_INVALID_SQL = `
         WHERE field.key NOT IN ('kind', 'sourceKind', 'targetLabel', 'version')
       )
       OR (SELECT COUNT(*) FROM json_each(NEW.prepared_action_json)) <> 4
+    )
+  )
+  OR (
+    json_extract(NEW.prepared_action_json, '$.sourceKind') = 'local-path'
+    AND (
+      EXISTS (
+        SELECT 1 FROM json_each(NEW.prepared_action_json) AS field
+        WHERE field.key NOT IN (
+          'kind', 'sourceDisplayName', 'sourceIdentity', 'sourceKind', 'sourcePath',
+          'sourceSizeBytes', 'targetLabel', 'version'
+        )
+      )
+      OR (SELECT COUNT(*) FROM json_each(NEW.prepared_action_json)) <> 8
+      OR (${preparedActionFileNameInvalidSql('$.sourceDisplayName')})
+      OR COALESCE(json_type(NEW.prepared_action_json, '$.sourceIdentity'), '') <> 'text'
+      OR length(json_extract(NEW.prepared_action_json, '$.sourceIdentity')) <> 71
+      OR substr(json_extract(NEW.prepared_action_json, '$.sourceIdentity'), 1, 7) <> 'sha256:'
+      OR substr(json_extract(NEW.prepared_action_json, '$.sourceIdentity'), 8) GLOB '*[^0-9a-f]*'
+      OR (${preparedActionBoundedTextInvalidSql('$.sourcePath', 4096)})
+      OR length(CAST(json_extract(NEW.prepared_action_json, '$.sourcePath') AS BLOB)) > 4096
+      OR COALESCE(json_type(NEW.prepared_action_json, '$.sourceSizeBytes'), '') <> 'integer'
+      OR CAST(json_extract(NEW.prepared_action_json, '$.sourceSizeBytes') AS INTEGER) < 0
+      OR CAST(json_extract(NEW.prepared_action_json, '$.sourceSizeBytes') AS INTEGER)
+        > ${MAX_SAFE_SQLITE_AGENT_ID}
     )
   )
   OR (
@@ -176,6 +207,46 @@ const FILE_STAGE_PREPARED_ACTION_INVALID_SQL = `
       OR substr(json_extract(NEW.prepared_action_json, '$.sourceIdentity'), 8) GLOB '*[^0-9a-f]*'
     )
   )
+`;
+
+const FILE_UPLOAD_PREPARED_ACTION_INVALID_SQL = `
+  EXISTS (
+    SELECT 1 FROM json_each(NEW.prepared_action_json) AS field
+    WHERE field.key NOT IN (
+      'conflictPolicy', 'kind', 'libraryId', 'outputFileName', 'parentId', 'providerId',
+      'sourceDisplayName', 'sourceIdentity', 'sourceKind', 'sourcePath', 'sourceSizeBytes',
+      'targetLabel', 'version'
+    )
+  )
+  OR (SELECT COUNT(*) FROM json_each(NEW.prepared_action_json)) <> 13
+  OR COALESCE(json_type(NEW.prepared_action_json, '$.conflictPolicy'), '') <> 'text'
+  OR json_extract(NEW.prepared_action_json, '$.conflictPolicy') NOT IN ('fail', 'rename')
+  OR COALESCE(json_type(NEW.prepared_action_json, '$.libraryId'), '') <> 'integer'
+  OR CAST(json_extract(NEW.prepared_action_json, '$.libraryId') AS INTEGER) <= 0
+  OR CAST(json_extract(NEW.prepared_action_json, '$.libraryId') AS INTEGER)
+    > ${MAX_SAFE_SQLITE_AGENT_ID}
+  OR (${preparedActionFileNameInvalidSql('$.outputFileName')})
+  OR COALESCE(json_type(NEW.prepared_action_json, '$.parentId'), '') <> 'integer'
+  OR CAST(json_extract(NEW.prepared_action_json, '$.parentId') AS INTEGER) <= 0
+  OR CAST(json_extract(NEW.prepared_action_json, '$.parentId') AS INTEGER)
+    > ${MAX_SAFE_SQLITE_AGENT_ID}
+  OR (${preparedActionBoundedTextInvalidSql('$.providerId', 128)})
+  OR json_extract(NEW.prepared_action_json, '$.providerId') GLOB '*[^A-Za-z0-9._:-]*'
+  OR substr(json_extract(NEW.prepared_action_json, '$.providerId'), 1, 1) GLOB '[^A-Za-z0-9]'
+  OR (${preparedActionFileNameInvalidSql('$.sourceDisplayName')})
+  OR COALESCE(json_type(NEW.prepared_action_json, '$.sourceIdentity'), '') <> 'text'
+  OR length(json_extract(NEW.prepared_action_json, '$.sourceIdentity')) <> 71
+  OR substr(json_extract(NEW.prepared_action_json, '$.sourceIdentity'), 1, 7) <> 'sha256:'
+  OR substr(json_extract(NEW.prepared_action_json, '$.sourceIdentity'), 8) GLOB '*[^0-9a-f]*'
+  OR COALESCE(json_type(NEW.prepared_action_json, '$.sourceKind'), '') <> 'text'
+  OR json_extract(NEW.prepared_action_json, '$.sourceKind') <> 'local-path'
+  OR (${preparedActionBoundedTextInvalidSql('$.sourcePath', 4096)})
+  OR length(CAST(json_extract(NEW.prepared_action_json, '$.sourcePath') AS BLOB)) > 4096
+  OR COALESCE(json_type(NEW.prepared_action_json, '$.sourceSizeBytes'), '') <> 'integer'
+  OR CAST(json_extract(NEW.prepared_action_json, '$.sourceSizeBytes') AS INTEGER) < 0
+  OR CAST(json_extract(NEW.prepared_action_json, '$.sourceSizeBytes') AS INTEGER)
+    > ${MAX_SAFE_SQLITE_AGENT_ID}
+  OR (${preparedActionBoundedTextInvalidSql('$.targetLabel', 500)})
 `;
 
 const FILE_PUBLISH_SOURCE_PATH_SQL =
@@ -364,6 +435,26 @@ function invalidShellLogicalPathSql(valueSql: string): string {
       OR ${valueSql} GLOB 'tmp/*'
       OR ${valueSql} GLOB 'work/*'
     )
+  )`;
+}
+
+/**
+ * Host cwd is a user-requested projection, not a resolved filesystem binding.
+ * Keep the SQL guard deliberately structural; main performs the authoritative
+ * platform-specific existence, symlink and canonical-path checks immediately
+ * before execution.
+ */
+function invalidShellHostPathSql(valueSql: string): string {
+  const normalizedSeparators = `replace(${valueSql}, char(92), '/')`;
+  return `(
+    length(CAST(${valueSql} AS BLOB)) = 0
+    OR length(CAST(${valueSql} AS BLOB)) > ${AGENT_SHELL_MAX_CWD_BYTES}
+    OR ${valueSql} <> trim(${valueSql}, ${PREPARED_ACTION_TRIM_CHARACTERS_SQL})
+    OR ${containsShellControlCharacterSql(valueSql)}
+    OR ${normalizedSeparators} = '..'
+    OR ${normalizedSeparators} LIKE '../%'
+    OR ${normalizedSeparators} LIKE '%/../%'
+    OR ${normalizedSeparators} LIKE '%/..'
   )`;
 }
 
@@ -593,9 +684,16 @@ const SHELL_PREPARED_ACTION_INVALID_SQL = `
   OR COALESCE(json_type(${SHELL_ROOT_JSON_SQL}, '$.cwd'), '') <> 'object'
   OR ${strictJsonObjectInvalidSql(SHELL_CWD_JSON_SQL, ['kind', 'path'])}
   OR COALESCE(json_type(${SHELL_CWD_JSON_SQL}, '$.kind'), '') <> 'text'
-  OR json_extract(${SHELL_CWD_JSON_SQL}, '$.kind') <> 'run-workspace'
+  OR json_extract(${SHELL_CWD_JSON_SQL}, '$.kind') NOT IN ('run-workspace', 'host')
   OR COALESCE(json_type(${SHELL_CWD_JSON_SQL}, '$.path'), '') <> 'text'
-  OR ${invalidShellLogicalPathSql(`json_extract(${SHELL_CWD_JSON_SQL}, '$.path')`)}
+  OR (
+    json_extract(${SHELL_CWD_JSON_SQL}, '$.kind') = 'run-workspace'
+    AND ${invalidShellLogicalPathSql(`json_extract(${SHELL_CWD_JSON_SQL}, '$.path')`)}
+  )
+  OR (
+    json_extract(${SHELL_CWD_JSON_SQL}, '$.kind') = 'host'
+    AND ${invalidShellHostPathSql(`json_extract(${SHELL_CWD_JSON_SQL}, '$.path')`)}
+  )
 
   OR COALESCE(json_type(${SHELL_ROOT_JSON_SQL}, '$.dataScope'), '') <> 'object'
   OR ${strictJsonObjectInvalidSql(SHELL_DATA_SCOPE_JSON_SQL, [
@@ -751,6 +849,15 @@ const RUN_RUNTIME_COLUMNS = [
   ['tool_catalog_revision', 'INTEGER NOT NULL DEFAULT 0'],
 ] as const;
 
+const MESSAGE_ASSISTANT_COLUMNS = [
+  ['assistant_phase', 'TEXT'],
+  ['assistant_status', 'TEXT'],
+  ['assistant_turn_ordinal', 'INTEGER'],
+  ['revision', 'INTEGER NOT NULL DEFAULT 1'],
+  ['updated_at', 'TEXT'],
+  ['finished_at', 'TEXT'],
+] as const;
+
 const CONTEXT_CHECKPOINT_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS agent_context_checkpoints (
     id TEXT PRIMARY KEY,
@@ -801,14 +908,20 @@ interface SessionRow {
 }
 
 interface MessageRow {
+  assistant_phase: AgentAssistantItemSnapshot['assistantItem']['phase'] | null;
+  assistant_status: AgentAssistantItemSnapshot['assistantItem']['status'] | null;
+  assistant_turn_ordinal: number | null;
   content: string;
   created_at: string;
+  finished_at: string | null;
   id: string;
+  revision: number;
   role: AgentMessage['role'];
   run_id: string | null;
   session_id: string;
   tool_call_id: string | null;
   tool_name: string | null;
+  updated_at: string;
 }
 
 interface RunRow {
@@ -996,8 +1109,48 @@ export interface BeginAgentContextCheckpointInput {
   throughMessageId: string;
 }
 
+export interface StartAgentAssistantItemInput {
+  id: string;
+  now: string;
+  runId: string;
+}
+
+interface FinishAgentAssistantItemInput {
+  content: string;
+  expectedRevision: number;
+  id: string;
+  now: string;
+}
+
+export interface FinishAgentAssistantCommentaryInput
+  extends FinishAgentAssistantItemInput {}
+
+export interface FinishAgentRunWithAssistantFinalInput
+  extends FinishAgentAssistantItemInput {
+  currentStep?: string;
+  runId: string;
+}
+
+export interface FinishAgentRunWithAssistantFailureInput {
+  assistantItem?: Readonly<{
+    content: string;
+    expectedRevision: number;
+    id: string;
+  }>;
+  currentStep?: string;
+  error?: string;
+  now: string;
+  runId: string;
+  status: Extract<AgentAssistantStatus, 'cancelled' | 'failed'>;
+}
+
+export interface AgentAssistantRunTerminalResult {
+  assistantItem?: AgentAssistantItemSnapshot;
+  run: AgentRunSnapshot;
+}
+
 export interface AgentSessionStore {
-  appendMessage: (message: AgentMessage) => Promise<void>;
+  appendMessage: (message: AgentNonAssistantMessage) => Promise<void>;
   beginContextCheckpoint: (
     input: BeginAgentContextCheckpointInput,
   ) => Promise<AgentContextCheckpoint>;
@@ -1039,6 +1192,15 @@ export interface AgentSessionStore {
     now: string,
     status?: Extract<AgentContextCheckpointStatus, 'failed' | 'interrupted'>,
   ) => Promise<AgentContextCheckpoint>;
+  finishAssistantCommentary: (
+    input: FinishAgentAssistantCommentaryInput,
+  ) => Promise<AgentAssistantItemSnapshot>;
+  finishRunWithAssistantFailure: (
+    input: FinishAgentRunWithAssistantFailureInput,
+  ) => Promise<AgentAssistantRunTerminalResult>;
+  finishRunWithAssistantFinal: (
+    input: FinishAgentRunWithAssistantFinalInput,
+  ) => Promise<AgentAssistantRunTerminalResult>;
   listSessions: (
     ownerScope: AgentOwnerScope,
     libraryId: number,
@@ -1061,6 +1223,9 @@ export interface AgentSessionStore {
     input: ReplacePendingAgentToolApprovalInput,
   ) => Promise<AgentToolActivitySnapshot>;
   setRunPlan: (runId: string, plan: AgentRunPlanSnapshot) => Promise<AgentRunSnapshot>;
+  startAssistantItem: (
+    input: StartAgentAssistantItemInput,
+  ) => Promise<AgentAssistantItemSnapshot>;
   resolveToolApproval: (
     approvalId: string,
     resolution: 'approved' | 'denied' | 'expired' | 'cancelled',
@@ -1195,6 +1360,30 @@ function normalizeContextCheckpointText(
   return normalized;
 }
 
+function normalizeAssistantItemId(value: unknown): string {
+  const id = String(value || '').trim();
+  if (!id || id.length > MAX_ASSISTANT_ITEM_ID_LENGTH) {
+    throw new Error('Agent assistant item ID 无效');
+  }
+  return id;
+}
+
+function normalizeAssistantItemRevision(value: unknown): number {
+  const revision = Number(value);
+  if (!Number.isSafeInteger(revision) || revision <= 0) {
+    throw new Error('Agent assistant item revision 无效');
+  }
+  return revision;
+}
+
+function normalizeAssistantItemTime(value: unknown): string {
+  const time = String(value || '').trim();
+  if (!time || time.length > 100) {
+    throw new Error('Agent assistant item 时间无效');
+  }
+  return time;
+}
+
 function serializeContextCheckpointSummary(summary: unknown): string {
   if (summary === null || summary === undefined) {
     throw new Error('Agent 上下文 checkpoint 摘要不能为空');
@@ -1248,15 +1437,48 @@ function toSessionSummary(row: SessionRow): AgentSessionSummary {
 }
 
 function toMessage(row: MessageRow): AgentMessage {
-  return {
+  const base = {
     content: row.content,
     createdAt: row.created_at,
     id: row.id,
-    role: row.role,
     ...(row.run_id ? { runId: row.run_id } : {}),
     sessionId: row.session_id,
     ...(row.tool_call_id ? { toolCallId: row.tool_call_id } : {}),
     ...(row.tool_name ? { toolName: row.tool_name } : {}),
+  };
+  const assistantFields = [
+    row.assistant_phase,
+    row.assistant_status,
+    row.assistant_turn_ordinal,
+  ];
+  const hasAssistantState = assistantFields.some(value => value !== null);
+  if (!hasAssistantState) {
+    if (row.role === 'assistant') {
+      throw new Error(`Agent assistant item ${row.id} 缺少结构化状态`);
+    }
+    return { ...base, role: row.role } as AgentMessage;
+  }
+  if (
+    row.role !== 'assistant'
+    || !row.run_id
+    || row.assistant_phase === null
+    || row.assistant_status === null
+    || row.assistant_turn_ordinal === null
+  ) {
+    throw new Error(`Agent assistant item ${row.id} 状态不完整`);
+  }
+  return {
+    ...base,
+    assistantItem: {
+      ...(row.finished_at ? { finishedAt: row.finished_at } : {}),
+      phase: row.assistant_phase,
+      revision: Number(row.revision),
+      status: row.assistant_status,
+      turnOrdinal: Number(row.assistant_turn_ordinal),
+      updatedAt: row.updated_at,
+    },
+    role: 'assistant',
+    runId: row.run_id,
   };
 }
 
@@ -1425,7 +1647,13 @@ const SESSION_SELECT = `
     sessions.last_message_preview,
     sessions.created_at,
     sessions.updated_at,
-    COUNT(messages.id) AS message_count,
+    COUNT(CASE
+      WHEN messages.role = 'user' THEN messages.id
+      WHEN messages.role = 'assistant'
+        AND messages.assistant_phase = 'final'
+        AND messages.assistant_status = 'completed' THEN messages.id
+      ELSE NULL
+    END) AS message_count,
     (
       SELECT runs.status
       FROM agent_runs AS runs
@@ -1454,6 +1682,23 @@ const CONTEXT_CHECKPOINT_SELECT = `
   FROM agent_context_checkpoints AS checkpoint
 `;
 
+const MESSAGE_SELECT_COLUMNS = `
+  id,
+  session_id,
+  run_id,
+  role,
+  content,
+  tool_call_id,
+  tool_name,
+  assistant_phase,
+  assistant_status,
+  assistant_turn_ordinal,
+  revision,
+  created_at,
+  updated_at,
+  finished_at
+`;
+
 async function ensureRunColumns(database: sqlite3.Database): Promise<void> {
   const existingColumns = new Set(
     (await all<{ name: string }>(database, 'PRAGMA table_info(agent_runs)'))
@@ -1464,6 +1709,232 @@ async function ensureRunColumns(database: sqlite3.Database): Promise<void> {
       await exec(database, `ALTER TABLE agent_runs ADD COLUMN ${name} ${definition}`);
     }
   }
+}
+
+async function ensureMessageAssistantSchema(
+  database: sqlite3.Database,
+  manageTransaction: boolean,
+): Promise<void> {
+  const existingColumns = new Set(
+    (await all<{ name: string }>(database, 'PRAGMA table_info(agent_messages)'))
+      .map(column => column.name),
+  );
+  const requiresHistoryReset = MESSAGE_ASSISTANT_COLUMNS.some(
+    ([name]) => !existingColumns.has(name),
+  );
+  if (manageTransaction) await exec(database, 'BEGIN IMMEDIATE;');
+  try {
+    for (const [name, definition] of MESSAGE_ASSISTANT_COLUMNS) {
+      if (!existingColumns.has(name)) {
+        await exec(database, `ALTER TABLE agent_messages ADD COLUMN ${name} ${definition}`);
+      }
+    }
+    if (requiresHistoryReset) {
+      const tableNames = new Set(
+        (await all<{ name: string }>(database, `
+          SELECT name FROM sqlite_master WHERE type = 'table'
+        `)).map(row => row.name),
+      );
+      for (const table of [
+        'agent_context_checkpoints',
+        'agent_tool_runs',
+        'agent_messages',
+        'agent_runs',
+        'agent_sessions',
+      ]) {
+        if (tableNames.has(table)) await exec(database, `DELETE FROM ${table};`);
+      }
+    }
+    await exec(database, `
+      UPDATE agent_messages
+      SET updated_at = created_at
+      WHERE updated_at IS NULL OR trim(updated_at) = '';
+    `);
+    await exec(database, `
+    DROP TRIGGER IF EXISTS agent_messages_update_session;
+    DROP TRIGGER IF EXISTS agent_messages_validate_assistant_insert;
+    DROP TRIGGER IF EXISTS agent_messages_validate_assistant_update;
+    DROP TRIGGER IF EXISTS agent_runs_create_user_message;
+    DROP TRIGGER IF EXISTS agent_runs_validate_assistant_terminal;
+    DROP TRIGGER IF EXISTS agent_runs_update_session_terminal;
+
+    CREATE UNIQUE INDEX IF NOT EXISTS agent_messages_run_assistant_turn_idx
+      ON agent_messages (run_id, assistant_turn_ordinal)
+      WHERE role = 'assistant'
+        AND assistant_turn_ordinal IS NOT NULL;
+
+    CREATE UNIQUE INDEX IF NOT EXISTS agent_messages_run_assistant_final_idx
+      ON agent_messages (run_id)
+      WHERE role = 'assistant'
+        AND assistant_phase = 'final'
+        AND assistant_status = 'completed';
+
+    CREATE UNIQUE INDEX IF NOT EXISTS agent_messages_run_assistant_streaming_idx
+      ON agent_messages (run_id)
+      WHERE role = 'assistant'
+        AND assistant_status = 'streaming';
+
+    CREATE TRIGGER agent_messages_validate_assistant_insert
+    BEFORE INSERT ON agent_messages
+    BEGIN
+      SELECT CASE WHEN NEW.updated_at IS NULL OR trim(NEW.updated_at) = ''
+        THEN RAISE(ABORT, 'Agent message updated time is required') END;
+      SELECT CASE WHEN NEW.role <> 'assistant' AND (
+        NEW.assistant_phase IS NOT NULL
+        OR NEW.assistant_status IS NOT NULL
+        OR NEW.assistant_turn_ordinal IS NOT NULL
+        OR NEW.finished_at IS NOT NULL
+        OR NEW.revision <> 1
+        OR NEW.updated_at IS NOT NEW.created_at
+      ) THEN RAISE(ABORT, 'Non-assistant message cannot carry assistant state') END;
+      SELECT CASE WHEN NEW.role = 'assistant'
+        AND (
+          NEW.run_id IS NULL
+          OR NEW.assistant_phase IS NULL
+          OR NEW.assistant_phase <> 'unknown'
+          OR NEW.assistant_status <> 'streaming'
+          OR NEW.assistant_turn_ordinal IS NULL
+          OR NEW.assistant_turn_ordinal <= 0
+          OR NEW.revision <> 1
+          OR NEW.finished_at IS NOT NULL
+        )
+      THEN RAISE(ABORT, 'Structured assistant item must start streaming') END;
+    END;
+
+    CREATE TRIGGER agent_messages_validate_assistant_update
+    BEFORE UPDATE ON agent_messages
+    BEGIN
+      SELECT CASE WHEN
+        NEW.id IS NOT OLD.id
+        OR NEW.session_id IS NOT OLD.session_id
+        OR NEW.run_id IS NOT OLD.run_id
+        OR NEW.sequence IS NOT OLD.sequence
+        OR NEW.role IS NOT OLD.role
+        OR NEW.tool_call_id IS NOT OLD.tool_call_id
+        OR NEW.tool_name IS NOT OLD.tool_name
+        OR NEW.assistant_turn_ordinal IS NOT OLD.assistant_turn_ordinal
+        OR NEW.created_at IS NOT OLD.created_at
+      THEN RAISE(ABORT, 'Agent assistant item identity is immutable') END;
+      SELECT CASE WHEN OLD.role <> 'assistant' OR OLD.assistant_phase IS NULL
+        THEN RAISE(ABORT, 'Only structured assistant items can be updated') END;
+      SELECT CASE WHEN OLD.assistant_status <> 'streaming'
+        THEN RAISE(ABORT, 'Terminal assistant item cannot be updated') END;
+      SELECT CASE WHEN NEW.revision <> OLD.revision + 1
+        THEN RAISE(ABORT, 'Agent assistant item revision must advance once') END;
+      SELECT CASE WHEN length(NEW.content) < length(OLD.content)
+        OR substr(NEW.content, 1, length(OLD.content)) <> OLD.content
+      THEN RAISE(ABORT, 'Agent assistant item content must append') END;
+      SELECT CASE WHEN NOT (
+        (
+          NEW.assistant_phase = 'unknown'
+          AND NEW.assistant_status = 'streaming'
+          AND NEW.finished_at IS NULL
+        )
+        OR (
+          NEW.assistant_phase IN ('commentary', 'final')
+          AND NEW.assistant_status = 'completed'
+          AND NEW.finished_at IS NOT NULL
+        )
+        OR (
+          NEW.assistant_phase = 'unknown'
+          AND NEW.assistant_status IN ('failed', 'cancelled', 'interrupted')
+          AND NEW.finished_at IS NOT NULL
+        )
+      ) THEN RAISE(ABORT, 'Agent assistant item transition is invalid') END;
+      SELECT CASE WHEN NEW.assistant_phase = 'final'
+        AND trim(NEW.content) = ''
+      THEN RAISE(ABORT, 'Agent final assistant item cannot be empty') END;
+    END;
+
+    CREATE TRIGGER agent_runs_create_user_message
+    AFTER INSERT ON agent_runs
+    BEGIN
+      INSERT INTO agent_messages (
+        id, session_id, run_id, sequence, role, content,
+        revision, created_at, updated_at
+      )
+      SELECT
+        NEW.id || ':user',
+        NEW.session_id,
+        NEW.id,
+        COALESCE(MAX(sequence), 0) + 1,
+        'user',
+        NEW.user_prompt,
+        1,
+        NEW.created_at,
+        NEW.created_at
+      FROM agent_messages
+      WHERE session_id = NEW.session_id;
+    END;
+
+    CREATE TRIGGER agent_messages_update_session
+    AFTER INSERT ON agent_messages
+    WHEN NEW.role = 'user'
+    BEGIN
+      UPDATE agent_sessions
+      SET
+        last_message_preview = substr(
+          replace(replace(NEW.content, char(10), ' '), char(13), ' '),
+          1,
+          180
+        ),
+        updated_at = NEW.created_at
+      WHERE id = NEW.session_id;
+    END;
+
+    CREATE TRIGGER agent_runs_validate_assistant_terminal
+    BEFORE UPDATE OF status ON agent_runs
+    WHEN NEW.status IN ('completed', 'failed', 'cancelled', 'interrupted')
+    BEGIN
+      SELECT CASE WHEN EXISTS (
+        SELECT 1
+        FROM agent_messages
+        WHERE run_id = NEW.id
+          AND role = 'assistant'
+          AND assistant_status = 'streaming'
+      ) THEN RAISE(ABORT, 'Agent Run still has a streaming assistant item') END;
+      SELECT CASE WHEN NEW.status = 'completed'
+        AND EXISTS (
+          SELECT 1 FROM agent_messages
+          WHERE run_id = NEW.id
+            AND role = 'assistant'
+            AND assistant_phase IS NOT NULL
+        )
+        AND 1 <> (
+          SELECT COUNT(*) FROM agent_messages
+          WHERE run_id = NEW.id
+            AND role = 'assistant'
+            AND assistant_phase = 'final'
+            AND assistant_status = 'completed'
+        )
+      THEN RAISE(ABORT, 'Structured Agent Run requires exactly one final item') END;
+      SELECT CASE WHEN NEW.status IN ('failed', 'cancelled', 'interrupted')
+        AND EXISTS (
+          SELECT 1 FROM agent_messages
+          WHERE run_id = NEW.id
+            AND role = 'assistant'
+            AND assistant_phase = 'final'
+            AND assistant_status = 'completed'
+        )
+      THEN RAISE(ABORT, 'Unsuccessful Agent Run cannot own a final item') END;
+    END;
+
+    CREATE TRIGGER agent_runs_update_session_terminal
+    AFTER UPDATE OF status ON agent_runs
+    WHEN NEW.status IN ('completed', 'failed', 'cancelled', 'interrupted')
+      AND OLD.status NOT IN ('completed', 'failed', 'cancelled', 'interrupted')
+    BEGIN
+      UPDATE agent_sessions
+      SET updated_at = NEW.updated_at
+      WHERE id = NEW.session_id;
+    END;
+    `);
+    if (manageTransaction) await exec(database, 'COMMIT;');
+  } catch (error) {
+    if (manageTransaction) await exec(database, 'ROLLBACK;').catch(() => undefined);
+    throw error;
+  }
+
 }
 
 async function ensureToolRunColumns(database: sqlite3.Database): Promise<void> {
@@ -1710,6 +2181,13 @@ async function ensureToolPreparationTriggers(
           AND CAST(json_extract(NEW.prepared_action_json, '$.version') AS INTEGER)
             = ${AGENT_FILE_PUBLISH_PREPARED_ACTION_VERSION}
           AND (${FILE_PUBLISH_PREPARED_ACTION_INVALID_SQL})
+        )
+        OR (
+          json_extract(NEW.prepared_action_json, '$.kind')
+            = ${sqlText(AGENT_FILE_UPLOAD_PREPARED_ACTION_KIND)}
+          AND CAST(json_extract(NEW.prepared_action_json, '$.version') AS INTEGER)
+            = ${AGENT_FILE_UPLOAD_PREPARED_ACTION_VERSION}
+          AND (${FILE_UPLOAD_PREPARED_ACTION_INVALID_SQL})
         )
       )
     THEN RAISE(ABORT, 'Agent Tool prepared action is invalid') END;
@@ -2278,52 +2756,70 @@ async function configureDatabaseConnection(database: sqlite3.Database): Promise<
 
 async function recoverInterruptedState(database: sqlite3.Database): Promise<void> {
   const recoveredAt = new Date().toISOString();
-  await run(database, `
-    UPDATE agent_context_checkpoints
-    SET status = 'interrupted', finished_at = ?
-    WHERE status = 'started'
-  `, [recoveredAt]);
-  await run(database, `
-    UPDATE agent_runs
-    SET
-      status = 'interrupted',
-      current_step = '上次运行已中断',
-      error = '应用退出时任务仍在运行，可重新发送上一条消息',
-      revision = revision + 1,
-      updated_at = ?,
-      finished_at = ?
-    WHERE status IN ('preparing', 'running', 'awaiting_approval', 'awaiting_interaction')
-  `, [recoveredAt, recoveredAt]);
-  await run(database, `
-    UPDATE agent_tool_runs
-    SET
-      status = 'interrupted',
-      result_json = ?,
-      approval_status = CASE
-        WHEN approval_status = 'pending' THEN 'interrupted'
-        ELSE approval_status
-      END,
-      approval_decided_at = CASE
-        WHEN approval_status = 'pending' THEN ?
-        ELSE approval_decided_at
-      END,
-      interaction_status = CASE
-        WHEN interaction_status = 'pending' THEN 'interrupted'
-        ELSE interaction_status
-      END,
-      interaction_decided_at = CASE
-        WHEN interaction_status = 'pending' THEN ?
-        ELSE interaction_decided_at
-      END,
-      revision = revision + 1,
-      finished_at = ?
-    WHERE status IN ('preparing', 'running', 'awaiting_approval', 'awaiting_interaction')
-  `, [
-    JSON.stringify({ message: '应用退出时 Agent Tool 仍在运行', ok: false }),
-    recoveredAt,
-    recoveredAt,
-    recoveredAt,
-  ]);
+  await exec(database, 'BEGIN IMMEDIATE;');
+  try {
+    await run(database, `
+      UPDATE agent_messages
+      SET
+        assistant_phase = 'unknown',
+        assistant_status = 'interrupted',
+        revision = revision + 1,
+        updated_at = ?,
+        finished_at = ?
+      WHERE role = 'assistant'
+        AND assistant_status = 'streaming'
+    `, [recoveredAt, recoveredAt]);
+    await run(database, `
+      UPDATE agent_runs
+      SET
+        status = 'interrupted',
+        current_step = '上次运行已中断',
+        error = '应用退出时任务仍在运行，可重新发送上一条消息',
+        revision = revision + 1,
+        updated_at = ?,
+        finished_at = ?
+      WHERE status IN ('preparing', 'running', 'awaiting_approval', 'awaiting_interaction')
+    `, [recoveredAt, recoveredAt]);
+    await run(database, `
+      UPDATE agent_tool_runs
+      SET
+        status = 'interrupted',
+        result_json = ?,
+        approval_status = CASE
+          WHEN approval_status = 'pending' THEN 'interrupted'
+          ELSE approval_status
+        END,
+        approval_decided_at = CASE
+          WHEN approval_status = 'pending' THEN ?
+          ELSE approval_decided_at
+        END,
+        interaction_status = CASE
+          WHEN interaction_status = 'pending' THEN 'interrupted'
+          ELSE interaction_status
+        END,
+        interaction_decided_at = CASE
+          WHEN interaction_status = 'pending' THEN ?
+          ELSE interaction_decided_at
+        END,
+        revision = revision + 1,
+        finished_at = ?
+      WHERE status IN ('preparing', 'running', 'awaiting_approval', 'awaiting_interaction')
+    `, [
+      JSON.stringify({ message: '应用退出时 Agent Tool 仍在运行', ok: false }),
+      recoveredAt,
+      recoveredAt,
+      recoveredAt,
+    ]);
+    await run(database, `
+      UPDATE agent_context_checkpoints
+      SET status = 'interrupted', finished_at = ?
+      WHERE status = 'started'
+    `, [recoveredAt]);
+    await exec(database, 'COMMIT;');
+  } catch (error) {
+    await exec(database, 'ROLLBACK;').catch(() => undefined);
+    throw error;
+  }
 }
 
 export async function initializeAgentSessionDatabaseSchema(
@@ -2403,7 +2899,13 @@ export async function initializeAgentSessionDatabaseSchema(
         content TEXT NOT NULL,
         tool_call_id TEXT,
         tool_name TEXT,
+        assistant_phase TEXT,
+        assistant_status TEXT,
+        assistant_turn_ordinal INTEGER,
+        revision INTEGER NOT NULL DEFAULT 1,
         created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        finished_at TEXT,
         UNIQUE (session_id, sequence)
       );
 
@@ -2466,7 +2968,7 @@ export async function initializeAgentSessionDatabaseSchema(
       AFTER INSERT ON agent_runs
       BEGIN
         INSERT INTO agent_messages (
-          id, session_id, run_id, sequence, role, content, created_at
+          id, session_id, run_id, sequence, role, content, created_at, updated_at
         )
         SELECT
           NEW.id || ':user',
@@ -2475,6 +2977,7 @@ export async function initializeAgentSessionDatabaseSchema(
           COALESCE(MAX(sequence), 0) + 1,
           'user',
           NEW.user_prompt,
+          NEW.created_at,
           NEW.created_at
         FROM agent_messages
         WHERE session_id = NEW.session_id;
@@ -2516,6 +3019,7 @@ export async function initializeAgentSessionDatabaseSchema(
   }
 
   await ensureRunColumns(database);
+  await ensureMessageAssistantSchema(database, manageTransactions);
   await ensureToolRunColumns(database);
   await ensureToolPreparationTriggers(database, manageTransactions);
   await ensureRunPlanTriggers(database, manageTransactions);
@@ -2547,6 +3051,28 @@ export async function createSQLiteAgentSessionStore(
   } catch (error) {
     await close(database).catch(() => undefined);
     throw error;
+  }
+
+  let assistantMutationTail = Promise.resolve();
+
+  function queueAssistantMutation<T>(operation: () => Promise<T>): Promise<T> {
+    const next = assistantMutationTail.then(operation);
+    assistantMutationTail = next.then(() => undefined, () => undefined);
+    return next;
+  }
+
+  function runAssistantTransaction<T>(operation: () => Promise<T>): Promise<T> {
+    return queueAssistantMutation(async () => {
+      await exec(database, 'BEGIN IMMEDIATE;');
+      try {
+        const value = await operation();
+        await exec(database, 'COMMIT;');
+        return value;
+      } catch (error) {
+        await exec(database, 'ROLLBACK;').catch(() => undefined);
+        throw error;
+      }
+    });
   }
 
   async function readSummary(
@@ -2596,6 +3122,20 @@ export async function createSQLiteAgentSessionStore(
     `, [runId]);
     if (!row) throw new Error('Agent 运行记录不存在');
     return toRunSnapshot(row);
+  }
+
+  async function readAssistantItem(id: string): Promise<AgentAssistantItemSnapshot> {
+    const row = await get<MessageRow>(database, `
+      SELECT ${MESSAGE_SELECT_COLUMNS}
+      FROM agent_messages
+      WHERE id = ?
+    `, [id]);
+    if (!row) throw new Error('Agent assistant item 不存在');
+    const message = toMessage(row);
+    if (message.role !== 'assistant') {
+      throw new Error('Agent message 不是 assistant item');
+    }
+    return message;
   }
 
   async function readToolActivity(id: string): Promise<AgentToolActivitySnapshot> {
@@ -2650,9 +3190,10 @@ export async function createSQLiteAgentSessionStore(
     async appendMessage(message) {
       await run(database, `
         INSERT INTO agent_messages (
-          id, session_id, run_id, sequence, role, content, tool_call_id, tool_name, created_at
+          id, session_id, run_id, sequence, role, content, tool_call_id, tool_name,
+          created_at, updated_at
         )
-        SELECT ?, ?, ?, COALESCE(MAX(sequence), 0) + 1, ?, ?, ?, ?, ?
+        SELECT ?, ?, ?, COALESCE(MAX(sequence), 0) + 1, ?, ?, ?, ?, ?, ?
         FROM agent_messages
         WHERE session_id = ?
       `, [
@@ -2663,6 +3204,7 @@ export async function createSQLiteAgentSessionStore(
         message.content,
         message.toolCallId || null,
         message.toolName || null,
+        message.createdAt,
         message.createdAt,
         message.sessionId,
       ]);
@@ -2765,6 +3307,7 @@ export async function createSQLiteAgentSessionStore(
     },
 
     async close() {
+      await assistantMutationTail;
       await close(database);
     },
 
@@ -3046,11 +3589,227 @@ export async function createSQLiteAgentSessionStore(
       return readContextCheckpoint(checkpointId);
     },
 
+    async finishAssistantCommentary(input) {
+      const id = normalizeAssistantItemId(input.id);
+      const expectedRevision = normalizeAssistantItemRevision(input.expectedRevision);
+      const content = String(input.content ?? '');
+      const finishedAt = normalizeAssistantItemTime(input.now);
+      return queueAssistantMutation(async () => {
+        const result = await run(database, `
+          UPDATE agent_messages
+          SET
+            content = ?,
+            assistant_phase = 'commentary',
+            assistant_status = 'completed',
+            revision = revision + 1,
+            updated_at = ?,
+            finished_at = ?
+          WHERE id = ?
+            AND role = 'assistant'
+            AND assistant_phase = 'unknown'
+            AND assistant_status = 'streaming'
+            AND revision = ?
+            AND length(?) >= length(content)
+            AND substr(?, 1, length(content)) = content
+        `, [
+          content,
+          finishedAt,
+          finishedAt,
+          id,
+          expectedRevision,
+          content,
+          content,
+        ]);
+        if (result.changes === 0) {
+          throw new Error(
+            'Agent assistant commentary 不存在、已结束、revision 已过期或内容不是追加快照',
+          );
+        }
+        return readAssistantItem(id);
+      });
+    },
+
+    async finishRunWithAssistantFailure(input) {
+      const runId = normalizeAssistantItemId(input.runId);
+      const finishedAt = normalizeAssistantItemTime(input.now);
+      if (input.status !== 'failed' && input.status !== 'cancelled') {
+        throw new Error('Agent Run assistant 失败终态无效');
+      }
+      const assistantItem = input.assistantItem
+        ? {
+            content: String(input.assistantItem.content ?? ''),
+            expectedRevision: normalizeAssistantItemRevision(
+              input.assistantItem.expectedRevision,
+            ),
+            id: normalizeAssistantItemId(input.assistantItem.id),
+          }
+        : undefined;
+      await runAssistantTransaction(async () => {
+        if (assistantItem) {
+          const itemResult = await run(database, `
+            UPDATE agent_messages
+            SET
+              content = ?,
+              assistant_phase = 'unknown',
+              assistant_status = ?,
+              revision = revision + 1,
+              updated_at = ?,
+              finished_at = ?
+            WHERE id = ?
+              AND run_id = ?
+              AND role = 'assistant'
+              AND assistant_phase = 'unknown'
+              AND assistant_status = 'streaming'
+              AND revision = ?
+              AND length(?) >= length(content)
+              AND substr(?, 1, length(content)) = content
+          `, [
+            assistantItem.content,
+            input.status,
+            finishedAt,
+            finishedAt,
+            assistantItem.id,
+            runId,
+            assistantItem.expectedRevision,
+            assistantItem.content,
+            assistantItem.content,
+          ]);
+          if (itemResult.changes === 0) {
+            throw new Error(
+              'Agent assistant item 失败收口 CAS 冲突或内容不是追加快照',
+            );
+          }
+        } else {
+          const streaming = await get<{ count: number }>(database, `
+            SELECT COUNT(*) AS count
+            FROM agent_messages
+            WHERE run_id = ?
+              AND role = 'assistant'
+              AND assistant_status = 'streaming'
+          `, [runId]);
+          if (Number(streaming?.count || 0) > 0) {
+            throw new Error('Agent Run 仍有 streaming assistant item，必须一并收口');
+          }
+        }
+        const runResult = await run(database, `
+          UPDATE agent_runs
+          SET
+            status = ?,
+            current_step = ?,
+            error = ?,
+            revision = revision + 1,
+            updated_at = ?,
+            finished_at = ?
+          WHERE id = ?
+            AND status IN ('preparing', 'running', 'awaiting_approval', 'awaiting_interaction')
+        `, [
+          input.status,
+          input.currentStep || (input.status === 'cancelled' ? '已取消' : '执行失败'),
+          input.error || null,
+          finishedAt,
+          finishedAt,
+          runId,
+        ]);
+        if (runResult.changes === 0) {
+          throw new Error('Agent 运行记录不存在或已经结束');
+        }
+      });
+      return {
+        ...(assistantItem ? { assistantItem: await readAssistantItem(assistantItem.id) } : {}),
+        run: await readRun(runId),
+      };
+    },
+
+    async finishRunWithAssistantFinal(input) {
+      const id = normalizeAssistantItemId(input.id);
+      const runId = normalizeAssistantItemId(input.runId);
+      const expectedRevision = normalizeAssistantItemRevision(input.expectedRevision);
+      const content = String(input.content ?? '');
+      if (!content.trim()) throw new Error('Agent final assistant item 不能为空');
+      const finishedAt = normalizeAssistantItemTime(input.now);
+      try {
+        await runAssistantTransaction(async () => {
+          const itemResult = await run(database, `
+          UPDATE agent_messages
+          SET
+            content = ?,
+            assistant_phase = 'final',
+            assistant_status = 'completed',
+            revision = revision + 1,
+            updated_at = ?,
+            finished_at = ?
+          WHERE id = ?
+            AND run_id = ?
+            AND role = 'assistant'
+            AND assistant_phase = 'unknown'
+            AND assistant_status = 'streaming'
+            AND revision = ?
+            AND length(?) >= length(content)
+            AND substr(?, 1, length(content)) = content
+        `, [
+          content,
+          finishedAt,
+          finishedAt,
+          id,
+          runId,
+          expectedRevision,
+          content,
+          content,
+        ]);
+          if (itemResult.changes === 0) {
+            throw new Error(
+              'Agent final assistant item CAS 冲突、已经结束或内容不是追加快照',
+            );
+          }
+          const runResult = await run(database, `
+          UPDATE agent_runs
+          SET
+            status = 'completed',
+            current_step = ?,
+            error = NULL,
+            revision = revision + 1,
+            updated_at = ?,
+            finished_at = ?
+          WHERE id = ?
+            AND status IN ('preparing', 'running', 'awaiting_approval', 'awaiting_interaction')
+        `, [input.currentStep || '已完成', finishedAt, finishedAt, runId]);
+          if (runResult.changes === 0) {
+            throw new Error('Agent 运行记录不存在或已经结束');
+          }
+          const sessionResult = await run(database, `
+          UPDATE agent_sessions
+          SET
+            last_message_preview = substr(
+              replace(replace(?, char(10), ' '), char(13), ' '),
+              1,
+              180
+            ),
+            updated_at = ?
+          WHERE id = (
+            SELECT session_id FROM agent_messages WHERE id = ?
+          )
+        `, [content, finishedAt, id]);
+          if (sessionResult.changes === 0) {
+            throw new Error('Agent Session final preview 更新失败');
+          }
+        });
+      } catch (error) {
+        if (String(error).includes('Agent Run still has unfinished Tool')) {
+          throw new Error('Agent Run 仍有未完成 Tool，不能标记为已完成');
+        }
+        throw error;
+      }
+      return {
+        assistantItem: await readAssistantItem(id),
+        run: await readRun(runId),
+      };
+    },
+
     async getSession(sessionId, ownerScope, libraryId) {
       const summary = await readSummary(sessionId, ownerScope, libraryId);
       if (!summary) return null;
       const rows = await all<MessageRow>(database, `
-        SELECT id, session_id, run_id, role, content, tool_call_id, tool_name, created_at
+        SELECT ${MESSAGE_SELECT_COLUMNS}
         FROM agent_messages
         WHERE session_id = ?
         ORDER BY sequence ASC
@@ -3259,6 +4018,72 @@ export async function createSQLiteAgentSessionStore(
         throw new Error('Agent 计划只能在活跃 Run 的首个 Tool 前设置一次');
       }
       return readRun(runId);
+    },
+
+    async startAssistantItem(input) {
+      const id = normalizeAssistantItemId(input.id);
+      const runId = normalizeAssistantItemId(input.runId);
+      const createdAt = normalizeAssistantItemTime(input.now);
+      return queueAssistantMutation(async () => {
+        let result: RunStatementResult;
+        try {
+          result = await run(database, `
+            INSERT INTO agent_messages (
+              id,
+              session_id,
+              run_id,
+              sequence,
+              role,
+              content,
+              assistant_phase,
+              assistant_status,
+              assistant_turn_ordinal,
+              revision,
+              created_at,
+              updated_at
+            )
+            SELECT
+              ?,
+              target.session_id,
+              target.id,
+              (
+                SELECT COALESCE(MAX(sequence), 0) + 1
+                FROM agent_messages
+                WHERE session_id = target.session_id
+              ),
+              'assistant',
+              '',
+              'unknown',
+              'streaming',
+              (
+                SELECT COALESCE(MAX(assistant_turn_ordinal), 0) + 1
+                FROM agent_messages
+                WHERE run_id = target.id
+                  AND role = 'assistant'
+              ),
+              1,
+              ?,
+              ?
+            FROM agent_runs AS target
+            WHERE target.id = ?
+              AND target.status IN (
+                'preparing',
+                'running',
+                'awaiting_approval',
+                'awaiting_interaction'
+              )
+          `, [id, createdAt, createdAt, runId]);
+        } catch (error) {
+          if (String(error).includes('agent_messages.run_id')) {
+            throw new Error('Agent Run 已有 streaming assistant item');
+          }
+          throw error;
+        }
+        if (result.changes === 0) {
+          throw new Error('Agent 运行记录不存在或已经结束');
+        }
+        return readAssistantItem(id);
+      });
     },
 
     async replacePendingToolApproval(input) {

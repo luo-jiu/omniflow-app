@@ -65,6 +65,7 @@ describe('agent provider model', () => {
         { content: '{"ok":true}', role: 'tool', tool_call_id: 'call-1' },
       ],
       stream: true,
+      stream_options: { include_usage: true },
       reasoning_effort: 'high',
       tools: [{ function: { name: 'file_list' }, type: 'function' }],
     });
@@ -139,6 +140,11 @@ describe('agent provider model', () => {
 
       expect(body.max_tokens).toBe(1_536);
       expect(body).not.toHaveProperty('max_completion_tokens');
+      if (providerType === 'deepseek') {
+        expect(body.stream_options).toEqual({ include_usage: true });
+      } else {
+        expect(body).not.toHaveProperty('stream_options');
+      }
     },
   );
 
@@ -241,6 +247,21 @@ describe('agent provider model', () => {
     ]);
   });
 
+  it('does not reject a valid provider turn only because it contains more than 16 Tool calls', () => {
+    const state = createAgentProviderStreamState();
+    Array.from({ length: 24 }, (_, index) => index).forEach((index) => {
+      consumeAgentProviderStreamEvent('openai', {
+        choices: [{ delta: { tool_calls: [{
+          function: { arguments: '{}', name: 'file_list' },
+          id: `call-${index}`,
+          index,
+        }] } }],
+      }, state);
+    });
+
+    expect(finalizeAgentProviderToolCalls(state, [fileListTool])).toHaveLength(24);
+  });
+
   it('assembles Claude tool_use input fragments', () => {
     const state = createAgentProviderStreamState();
     consumeAgentProviderStreamEvent('claude', {
@@ -257,6 +278,54 @@ describe('agent provider model', () => {
     expect(finalizeAgentProviderToolCalls(state, [fileListTool, fileStatTool])).toEqual([
       { id: 'toolu-1', input: { directoryId: 3 }, name: 'file.list' },
     ]);
+  });
+
+  it('captures OpenAI-compatible usage-only chunks without requiring a delta', () => {
+    const state = createAgentProviderStreamState();
+
+    expect(consumeAgentProviderStreamEvent('openai', {
+      choices: [],
+      usage: {
+        completion_tokens: 23,
+        completion_tokens_details: { reasoning_tokens: 7 },
+        prompt_tokens: 101,
+        prompt_tokens_details: { cached_tokens: 40 },
+        total_tokens: 124,
+      },
+    }, state)).toBe('');
+    expect(state.usage).toEqual({
+      cachedInputTokens: 40,
+      inputTokens: 101,
+      outputTokens: 23,
+      reasoningOutputTokens: 7,
+      totalTokens: 124,
+    });
+  });
+
+  it('merges Claude input/cache usage from message_start with final output usage', () => {
+    const state = createAgentProviderStreamState();
+    consumeAgentProviderStreamEvent('claude', {
+      message: {
+        usage: {
+          cache_creation_input_tokens: 30,
+          cache_read_input_tokens: 20,
+          input_tokens: 100,
+          output_tokens: 1,
+        },
+      },
+      type: 'message_start',
+    }, state);
+    consumeAgentProviderStreamEvent('claude', {
+      type: 'message_delta',
+      usage: { output_tokens: 25 },
+    }, state);
+
+    expect(state.usage).toEqual({
+      cachedInputTokens: 50,
+      inputTokens: 150,
+      outputTokens: 25,
+      totalTokens: 175,
+    });
   });
 
   it('rejects assistant content before an oversized delta is accumulated', () => {

@@ -10,6 +10,7 @@ import {
   projectAgentSessionForRenderer,
   projectAgentToolActivityForRenderer,
 } from './agent-renderer-projection';
+import { createAgentToolRegistry } from './agent-tool-registry';
 
 const INSTRUCTIONS_HASH = 'a'.repeat(64);
 
@@ -58,8 +59,50 @@ describe('Agent renderer projection', () => {
   });
 
   it('does not rewrite ordinary business Tool activities', () => {
-    const source = activity('file.list');
+    const source = activity('ordinary.tool');
     expect(projectAgentToolActivityForRenderer(source)).toBe(source);
+  });
+
+  it('projects only registry-owned grouping metadata to renderer activities', () => {
+    const registry = createAgentToolRegistry([{
+      description: 'List visible resources',
+      execute: async () => ({ ok: true }),
+      inputSchema: { type: 'object' },
+      name: 'file.list',
+      presentation: { groupKind: 'resource-read', operationKind: 'list' },
+      risk: 'read',
+    }, {
+      description: 'Write a visible resource',
+      execute: async () => ({ ok: true }),
+      inputSchema: { type: 'object' },
+      name: 'file.write',
+      risk: 'write',
+    }]);
+
+    expect(projectAgentToolActivityForRenderer(
+      activity('file.list'),
+      name => registry.get(name),
+    )).toMatchObject({
+      toolMetadata: {
+        groupKind: 'resource-read',
+        kind: 'business',
+        operationKind: 'list',
+        risk: 'read',
+      },
+    });
+    expect(projectAgentToolActivityForRenderer(
+      activity('file.write'),
+      name => registry.get(name),
+    ).toolMetadata).toEqual({ kind: 'business', risk: 'write' });
+    expect(projectAgentToolActivityForRenderer(
+      { ...activity('missing.tool'), toolMetadata: {
+        groupKind: 'resource-read',
+        kind: 'business',
+        operationKind: 'read',
+        risk: 'read',
+      } },
+      name => registry.get(name),
+    ).toolMetadata).toBeUndefined();
   });
 
   it('keeps Shell tails but removes main-only log identities', () => {
@@ -68,6 +111,10 @@ describe('Agent renderer projection', () => {
       data: {
         executionId: 'execution-secret',
         logRef: `log:v1:${'e'.repeat(64)}`,
+        providerOutput: {
+          stdout: { head: 'provider-only output' },
+          version: 1,
+        },
         status: 'completed',
         stdoutTail: 'done',
       },
@@ -83,6 +130,7 @@ describe('Agent renderer projection', () => {
     });
     expect(JSON.stringify(projected)).not.toContain('execution-secret');
     expect(JSON.stringify(projected)).not.toContain('log:v1:');
+    expect(JSON.stringify(projected)).not.toContain('provider-only output');
   });
 
   it('redacts both live event results and canonical activity arrays', () => {

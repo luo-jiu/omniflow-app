@@ -1,6 +1,8 @@
 # 内置 Agent 架构
 
-更新时间：2026-08-31
+更新时间：2026-09-08
+
+计划步骤的 `toolName` 同时接受本轮已注册业务 Tool 的 canonical 名称与对应 Provider 名称（如 `file.list` / `file_list`），持久化统一使用 canonical 名称；未知或映射歧义仍拒绝，不扩大本轮能力范围。真实目录与内部保存联调结论见 [Agent 资料库目录发现](agent-library-discovery.md)。
 
 适用范围：
 
@@ -10,9 +12,9 @@
 - `electron/service/agent/`
 - Agent 使用的 AI 服务访问边界
 
-本文记录已经落地的架构事实与明确未验收边界。尚未实现的动态 Skill 来源、向量检索和通用媒体转码不属于当前用户能力。Code Agent 级 Shell 的完整目标契约见 `docs/built-in-agent-shell-architecture.md`；当前把 macOS Zsh 与 `ask / auto / full-access` 三种本机权限模式定义为开发预览，不能反向宣称 Linux、Windows、持久规则或 OS sandbox 已经可用。
+本文记录已经落地的架构事实与明确未验收边界。尚未实现的动态 Skill 来源、向量检索和通用媒体转码不属于当前用户能力。Code Agent 级 Shell 的当前实现见 `docs/built-in-agent-shell-architecture.md`；宿主机执行迁移目标见 [`built-in-agent-host-execution-contract.md`](./built-in-agent-host-execution-contract.md)。当前把 macOS Zsh 与 `ask / auto / full-access` 三种本机权限模式定义为开发预览，不能反向宣称 Linux、Windows、持久规则或 OS sandbox 已经可用。
 
-Agent renderer 的页面模式、组件职责、时间线投影、受控交互和视觉验证边界见 `docs/built-in-agent-ui-contract.md`。修改 Agent UI 时必须同时遵守两份文档；UI 契约不能反向改变本文定义的执行、持久化、IPC 和安全事实。
+Agent renderer 的页面模式、组件职责、时间线投影、受控交互和视觉验证边界见 `docs/built-in-agent-ui-contract.md`。工作过程、commentary、稳定 assistant item、状态优先级和 reasoning summary 的分阶段设计见 `docs/built-in-agent-work-observability.md`；结构化 assistant item、Provider turn 内存 writer、终态事务、上下文过滤、专用 item IPC、renderer 流式对账、工作过程 UI、纯状态选择器与受控只读 Tool 分组已经落地，reasoning summary 仍未落地。修改 Agent UI 时必须同时遵守这些文档；UI 契约不能反向改变本文定义的执行、持久化、IPC 和安全事实。
 
 Shell 的 main-only 一次性 execution lease、Process Supervisor、LogStore、物理 LogFileStore、`AgentShellSpawnPreflight`、`AgentShellRuntime` 和生产 Service Runtime 已经接成一条链。应用启动会探测平台 Provider；只有 macOS 系统 Zsh 的 `executionReady` 为真时，才动态注册 `shell.run@1`，把 Provider 快照与 main-owned 本机设置中的权限模式冻结进 Run capability，并使用生产 AI binding resolver、main prepare、审批卡、ToolRun、结果 presenter 和退出清理。Linux Bash 与 Windows PowerShell 仍保持 `executionReady: false`，不会注册可执行 Tool。每次执行还会预留默认 512 MiB workspace 增长额度，以默认 500 ms 周期进行不哈希活跃文件的执行期计量，进程结束后再做完整 scanner v3 哈希扫描并把预留原子结算进 workspace；超限或扫描不可信时终止进程并隔离工作区。该机制是可靠性与配额保护，不是文件系统 quota 或 OS sandbox。
 
@@ -22,14 +24,14 @@ Shell 的 main-only 一次性 execution lease、Process Supervisor、LogStore、
 
 - 资料库工作区中的流式文本对话。
 - OpenAI-compatible 和 Claude provider 适配。
-- 受控只读 `file.list` / `file.stat` Tool Calling。
+- 受控只读 `file.list` / `file.stat` / `file.search` / `file.resolve` Tool Calling，可跨 UI 当前目录查询资料库元数据；分页、Run 内发现缓存和直接输出目录契约见 [Agent 资料库目录发现](agent-library-discovery.md)。
 - 受控只读 `media.inspect`：按当前感知节点取得短期链接，并通过本机 `ffprobe` 返回清洗后的容器和媒体流元数据。
 - 经过确认的 `directory.create` 写操作，以及执行后的目录树刷新和再感知。
-- 经过确认的 `media.extractAudio`：先无副作用解析源 provider、按 M4A / MP3 / WAV 分别准备资料库路由与本机兜底，再允许用户选择资料库目录或本机、修改文件名与格式并冻结精确动作；批准后提取第一条音轨，由 main 持有完整资料库上传事务并在成功后刷新再感知，或通过 main 持有的系统 Save As 保存到本机。
+- 按权限策略执行的 `media.extractAudio`：区分源可读与目标可写，默认保存资料库；完全访问下非覆盖动作免重复审批，选择本机或切换目标仍走同一 prepare、一次性能力与提交链。
 - main / renderer Tool 的统一执行分发，以及只由已注册媒体 Tool 间接使用的受控本地进程基座。
 - Tool Registry 与 Orchestrator 的通用 prepare 生命周期：声明 prepare 的 Tool 必须由 main 或 renderer 单一持有；main-owned prepare 直接从 Run 冻结快照生成 public action、不可变私有 binding 和 hash，私有 binding 只经 main execution context 交给同一冻结 Tool 实现，不进入模型输入、SQLite 或 renderer IPC。macOS 开发预览中的 `shell.run` 已使用该 main-owned prepare 链路。
-- macOS Zsh `shell.run` 开发预览：只支持非交互前台命令；用户可以在 Agent 页面选择 `ask / auto / full-access`，main 持久化该本机设置并只影响后续新 Run。`ask` 展示完整冻结命令、Provider、逻辑 cwd、风险、超时和非敏感环境覆盖；`auto` 只自动批准确定性分析已证明在 Run workspace 内的普通操作；`full-access` 仍受不可变 deny 和 Analyzer 完整性门禁约束。输出经增量解码、控制序列清洗和脱敏后，把有界 tail 与 opaque `logRef` 投影到 Tool 结果；终态或恢复后的卡片可按 opaque cursor 分页读取 main 托管的详细日志。
-- `file.stage@1` / `file.publish@1` 文件桥开发预览：本机分支分别由 main 系统 picker 暂存一个普通文件和通过 Save As 发布 Run 输出；资料库分支通过绑定窗口提供的短期一次性 authority，在 prepare 与 execute 分别重验节点、目标、owner、Session、Run 和 ToolRun。stage 的签名 URL 只在 main 下载期存在，下载后再次重验来源身份；publish 复用 main-owned 上传事务并保留 `committed / uncommitted / commit_unknown` 三态。token、签名 URL、credentials、workspace 物理路径均不进入模型、Tool 结果或 SQLite。两个 Tool 都计入业务 Tool 配额，并使用 45 秒有界取消结算预算；真实资料库与安装包行为仍需人工验收。
+- macOS Zsh `shell.run` 开发预览：只支持非交互前台命令；用户可以在 Agent 页面选择 `ask / auto / full-access`，main 持久化该本机设置并只影响后续新 Run。`ask` 展示完整冻结命令、Provider、逻辑 cwd、风险、超时和非敏感环境覆盖；`auto` 只自动批准确定性分析已证明在 Run workspace 内的普通操作，访问外部路径时仍询问；`full-access` 对已经完整分析的外部路径读取直接放行，但仍受不可变 deny 和 Analyzer 完整性门禁约束。查看、读取、概括或分析用户明确给出的宿主绝对路径时，模型直接调用受支持只读命令，不先暂存文件。`run-workspace` 中的 `~ / HOME` 指向 Run 虚拟 home，`host` 中则指向 main 冻结的宿主 home。Supervisor 在继续 drain 全部输出的同时维护最多 `1 MiB`、等额保留 head / tail 的 main-only 诊断采集；该采集同时受固定字节数和最多 `4,096` 个返回事件约束，尾部回收不依赖数组头部搬移。原始采集不进入 SQLite、模型或 renderer。输出事件经控制序列清洗和脱敏后进入详细日志，并同步形成最多 `160,000` UTF-8 bytes、使用固定 Buffer 而不按来源碎片积累对象的安全 head / tail 模型源；规范 Tool result 仍经过 `100,000` JSON 字符门禁，Shell 会自适应收口到约 `90,000` JSON 字符为清洗和传输字段留余量。Orchestrator 为单个 `shell.run` Tool result 提供最高约 `40,000 tokens` 的独立投影预算，真实 continuation 空间不足时按 byte / token 再次投影并重算真实 `omittedBytes`。renderer 每个 stdout / stderr 摘要最多 `4 KiB`，但非审批 Shell 默认只以无框单行展示最低状态和 main public prepared action 中的命令摘要，不铺开输出，也不显示耗时、退出码或预览截断；点击具备 owner-bound 结果的行后，才展开最高约 `156px`、内部滚动的受控详细日志，真实过期或缺口只在展开区弱提示。审批态继续使用完整确认卡；命令显示禁止回退到 `call.input`。原始采集、规范结果中的模型源、provider Tool result、renderer 摘要和详细日志是互不替代的预算层。
+- `file.stage@1` / `file.publish@1` / `file.upload@1` 文件桥开发预览：stage 可由 main 系统 picker 或用户在当前请求中明确给出的本机绝对 / `~/` 来源路径把需要工作副本的普通文件暂存进 Run，也可暂存当前资料库普通文件；本机文件只有在需要修改、转码或生成新文件时才走 stage，单纯查看不复制。publish 把 Run 输出发布到 Save As、目录节点或从资料库根开始的绝对目录路径；upload 将明确本机来源原样上传到资料库，不先进入 Run。资料库路径由 renderer authority 从根逐段精确解析，缺失、重名、文件段或层级漂移均失败；prepare 与 execute 分别重验节点、目标、owner、Session、Run 和 ToolRun。stage 的签名 URL 只在 main 下载期存在，publish / upload 复用 main-owned 上传事务并保留 `committed / uncommitted / commit_unknown` 三态。用户明确提供的来源路径可进入对应 Tool input、public prepared action、确认卡和 SQLite 审计；canonical 路径、workspace 物理路径、token、签名 URL 与 credentials 仍只由 main 持有。三个 Tool 都是规范 `business` Tool，并使用 45 秒有界取消结算预算；真实资料库与安装包行为仍需人工验收。
 - 本机会话分页列表、搜索、新建、打开、重命名和删除。
 - 等待确认状态持久化、应用重启后的会话恢复，以及未完成运行的中断标记。
 - 由持久化 ToolRun 驱动的统一 Agent 时间线：实时进度、确认、结果、产物和中断状态在恢复后保持一致。
@@ -38,7 +40,7 @@ Shell 的 main-only 一次性 execution lease、Process Supervisor、LogStore、
 - 受控展示块与语义动作注册表；当前可展示通用状态、进度、媒体信息和资料库产物，并可安全定位结果节点。
 - 受控 `interaction.request`：当任务确实缺少有限选择或少量参数时，在同一个 ToolActivity 中展示选择卡片或表单，回答持久化后恢复原 Run，且只允许提交一次。
 - 内置 Skill V1：初始上下文只投影有预算的 Skill 摘要，模型通过独占的 `skill.activate` 控制 Tool 按需加载完整说明；激活成功后从下一次 provider turn 起按 allowlist 收窄业务 Tool。
-- 首条内置 `media-extract-audio` Skill：只组织既有 `file.list`、`file.stat`、`media.inspect`、`interaction.request` 和 `media.extractAudio`，不增加媒体 executor、权限路径或第二套任务状态。
+- 内置 `media-extract-audio` Skill 默认组织文件与媒体 Tool，并将当前 Run 实际可用的 Shell 和文件桥作为可选备选。激活后在同一 Run 继续，不要求用户重复发“开始”；可选宿主 Tool 尚未注册时不使整个 Run 失败，也不会因此取得执行能力。
 - Run 级 Tool + Skill capability snapshot：预检、provider schema、计划校验、激活、参数校验和 executor lookup 使用同一份不可变快照；Tool registration identity 用于拒绝过期实现。
 - Electron main 持有的 Capability Registry：Run 创建前以只读 Probe 检查 `media.ffprobe` / `media.ffmpeg`，按 `machine / owner / library` scope 隔离短 TTL 缓存，并从同一安全快照派生 Effective Tool / Skill View。required Capability 不可用或未知时 fail-closed，相关业务 Tool 与依赖 Skill 不进入本 Run；optional Capability 不可用或未知时只降级，不授予或撤销权限。
 - 有界上下文投影与会话摘要：完整 transcript 保留在 SQLite，provider 只接收结构化摘要、独立的近期规范 ToolRun 事实、近期完整 Run 和当前 Run；摘要以两阶段 checkpoint 持久化，失败时退回确定性的有界近期历史。
@@ -46,7 +48,7 @@ Shell 的 main-only 一次性 execution lease、Process Supervisor、LogStore、
 
 Skill V1 的代码、自动化门禁和首条真实媒体核心路径已经收口。2026-08-25 用户在 macOS 本机 MinIO 的非第一个资料库中验证：真实 provider 能选择并激活 `media-extract-audio` Skill，完成媒体检查、音频提取、本机 Save As，以及资料库上传、目录树刷新和新节点定位。格式修改、取消、上传三态和异常恢复继续由自动化覆盖，后续发现真实环境差异时再补定向验收。
 
-当前 macOS 开发构建在 Zsh 探测成功后会注册 `shell.run`、`file.stage` 与 `file.publish`，模型可以按 Run 冻结的权限模式执行受支持的宿主命令、把本机或当前资料库普通文件放入 Run，或把 Run 输出发布到本机和资料库；这仍不是稳定发布能力。当前不提供 Shell Session / 资料库长期规则、Shell 规则管理 UI、实时双流日志时间线、通用媒体转码 Tool、可重写计划、跨多轮 Workflow、自动恢复未完成运行、后台自动记忆提取、跨机器同步或向量检索。Skill 也不支持本地 `SKILL.md`、远程来源、插件注册、热更新、多 Skill 组合、Hook、子 Agent 或专用管理 UI。`AgentLocalProcessRunner` 仍只被 `media.inspect`、`media.extractAudio` 等具体 Tool 内部使用，不是模型可调用的 Tool；raw Shell 只能进入独立的 `shell.run` 生产链。
+当前 macOS 开发构建在 Zsh 探测成功后会注册 `shell.run`、`file.stage`、`file.publish` 与 `file.upload`，模型可以按 Run 冻结的权限模式直接读取明确宿主绝对路径、执行其他受支持宿主命令、把需要工作副本的本机或当前资料库普通文件放入 Run、把 Run 输出发布到本机和资料库，或把用户明确指定的本机普通文件原样上传到资料库；这仍不是稳定发布能力。当前不提供 Shell Session / 资料库长期规则、Shell 规则管理 UI、实时双流日志时间线、通用媒体转码 Tool、可重写计划、跨多轮 Workflow、自动恢复未完成运行、后台自动记忆提取、跨机器同步或向量检索。Skill 也不支持本地 `SKILL.md`、远程来源、插件注册、热更新、多 Skill 组合、Hook、子 Agent 或专用管理 UI。`AgentLocalProcessRunner` 仍只被 `media.inspect`、`media.extractAudio` 等具体 Tool 内部使用，不是模型可调用的 Tool；raw Shell 只能进入独立的 `shell.run` 生产链。
 
 Shell 基座已经包含 `shell.run@1` strict input / public action、schema 2 持久化分支、main-only exact command hash、macOS Zsh / Linux Bash / Windows PowerShell Provider discovery、Run snapshot、AI destination binding、AST Analyzer、三态 Policy、PreparationService、一次性执行能力与 Runtime。Analyzer 使用微软维护的 `@vscode/tree-sitter-wasm` 预编译 runtime：Zsh / Bash 使用 Bash grammar，PowerShell 使用独立 grammar。静态已知子集生成 `operations / facets / risk / unresolved`、`workspaceBoundaryVerified` 和稳定 `analysisIdentity`；PreparationService 再将其与 AI destination、环境、Provider、workspace content 和各 policy revision 合成为 `authorizationIdentity`。变量展开、命令替换、控制流、动态命令头、嵌套解释器、未知命令或参数、链接创建、交互参数和语法错误均 fail-closed；Parser / WASM 故障回退到不泄漏原始异常的 conservative assessment。
 
@@ -153,9 +155,9 @@ agent_shell_workspaces
 
 - `agent_sessions`：按 `backend_scope + account_scope + library_id` 隔离，保存标题、最新安全上下文、消息预览和生命周期时间。
 - `agent_runs`：一次用户提交对应一个 Run，保存 provider 配置 ID、模型、推理强度、状态、当前步骤、错误、可空的受限计划快照、稳定的 `capability_identity`、`tool_catalog_revision`、`skill_catalog_revision` 和从 `1` 起单调递增的 `revision`。诊断身份不包含 Probe 的 `checkedAt`，也不保存完整 Capability / Tool / Skill 定义。
-- `agent_messages`：按 Session 内单调递增的 `sequence` 排序，保存 user / assistant / tool 消息。
+- `agent_messages`：按 Session 内单调递增的 `sequence` 排序。user / tool 保存普通消息；assistant 保存稳定 `turn_ordinal`、`phase / status`、revision 和终态时间。Provider delta 只存在于 main 内存 writer 与实时事件，SQLite 只在 commentary、final、失败、取消或中断边界提交 item；失败、取消和崩溃不保存当前半句话。
 - `agent_context_checkpoints`：append-only 的派生摘要记录，保存 base checkpoint、覆盖到的消息和 `sequence`、模型来源及 `started / completed / failed / interrupted` 状态。只有 `completed` 能进入 provider 投影；它不改变 Session 排序、预览、消息数或任何 Run / ToolRun 事实。
-- `agent_tool_runs`：保存 Tool 输入、结构化结果、最新进度、权限决策、确认快照、交互请求 / 回答、`business / control` 分类、Run 内稳定 `ordinal`、可空的 `plan_step_id`、从 `1` 起单调递增的 `revision` 和运行状态，不把 Tool 状态压进聊天文本作为唯一事实。需要审批前准备的 Tool 还原子保存 `prepared_action_id / prepared_action_json / prepared_snapshot_hash`；三字段禁止半状态，三者与 `approval_input_hash` 在 prepared action 存在时必须以 SQLite `text` 保存，且两个 hash 必须完全相等。public action 使用包含 `media.extractAudio@1`、`shell.run@1`、`file.stage@1` 与 `file.publish@1` 的严格 `kind / version` 判别联合，TypeScript normalizer、main hash / Tool 绑定校验与 SQLite 独立 branch trigger 共同拒绝未知版本、错误字段类型、危险逻辑路径、错误 hash、额外或重复字段。交互字段为 `interaction_id / interaction_request_json / interaction_status / interaction_response_json / interaction_decided_at`，请求和最终回答都归属于原 ToolRun。
+- `agent_tool_runs`：保存 Tool 输入、结构化结果、最新进度、权限决策、确认快照、交互请求 / 回答、`business / control` 分类、Run 内稳定 `ordinal`、可空的 `plan_step_id`、从 `1` 起单调递增的 `revision` 和运行状态，不把 Tool 状态压进聊天文本作为唯一事实。需要审批前准备的 Tool 还原子保存 `prepared_action_id / prepared_action_json / prepared_snapshot_hash`；三字段禁止半状态，三者与 `approval_input_hash` 在 prepared action 存在时必须以 SQLite `text` 保存，且两个 hash 必须完全相等。public action 使用包含 `media.extractAudio@1`、`shell.run@1`、`file.stage@1`、`file.publish@1` 与 `file.upload@1` 的严格 `kind / version` 判别联合，TypeScript normalizer、main hash / Tool 绑定校验与 SQLite 独立 branch trigger 共同拒绝未知版本、错误字段类型、危险逻辑路径或本机来源路径、错误 hash、额外或重复字段。交互字段为 `interaction_id / interaction_request_json / interaction_status / interaction_response_json / interaction_decided_at`，请求和最终回答都归属于原 ToolRun。
 - `agent_memories`：只保存已经确认的 `preference / project / reference`，正文拆分为标题、规则、保存原因和适用场景，同时记录 global / library scope、来源 Session / Run、创建时间、更新时间和乐观锁 `revision`。删除 Session 不删除已经确认的长期记忆。
 - `agent_local_storage_resources`：保存 owner、adapter、opaque resource ref、Run、预留 / 实际字节、状态、TTL 和安全错误码，是媒体 artifact 与 Shell workspace 共享配额及崩溃清理的规范 ledger；不保存业务文件正文或物理路径。
 - `agent_shell_workspaces`：保存 Run 工作区的 owner、Run、quota resource ref、generation、状态和 manifest JSON；物理根仍由 main-owned Store 从固定托管根重建，不进入模型、renderer 或普通日志。
@@ -163,7 +165,7 @@ agent_shell_workspaces
 
 创建 Run 和首条用户消息必须原子完成。当前由 SQLite 的 `agent_runs_create_user_message` trigger 在插入 Run 时同步创建 user message，避免进程退出后出现只有 Run 或只有消息的半状态。
 
-当前 schema 标记保持为 `2`。v1 升级时原有会话保留为不可认领的 `legacy` scope，不能自动暴露给升级后首先登录的账号；新会话写入完整 owner scope。项目仍处于未正式发布阶段，确认审计字段、prepared action 字段、进度字段、交互字段、Run / ToolRun `revision`、Tool `ordinal`、Tool `tool_kind`、Run `plan_json`、ToolRun `plan_step_id`、Run 的 `capability_identity / tool_catalog_revision / skill_catalog_revision` 和上下文 checkpoint 表直接并入当前建表定义；本机已有的 schema 2 数据库幂等补列、补表和补 trigger，旧媒体 prepared action 在同一 bootstrap 事务内回填为 `kind = 'media.extractAudio', version = 1`，`shell.run@1`、`file.stage@1` 与 `file.publish@1` 各使用独立 strict branch，Shell 额外校验 main command hash，损坏或无法证明归属的数据会使整个 bootstrap 回滚。历史 snapshot hash 原样保留且不恢复执行能力。旧 Run 的能力身份使用明确的 legacy 缺省值，已有 Run / ToolRun 的 `revision` 初始化为 `1`，普通 Tool 的 `tool_kind` 初始化为 `business`，既有 `skill.activate` 记录回填为 `control` 并清除旧计划绑定，再按既有 `rowid` 回填 Run 内 Tool 顺序，原地兼容且不新增 schema 版本。`agent_memories` 也由独立 Store 在同一数据库中幂等建表，不改变 `user_version`。开发期间曾短暂写入过 `user_version = 3`；启动时仅在四张核心表和确认审计字段均匹配该已知中间结构时保留数据并把标记归回 `2`，其他更高版本或未知结构仍拒绝打开。不能在无法证明归属时自动认领历史数据。
+当前 schema 标记保持为 `2`。assistant item 是预发布阶段的破坏式会话结构切换：发现任一 assistant baseline 字段缺失时，在同一事务内清空 Session、Run、Message、ToolRun 和 context checkpoint，再建立当前结构；不迁移、不推断或兼容旧对话。该清空不涉及独立的长期记忆、配额和 Shell 资源账本。项目仍处于未正式发布阶段，已经符合 assistant baseline 的数据库可以继续幂等补齐确认审计、prepared action、进度、交互、Run / ToolRun revision、Tool ordinal / kind、计划、能力身份和 checkpoint 等当前基线结构，但这不构成旧对话兼容承诺。`agent_memories`、本机资源、Shell workspace 和 Shell log metadata 由各自 Store 在同一数据库中协调建表，不因会话结构切换而删除。开发期间曾短暂写入过 `user_version = 3`；启动时仅在四张核心表和确认审计字段均匹配该已知中间结构时把标记归回 `2`，其他更高版本或未知结构仍拒绝打开。
 
 生产启动由 `bootstrapAgentPersistenceDatabase()` 统一进入唯一 `AgentDatabaseSchemaCoordinator`：Coordinator 自己打开独占 bootstrap connection，在同一个 `BEGIN EXCLUSIVE` 事务中依次执行 Session、Memory、Quota、Shell workspace 和 Shell log metadata 的领域 DDL / reconcile，再完整自检 `user_version`、必需表、全部已知列、命名 index 与 trigger；全部通过后才提交并释放一次性 readiness barrier，任一步失败都回滚并允许后续重试。canonical DDL 仍按领域维护在对应 Store 模块，但生产业务连接只能在 barrier 后打开，不再重复执行 DDL。`:memory:` 和直接 Store 测试继续由各 Store 自行初始化，不把测试兼容入口误作生产 schema owner。
 
@@ -203,7 +205,7 @@ Run / ToolRun 每次成功状态 mutation 都在同一条 SQL 中执行 `revisio
   -> 流式执行 provider / Tool loop
   -> 模型需要流程说明时，独占一轮调用 skill.activate
   -> 激活结果完整进入当前 provider 上下文，下一 turn 按 allowlist 收窄业务 Tool
-  -> 执行任一 Tool 前原子预检整轮业务 Tool 配额和全部最小合法结果消息
+  -> 执行任一 Tool 前原子预检整轮全部最小合法结果消息与 continuation 剩余上下文
   -> 声明 prepare 契约的 Tool 先创建 preparing ToolRun
   -> main-owned prepare 直接调用 Run 冻结 Tool hook，不产生 renderer request
   -> renderer-owned prepare 由 main 发出绑定 owner / ToolRun / call / 输入 hash 的一次性 request
@@ -277,7 +279,9 @@ agent:memory:delete
 agent:chat:event
   started
   run-updated
-  delta
+  assistant-item-started
+  assistant-item-delta
+  assistant-item-finished
   tool-started
   tool-progress
   tool-prepare-requested
@@ -296,7 +300,7 @@ agent:chat:event
 
 Skill V1 本身没有新增 IPC channel。`skill.activate` 复用既有 ToolRun、`tool-started / tool-completed` 和 Session 快照协议；Run capability snapshot 与 Registry 没有独立 preload API。阶段 B 新增的 prepare completion、Agent 专用 Save As 与单一 sealed artifact upload IPC 只服务既有 Tool 生命周期，不是模型可直接调用的 Tool。Main 在统一事件与 Session 返回边界生成 renderer-safe 投影，剥离完整 instructions 和 allowlist，只保留 `skillId / version / instructionsHash` 和本地状态文案；SQLite 中的规范审计事实不被反向覆盖。
 
-每个流式事件同时携带 `sessionId` 和 `runId`。`started` 与 `run-updated` 携带 SQLite 返回的完整 `AgentRunSnapshot`；Run 终态事件也携带该 Run 的规范快照。Renderer 只消费当前 Session 的事件，按持久化 `revision` 单调合并并拒绝终态回退；`updatedAt` 不参与版本比较。创建新 Session 时允许在 `start` IPC 返回前短暂缓存该 Session 的抢跑事件，恢复活跃 Session 时也只为目标 Session 暂存快照读取期间的事件。Tool 开始、进度、确认和完成事件携带对应的规范 ToolActivity 投影；renderer 同样按 ToolRun `revision` 拒绝迟到快照。完成、取消或失败事件同时携带该 Run 已持久化的规范消息、Run 与 ToolActivity 投影，renderer 用它们替换临时流式状态。累计文本只作为读取规范投影失败时的降级补齐路径。不能仅按字符长度补后缀，因为离开页面期间漏失的 delta 可能位于回答中间，也不能跨 Tool 边界重复或错序插入文本。
+每个流式事件同时携带 `sessionId` 和 `runId`。`started` 与 `run-updated` 携带 SQLite 返回的完整 `AgentRunSnapshot`；Run 终态事件也携带该 Run 的规范快照。每个 Provider turn 使用稳定 assistant item ID，`assistant-item-delta` 携带 JavaScript UTF-16 绝对 offset；Run 终态事件不再携带累计正文。Renderer 只消费当前 Session 的事件，按 item ID、offset 和持久化 `revision` 单调合并，拒绝终态回退；发现 gap 或 overlap conflict 时暂停该 item，读取 Session 规范快照并缓冲读取期间的新事件，随后按 offset 重放。main 的 `getSession()` 会用活跃内存 writer 覆盖 SQLite 中仍为空的 streaming item，因此恢复不需要高频刷盘。创建新 Session 时允许在 `start` IPC 返回前短暂缓存该 Session 的抢跑事件，恢复活跃 Session 时也只为目标 Session 暂存快照读取期间的事件。Tool 开始、进度、确认和完成事件携带对应的规范 ToolActivity 投影；renderer 同样按 ToolRun `revision` 拒绝迟到快照。完成、取消或失败事件同时携带该 Run 已持久化的规范消息、Run 与 ToolActivity 投影，renderer 用它们替换同一 Run 的临时流式状态。
 
 除停止当前 Run 外，所有 Session 与 Memory 请求都必须携带完整 owner scope。main 必须重新规范化 scope，并将其加入每一条查询和修改条件；只校验 `libraryId` 不构成账号隔离。Memory 修改与删除还要携带当前 `revision`。prepare 回执必须同时匹配发起窗口、owner scope、`libraryId`、`sessionId`、`runId`、ToolRun、provider call、语义输入 hash 和一次性 prepare ID；prepare 与 execution capability 不能互换。确认、交互回答、Renderer 能力调用、写入提交与执行完成请求必须同时匹配发起窗口、`sessionId`、`runId`、`libraryId` 和一次性 ID，重复或迟到结果不能再次执行。交互回答还要按已持久化请求 schema 重新校验，renderer 临时草稿不构成事实。
 
@@ -309,14 +313,14 @@ Renderer 写操作有两个不同的回执边界：后端已经确认创建节�
 - 当前自动执行仅允许 main 注册且经过校验的 `risk: 'read'` Tool；Renderer 只读 Tool 还必须显式返回 `allow` 决策并走一次性 execution request。
 - `AgentToolBroker` 是 main / renderer executor 的唯一分发入口。main Tool 收到停止或超时后先触发其 `AbortSignal`，并最多等待 6 秒让 Tool 完成回滚或返回已经提交的结果，再结束 Run；不能先宣布取消、后台仍继续副作用。Renderer 回执必须匹配窗口、owner scope、资料库、Session、Run 和一次性 execution ID。commit 前超时、取消或 owner 释放会主动通知 Renderer 中止并使请求失效；commit 后保留已提交的成功结果，在最终回执失败或 30 秒收口超时时作为 Tool 结果继续，不能再次执行写入。
 - `media.inspect` 的模型输入和 ToolRun 只保存 `nodeId`。Renderer 依据 main 生成的节点请求取得短期签名链接，再通过 `agent:media:inspect` 瞬时交给 main；Broker 对该内部能力执行一次性校验和防重放。main 随后把上游链接封装进本机 loopback 代理，ffprobe 参数只包含本机 URL；签名链接、代理 token 和 ffprobe stderr 不进入 Tool 结果、模型消息、SQLite 或日志。
-- `media.extractAudio` 只接受 main 根据当前感知节点生成的 `nodeId`。prepare 先验证源 provider；不可用时按 M4A / MP3 / WAV 分别尝试资料库路由和默认 provider，并冻结用户最终选择的目录、文件名、格式、兜底策略与物理 binding。对外确认动作固定为 `kind = 'media.extractAudio', version = 1`；Renderer 编辑后由 main 重新严格规范化，并校验 action kind 与当前 Tool 名称一致，未知或损坏分支只能取消、不能批准。输出名默认 `<源文件名>-audio.<格式>`，在确认和 staging 前限制为 240 UTF-8 bytes，冲突时自动改名。Renderer 取得 6 小时签名链接后，通过一次性 capability 交给 main；ffmpeg 只接触 6 小时有效的 loopback URL 和 main 创建的临时输出路径。提取 IPC 只把不含物理路径的 artifact metadata 返回 Renderer；Renderer 随后的资料库上传请求只提交 `artifactId`、当前认证凭据和 execution / owner 身份，不能提交目录、Provider、文件名、格式、冲突策略、签名 URL、upload session、part 或 ETag。main 从冻结 `executionInput` 重新取得并验证目标，上传成功后立即以后端实际返回的节点 ID、名称和扩展名提交 authoritative result，再由 Renderer 刷新并再感知；只有最新目录确实包含该 `createdNodeId` 才标记 `verified: true`。
+- `media.extractAudio` 绑定当前可见源节点，支持可选 `destination / fileName / format`，默认在当前资料库生成音频。prepare 单独确认源存储；源不可达明确失败，不用可写目标代替源可读。目标依次采用健康源 Provider、路由、默认和其他健康 Provider，不静默降级本机。执行期 main 对已签发 loopback claim 做有界 Range 读取，并用 ffprobe 确认音轨后才创建输出和启动 ffmpeg；提取需要 ffprobe 与 ffmpeg 两项能力。错误返回固定分类，不泄漏原始 stderr 或签名 URL。prepared action 继续保持 V1，目标与文件名仍重新规范化、绑定并复验；资料库上传继续由 main 持有，Renderer 只能提交 opaque artifact、当前认证与 owner / execution 身份。`full-access` 下非覆盖提取可自动授权，其他模式仍按既有审批链执行。完整规则见 [媒体、权限与过程展示](./agent-media-availability-and-permissions.md)。
 - `AgentMediaArtifactStore` 位于 main，单文件上限 2 GiB、同时最多 4 个当前进程活跃产物、无活动 TTL 1 小时。创建前先向共享 `AgentLocalStorageQuotaManager` 预留 2 GiB，稳定目录落盘后绑定 opaque resource ref，完成后以 `max(data fork 长度, st_blocks * 512)` 提交；媒体产物与 Shell workspace 共用默认 8 GiB 总额度和 4,096 条本机资源记录上限，零字节预留也必须经过资源数量、聚合额度与低磁盘水位检查。生产媒体根与 Shell workspace 都位于 `userData` 文件系统；runtime 查询该卷可用字节，并扣除尚未落盘的 reservation headroom，保证新预留全部兑现后仍至少剩余 1 GiB。它不会在 macOS 固定查询根卷，也不会在 Windows 固定假设 `C:`；写后 `commit / adjust` 只协调已经反映在文件系统可用量中的已观测字节，不重复扣减。finalize 后不再公开“取得路径再打开”的消费 API；Save As 与资料库上传只能通过 `withOwnedFile`，由 Store 使用 `lstat + O_NOFOLLOW handle + fstat + realpath + 目录身份复验` 打开并冻结 `dev / ino / ctimeNs / size / allocated bytes`，在消费结束后复验。同一 artifact 的 finalize、句柄消费和释放在 main 内串行，消费期间另持 quota live lease，因此 release / sweep 不能边读边删；lease 释放失败也不能把消费误报成功。配额 ledger 写入同一 Agent SQLite，重启不恢复中断的媒体任务，但仍能让 adapter 按 TTL 回收已提交残留；升级后 adapter 仍同时清理旧系统临时根中的同 ID 目录，两个根内无 ledger 的过期目录也按 legacy residue 回收。unmanaged residue 枚举和删除期间会关闭共享 quota admission，只有完整扫描、删除和根身份复核成功后才解除；失败保持关闭，不能一边未知占用一边接纳新资源。产物同时绑定账号环境、窗口、Session、Run 和 execution ID，Run / 窗口结束时提交清理意图，应用 ready 阶段会主动 sweep。artifact ID、本地路径、签名 URL、loopback token 和 ffmpeg stderr 不进入 Tool 结果、模型消息或普通日志；SQLite 只保存 opaque resource ref 和配额事实。generic xattr 的物理占用当前可能不反映在 `st_blocks` 中，该限制不得描述为精确总量计费，后续与 Shell 共用 handle-based metadata adapter 收口。
-- 资料库上传是 main 全程持有的单一事务。`agent:media:artifact:upload` 领取一次性 `media.extractAudio.upload` execution capability 后，main 先用当前凭据请求规范 API 基址的账号接口，复验用户 ID 与冻结 owner 一致，再执行 init、sign、PUT、complete 和必要的 reconcile。API 基址由 Vite 在构建时固定注入 `__OMNIFLOW_API_BASE_URL__`，不能由 Renderer 为单次上传指定。每批最多 4 个 PUT；任一分片失败会中止并等待同批请求全部收口，再 best-effort abort 后端 session。main 始终从同一个 `O_NOFOLLOW` 已验证 FileHandle 的显式 offset 读取，并在 complete 前复验源身份。取得 `committed` 或 `commit_unknown` 这类禁止盲目重试的结算后，即使 owned-file 退出复验或 lease 清理失败，也只能隔离并清理本地产物，不能把结算降级成普通 IPC 异常。普通本地文件仍走 Renderer 协调的 `runDirectUpload`，两条链路不能共享物理路径或把 artifact 编码进 `filePath`。
+- 资料库上传是 main 全程持有的单一事务。`agent:media:artifact:upload` 领取一次性 `media.extractAudio.upload` execution capability 后，main 先用当前凭据请求规范 API 基址的账号接口，复验用户 ID 与冻结 owner 一致，再执行 init、sign、PUT、complete 和必要的 reconcile。API 基址由 Vite 在构建时固定注入 `__OMNIFLOW_API_BASE_URL__`，不能由 Renderer 为单次上传指定。每批最多 4 个 PUT；任一分片失败会中止并等待同批请求全部收口，再 best-effort abort 后端 session。main 始终从同一个 `O_NOFOLLOW` 已验证 FileHandle 的显式 offset 读取，并在 complete 前复验源身份。取得 `committed` 或 `commit_unknown` 这类禁止盲目重试的结算后，即使 owned-file 退出复验或 lease 清理失败，也只能隔离并清理本地产物，不能把结算降级成普通 IPC 异常。Agent 外的普通本地上传仍走 Renderer 协调的 `runDirectUpload`；Agent `file.upload` 是从严格 prepared binding 和已验证本机 FileHandle 进入同一 main-owned 上传管理器的窄入口。三类来源不能共享物理路径、把 artifact 编码进 `filePath`，或让 renderer 提交任意 Agent 来源路径。
 - 上传结果必须是显式三态：`committed` 只在 complete 或 reconcile 返回同时具有有效正整数 `node.id` 与非空 `node.name` 的 authoritative receipt 时成立；明确 4xx 或 reconcile 返回 `uncommitted` 才是 `uncommitted`；complete 已发出但响应、核对或回执不明确时是 `commit_unknown`。reconcile 使用独立的短时 signal，即使原 execution 在提交边界取消，也要尽力核对同一个 operation；此时禁止 abort、重传或生成第二份结果。Broker 的 critical settlement 只在即将调用 complete 时开启，不覆盖账号复验、init、sign 或 PUT 阶段。
 - 本机目标与资料库上传后的本机兜底都使用 Agent 专用 Save As，但兜底额外需要 main 签发的一次性 grant。只有 main 上传事务显式返回 `uncommitted` 才登记该 grant；`committed`、`commit_unknown`、Renderer 未取得结构化结果的普通 IPC 异常、错误 sender 或重放都不得由 Renderer 推断成兜底条件。grant 绑定 artifact、execution、窗口、Session 和 Run，并在首次使用、artifact release、Run 结束或 owner release 时删除。Save As capability 仍同时绑定 owner、资料库、prepared action、snapshot hash 和 artifact，领取一次即消费；用户取消也不能重放。目标绝对路径只由 main 的系统对话框返回，main 从已验证 FileHandle 的 offset 0 复制到同目录临时文件，源身份复验成功后才原子替换；Windows 已存在目标使用可恢复备份，失败时删除临时文件，结果只返回安全文件名。停止、超时、owner release 或窗口销毁先中止 execution，待正在进行的 Save As 收口后再释放 artifact，不能边复制边删除源文件。
 - ffprobe / ffmpeg 路径由 `electron/platform/mediaExecutable.ts` 解析为绝对路径，支持显式环境变量、已配置二进制的同级目录、安装包 resources 和系统 PATH。缺失时返回明确能力错误，不退回模拟结果。
 - `media.ffprobe` / `media.ffmpeg` Probe 只返回规范状态与安全 reason code，不返回路径或异常原文。当前 timeout 为 2 秒、TTL 为 30 秒；调用方取消只停止等待，共享 Probe 的超时、失效 generation 和迟到结果由 Registry 收口。Run 前 Probe 只是提前失败与诊断，`media.inspect` / `media.extractAudio` 在真正执行前仍重新解析可执行文件，承担 authoritative check。
-- `directory.create` 必须经过 main 参数校验和 `ask` 决策；模型只能提交名称，目标资料库和父目录来自安全应用上下文。
+- `directory.create` 必须经过 main 参数与目录身份校验；`ask / auto` 请求确认，`full-access` 下可自动授权非覆盖创建。目标仍固定为当前资料库目录，不跳过后端权限检查。
 - 用户批准后，Renderer executor 只分发 main 生成的一次性 `directory.create` 请求，复用现有 `createNode` API；成功后刷新目标子树并重新读取感知快照。目录已经创建但刷新或再感知失败时，不把写入误报为失败以免模型重复创建。
 - 未注册 Tool、没有权限策略的非只读 Tool，以及没有显式只读授权或绕过确认的 Renderer 写 Tool 返回结构化拒绝结果，不直接执行。
 - 单次确认只绑定当前运行中的精确动作，不提供“永久允许”；拒绝、停止、超时、owner 释放或应用退出后均失效。
@@ -330,14 +334,16 @@ Renderer 写操作有两个不同的回执边界：后端已经确认创建节�
 - 每个 Run 在创建前同时冻结 Tool 与 Skill 快照。摘要、预检、provider schema、计划允许的业务 Tool、激活、运行时 Schema 校验和 main executor lookup 都消费同一份内存快照；Skill allowlist 只能对原有业务 Tool 求交集，不能授予 Tool、权限或 owner scope。Broker 执行 main Tool 时继续校验快照中的 registration identity，不能回到 live Registry 偷换同名实现。
 - `skill.activate` 是唯一允许注册的 `control` Tool，固定为 main 侧只读实现。它只能按 ID 读取当前 Run 摘要目录中可见的 Skill，不能加载模型提供的路径、URL 或正文；同一 Run 重复激活相同 Skill 保持幂等，切换另一个 Skill 会拒绝。业务 Skill 不能声明控制分类。
 - `skill.activate` 必须独占 provider turn。若模型把激活与计划或其他 Tool 放在同一响应中，Orchestrator 在创建任何 ToolRun 和执行任何副作用前整批拒绝；激活正文与 allowlist 收窄只从下一 turn 生效。
-- 完整激活 envelope 包含 `skillId / version / instructions / toolAllowlist / instructionsHash`，注册期和执行前都必须完整落入 1,024 token 的 provider Tool result 上限以及当前 continuation 剩余预算；不能截断说明后继续。终态 Run 的近期执行事实和 renderer-safe 投影都只保留 `skillId / version / instructionsHash`，不向后续 provider 或 UI 回灌正文；完整结果只留在 main 的当前 Run 上下文与 SQLite 规范审计事实中。
+- 完整激活 envelope 包含 `skillId / version / instructions / toolAllowlist / instructionsHash`，注册期和执行前都必须完整落入当前单 Tool result 的 provider 投影预算以及 continuation 剩余预算；该投影默认目标约为 `10,000 tokens`，可以因真实模型窗口和同轮其他结果而收缩，但不能截断 Skill 说明后继续。终态 Run 的近期执行事实和 renderer-safe 投影都只保留 `skillId / version / instructionsHash`，不向后续 provider 或 UI 回灌正文；完整结果只留在 main 的当前 Run 上下文与 SQLite 规范审计事实中。
 - Tool Registry 在注册时要求 `inputSchema` 具有明确的对象根，深拷贝并冻结后再严格编译；无效或 Provider 不兼容的 schema 不能完成注册，调用方后续修改原对象或 Registry 返回值也不能让 Provider 声明与运行时校验器漂移。每个 Tool 同时冻结 `business / control` 分类和显式或派生的 registration identity；重复 identity 和未声明的控制 Tool 会被拒绝。运行时不做类型转换、默认值填充或额外字段删除。已知 Tool 的原始参数必须先通过统一 JSON Schema 和危险对象结构检查，再进入 Tool 自己的领域 `validate`、动态权限 `assess`、确认和执行。Schema 失败时以固定安全占位替换 provider 历史中的原参数并返回结构化错误，不创建 ToolRun、不发出 Tool 事件，也不调用领域校验、权限判断、Renderer 请求或 executor；Registry 在 main 执行入口再次校验，防止 Broker 直达路径绕过。
 - main-owned prepare 使用与 Registry 执行复验相同的 canonical 输入 hash；opaque capability 同时绑定 owner、窗口、资料库、AI destination、Run capability、Session、Run、ToolRun、call、Tool input 与 registration identity，且在调用 executor 前即一次性消费。prepare hook 只取得无 progress / interaction / memory / Registry execute 回调的窄上下文。私有 binding、snapshot material 任一单项及完整规范快照都不得超过 256 KiB，超限时在哈希和持久化前拒绝。批准复核失败只向 renderer 返回稳定通用错误，不透传 hook 的本机路径、凭据或异常正文。审批 CAS 是不可回滚的提交边界：提交前故障保留当前卡重试，提交后即使 Run 状态或事件投影失败也必须结算等待者并清理旧卡。
 - 通过 Schema 的 Tool 参数再生成有界审计投影；发现敏感字段或无法完整审计时不产生副作用。Tool 进度、确认预览、规范结果和 Run 错误都必须在写入 SQLite 或发送 renderer 事件前完成文本或结构化递归清洗；未知、拒绝和失败 Tool 同样不能把原始参数或上游错误旁路到时间线。
-- 当前每个 Run 最多 10 个 provider turn 和 8 次业务 Tool 调用：10 turn 可容纳一次 Skill 激活、最多 8 个串行业务 Tool turn 与最终回答。模型单轮返回的业务 Tool 数会与 Run 已用配额一起原子预检；超额时整轮拒绝，不能先执行一部分再失败。`agent.plan.set` 和 `skill.activate` 均不计入业务 Tool 调用配额，`skill.activate` 也不绑定计划步骤；控制 Tool 仍受 provider 总 turn 限制，不能无限续接。
-- provider 上下文按每一次完整请求重新估算 system、Tool schema、消息、Tool Call 参数和 Tool result；当前缺少可靠模型窗口元数据时使用保守 `16,384` token fallback，并为回答和后续 Tool loop 分别预留固定额度。main 可通过只接收 `providerType + model` 的预算 resolver 注入真实窗口，不向 resolver 暴露 Key，也暂不扩展配置 UI。解析后的回答预留同时作为常规 Tool turn、无 Tool fallback 和摘要请求的真实 provider 输出上限：官方 OpenAI 使用 `max_completion_tokens`，DeepSeek / Local 的 OpenAI-compatible Chat Completions 与 Claude 使用 `max_tokens`，两类字段不能同时发送；字符硬上限继续作为独立的本地内存保护。固定输入与预留已经占满窗口、当前 user message 超过剩余预算时，在创建 Session / Run 前明确拒绝；不能用最小预算下限制造负预算，也不能静默截断当前 Run。每轮 Tool Call 在执行任一 Tool 前必须能容纳全部最小合法 Tool 结果消息，逐项投影时还要精确保留后续 callId、Tool 名和最小结果的完整协议开销；若 Renderer Tool 可能在副作用后首次返回感知快照，预检必须同时覆盖执行前后两种 system prompt 状态。
-- 经清洗和存储上限收口的规范 Tool 结构化结果保存在 SQLite 并用于时间线；进入 provider 前再生成独立、有 token 上限的结构化投影，始终保留 `ok` 和可容纳的状态 / message / data，省略数组、字段或长文本时写入 `_omniflowProjection.truncated`。API Key、认证头、Cookie、密码、token 和签名 URL 查询参数不能因 Tool 返回而进入 SQLite、renderer 或 provider；provider 的二次截断不反向覆盖规范执行事实。Tool loop 任一轮仍超窗时停止下一次 provider 调用。
-- 历史投影只压缩完整终态 Run，当前 Run、等待确认 / 交互的 Run 和近期预算内完整轮次不被切开；预算不依赖上一轮 usage 或简单百分比。最近 12 条规范执行事实始终从所有终态 Run 的 ToolRun 单独投影，不受 checkpoint 对话边界或 provider tail 是否仍含对应 Run 消息影响。
+- Run 不设置固定 provider turn 或业务 Tool 次数上限。每轮根据完整请求、当前模型上下文窗口、回答预留和全部最小合法 Tool 结果重新决定能否继续；模型返回最终回答或不再请求 Tool 时正常结束，用户停止、权限 / 协议失败、上下文不足或 Tool 终态要求停止时明确收口。为防止无进展死循环，main 为每个 Tool round 生成包含规范 Tool 名、校验后参数和稳定结果的摘要，并只保留最近 24 轮摘要；当长度 `1..8` 的同一摘要周期连续重复 3 次时，在发起下一次 provider 请求前明确失败，并向用户说明检测到重复且无进展的工具调用。普通 Tool 的稳定结果保留 `revision / updatedAt / createdAt` 等业务字段；只有 `shell.run` 的 `result.data` 顶层 `durationMs / executionId / logRef` 等传输元数据不参与稳定摘要。任一周期中的调用或稳定结果发生变化都会破坏该周期匹配，不能把总调用次数重新伪装成另一种固定硬上限。`agent.plan.set` 不创建 ToolRun，`skill.activate` 仍是 `control` Tool 且不绑定计划步骤；二者同样受上下文预算、取消和重复循环门禁约束。
+- provider 上下文按每一次完整请求重新估算 system、Tool schema、消息、Tool Call 参数和 Tool result。模型预算不再使用单模型特判：main 优先读取当前连接的模型目录元数据，其次使用随应用发布的 Codex 模型目录精简快照；未知模型使用保守回退。常规聊天不提供预算编辑入口，不读取客户端预算偏好或消费旧 `modelBudget` 字段。默认窗口、最大窗口、输出预留和 95% 有效窗口分别计算；预算在创建 Run 前由 main 自动解析并冻结。内部有界配置注入仍可用于测试或后续供应商适配，不等于存在用户高级设置入口。解析优先级、缓存、目录来源、旧偏好清理和输出保护见 [Agent 模型预算与体验边界](./agent-model-context-and-reliability.md)。OpenAI Chat Completions 使用 `max_completion_tokens`，其他已支持协议使用 `max_tokens`。固定输入与预留占满窗口或当前请求超限时，在创建 Session / Run 前拒绝，不静默截断当前任务。每轮 Tool 执行前必须容纳全部最小合法结果与完整续接开销；可能在副作用后首次取得感知时，同时预检前后两种 prompt 状态。
+- Registry 与 ToolRun 继续使用带点号的 canonical Tool 名；Provider schema、system prompt 中的 capability 清单和显式 Tool 路由说明必须通过同一个映射生成 Provider 可见名称，例如 `file.upload -> file_upload`。不得在提示词中手写另一套名称，否则弱模型可能无法把说明与真实 function schema 对齐。
+- 经清洗和存储上限收口的规范 Tool 结构化结果保存在 SQLite 并用于时间线；`AgentToolBroker` 对规范结果施加 `100,000` JSON 字符硬门禁，Shell 结果先自适应收口到约 `90,000` JSON 字符。进入 provider 前再生成独立、有 token 上限的结构化投影：普通 Tool result 默认目标约为 `1,024 tokens`，必须完整承载内置说明的 `skill.activate` 约为 `10,000 tokens` 且禁止截断，`shell.run` 从最多 `160,000` UTF-8 bytes 的安全源生成最高约 `40,000 tokens` 的投影；三者都继续受真实上下文剩余空间和同轮其他结果约束，协议拒绝等小结果使用普通预算。预算选择只依据 Provider 已解析回 canonical 的 Tool 名，不能依赖显示名或 Provider 转义名。结构化投影始终保留 `ok` 和可容纳的状态 / message / data，省略数组、字段或长文本时写入 `_omniflowProjection.truncated`。完整 Shell 流使用 `content + truncated=false + omittedBytes=0`；只有 `_omniflowProjection.truncated=true`、对应流 `truncated=true` 或 `omittedBytes>0` 才表示这条命令产生的正文被省略，此时才使用 head + tail。Shell 的二次 byte / token 投影以总输出字节减去本次实际保留字节重新计算 `omittedBytes`，不能沿用上游旧省略量。输出交付完整与源内容覆盖完整是两个独立事实：`truncated=false` 不能把 `head`、`tail` 或限定范围的 `sed` 升级成全文读取；只有命令覆盖完整来源且输出也完整时，Agent 才能声称全文已读。字段名、文件长度和 UI 是否展开均不是截断证据。API Key、认证头、Cookie、密码、token 和签名 URL 查询参数不能因 Tool 返回而进入 SQLite、renderer 或 provider。
+- 当前 Run 的 Active Context 不再把已消费的旧 Tool result 从 canonical result 机械重投影得更小。continuation 接近窗口时，只从最旧的、连续、完整、已经被模型消费且明确允许压缩的 Tool 回合选取候选，把 assistant Tool call、成组 Tool result 和相邻的内部旧摘要一起交给无 Tool 的摘要调用，生成严格 V1 JSON：`objective / verifiedFacts / completedActions / decisions / failures / pendingWork`。`skill.activate`、不完整回合和默认保留的最新 Tool result 不参与压缩。摘要先在 `messages / toolResults` 副本 staging，所有候选都成功且重新估算后才一次性提交到 main 内存 Active Context；任一摘要失败时原上下文保持不变。摘要以低权限 user envelope 注入，使用 main-only `Symbol` provenance 区分内部摘要与用户伪造前缀，并禁止表达或继承授权、批准和许可状态；SQLite canonical ToolRun、renderer 投影和详细日志均不被覆盖。
+- 历史投影仍只压缩完整终态 Run，当前 Run 的上述 Active Context 语义压缩是独立机制；等待确认 / 交互的历史 Run 和近期预算内完整轮次不被切开。OpenAI-compatible 与 Claude 流式响应中的实际 usage 会被解析；每个 Run 记录“实际 input tokens - 本地估算”的最大正向低估量，并从后续 provider 请求上限中扣除，已有估算更保守时不反向放宽。Provider 未返回 usage 时继续使用本地字符估算，不伪造实际值。HTTP 或 SSE 返回结构化 context overflow 时明确失败当前 Run：OpenAI-compatible 只认 `code = context_length_exceeded`，Claude 只认 `type = invalid_request_error` 加明确 prompt / context 超长文案；不会新建 Run、自动重放 Tool 或重试同一 provider turn。终态 ToolRun 的近期执行事实始终从 SQLite 单独投影，不受 checkpoint 对话边界或 provider tail 是否仍含对应 Run 消息影响；事实总预算最高约 `48,000 tokens`，普通 Tool 单项约 `1,024 tokens`，Shell 单项最高约 `40,000 tokens`，按新到旧选择而不先施加固定条数上限。已经完成的 Shell ToolRun 即使所属 Run 随后取消或中断，安全投影后的 stdout 及其 ordinal、main public prepared action 中的命令仍可进入下一 Run；投影删除 `executionId`、`logRef` 和 renderer preview，`skill.activate` 无论成功失败都不回灌完整说明或 allowlist。
 - 自动摘要是一次独立、无 Tool、无时间线事件的纯文本模型调用，只读取经过长度限制和秘密清洗的 user / assistant 历史并产出严格 V1 JSON；单次压缩最多连续生成 4 个摘要批次，模型输出上限为 20,000 字符。摘要只保留目标、任务上下文、限制与偏好、决策及理由、未解决事项，不声称保存已完成操作或执行结果；规范执行事实由 ToolRun 投影独立提供。摘要调用不能调用 Registry / Broker、创建 Run / ToolRun、改变权限或把历史文字变成用户授权。API Key、认证头、Cookie、密码、token、JWT 和签名 URL 查询参数在摘要输入与输出边界都被清洗。
 - checkpoint 先 `started` 再原子转为 `completed`，覆盖边界必须单调、不能切开 Run，同一 Session 同时只有一个压缩任务。连续三次失败后按 Session + 配置 + 模型进入五分钟冷却；更换配置 / 模型或冷却结束后允许一次探测。摘要不可用时仍只发送有界近期历史，不无限重试或阻塞普通对话。
 - Agent 单个 provider turn 与整个 Run 的 assistant 内容硬上限均为 64,000 字符；Agent SSE 未完成事件缓存上限 128,000 字符，Tool 参数为每次调用 64,000、单轮合计 128,000 字符。通用 AI SSE 缓存上限 256,000 字符；非流式成功 JSON body 上限 2 MiB、错误 body 上限 64 KiB。达到任一上限都取消读取并失败，不继续累积内存或执行后续 Tool。
@@ -346,7 +352,7 @@ Renderer 写操作有两个不同的回执边界：后端已经确认创建节�
 - Renderer execution 使用独立 `AbortController` 关联 Run。commit 前停止、终态事件、资料库 scope 切换、组件卸载或 main 发出的 `tool-execution-cancelled` 会中止 Renderer executor；main-owned 上传同时监听 Broker capability signal，中止全部 in-flight PUT 并在提交尚未开始时 best-effort abort 后端 session。complete 已经发出后先以独立 signal reconcile 同一个 operation，不能把取消直接解释成未提交；commit 后不再撤销已完成写入，只等待最终回执并停止后续 Run。
 - 认证会话释放时通过 `agent:owner:release` 取消主窗口拥有的全部活跃 Run。
 - Agent 不读取 AI Service API Key，也不将 Key、Cookie、签名 URL 或完整环境变量写入 SQLite。
-- `AgentLocalProcessRunner` 当前不暴露 IPC 或 Tool；只接受 Tool 代码提供的绝对可执行文件路径与参数数组，固定 `shell: false`，只传安全环境变量白名单，并限制参数、并发、stdout/stderr、执行时间和取消后的进程树生命周期。macOS / Linux 使用独立进程组，Windows 终止策略收敛到 `electron/platform/processTree.ts`。未来 `shell.run` 仍只能经 Registry、main prepare、权限、ToolRun、Broker 和平台 Provider 进入，不能把 Runner 本身改成模型或 renderer 入口。
+- `AgentLocalProcessRunner` 当前不暴露 IPC 或 Tool；只接受 Tool 代码提供的绝对可执行文件路径与参数数组，固定 `shell: false`，只传安全环境变量白名单，并限制参数、并发、stdout/stderr、执行时间和取消后的进程树生命周期。macOS / Linux 使用独立进程组，Windows 终止策略收敛到 `electron/platform/processTree.ts`。已经注册的 `shell.run` 只能经 Registry、main prepare、权限、ToolRun、Broker 和平台 Provider 进入，不能把 Runner 本身改成模型或 renderer 入口。
 
 ## 7. 受控时间线与展示协议
 
@@ -364,9 +370,9 @@ AgentMessage + AgentRunSnapshot + AgentToolActivitySnapshot
 - 实时事件只对当前投影做增量合并，恢复与 Run 终态以 SQLite 返回的规范 Run / ToolActivity 为准。Run 和 ToolRun 均按 `revision` 接受更高版本；终态不能被迟到的 active 事件覆盖，较新的进度、确认或交互状态也不能被旧快照抹掉。系统时钟回拨或同毫秒更新不会改变状态新旧关系。
 - 历史 `role: tool` 文本消息继续保留在数据库中，时间线发现同一 `runId + toolCallId` 的 ToolActivity 时在该消息原位置以活动卡片替换；实时 `tool-started` 也创建同语义的瞬时消息锚点，后续 assistant delta 因而不会越过 Tool 卡。恢复中的未完成 Tool 没有持久化 tool message 时，按 `ordinal` 放在同 Run 最后一条消息之后；只有完全缺失同 Run 消息的损坏或遗留记录才按时间作全局降级。没有匹配活动的旧 Tool 消息仍按文本显示。
 - Tool 进度先写入 `agent_tool_runs.progress_json`，再发送 renderer 事件。应用退出或切走页面后，重新打开会话仍能看到最后一个规范进度和最终状态。
-- ToolRun 的 `tool_kind` 是持久化事实：普通能力固定为 `business`，当前唯一 `control` Tool 是 `skill.activate`。控制 Tool 仍保留 ToolRun 审计，但不占业务 Tool 配额，也不参与计划步骤绑定。
-- `buildAgentWorkflowProjection()` 是纯 selector：从 Run 的 `currentStep / status` 与同一 Run 内按 `ordinal` 排序的真实 ToolActivity 派生任务卡。它不调用 Registry、Broker 或 executor，不创建假 ToolRun，也不持久化总百分比或 renderer 自己猜测的步骤状态。
-- 复杂任务可通过保留的 provider 控制调用 `agent.plan.set` 声明一次 Run 内计划。该调用只在 provider 协议中可见，由 Orchestrator 截获；它不注册进业务 ToolRegistry、不创建 ToolRun、不调用 Broker / executor、不消耗业务 Tool 配额，也不形成预授权。
+- ToolRun 的 `tool_kind` 是持久化事实：普通能力固定为 `business`，当前唯一 `control` Tool 是 `skill.activate`。控制 Tool 仍保留 ToolRun 审计，但不参与计划步骤绑定；分类不承担调用次数计费。
+- `buildAgentWorkflowProjection()` 是纯 selector：从 Run 的 `currentStep / status` 与同一 Run 内按 `ordinal` 排序的真实 ToolActivity 派生内部任务投影。它不调用 Registry、Broker 或 executor，不创建假 ToolRun，也不持久化总百分比或 renderer 自己猜测的步骤状态。当前工作区不挂载独立 Workflow / Active Run 状态卡，真实执行、审批和交互继续由统一时间线中的 ToolActivity 展示。
+- 复杂任务可通过保留的 provider 控制调用 `agent.plan.set` 声明一次 Run 内计划。该调用只在 provider 协议中可见，由 Orchestrator 截获；它不注册进业务 ToolRegistry、不创建 ToolRun、不调用 Broker / executor，也不形成预授权。
 - 计划只允许 2 至 8 个步骤。模型只能提供计划标题、步骤标题和每步预计使用的已注册 Tool 名称；main 生成步骤 ID、`ordinal` 和时间。模型不能声明状态、进度、结果、权限、确认、关联 ID、revision、时间、UI、HTML、回调或 IPC。
 - 计划在首个真实 ToolRun 前一次性写入 `agent_runs.plan_json`，写入后不可改写，并与 Run `revision` 在同一条更新中递增。真实 ToolRun 创建时按“计划顺序 + 精确 Tool 名称”单调绑定尚未使用的步骤；偏离计划或重试产生的 ToolRun 保持未关联并仍作为真实执行展示。
 - 计划步骤状态完全由关联 ToolRun 派生。未关联步骤在活跃 Run 中显示为待执行，在终态 Run 中显示为未执行；计划本身不能推进执行、绕过参数校验、权限门或用户确认。恢复时保留计划和关联，但不自动重放未完成 Tool。
@@ -383,7 +389,7 @@ choice / form
 
 安全约束：
 
-- 模型、Tool 结果和历史消息不能提供 React 组件、JSX、HTML、CSS、回调、IPC channel、任意 URL 或本地路径。
+- 模型、Tool 结果和历史消息不能提供 React 组件、JSX、HTML、CSS、回调、IPC channel、任意 URL 或自行生成的本地路径。窄例外是用户在当前请求中明确给出的本机来源路径：它可以原样进入 `file.stage` / `file.upload` 的 strict Tool input，或进入 `shell.run` 的精确只读 command、main prepared action、确认卡和 SQLite 审计，但不能扩展为相邻目录枚举授权，也不能带出 canonical 路径、workspace 物理路径或其他本机路径。
 - 按钮只能携带共享协议声明的语义动作，例如 `tree.revealNode`；renderer 在中心分发点再次按动作 ID 选择本地处理器。
 - 当前仅注册 `tree.revealNode`，并且节点身份由已完成 Tool 的清洗结果和当前 `libraryId` 组合。其他已声明动作在没有本地处理器时不得执行。
 - `choice / form` 是同一个 ToolActivity 的交互阶段，不创建独立时间线事实。Renderer 只持有未提交草稿；`pending / submitted / expired / cancelled / interrupted` 状态和已提交回答均由 SQLite ToolRun 持有。提交成功后卡片继续保留为只读历史，迟到的 `pending` 事件不能让它重新可编辑。
@@ -466,8 +472,8 @@ Agent Session Store 使用 `sqlite3` 原生依赖：
 - `electron/platform/processTree.test.ts`
 - `electron/platform/mediaExecutable.test.ts`
 
-2026-08-31 收口验证：`npm test` 共 254 个测试文件、1,652 个用例通过、3 个跳过；`npm run lint`、`npx tsc --noEmit` 和 `npm run build` 均通过。build 仍有既有的单 chunk 超过 500 kB 警告；Tree-sitter runtime 已从 main ESM bundle 外部化，避免其依赖 `__filename` 的 CommonJS 初始化在 Electron 启动时失败。源码构建成功不替代安装包 ASAR 内 JS runtime / grammar WASM 解析和真实 macOS 命令验收。Windows 本轮未验收。
+2026-08-31 收口验证：`npm test` 共 254 个测试文件、1,662 个用例通过，3 个测试文件、7 个用例按既有条件跳过；`npm run lint`、`npx tsc --noEmit` 和 `npm run build` 均通过。build 仍有既有的单 chunk 超过 500 kB 警告；Tree-sitter runtime 已从 main ESM bundle 外部化，避免其依赖 `__filename` 的 CommonJS 初始化在 Electron 启动时失败。源码构建成功不替代安装包 ASAR 内 JS runtime / grammar WASM 解析和真实 macOS 命令验收。Windows 本轮未验收。
 
 完整手工路径见 `docs/frontend-validation-matrix.md` 的“内置 Agent”章节。测试资料库继续遵守 workspace 规则：任何场景禁止第一个资料库，`Win` 可用时优先使用 `Win`。
 
-Skill V1 的自动化已经覆盖 renderer 正文隔离，以及一次控制激活、8 个串行业务 Tool turn 和最终回答的轮次预算。2026-08-25 的真实验收记录进一步确认：provider 能正确选择并激活流程，`media-extract-audio` 能在非第一个资料库完成检查、提取、上传、刷新和新节点定位，也能通过系统 Save As 保存到本机。macOS / Windows 媒体差异继续由既有 Tool 和 process runner 承担；新增格式、平台或 provider 行为时仍需补充对应真实记录，不能只凭单元测试宣布兼容。
+Skill V1 的自动化已经覆盖 renderer 正文隔离、控制激活、连续多轮业务 Tool 与最终回答；固定调用次数的旧预算不再构成契约，后续自动化必须覆盖上下文驱动续接和无进展重复循环门禁。2026-08-25 的真实验收记录进一步确认：provider 能正确选择并激活流程，`media-extract-audio` 能在非第一个资料库完成检查、提取、上传、刷新和新节点定位，也能通过系统 Save As 保存到本机。macOS / Windows 媒体差异继续由既有 Tool 和 process runner 承担；新增格式、平台或 provider 行为时仍需补充对应真实记录，不能只凭单元测试宣布兼容。

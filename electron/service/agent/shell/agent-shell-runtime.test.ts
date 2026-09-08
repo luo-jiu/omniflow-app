@@ -253,6 +253,11 @@ describe('Agent Shell Runtime', () => {
       executionId: 'execution-1',
       logRef: 'log:v1:ref',
       ok: true,
+      outputProjection: {
+        stderr: { totalBytes: 0 },
+        stdout: { head: 'hello', totalBytes: 5, truncated: false },
+        version: 1,
+      },
       processStatus: 'completed',
       status: 'completed',
     });

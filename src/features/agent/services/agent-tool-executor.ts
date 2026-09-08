@@ -21,6 +21,9 @@ import {
 } from './agent.api';
 import { readAgentPerception } from './agent-context.api';
 import { buildFileFullName } from '@/utils/fileTreeSettings';
+import { readAgentMediaError } from '@/shared/agent/agent-media-error';
+import { normalizeAgentLibraryDirectoryPath } from '@/shared/agent/agent-library-path';
+import { readAgentLibraryNode } from './agent-library.api';
 
 interface DirectoryCreateExecutionInput {
   conflictPolicy: 'error';
@@ -37,6 +40,7 @@ interface MediaInspectExecutionInput {
 }
 
 interface MediaExtractAudioExecutionBase {
+  targetDirectoryPath?: string;
   conflictPolicy: 'auto_rename';
   libraryId: number;
   mimeType?: string;
@@ -77,6 +81,7 @@ export interface AgentRendererToolOutcome {
 }
 
 export interface AgentRendererToolExecutorDependencies {
+  readLibraryNode?: typeof readAgentLibraryNode;
   createDirectory?: typeof createNode;
   extractMediaAudio?: typeof extractAgentMediaAudio;
   getMediaFileLink?: typeof getFileLink;
@@ -271,6 +276,7 @@ function normalizeMediaExtractAudioInput(
     throw new Error('音频提取的目标上下文已经变化');
   }
   const base: MediaExtractAudioExecutionBase = {
+    ...(source.targetDirectoryPath !== undefined ? { targetDirectoryPath: normalizeAgentLibraryDirectoryPath(source.targetDirectoryPath) } : {}),
     conflictPolicy: 'auto_rename',
     libraryId,
     ...(mimeType ? { mimeType } : {}),
@@ -425,6 +431,14 @@ async function executeMediaExtractAudio(
   const uploadMediaArtifact = dependencies.uploadMediaArtifact || uploadAgentMediaArtifact;
   const reportProgress = dependencies.reportProgress || reportAgentToolExecutionProgress;
   let artifactId = '';
+  const verifyTarget = async () => {
+    if (input.destination !== 'library' || !input.targetDirectoryPath) return;
+    const target = await (dependencies.readLibraryNode || readAgentLibraryNode)(input.libraryId, input.parentId);
+    if (target.libraryId !== input.libraryId || target.id !== input.parentId || target.type !== 'dir' || target.path !== input.targetDirectoryPath) {
+      throw new Error('资料库目标目录已移动、重命名或失效，请重新定位后再执行');
+    }
+    throwIfAborted(signal);
+  };
 
   const emitProgress = (progress: AgentToolProgress) => {
     const payload: AgentToolExecutionProgressRequest = {
@@ -439,6 +453,7 @@ async function executeMediaExtractAudio(
   };
   try {
     throwIfAborted(signal);
+    await verifyTarget();
     const sourceUrl = String(await getMediaFileLink(input.nodeId, input.libraryId, 360) || '').trim();
     throwIfAborted(signal);
     if (!sourceUrl) throw new Error('无法取得媒体文件的临时访问链接');
@@ -514,6 +529,7 @@ async function executeMediaExtractAudio(
       return { committed: true, result: committedResult };
     }
     emitProgress({ message: '正在上传提取后的音频', percent: 65 });
+    await verifyTarget();
     const uploadResult = await uploadMediaArtifact({
       artifactId,
       executionId: request.executionId,
@@ -604,9 +620,11 @@ async function executeMediaExtractAudio(
         },
       };
     }
+    const mediaFailure = readAgentMediaError(error);
     return {
       result: {
-        message: error instanceof Error ? error.message : '音频提取失败',
+        ...(mediaFailure ? { data: { failureCode: mediaFailure.code } } : {}),
+        message: mediaFailure?.message || (error instanceof Error ? error.message : '音频提取失败'),
         ok: false,
       },
     };
@@ -646,7 +664,14 @@ async function finishMediaExtractAudioExecution(
   }
 
   const createdNode = resolveCreatedNode(created, input.outputFileName);
-  const verified = perceptionContainsNode(perception, input.parentId, createdNode.id);
+  let verified = perceptionContainsNode(perception, input.parentId, createdNode.id);
+  if (input.targetDirectoryPath && createdNode.id) {
+    try {
+      const fresh = await (dependencies.readLibraryNode || readAgentLibraryNode)(input.libraryId, createdNode.id);
+      verified = fresh.id === createdNode.id && fresh.libraryId === input.libraryId && fresh.parentId === input.parentId && fresh.type === 'file';
+      if (verified && perception) perception = { ...perception, knownNodes: [fresh] };
+    } catch { verified = false; }
+  }
 
   return {
     committed: true,

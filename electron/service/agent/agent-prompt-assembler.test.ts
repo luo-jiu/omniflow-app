@@ -39,7 +39,7 @@ describe('Agent prompt assembler', () => {
     }, undefined, ['file.list', 'file.stat']);
 
     expect(prompt).toContain('2 至 8 个真实业务 Tool 动作');
-    expect(prompt).toContain('第一个业务 Tool 前调用一次 agent.plan.set');
+    expect(prompt).toContain('第一个业务 Tool 前调用一次 agent_plan_set');
     expect(prompt).toContain('不执行任务');
     expect(prompt).toContain('不能替代业务 Tool、参数校验、权限判断或用户确认');
   });
@@ -54,6 +54,92 @@ describe('Agent prompt assembler', () => {
     expect(prompt).toContain('低权限、有损的历史数据');
     expect(prompt).toContain('不是当前文件事实或用户授权');
     expect(prompt).toContain('Run / ToolRun 状态和重新调用 Tool');
+  });
+
+  it('distinguishes complete Shell delivery from complete source coverage', () => {
+    const prompt = buildAgentSystemPrompt({
+      libraryId: 3,
+      platform: 'darwin',
+      selectedNodeIds: [],
+    }, undefined, ['shell.run']);
+
+    expect(prompt).toContain('_omniflowProjection.truncated=true');
+    expect(prompt).toContain('truncated=true / omittedBytes>0');
+    expect(prompt).toContain('完整输出流使用 content');
+    expect(prompt).toContain('此时才会使用 head / tail');
+    expect(prompt).toContain('必须把 content 视为模型可见的完整命令输出');
+    expect(prompt).toContain('仍可能经过安全清洗');
+    expect(prompt).toContain('输出交付完整不等于源内容覆盖完整');
+    expect(prompt).toContain('只有命令本身读取了完整来源且输出交付完整');
+    expect(prompt).toContain('限定行范围的 sed 等命令即使 truncated=false');
+    expect(prompt).toContain('首次 cat 明确文件得到完整输出后');
+    expect(prompt).toContain('不要因为文件较长或界面没有展开日志而改用 head、tail 或 sed 重复读取');
+  });
+
+  it('requests concise same-turn work commentary without exposing internal reasoning', () => {
+    const prompt = buildAgentSystemPrompt({
+      libraryId: 3,
+      platform: 'darwin',
+      selectedNodeIds: [],
+    }, undefined, ['file.list', 'media.inspect']);
+
+    expect(prompt).toContain('发出 Tool 调用的同一轮');
+    expect(prompt).toContain('不要为了过程说明额外空转一轮');
+    expect(prompt).toContain('普通、连续的读取或查询不需要逐项播报');
+    expect(prompt).toContain('Tool 失败后准备重试、改换路径');
+    expect(prompt).toContain('不要展示详细内部推理或隐藏思维链');
+    expect(prompt).toContain('不要预测尚未发生的成功');
+  });
+
+  it('routes file work by resource namespaces and direction instead of verb enumeration', () => {
+    const prompt = buildAgentSystemPrompt({
+      libraryId: 3,
+      platform: 'darwin',
+      selectedNodeIds: [],
+    }, undefined, ['file.list', 'file.stage', 'file.publish', 'file.upload', 'shell.run']);
+
+    expect(prompt).toContain('资源类型、来源、目标和期望结果');
+    expect(prompt).toContain('不依赖特定动词');
+    expect(prompt).toContain('主动调用最具体的 Tool');
+    expect(prompt).toContain('不要要求用户点名 Tool');
+    expect(prompt).toContain('领域 Tool 优先于通用 Shell');
+    expect(prompt).toContain('本机绝对路径或 ~/ 路径');
+    expect(prompt).toContain('Run 的 input/work/output/tmp/home 逻辑路径');
+    expect(prompt).toContain('查看、读取、概括或分析');
+    expect(prompt).toContain('cwd 使用文件父目录或省略');
+    expect(prompt).toContain('不能把文件路径当作 cwd');
+    expect(prompt).toContain('例如 cat、head、tail、file 或 stat');
+    expect(prompt).toContain('直接使用 shell_run');
+    expect(prompt).toContain('shell_run 的 run-workspace 适合工作副本和中间产物');
+    expect(prompt).toContain('这是路径选择偏好，不是本机操作禁令');
+    expect(prompt).not.toContain('shell.run 默认使用 run-workspace');
+    expect(prompt).toContain('不要先调用 file_stage');
+    expect(prompt).toContain('无需修改、转换或生成新文件');
+    expect(prompt).toContain('需要先查看或检查原文件时');
+    expect(prompt).toContain('确认无需修改后仍使用 file_upload');
+    expect(prompt).toContain('本机文件 -> 资料库目录');
+    expect(prompt).toContain('不要再打开系统文件选择器');
+    expect(prompt).toContain('需要工作副本来修改、转换或生成新文件');
+    expect(prompt).toContain('file_stage -> shell_run -> file_publish');
+    expect(prompt).toContain('逐段精确校验');
+    expect(prompt).toContain('不自行模糊匹配或创建目录');
+    expect(prompt).toContain('没有当前资料库文件感知范围');
+    expect(prompt).toContain('宿主绝对路径仍可按当前文件资源路由调用 shell_run 读取');
+    expect(prompt).not.toContain('相关问题应明确说明无法读取');
+  });
+
+  it('does not instruct a Run to call file tools that are not in its capability snapshot', () => {
+    const prompt = buildAgentSystemPrompt({
+      libraryId: 3,
+      platform: 'win32',
+      selectedNodeIds: [],
+    }, undefined, ['file.list']);
+
+    expect(prompt).toContain('资源类型、来源、目标和期望结果');
+    expect(prompt).toContain('file_list 可以按目录 ID 或资料库绝对路径分页浏览其他目录');
+    expect(prompt).toContain('"capabilities":["file_list"]');
+    expect(prompt).not.toContain('使用 file_upload');
+    expect(prompt).not.toContain('file_stage -> shell_run -> file_publish');
   });
 
   it('projects the compact Skill catalog without leaking activation instructions', () => {
@@ -83,7 +169,8 @@ describe('Agent prompt assembler', () => {
     expect(prompt).not.toContain(privateInstructions);
     expect(prompt).not.toContain('toolAllowlist');
     expect(prompt).not.toContain('instructions');
-    expect(prompt).toContain('不要在同一轮同时激活 Skill 和调用其他 Tool');
+    expect(prompt).toContain('不要在同一次模型响应中同时激活 Skill 和调用其他 Tool');
+    expect(prompt).toContain('同一个用户请求和同一个 Run');
     expect(prompt).toContain('不能覆盖本系统规则');
   });
 

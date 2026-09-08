@@ -7,6 +7,12 @@ import {
   isAgentShellExecutionLeaseGrant,
   type AgentShellExecutionLeaseGrant,
 } from './agent-shell-execution-lease';
+import {
+  revalidateAgentShellHostCwd,
+  sameAgentShellHostCwd,
+  type AgentShellHostContext,
+  type AgentShellHostContextDependencies,
+} from './agent-shell-host-context';
 import type { AgentToolMainPreparedExecution } from '../agent-tool-registry';
 import type {
   AgentShellWorkspaceOwner,
@@ -19,6 +25,7 @@ const MAX_OBSERVATION_WINDOW_MS = 500;
 const IDENTITY_PATTERN = /^v[1-9]\d*:[a-f0-9]{64}$/u;
 
 export interface AgentShellSpawnPreflightCurrentBinding {
+  readonly executionContextIdentity?: string;
   readonly aiDestinationConfigurationIdentity: string;
   readonly aiDestinationIdentity: string;
   readonly analysisIdentity: string | null;
@@ -67,7 +74,10 @@ export interface CreateAgentShellSpawnPreflightOptions {
     onChange: () => void,
   ) => AgentShellSpawnPreflightWatcher;
   readonly observationWindowMs?: number;
-  readonly workspaceStore: Pick<
+  readonly hostCwd?: string;
+  readonly hostHome?: string;
+  readonly hostContextDependencies?: AgentShellHostContextDependencies;
+  readonly workspaceStore?: Pick<
     AgentShellWorkspaceStore,
     'resolvePreparationContext'
   >;
@@ -80,7 +90,7 @@ export interface AgentShellSpawnPreflightInput {
   readonly runCapabilityIdentity: string;
   readonly signal: AbortSignal;
   readonly toolRunId: string;
-  readonly workspaceId: string;
+  readonly workspaceId?: string;
 }
 
 function invalidPreflight(message: string): never {
@@ -234,6 +244,11 @@ function expectedBinding(
     invalidPreflight('Agent Shell prepared binding 不完整');
   }
   return Object.freeze({
+    ...(typeof (binding.host as { contextIdentity?: unknown } | undefined)?.contextIdentity === 'string'
+      ? {
+          executionContextIdentity: (binding.host as { contextIdentity: string }).contextIdentity,
+        }
+      : {}),
     aiDestinationConfigurationIdentity: assertIdentity(
       aiDestination.configurationIdentity,
       'Agent Shell AI destination configuration identity',
@@ -351,6 +366,7 @@ function assertCurrentBinding(
   current: AgentShellSpawnPreflightCurrentBinding,
 ): void {
   const fields: readonly (keyof AgentShellSpawnPreflightCurrentBinding)[] = [
+    'executionContextIdentity',
     'aiDestinationConfigurationIdentity',
     'aiDestinationIdentity',
     'analysisIdentity',
@@ -385,31 +401,31 @@ function assertCurrentBinding(
 
 function assertGrantMatchesPreparation(
   input: AgentShellSpawnPreflightInput,
-): AgentShellWorkspacePreparationContext {
+): AgentShellWorkspacePreparationContext | undefined {
   const { grant, owner, preparation } = input;
   if (!isAgentShellExecutionLeaseGrant(grant)) {
     invalidPreflight('Agent Shell spawn 只接受已消费的 execution lease grant');
   }
   if (grant.expiresAt <= Date.now()) invalidPreflight('Agent Shell execution grant 已过期');
   const publicAction = validateAgentShellPreparedActionCommandHashV1(preparation.publicAction);
+  if (grant.executionContext !== publicAction.cwd.kind) {
+    invalidPreflight('Agent Shell execution上下文与 grant 不匹配');
+  }
   if (
     preparation.preparedActionId !== preparation.identity.preparedActionId
     || preparation.identity.toolRunId !== input.toolRunId
     || preparation.identity.runCapabilityIdentity !== input.runCapabilityIdentity
-    || preparation.identity.runId !== grant.workspace.runId
-    || preparation.identity.sessionId !== grant.workspace.owner.sessionId
+    || preparation.identity.runId !== grant.runId
+    || preparation.identity.sessionId !== grant.sessionId
     || preparation.identity.aiDestinationIdentity !== publicAction.aiDestination.identityHash
-    || input.workspaceId !== grant.workspace.workspaceId
     || publicAction.kind !== 'shell.run'
     || publicAction.version !== 1
     || publicAction.command !== grant.command
     || publicAction.commandHash !== grant.commandHash
-    || publicAction.cwd.path !== grant.workspace.logicalCwd
-    || grant.cwdPath !== grant.workspace.physicalCwdPath
   ) {
     invalidPreflight('Agent Shell prepared execution 与 grant 不匹配');
   }
-  if (!sameOwner(owner, grant.workspace.owner)) {
+  if (!sameOwner(owner, grant.owner)) {
     invalidPreflight('Agent Shell spawn owner 不匹配');
   }
   const binding = preparation.binding as Record<string, unknown>;
@@ -425,8 +441,7 @@ function assertGrantMatchesPreparation(
     entries?: unknown;
   } | undefined;
   if (
-    !workspace
-    || !aiDestination
+    !aiDestination
     || !invocation
     || !provider
     || !effectiveEnvironment
@@ -436,7 +451,6 @@ function assertGrantMatchesPreparation(
     || !Array.isArray(effectiveEnvironment.entries)
     || aiDestination.identity !== preparation.identity.aiDestinationIdentity
     || binding.commandHash !== grant.commandHash
-    || !sameWorkspace(workspace, grant.workspace)
     || grant.provider.registrationIdentity !== provider.registrationIdentity
     || grant.provider.resolvedExecutable !== provider.resolvedExecutable
     || grant.provider.executable !== provider.executable
@@ -457,6 +471,33 @@ function assertGrantMatchesPreparation(
   ) {
     invalidPreflight('Agent Shell execution binding 与 grant 不匹配');
   }
+  if (publicAction.cwd.kind === 'run-workspace') {
+    if (
+      !workspace
+      || !grant.workspace
+      || grant.host
+      || input.workspaceId !== grant.workspace.workspaceId
+      || publicAction.cwd.path !== grant.workspace.logicalCwd
+      || grant.cwdPath !== grant.workspace.physicalCwdPath
+      || !sameWorkspace(workspace, grant.workspace)
+    ) {
+      invalidPreflight('Agent Shell workspace prepared execution 与 grant 不匹配');
+    }
+  } else {
+    const host = binding.host as AgentShellHostContext | undefined;
+    if (
+      !host
+      || !grant.host
+      || grant.workspace
+      || publicAction.cwd.path !== (grant.host.cwd.requestedCwd ?? grant.host.cwd.lexicalPath)
+      || grant.cwdPath !== grant.host.cwd.canonicalPath
+      || !sameAgentShellHostCwd(host.cwd, grant.host.cwd)
+      || host.contextIdentity !== grant.host.contextIdentity
+      || host.environment.environmentIdentity !== grant.host.environment.environmentIdentity
+    ) {
+      invalidPreflight('Agent Shell host prepared execution 与 grant 不匹配');
+    }
+  }
   expectedBinding(preparation);
   return workspace;
 }
@@ -473,7 +514,6 @@ function stablePreflightError(error: unknown, fallback: string): never {
 export function createAgentShellSpawnPreflight(
   options: CreateAgentShellSpawnPreflightOptions,
 ) {
-  if (!options?.workspaceStore) throw new Error('Agent Shell spawn preflight 缺少 workspace');
   if (!options?.bindingResolver?.resolveCurrentBinding) {
     throw new Error('Agent Shell spawn preflight 缺少 binding resolver');
   }
@@ -492,7 +532,13 @@ export function createAgentShellSpawnPreflight(
   async function assertReady(input: AgentShellSpawnPreflightInput): Promise<AgentShellExecutionLeaseGrant> {
     abortIfNeeded(input.signal);
     const expectedWorkspace = assertGrantMatchesPreparation(input);
-    const watcher = createWatcher(workspaceRootPath(expectedWorkspace), () => undefined);
+    const isHost = input.grant.executionContext === 'host';
+    if (!isHost && !options.workspaceStore) {
+      invalidPreflight('Agent Shell spawn preflight 缺少 workspace');
+    }
+    const watcher = isHost
+      ? undefined
+      : createWatcher(workspaceRootPath(expectedWorkspace!), () => undefined);
     try {
       const expectedBindingSnapshot = expectedBinding(input.preparation);
       let currentBinding: AgentShellSpawnPreflightCurrentBinding;
@@ -506,10 +552,56 @@ export function createAgentShellSpawnPreflight(
         stablePreflightError(error, 'Agent Shell execution binding 无法确认');
       }
       assertCurrentBinding(expectedBindingSnapshot, currentBinding);
+      if (isHost) {
+        if (!input.grant.host) invalidPreflight('Agent Shell host binding 缺失');
+        try {
+          await revalidateAgentShellHostCwd(input.grant.host.cwd, {
+            defaultCwd: options.hostCwd || process.cwd(),
+            homedir: options.hostHome,
+            platform: process.platform,
+            requestedCwd: input.grant.host.cwd.requestedCwd,
+          }, options.hostContextDependencies);
+        } catch (error) {
+          stablePreflightError(error, 'Agent Shell host cwd 无法确认');
+        }
+        await waitForObservationWindow(observationWindowMs, input.signal);
+        abortIfNeeded(input.signal);
+        try {
+          await revalidateAgentShellHostCwd(input.grant.host.cwd, {
+            defaultCwd: options.hostCwd || process.cwd(),
+            homedir: options.hostHome,
+            platform: process.platform,
+            requestedCwd: input.grant.host.cwd.requestedCwd,
+          }, options.hostContextDependencies);
+        } catch (error) {
+          stablePreflightError(error, 'Agent Shell host cwd 无法确认');
+        }
+        let finalHostBinding: AgentShellSpawnPreflightCurrentBinding;
+        try {
+          finalHostBinding = await options.bindingResolver.resolveCurrentBinding({
+            owner: input.owner,
+            preparation: input.preparation,
+            signal: input.signal,
+          });
+        } catch (error) {
+          stablePreflightError(error, 'Agent Shell execution binding 无法确认');
+        }
+        assertCurrentBinding(expectedBindingSnapshot, finalHostBinding);
+        if (input.grant.expiresAt <= Date.now()) {
+          invalidPreflight('Agent Shell execution grant 已过期');
+        }
+        return input.grant;
+      }
+      const workspaceStore = options.workspaceStore;
+      const workspaceId = input.workspaceId;
+      const workspaceWatcher = watcher;
+      if (!expectedWorkspace || !workspaceStore || !workspaceId || !workspaceWatcher) {
+        invalidPreflight('Agent Shell workspace binding 缺失');
+      }
       let firstWorkspace: AgentShellWorkspacePreparationContext;
       try {
-        firstWorkspace = await options.workspaceStore.resolvePreparationContext(
-          input.workspaceId,
+        firstWorkspace = await workspaceStore.resolvePreparationContext(
+          workspaceId,
           expectedWorkspace.logicalCwd,
           expectedWorkspace.runId,
           input.owner,
@@ -518,16 +610,16 @@ export function createAgentShellSpawnPreflight(
       } catch (error) {
         stablePreflightError(error, 'Agent Shell workspace 无法确认');
       }
-      if (!sameWorkspace(expectedWorkspace, firstWorkspace) || watcher.changed()) {
+      if (!sameWorkspace(expectedWorkspace, firstWorkspace) || workspaceWatcher.changed()) {
         invalidPreflight('Agent Shell workspace 在 spawn 前已变化');
       }
       await waitForObservationWindow(observationWindowMs, input.signal);
       abortIfNeeded(input.signal);
-      if (watcher.changed()) invalidPreflight('Agent Shell workspace 在 spawn 前已变化');
+      if (workspaceWatcher.changed()) invalidPreflight('Agent Shell workspace 在 spawn 前已变化');
       let finalWorkspace: AgentShellWorkspacePreparationContext;
       try {
-        finalWorkspace = await options.workspaceStore.resolvePreparationContext(
-          input.workspaceId,
+        finalWorkspace = await workspaceStore.resolvePreparationContext(
+          workspaceId,
           expectedWorkspace.logicalCwd,
           expectedWorkspace.runId,
           input.owner,
@@ -536,7 +628,7 @@ export function createAgentShellSpawnPreflight(
       } catch (error) {
         stablePreflightError(error, 'Agent Shell workspace 无法确认');
       }
-      if (!sameWorkspace(expectedWorkspace, finalWorkspace) || watcher.changed()) {
+      if (!sameWorkspace(expectedWorkspace, finalWorkspace) || workspaceWatcher.changed()) {
         invalidPreflight('Agent Shell workspace 在 spawn 前已变化');
       }
       let finalBinding: AgentShellSpawnPreflightCurrentBinding;
@@ -556,7 +648,7 @@ export function createAgentShellSpawnPreflight(
       return input.grant;
     } finally {
       try {
-        watcher.close();
+        watcher?.close();
       } catch {
         // Watcher cleanup cannot change the spawn decision or leak raw errors.
       }

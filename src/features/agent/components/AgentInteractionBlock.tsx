@@ -45,14 +45,14 @@ const Interaction = styled.section`
     grid-template-columns: 18px minmax(0, 1fr);
     gap: 8px;
     align-items: start;
-    padding: 8px 10px;
-    border-radius: var(--app-radius-small);
-    background: color-mix(in srgb, var(--app-text-muted) 6%, transparent);
+    padding: 5px 0;
+    border-radius: 0;
+    background: transparent;
     cursor: pointer;
   }
 
   .agent-interaction-option:has(input:checked) {
-    background: color-mix(in srgb, var(--semi-color-primary) 14%, transparent);
+    color: var(--semi-color-primary);
   }
 
   .agent-interaction-option:has(input:disabled) {

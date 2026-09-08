@@ -1,4 +1,6 @@
 import type { AgentToolResult } from '@/shared/agent/agent.types';
+import { AgentMediaError, classifyAgentMediaProcessFailure } from '../../../src/shared/agent/agent-media-error';
+import { assertAgentMediaSourceReadable } from './agent-media-source-check';
 import { resolveDesktopFfprobePath } from '../../platform/mediaExecutable';
 import {
   agentLocalProcessRunner,
@@ -22,6 +24,7 @@ interface AgentMediaInspectSource {
 }
 
 interface AgentMediaInspectorDependencies {
+  checkSource?: typeof assertAgentMediaSourceReadable;
   createProxySource?: (input: {
     fileName: string;
     mimeType?: string;
@@ -128,6 +131,7 @@ export function parseAgentFfprobeOutput(stdout: string) {
     ? Math.min(root.chapters.length, MAX_CHAPTERS)
     : 0;
   return {
+    hasAudio: Array.isArray(root.streams) && root.streams.some(stream => record(stream).codec_type === 'audio'),
     chapterCount,
     format: compact({
       bitRate: integer(format.bit_rate),
@@ -182,6 +186,7 @@ export async function inspectAgentMediaSource(
     sourceUrl: input.sourceUrl,
   });
   try {
+    await (dependencies.checkSource || assertAgentMediaSourceReadable)(proxy.url, signal);
     const runProcess = dependencies.runProcess || (request => agentLocalProcessRunner.run(request));
     const processResult = await runProcess({
       args: buildAgentFfprobeArgs(proxy.url),
@@ -191,8 +196,10 @@ export async function inspectAgentMediaSource(
       timeoutMs: FFPROBE_TIMEOUT_MS,
     });
     if (processResult.exitCode !== 0) {
+      const error = classifyAgentMediaProcessFailure(processResult.stderr, processResult.exitCode);
       return {
-        message: `无法读取“${input.fileName}”的媒体信息（ffprobe 退出码 ${processResult.exitCode ?? 'unknown'}）`,
+        data: { failureCode: error.code },
+        message: error.message,
         ok: false,
       };
     }
@@ -208,6 +215,9 @@ export async function inspectAgentMediaSource(
       message: `已读取“${input.fileName}”的媒体信息：${inspected.streamCount} 个媒体流`,
       ok: true,
     };
+  } catch (error) {
+    if (signal.aborted || !(error instanceof AgentMediaError)) throw error;
+    return { ok: false, message: error.message, data: { failureCode: error.code } };
   } finally {
     proxy.release();
   }

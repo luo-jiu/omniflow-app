@@ -72,9 +72,9 @@ function prepared(timeoutMs = 10_000): AgentToolMainPreparedExecution {
       runCapabilityIdentity: `v1:${'7'.repeat(64)}`,
       runId: 'run-1',
       sessionId: 'session-1',
-      toolInputHash: `sha256:${'8'.repeat(64)}`,
+      toolInputHash: '8'.repeat(64),
       toolName: 'shell.run',
-      toolRegistrationId: 'omniflow.shell.run.v1',
+      toolRegistrationId: 'shell.run@1',
       toolRunId: 'tool-run-1',
     },
     preparedActionId: 'prepared-1',
@@ -101,7 +101,7 @@ function prepared(timeoutMs = 10_000): AgentToolMainPreparedExecution {
       timeoutMs,
       version: 1,
     },
-    snapshotHash: `sha256:${'9'.repeat(64)}`,
+    snapshotHash: '9'.repeat(64),
   };
 }
 
@@ -125,8 +125,12 @@ async function grant(timeoutMs = 10_000) {
 
 async function windowsGrant() {
   const source = await grant();
+  if (source.executionContext !== 'run-workspace' || !source.workspace) {
+    throw new Error('Windows process supervisor fixture requires a workspace grant');
+  }
+  const sourceWorkspace = source.workspace;
   const windowsWorkspace = Object.freeze({
-    ...source.workspace,
+    ...sourceWorkspace,
     physicalCwdPath: 'C:\\OmniFlow\\agent\\workspace\\work',
   });
   return Object.freeze({
@@ -213,7 +217,7 @@ describe('Agent Shell process supervisor', () => {
       stdout: '你',
       terminationConfirmed: true,
     });
-    expect(result.output.map(event => event.stream)).toEqual(['stdout', 'stderr', 'stdout']);
+    expect(result.output.map(event => event.stream)).toEqual(['stderr', 'stdout']);
     expect(events.slice(0, 2)).toEqual(['starting', 'running']);
     expect(events.at(-1)).toBe('completed');
   });
@@ -345,21 +349,55 @@ describe('Agent Shell process supervisor', () => {
     }
   });
 
-  it('drains output after the bound, records dropped bytes, and fails the run', async () => {
+  it('keeps draining after the capture bound and returns an explicit head-tail marker', async () => {
     const child = childFixture();
     const fixture = supervisorFixture(child, { maxOutputBytes: 4 });
-    const handle = fixture.supervisor.start({ grant: await grant() });
+    const streamed: string[] = [];
+    const handle = fixture.supervisor.start({
+      grant: await grant(),
+      onEvent: event => {
+        if (event.kind === 'output') streamed.push(event.text);
+      },
+    });
     await Promise.resolve();
     child.stdout.write('abcdef');
+    child.emit('close', 0, null);
     const result = await handle.promise;
 
     expect(result).toMatchObject({
       droppedOutputBytes: 2,
       outputBytes: 6,
-      status: 'failed',
-      stdout: 'abcd',
+      status: 'completed',
+      stdout: 'ab\n[... 2 bytes omitted ...]\nef',
     });
-    expect(fixture.terminateProcessTree).toHaveBeenCalled();
+    expect(result.output.map(event => event.text)).toEqual(['ab', 'ef']);
+    expect(streamed.join('')).toBe('abcdef');
+    expect(fixture.terminateProcessTree).not.toHaveBeenCalled();
+  });
+
+  it('bounds retained events for one-byte fragmented UTF-8 output', async () => {
+    const child = childFixture();
+    const output = '你'.repeat(5_000);
+    const bytes = Buffer.from(output, 'utf8');
+    const fixture = supervisorFixture(child, { maxOutputBytes: bytes.byteLength + 1 });
+    const handle = fixture.supervisor.start({ grant: await grant() });
+    await Promise.resolve();
+
+    for (const byte of bytes) child.stdout.write(Buffer.from([byte]));
+    child.emit('close', 0, null);
+    const result = await handle.promise;
+
+    expect(result.output).toHaveLength(4_096);
+    expect(result.output.every((event, index, events) => (
+      index === 0 || event.sequence > events[index - 1].sequence
+    ))).toBe(true);
+    expect(result.output.map(event => event.text).join('')).toBe('你'.repeat(4_096));
+    expect(result).toMatchObject({
+      droppedOutputBytes: 2_712,
+      outputBytes: bytes.byteLength,
+      stdout: output,
+    });
+    expect(result.stdout).not.toContain('\uFFFD');
   });
 
   it('enforces concurrency and prevents reusing one consumed grant', async () => {

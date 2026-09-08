@@ -192,6 +192,31 @@ describe('Agent Tool registry', () => {
     })).rejects.toThrow('执行已取消');
   });
 
+  it('accepts only read-only business Tool grouping metadata', () => {
+    const registry = createAgentToolRegistry([{
+      description: 'List visible files',
+      execute: async () => ({ ok: true }),
+      inputSchema: { type: 'object' },
+      name: 'file.list-grouped',
+      presentation: { groupKind: 'resource-read', operationKind: 'list' },
+      risk: 'read',
+    }]);
+
+    expect(registry.get('file.list-grouped')?.presentation).toEqual({
+      groupKind: 'resource-read',
+      operationKind: 'list',
+    });
+    expect(Object.isFrozen(registry.get('file.list-grouped')?.presentation)).toBe(true);
+    expect(() => createAgentToolRegistry([{
+      description: 'Must not group a write',
+      execute: async () => ({ ok: true }),
+      inputSchema: { type: 'object' },
+      name: 'file.write-grouped',
+      presentation: { groupKind: 'resource-read', operationKind: 'read' },
+      risk: 'write',
+    }])).toThrow('展示分组元数据无效');
+  });
+
   it('reserves agent control protocol names outside the business Tool registry', () => {
     const registry = createAgentToolRegistry();
     expect(() => registry.register({

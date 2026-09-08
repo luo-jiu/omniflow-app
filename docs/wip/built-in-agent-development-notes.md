@@ -1,11 +1,11 @@
-# 内置 Agent 开发讨论稿
+# 内置 Agent 历史开发讨论稿
 
-> **临时文档。** 本文记录 OmniFlow 内置 Agent 的阶段性讨论结论和当前落地边界，不是最终架构契约。方案稳定后，应将有效边界整理到工具工作区、AI 服务和对应任务文档中，并删除或归档本文。
+> **历史文档，不是当前实现契约。** 本文保留 OmniFlow 内置 Agent 的阶段性讨论、外部项目调研和设计取舍。正文中的 `agent-home`、阶段完成度、待验证项、页面草图和候选结构可能早于当前实现，禁止据此直接修改 UI、状态 owner 或执行链路。
 
-更新时间：2026-08-24
+更新时间：2026-08-31
 适用范围：`src/features/tool-workspace/`、`src/features/ai-services/`、Electron 本地任务能力，以及未来的内置 Agent 工具区。
 
-> 已落地的 Agent IPC、会话存储、运行恢复、ToolBroker、长期记忆、本地进程基座、Skill 主链和状态所有权以 `docs/built-in-agent-architecture.md` 为准。Skill V1 的设计理由、Claude Code / OpenCode 调研取舍和剩余验收门禁单独保留在同目录的 `built-in-agent-skill-v1-design.md`；本文不再维护另一套 Skill 契约。
+> 已落地的 Agent IPC、会话存储、运行恢复、ToolBroker、长期记忆、本地进程基座、Skill 主链和状态所有权以 `docs/built-in-agent-architecture.md` 为准；renderer 页面模式、组件职责、受控展示和视觉验证以 `docs/built-in-agent-ui-contract.md` 为准。当前 Agent 复用 `search-home` 工作区落点，并不存在独立 `agent-home` 状态。Skill V1 的设计理由、Claude Code / OpenCode 调研取舍单独保留在同目录的 `built-in-agent-skill-v1-design.md`；本文不再维护另一套当前契约。
 
 ## 1. 目标
 
@@ -76,7 +76,7 @@ interface AgentTool {
 ```text
 file.list
 file.stat
-file.readText
+shell.run
 media.inspect
 media.transcode
 media.extractAudio
@@ -87,7 +87,7 @@ file.importToLibrary
 workspace.openResult
 ```
 
-第一批已经覆盖当前上下文感知、提取音频、结果保存和打开；通用音视频转码仍需先有受控 `media.transcode` Tool。字幕翻译属于后续候选 Skill，不进入 Agent 核心链路。
+本机文件读取不新增 `file.readText`：查看、概括或分析用户明确给出的宿主绝对路径统一使用受权限链约束的 `shell.run`；需要工作副本或修改时才 `file.stage`。第一批已经覆盖当前上下文感知、提取音频、结果保存和打开；通用音视频转码仍需先有受控 `media.transcode` Tool。字幕翻译属于后续候选 Skill，不进入 Agent 核心链路。
 
 ### 3.2 Skill
 
@@ -96,6 +96,8 @@ Skill 是 Tool 的按需编排说明，不是任意代码插件、executor、权
 Skill 的 `toolAllowlist` 只能缩小本轮模型可见能力，不能授权 Tool。Tool 的 Schema、动态权限、确认、Broker、取消、审计和再感知仍是唯一执行边界。有效 Tool 集、控制调用、同轮激活和快照语义不在本文重复定义，统一以 `built-in-agent-skill-v1-design.md` 为准。
 
 ## 4. 本地进程与 Shell
+
+> 本节保留早期“先做高层 Tool、不开放 Shell”的历史取舍。后续已经批准 Code Agent 级 raw Shell 目标，正式契约以 `docs/built-in-agent-shell-architecture.md` 为准；当前 macOS Zsh 已进入固定 `ask` 的单次批准开发预览，不能据此宣称 Linux、Windows、持久规则或 OS sandbox 已经落地。
 
 当前项目已经在 Electron main 侧使用 `spawn(command, args)` 执行 ffmpeg。Agent 不应直接拼接任意 Shell 字符串，而应调用高层 Tool：
 
@@ -134,15 +136,9 @@ external
   网络请求、上传或向外部服务发送内容，单独确认
 ```
 
-第一版不提供无限制 `shell.run`。如果未来增加高级 Shell Tool，必须默认关闭并具备：
+早期第一版不提供 `shell.run`，当时曾考虑命令白名单。该取舍已经被正式 Shell 专题替代：目标版本接受 raw command，通过工作区、Provider AST 分析、显式权限规则、审批、环境隔离、进程树取消和审计控制风险，不再把命令白名单当成 Shell 设计。高层 Tool 仍应保留，因为稳定业务动作的结构化参数和再感知语义比 raw Shell 更可靠。
 
-- 命令白名单，不接受模型直接拼接任意命令。
-- 工作目录和真实路径限制，防止 `..`、符号链接和 Windows UNC 路径逃逸。
-- 环境变量白名单，不向子进程暴露 API Key、Cookie 和完整环境。
-- 超时、输出上限、并发限制和可取消的进程树。
-- 显示完整命令、工作目录和风险，并按危险级别确认。
-
-“只读 Shell”不能仅靠禁止几个写命令实现；Shell 语法、重定向、命令替换、脚本解释器和网络工具都可能绕过表面限制。因此优先提供结构化只读 Tool，而不是任意 Shell。
+“只读 Shell”不能仅靠禁止几个写命令实现；Shell 语法、重定向、命令替换、脚本解释器和网络工具都可能绕过表面限制。正式方案也明确不把 AST、cwd 或权限规则描述成 OS 沙箱。
 
 ## 5. 记忆系统与上下文
 
@@ -266,8 +262,8 @@ interface AgentMemoryStore {
 ```text
 Tool 权限
   -> 参数校验
-  -> 命令白名单
-  -> 路径沙箱
+  -> Shell AST 分析与显式权限规则
+  -> Run 工作区与受控文件桥
   -> 环境变量隔离
   -> 网络限制
   -> 进程资源限制
@@ -329,19 +325,20 @@ AI Service 继续负责 provider、模型和 Key；Agent 只请求当前启用�
 - 会话摘要、有界上下文投影与 checkpoint 已落地；确认式用户偏好、资料库记忆、结构化召回和管理页也已落地。FTS / 向量召回仍是后续派生层。
 - 高风险动作的统一确认门已落地，且单次确认不会跨 Run 继承。
 
-### Phase 3：内置 Skill V1（代码与自动化已落地，端到端待验证）
+### Phase 3：内置 Skill V1（已落地并完成主路径验收）
 
 - 已注册受控的内置 TypeScript Skill catalog，并在 Run 启动时与 Tool catalog 一起冻结快照。
 - 初始上下文已经只注入 Skill 摘要；模型通过独占的 `skill.activate` 加载完整说明，下一 turn 才收窄业务 Tool。
 - 第一条 `media-extract-audio` 已进入 catalog，只编排现有 Tool，不新增 executor、权限路径或任务状态机。
-- Main 会在事件与 Session 返回边界剥离 Skill 正文，provider 总上限为 10 turn、业务 Tool 调用上限仍为 8；真实 provider 和媒体端到端手工路径仍未验证。
+- Main 会在事件与 Session 返回边界剥离 Skill 正文，provider 总上限为 10 turn、业务 Tool 调用上限仍为 8；2026-08-25 已完成真实 provider 和 macOS 非第一个资料库媒体主路径验收。
 - 插件、磁盘 Markdown、远程来源、Hook、子 Agent 和热更新全部延期，详见 `built-in-agent-skill-v1-design.md`。
 
-### Phase 4：高级本地命令能力
+### Phase 4：高级本地命令能力（macOS 三态权限开发预览已贯通）
 
-- 评估是否需要 `shell.run`。
-- 只对明确启用的高级用户开放。
-- 首先支持受限工作目录和命令白名单，再考虑交互式 PTY。
+- macOS 系统 Zsh 探测成功后动态注册 `shell.run`；raw command 已通过 main prepare、单次审批、Run 工作区、日志、执行期配额和平台 Provider 进入现有 ToolRun 链路。
+- 本机 `ask / auto / full-access` 设置、`file.stage / file.publish / file.upload` 文件桥和详细 Shell 日志 action 已接入开发预览；持久命令规则与 Linux / Windows 执行仍未开放。
+- V1 只做非交互前台命令；后台 Job 与 PTY 后续独立建设。
+- 完整实现顺序和双平台门禁见 `docs/built-in-agent-shell-architecture.md`。
 
 ## 9. 仍未决问题
 
@@ -514,7 +511,7 @@ library detail
       ├─ file-viewer       已打开文件时展示 Viewer
       ├─ browser           顶部浏览器入口
       ├─ tools             AI 服务配置、媒体等精细工具
-      └─ agent-home        没有打开文件时的默认 Agent 对话
+      └─ search-home       当前承载默认 Agent 对话
 ```
 
 Agent 首页采用“空状态居中、开始对话后变成时间线”的布局：
@@ -547,8 +544,8 @@ Agent 首屏不主动展示服务连接配置细节；服务仍由 `AI 服务配
 LibraryDetail
   持有 workspaceDisplayMode、当前资料库和目录树选中项
        ↓ 只读上下文投影
-AgentWorkspace
-  持有当前会话显示、输入草稿和滚动位置
+AgentWorkspace / useAgentSession
+  分别持有页面编排，以及当前会话 renderer 投影、输入草稿和在途协调
        ↓ 受控 bridge
 Electron main
   持有任务状态、Tool 执行、AI 流式请求和本地记忆
@@ -650,7 +647,7 @@ electron/service/agent/
 - 接入当前 AI 服务配置和模型选择。
 - 完成消息、停止、错误和重新开始会话。
 
-当前实现已完成本步骤的第一版：`AgentWorkspace` 已接入 `library detail` 默认空状态，Agent IPC 已支持 OpenAI 兼容接口 / Claude 的 SSE 增量回复、停止、错误和新会话。真实 provider 请求仍需要用户在本机配置 AI 服务后手工验证；本轮没有自动发起外部 AI 请求。
+当前实现已完成本步骤：`AgentWorkspace` 已接入 `library detail` 的 `search-home` 默认落点，Agent IPC 已支持 OpenAI 兼容接口 / Claude 的 SSE 增量回复、停止、错误和新会话；后续真实 provider 与首条媒体 Skill 主路径也已在 2026-08-25 完成验收。
 
 ### Step 3：安全感知
 
@@ -669,7 +666,7 @@ electron/service/agent/
 - 已接入只读 `media.inspect` 和需要确认、临时输出、上传及结果落地校验的 `media.extractAudio`。
 - 字幕翻译等复杂 Skill 暂不阻塞核心 Agent 进度。
 
-当前已经跑通 `directory.create`、只读 `media.inspect` 和 `media.extractAudio` 各自的 Tool 闭环。目录创建由 main 完成参数校验、权限评估、确认持久化和一次性执行关联，Renderer 复用现有目录 API 创建节点。所有 Renderer 写操作在后端确认节点创建后先提交 authoritative result，再刷新并重新感知；只有最新目录包含同一个 `createdNodeId` 才视为已验证，刷新失败、取消或最终回执超时时由 `AgentToolBroker` 使用 committed fallback，不能把真实写入误报失败后重复执行。媒体读取与提取都只允许当前感知范围中的单个文件，Renderer 依据 main 生成的一次性请求取得签名链接，main 再校验窗口、owner、资料库、Session、Run、execution ID 和内部能力防重放；签名链接只进入瞬时 IPC 和本机 loopback 代理。音频提取使用固定 ffmpeg 参数，只支持 `m4a / mp3 / wav`，默认 `m4a`；输出名在确认前限制为 240 UTF-8 bytes，自动改名后以服务端实际节点名称为准。main 的 Artifact Store 负责 2 GiB 单文件上限、4 个活跃产物、默认 8 GiB 总预留、1 小时无活动 TTL 和 Run / 窗口 / 崩溃残留清理，近期残留计入总量，应用启动时清理过期残留，上传进度会续期产物 lease。commit 前停止任务或 Broker 超时会反向通知 Renderer，并同时取消进程与上传；commit 后只收口刷新和 Run，不撤销已经成功的写入。模型与 SQLite 只获得清洗后的结构化结果，不接触 URL、本地路径、artifact ID 或 stderr。三条链路的 main / renderer 分发均收敛到 `AgentToolBroker`，本地进程生命周期收敛到 `AgentLocalProcessRunner`。结果定位、基于执行事实的任务现场，以及 Run 内一次性受限计划与真实 ToolRun 的关联已经补齐；`media-extract-audio` Skill 的组合端到端验证通过后，才评估 `media.transcode`，仍不扩展通用 Shell。项目尚未正式发布，确认审计字段与当前任务投影所需字段直接并入 schema 2 建表定义，本机已有 schema 2 数据库以幂等补列原地兼容，不新增 schema 版本。
+当前已经跑通 `directory.create`、只读 `media.inspect` 和 `media.extractAudio` 各自的 Tool 闭环。目录创建由 main 完成参数校验、权限评估、确认持久化和一次性执行关联，Renderer 复用现有目录 API 创建节点。所有 Renderer 写操作在后端确认节点创建后先提交 authoritative result，再刷新并重新感知；只有最新目录包含同一个 `createdNodeId` 才视为已验证，刷新失败、取消或最终回执超时时由 `AgentToolBroker` 使用 committed fallback，不能把真实写入误报失败后重复执行。媒体读取与提取都只允许当前感知范围中的单个文件，Renderer 依据 main 生成的一次性请求取得签名链接，main 再校验窗口、owner、资料库、Session、Run、execution ID 和内部能力防重放；签名链接只进入瞬时 IPC 和本机 loopback 代理。音频提取使用固定 ffmpeg 参数，只支持 `m4a / mp3 / wav`，默认 `m4a`；输出名在确认前限制为 240 UTF-8 bytes，自动改名后以服务端实际节点名称为准。main 的 Artifact Store 负责 2 GiB 单文件上限、4 个活跃产物、默认 8 GiB 总预留、1 小时无活动 TTL 和 Run / 窗口 / 崩溃残留清理，近期残留计入总量，应用启动时清理过期残留，上传进度会续期产物 lease。commit 前停止任务或 Broker 超时会反向通知 Renderer，并同时取消进程与上传；commit 后只收口刷新和 Run，不撤销已经成功的写入。模型与 SQLite 只获得清洗后的结构化结果，不接触 URL、本地路径、artifact ID 或 stderr。三条媒体链路的 main / renderer 分发均收敛到 `AgentToolBroker`，本地进程生命周期收敛到 `AgentLocalProcessRunner`。结果定位、基于执行事实的任务现场，以及 Run 内一次性受限计划与真实 ToolRun 的关联已经补齐；`media-extract-audio` Skill 的组合端到端验证已经通过，后续再按真实需求评估 `media.transcode`。raw Shell 使用独立的 `shell.run` Service Runtime，不复用或暴露 `AgentLocalProcessRunner`；macOS 单次批准链已贯通，但文件桥、持久权限和其他平台仍以 Shell 专题文档为准。项目尚未正式发布，确认审计字段与当前任务投影所需字段直接并入 schema 2 建表定义，本机已有 schema 2 数据库以幂等补列原地兼容，不新增 schema 版本。
 
 工具闭环也已接入同一 ToolActivity 内的 `interaction.request` 阶段。模型只有在完成任务确实缺少有限选择或少量参数时才能请求 `choice / form`；main 先规范化请求并持久化，再发出 `tool-interaction-required`。Renderer 只保存未提交草稿，提交时必须匹配窗口、owner、资料库、Session、Run 和一次性 interaction ID，回答还要重新按原请求 schema 校验。成功后原 ToolRun / Run 恢复执行并把结构化回答交给模型；重复提交、停止、超时和重启均不能复活请求。交互卡不能索取 Key、密码、Cookie 或令牌，也不能携带任意 UI、回调、URL 和执行行为。
 

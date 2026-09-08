@@ -33,6 +33,24 @@ function context(selectedNodeIds: number[] = [8]) {
 }
 
 describe('media.extractAudio Agent tool', () => {
+  it('binds an explicit target path and re-prepares the edited directory by ID', async () => {
+    const input = { directoryPath: '/音乐' };
+    expect(mediaExtractAudioTool.createRendererPrepareRequest?.(input, context())).toMatchObject({ directoryPath: '/音乐', destination: 'library' });
+    const prepared = await mediaExtractAudioTool.finalizeRendererPreparation?.(input, {
+      providerBindings: { m4a: { providerAlias: 'local' } },
+      targetDirectory: { id: 20, parentId: 2, libraryId: 3, name: '音乐', type: 'dir', path: '/音乐' },
+    }, undefined, context());
+    expect(prepared).toMatchObject({ publicAction: { parentId: 20, targetLabel: '/音乐' }, executionInput: { parentId: 20, targetDirectoryPath: '/音乐' } });
+    const edited = { ...prepared!.publicAction, parentId: 21, targetLabel: '/其他' };
+    expect(mediaExtractAudioTool.createRendererPrepareRequest?.(input, context(), edited)).toMatchObject({ parentId: 21 });
+    expect(mediaExtractAudioTool.createRendererPrepareRequest?.(input, context(), edited)).not.toHaveProperty('directoryPath');
+  });
+  it('refuses inaccessible sources and does not silently replace a library destination', () => {
+    expect(() => mediaExtractAudioTool.finalizeRendererPreparation?.({}, { providerBindings: {} }, undefined, context()))
+      .toThrow('destination_unavailable');
+    expect(() => mediaExtractAudioTool.finalizeRendererPreparation?.({ destination: 'local' }, { sourceFailure: 'source_unreachable', providerBindings: {} }, undefined, context()))
+      .toThrow('source_unreachable');
+  });
   it('binds one perceived file to a deterministic current-directory output', async () => {
     const executionContext = context();
     expect(mediaExtractAudioTool.validate?.({ format: 'mp3' }, executionContext)).toEqual({ ok: true });
@@ -101,10 +119,10 @@ describe('media.extractAudio Agent tool', () => {
       .toMatchObject({ ok: false });
   });
 
-  it('falls back to a canonical local action when library storage is unavailable', async () => {
+  it('allows a model-selected local target without silently changing the default destination', async () => {
     const executionContext = context();
     const prepared = await mediaExtractAudioTool.finalizeRendererPreparation?.(
-      {},
+      { destination: 'local' },
       { providerBindings: {} },
       undefined,
       executionContext,

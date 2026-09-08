@@ -33,6 +33,12 @@ import {
   freezeAgentShellProviderInvocation,
   type AgentShellPreparationHostEnvironment,
 } from './agent-shell-preparation-service';
+import {
+  resolveAgentShellHostContext,
+  sameAgentShellHostCwd,
+  type AgentShellHostContext,
+  type AgentShellHostContextDependencies,
+} from './agent-shell-host-context';
 import type {
   AgentShellProviderRegistry,
 } from './agent-shell-provider-registry';
@@ -48,6 +54,9 @@ export interface CreateAgentShellBindingResolverOptions {
   readonly additionalPathEntries?: readonly string[];
   readonly commandAnalyzer?: Pick<AgentShellCommandAnalyzer, 'analyze'>;
   readonly hostEnvironment?: AgentShellPreparationHostEnvironment;
+  readonly hostCwd?: string;
+  readonly hostHome?: string;
+  readonly hostContextDependencies?: AgentShellHostContextDependencies;
   readonly probeDependencies?: Pick<
     AgentShellProviderProbeDependencies,
     'accessExecutable' | 'readExecutableIdentity' | 'resolveExecutable'
@@ -97,6 +106,7 @@ export function createAgentShellBindingResolver(
   const policyEngine = createAgentShellPolicyEngine();
   const additionalPathEntries = Object.freeze([...(options.additionalPathEntries || [])]);
   const hostEnvironment = options.hostEnvironment || process.env;
+  const frozenHostCwd = options.hostCwd || process.cwd();
   const probeDependencies = options.probeDependencies
     || defaultAgentShellProviderProbeDependencies;
 
@@ -113,10 +123,16 @@ export function createAgentShellBindingResolver(
     );
     const preparedProvider = record(binding.provider, 'Agent Shell Provider binding');
     const preparedAnalysis = record(binding.analysis, 'Agent Shell analysis binding');
-    const preparedWorkspace = record(
-      binding.workspace,
-      'Agent Shell workspace binding',
-    ) as unknown as AgentShellWorkspacePreparationContext;
+    const executionContext = action.cwd.kind;
+    const preparedWorkspace = executionContext === 'run-workspace'
+      ? record(
+          binding.workspace,
+          'Agent Shell workspace binding',
+        ) as unknown as AgentShellWorkspacePreparationContext
+      : undefined;
+    const preparedHost = executionContext === 'host'
+      ? record(binding.host, 'Agent Shell host binding') as unknown as AgentShellHostContext
+      : undefined;
     const profileId = requiredText(
       preparedAiDestination.profileId,
       'Agent Shell AI profile ID',
@@ -173,13 +189,34 @@ export function createAgentShellBindingResolver(
     const overrides = Object.freeze(Object.fromEntries(
       action.environment.map(entry => [entry.name, entry.value]),
     ));
+    let currentHost: AgentShellHostContext | undefined;
+    if (executionContext === 'host') {
+      try {
+        currentHost = await resolveAgentShellHostContext({
+          defaultCwd: frozenHostCwd,
+          environment: {
+            overrides,
+            source: hostEnvironment,
+          },
+          platform: providerSnapshot.platform,
+          requestedCwd: action.cwd.path,
+          ...(options.hostHome ? { homedir: options.hostHome } : {}),
+        }, options.hostContextDependencies);
+      } catch {
+        throw new Error('Agent Shell host context 当前不可用');
+      }
+      if (!preparedHost || !sameAgentShellHostCwd(preparedHost.cwd, currentHost.cwd)
+        || preparedHost.environment.environmentIdentity !== currentHost.environment.environmentIdentity) {
+        throw new Error('Agent Shell host context 在 spawn 前已变化');
+      }
+    }
     const effectiveEnvironment = buildAgentShellEffectiveEnvironment({
       additionalPathEntries,
       hostEnvironment,
       overrides,
       provider,
       providerBinding,
-      workspace: preparedWorkspace,
+      ...(currentHost ? { hostContext: currentHost } : { workspace: preparedWorkspace }),
     });
     let commandAnalysis;
     try {
@@ -187,8 +224,10 @@ export function createAgentShellBindingResolver(
         command: action.command,
         dialect: provider.publicIdentity.dialect,
         hasEnvironmentOverrides: action.environment.length > 0,
-        logicalCwd: action.cwd.path,
-        persistentRuleEligible: AGENT_SHELL_WORKSPACE_PERSISTENT_RULE_IDENTITY_READY,
+        logicalCwd: currentHost?.cwd.lexicalPath || preparedWorkspace!.logicalCwd,
+        persistentRuleEligible: executionContext === 'host'
+          ? false
+          : AGENT_SHELL_WORKSPACE_PERSISTENT_RULE_IDENTITY_READY,
         providerAnalyzerRevision: provider.publicIdentity.analyzerRevision,
       });
     } catch {
@@ -201,8 +240,13 @@ export function createAgentShellBindingResolver(
       analysisIdentity: commandAnalysis.analysisIdentity,
       environmentIdentity: effectiveEnvironment.identity,
       providerRegistrationIdentity: provider.publicIdentity.registrationIdentity,
-      workspaceContentIdentity: preparedWorkspace.workspaceContentIdentity,
-      workspaceContentScannerRevision: preparedWorkspace.workspaceContentScannerRevision,
+      executionContext,
+      ...(currentHost
+        ? { hostContextIdentity: currentHost.contextIdentity }
+        : {
+            workspaceContentIdentity: preparedWorkspace!.workspaceContentIdentity,
+            workspaceContentScannerRevision: preparedWorkspace!.workspaceContentScannerRevision,
+          }),
     }) || null;
     const permissionMode = preparedAnalysis.permissionMode;
     if (
@@ -223,6 +267,12 @@ export function createAgentShellBindingResolver(
     }
 
     return Object.freeze({
+      ...(currentHost
+        ? {
+            executionContextIdentity: currentHost.contextIdentity,
+            cwdIdentity: currentHost.cwd.identity,
+          }
+        : {}),
       aiDestinationConfigurationIdentity: currentAiDestination.configurationIdentity,
       aiDestinationIdentity: currentAiDestination.identity,
       analysisIdentity: commandAnalysis.analysisIdentity,

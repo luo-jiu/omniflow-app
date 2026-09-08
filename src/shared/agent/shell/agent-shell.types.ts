@@ -89,6 +89,37 @@ export type AgentShellDialect = 'bash' | 'powershell' | 'zsh';
 
 export type AgentShellPermissionMode = 'ask' | 'auto' | 'full-access';
 
+/**
+ * Main-owned execution context. The workspace fields are deliberately kept
+ * separate from the public cwd projection so a renderer/model cannot choose a
+ * physical workspace path or host environment identity.
+ */
+export type AgentShellExecutionContext =
+  | {
+      kind: 'run-workspace';
+      workspaceId: string;
+      generation: number;
+      logicalCwd: string;
+    }
+  | {
+      kind: 'host';
+      environmentId: 'local';
+      requestedCwd?: string;
+    };
+
+export type AgentShellExecutionContextKind = AgentShellExecutionContext['kind'];
+
+export type AgentShellPreparedCwdV1 =
+  | {
+      kind: 'run-workspace';
+      path: string;
+    }
+  | {
+      kind: 'host';
+      /** The user-requested host path, never a main-resolved binding. */
+      path: string;
+    };
+
 export interface AgentShellSettingsSnapshot {
   permissionMode: AgentShellPermissionMode;
   version: 1;
@@ -160,6 +191,7 @@ export interface AgentShellRunInputV1 {
   command: string;
   cwd: string;
   env: Readonly<Record<string, string>>;
+  executionContext?: AgentShellExecutionContextKind;
   providerId?: string;
   timeoutMs: number;
 }
@@ -194,10 +226,7 @@ export interface AgentShellPreparedActionPublicV1 {
   assessment: AgentShellPreparedAssessment;
   command: string;
   commandHash: string;
-  cwd: {
-    kind: 'run-workspace';
-    path: string;
-  };
+  cwd: AgentShellPreparedCwdV1;
   dataScope: {
     stagedInputs: readonly AgentShellPreparedStagedInput[];
     unresolvedWorkspaceRead: boolean;
@@ -216,7 +245,14 @@ export interface AgentShellPreparedActionPublicV1 {
   version: typeof AGENT_SHELL_PREPARED_ACTION_VERSION;
 }
 
-const SHELL_RUN_INPUT_FIELDS = new Set(['command', 'cwd', 'env', 'providerId', 'timeoutMs']);
+const SHELL_RUN_INPUT_FIELDS = new Set([
+  'command',
+  'cwd',
+  'env',
+  'executionContext',
+  'providerId',
+  'timeoutMs',
+]);
 const SHELL_PREPARED_ACTION_FIELDS = new Set([
   'aiDestination',
   'assessment',
@@ -366,6 +402,47 @@ export function normalizeAgentShellLogicalPath(input: unknown): string {
   return segments.join('/');
 }
 
+/**
+ * Normalize a host cwd supplied by the model/user without resolving it. Path
+ * existence, realpath and symlink checks belong to main immediately before
+ * spawn. The current host execution preview is macOS-only, so this accepts
+ * POSIX absolute paths, host `~` / `~/...`, and safe relative paths. Relative
+ * paths are resolved by main against its frozen host cwd; `..` is rejected so
+ * a caller cannot escape that anchor implicitly.
+ */
+export function normalizeAgentShellHostPath(input: unknown): string {
+  if (typeof input === 'string' && Array.from(input).some((character) => {
+    const code = character.charCodeAt(0);
+    return code < 32 || code === 127;
+  })) {
+    throw new Error('Agent Shell 宿主路径无效');
+  }
+  const value = boundedText(input, 'Agent Shell 宿主路径', AGENT_SHELL_MAX_CWD_BYTES);
+  if (
+    value.includes('\\')
+    || value.startsWith('//')
+    || /^[A-Za-z]:/u.test(value)
+  ) {
+    throw new Error('Agent Shell 宿主路径目前仅支持 macOS POSIX 路径');
+  }
+  if (value.startsWith('~') && value !== '~' && !value.startsWith('~/')) {
+    throw new Error('Agent Shell 宿主路径不支持 named-home');
+  }
+  const segments = value.split('/');
+  if (segments.some(segment => segment === '..')) {
+    throw new Error('Agent Shell 宿主路径不能包含路径回退');
+  }
+  return value;
+}
+
+function normalizeExecutionContextKind(input: unknown): AgentShellExecutionContextKind | undefined {
+  if (input === undefined) return undefined;
+  if (input !== 'run-workspace' && input !== 'host') {
+    throw new Error('Agent Shell 执行上下文无效');
+  }
+  return input;
+}
+
 function normalizeTimeout(input: unknown): number {
   if (input === undefined) return AGENT_SHELL_DEFAULT_TIMEOUT_MS;
   if (typeof input !== 'number' || !Number.isSafeInteger(input) || input <= 0) {
@@ -430,10 +507,19 @@ export function normalizeAgentShellRunInputV1(input: unknown): AgentShellRunInpu
   const providerId = source.providerId === undefined
     ? undefined
     : normalizeIdentifier(source.providerId, 'Agent Shell Provider ID');
+  const executionContext = normalizeExecutionContextKind(source.executionContext);
+  // A host command without an explicit cwd follows the same convention as a
+  // native shell invocation: resolve it against the frozen main-process cwd.
+  // `.` keeps that distinction in the public input without exposing the
+  // physical path before main has validated it.
+  const cwd = executionContext === 'host'
+    ? normalizeAgentShellHostPath(source.cwd ?? '.')
+    : normalizeAgentShellLogicalPath(source.cwd ?? AGENT_SHELL_DEFAULT_CWD);
   return Object.freeze({
     command,
-    cwd: normalizeAgentShellLogicalPath(source.cwd ?? AGENT_SHELL_DEFAULT_CWD),
+    cwd,
     env: normalizeEnvironment(source.env),
+    ...(executionContext ? { executionContext } : {}),
     ...(providerId ? { providerId } : {}),
     timeoutMs: normalizeTimeout(source.timeoutMs),
   });
@@ -587,7 +673,9 @@ export function normalizeAgentShellPreparedActionPublicV1(
 
   const cwd = strictObject(source.cwd, 'Agent Shell cwd');
   assertExactFields(cwd, CWD_FIELDS, 'Agent Shell cwd');
-  if (cwd.kind !== 'run-workspace') throw new Error('Agent Shell cwd 类型无效');
+  if (cwd.kind !== 'run-workspace' && cwd.kind !== 'host') {
+    throw new Error('Agent Shell cwd 类型无效');
+  }
 
   const aiDestination = strictObject(source.aiDestination, 'Agent Shell AI 目的地');
   assertExactFields(aiDestination, AI_DESTINATION_FIELDS, 'Agent Shell AI 目的地');
@@ -614,8 +702,10 @@ export function normalizeAgentShellPreparedActionPublicV1(
     command,
     commandHash: normalizeHash(source.commandHash, 'Agent Shell command hash', SHA256_PATTERN),
     cwd: Object.freeze({
-      kind: 'run-workspace',
-      path: normalizeAgentShellLogicalPath(cwd.path),
+      kind: cwd.kind,
+      path: cwd.kind === 'host'
+        ? normalizeAgentShellHostPath(cwd.path)
+        : normalizeAgentShellLogicalPath(cwd.path),
     }),
     dataScope: normalizeDataScope(source.dataScope),
     environment: normalizePreparedEnvironment(source.environment),

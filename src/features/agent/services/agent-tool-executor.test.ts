@@ -65,6 +65,32 @@ function extractedArtifact() {
 }
 
 describe('Agent renderer tool executor', () => {
+  it('verifies the actual target and saved node without changing the current UI directory', async () => {
+    const readLibraryNode = vi.fn(async (_libraryId: number, nodeId: number) => nodeId === 20
+      ? { id: 20, libraryId: 3, parentId: 2, name: '音乐', type: 'dir' as const, path: '/音乐' }
+      : { id: 32, libraryId: 3, parentId: 20, name: 'movie-audio', ext: 'm4a', type: 'file' as const, path: '/音乐/movie-audio.m4a' });
+    const outcome = await executeAgentRendererTool(mediaExtractRequest({ parentId: 20, targetDirectoryPath: '/音乐' }), {
+      readLibraryNode, getMediaFileLink: vi.fn(async () => 'https://fixture.invalid/source'),
+      extractMediaAudio: vi.fn(async () => extractedArtifact()),
+      uploadMediaArtifact: vi.fn(async () => ({ commitState: 'committed', node: { id: 32, name: 'movie-audio', ext: 'm4a' } })) as never,
+      releaseMediaArtifact: vi.fn(async () => true), reportProgress: vi.fn(async () => true), onCommitted: vi.fn(),
+      readPerception: async () => ({ selectedNodes: [], collectedAt: '', currentDirectory: { id: 10, name: '视频', entries: [], entryCount: 0 } }),
+    });
+    expect(outcome.result).toMatchObject({ ok: true, data: { parentId: 20, verified: true } });
+    expect(outcome.perception?.currentDirectory?.id).toBe(10);
+    expect(readLibraryNode.mock.calls.map(call => call[1])).toEqual([20,20,32]);
+  });
+
+  it('does not extract when a frozen target path has changed', async () => {
+    const extractMediaAudio = vi.fn();
+    const outcome = await executeAgentRendererTool(mediaExtractRequest({ parentId: 20, targetDirectoryPath: '/音乐' }), {
+      readLibraryNode: async () => ({ id: 20, libraryId: 3, parentId: 2, name: '改名', type: 'dir', path: '/改名' }),
+      extractMediaAudio,
+    });
+    expect(outcome.result.ok).toBe(false);
+    expect(outcome.result.message).toContain('目标目录已');
+    expect(extractMediaAudio).not.toHaveBeenCalled();
+  });
   it('creates a directory, refreshes the tree and returns a fresh perception', async () => {
     const createDirectory = vi.fn(async () => ({ id: 22 }));
     const onRefreshDirectory = vi.fn(async () => undefined);

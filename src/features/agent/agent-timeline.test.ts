@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type {
+  AgentAssistantItemSnapshot,
   AgentMessage,
   AgentRunSnapshot,
   AgentToolActivitySnapshot,
@@ -9,347 +10,361 @@ import {
   buildAgentTimelineItems,
   buildAgentTimelineItemsFromProjection,
   prepareAgentTimelineProjection,
+  splitAgentTimelineLayers,
 } from './agent-timeline';
 
-function message(
+function user(id: string, createdAt: string, runId = 'run-1'): AgentMessage {
+  return {
+    content: id,
+    createdAt,
+    id,
+    role: 'user',
+    runId,
+    sessionId: 'session-1',
+  };
+}
+
+function assistant(
   id: string,
-  role: AgentMessage['role'],
   createdAt: string,
-  toolCallId?: string,
+  options: {
+    content?: string;
+    phase?: AgentAssistantItemSnapshot['assistantItem']['phase'];
+    runId?: string;
+    status?: AgentAssistantItemSnapshot['assistantItem']['status'];
+    turnOrdinal?: number;
+  } = {},
+): AgentAssistantItemSnapshot {
+  const status = options.status || 'completed';
+  return {
+    assistantItem: {
+      ...(status === 'streaming' ? {} : { finishedAt: createdAt }),
+      phase: options.phase || 'final',
+      revision: status === 'streaming' ? 1 : 2,
+      status,
+      turnOrdinal: options.turnOrdinal || 1,
+      updatedAt: createdAt,
+    },
+    content: options.content ?? id,
+    createdAt,
+    id,
+    role: 'assistant',
+    runId: options.runId || 'run-1',
+    sessionId: 'session-1',
+  };
+}
+
+function toolMessage(
+  id: string,
+  createdAt: string,
+  callId: string,
   runId = 'run-1',
 ): AgentMessage {
   return {
     content: id,
     createdAt,
     id,
-    role,
+    role: 'tool',
     runId,
     sessionId: 'session-1',
-    ...(toolCallId ? { toolCallId, toolName: 'file.list' } : {}),
+    toolCallId: callId,
+    toolName: 'file.list',
   };
 }
 
 function activity(
-  createdAt: string,
-  runId = 'run-1',
-  callId = 'call-1',
-  ordinal = 1,
+  id: string,
+  ordinal: number,
+  options: {
+    callId?: string;
+    groupable?: boolean;
+    permissionBehavior?: AgentToolActivitySnapshot['permissionBehavior'];
+    runId?: string;
+    status?: AgentToolActivitySnapshot['status'];
+  } = {},
 ): AgentToolActivitySnapshot {
+  const runId = options.runId || 'run-1';
+  const status = options.status || 'completed';
   return {
-    call: { id: callId, input: {}, name: 'file.list' },
-    createdAt,
-    id: `activity-${runId}-${callId}`,
+    call: { id: options.callId || `call-${id}`, input: {}, name: 'file.list' },
+    createdAt: `2026-08-23T00:00:0${ordinal}.000Z`,
+    id,
     ordinal,
-    permissionBehavior: 'allow',
-    result: { message: '读取完成', ok: true },
+    permissionBehavior: options.permissionBehavior || 'allow',
+    result: status === 'completed' ? { message: `${id} 完成`, ok: true } : undefined,
     revision: 1,
     runId,
     sessionId: 'session-1',
-    status: 'completed',
+    status,
+    ...(options.groupable === false ? {} : {
+      toolMetadata: {
+        groupKind: 'resource-read' as const,
+        kind: 'business' as const,
+        operationKind: 'list' as const,
+        risk: 'read' as const,
+      },
+    }),
   };
 }
 
 function run(
   status: AgentRunSnapshot['status'] = 'completed',
-  id = 'run-1',
-  createdAt = '2026-08-23T00:00:00.000Z',
+  options: { id?: string; plan?: boolean } = {},
 ): AgentRunSnapshot {
+  const id = options.id || 'run-1';
   return {
-    createdAt,
-    currentStep: status === 'completed' ? '已完成' : '请求 AI 服务',
+    createdAt: '2026-08-23T00:00:00.000Z',
     id,
     model: 'model-a',
+    ...(options.plan ? {
+      plan: {
+        createdAt: '2026-08-23T00:00:00.500Z',
+        steps: [{ expectedToolName: 'file.list', id: 'step-1', ordinal: 1, title: '读取目录' }],
+        version: 1 as const,
+      },
+    } : {}),
     profileId: 'profile-a',
     reasoningEffort: 'medium',
     revision: 1,
     sessionId: 'session-1',
     status,
-    updatedAt: createdAt,
+    updatedAt: '2026-08-23T00:00:09.000Z',
     userPrompt: '读取目录',
   };
 }
 
-function withPlan(snapshot: AgentRunSnapshot): AgentRunSnapshot {
-  return {
-    ...snapshot,
-    plan: {
-      createdAt: '2026-08-23T00:00:00.500Z',
-      steps: [
-        {
-          expectedToolName: 'file.list',
-          id: 'step-1',
-          ordinal: 1,
-          title: '读取目录',
-        },
-        {
-          expectedToolName: 'file.stat',
-          id: 'step-2',
-          ordinal: 2,
-          title: '检查文件',
-        },
-      ],
-      version: 1,
-    },
-  };
-}
-
 describe('Agent timeline projection', () => {
-  it('replaces a persisted Tool text message with its canonical activity', () => {
+  it('retains an empty failed run after restoring canonical history', () => {
     const items = buildAgentTimelineItems([
-      message('before', 'assistant', '2026-08-23T00:00:00.000Z'),
-      message('legacy-tool', 'tool', '2026-08-23T00:00:02.000Z', 'call-1'),
-      message('after', 'assistant', '2026-08-23T00:00:03.000Z'),
-    ], [], [activity('2026-08-23T00:00:01.000Z')]);
+      user('question', '2026-09-07T00:00:00Z'),
+      assistant('empty', '2026-09-07T00:00:01Z', { content: '', status: 'failed', phase: 'unknown' }),
+    ], [{ ...run('failed'), error: 'Provider unavailable' }], []);
+    expect(items.map(item => item.type)).toEqual(['message', 'run-status']);
+    expect(items[1]).toMatchObject({ run: { error: 'Provider unavailable' } });
+  });
+  it('replaces persisted Tool text with its canonical activity', () => {
+    const items = buildAgentTimelineItems([
+      user('user', '2026-08-23T00:00:00.000Z'),
+      toolMessage('tool', '2026-08-23T00:00:01.000Z', 'call-1'),
+      assistant('answer', '2026-08-23T00:00:02.000Z'),
+    ], [], [activity('activity-1', 1, { callId: 'call-1', groupable: false })]);
 
-    expect(items.map(item => item.type === 'message'
-      ? item.message.id
-      : item.type === 'tool-activity'
-        ? item.activity.id
-        : item.workflow.runId))
-      .toEqual(['before', 'activity-run-1-call-1', 'after']);
+    expect(items.map(item => item.key)).toEqual([
+      'message:user',
+      'activity:activity-1',
+      'message:answer',
+    ]);
   });
 
-  it('keeps unmatched legacy Tool messages as a fallback', () => {
+  it('does not render unmatched raw Tool or system messages as conversation text', () => {
     const items = buildAgentTimelineItems([
-      message('legacy-tool', 'tool', '2026-08-23T00:00:00.000Z', 'old-call'),
+      toolMessage('unmatched', '2026-08-23T00:00:00.000Z', 'missing'),
+      {
+        content: 'system',
+        createdAt: '2026-08-23T00:00:01.000Z',
+        id: 'system',
+        role: 'system',
+        sessionId: 'session-1',
+      },
     ], [], []);
 
-    expect(items).toHaveLength(1);
-    expect(items[0].type).toBe('message');
+    expect(items).toEqual([]);
   });
 
-  it('places an unanchored activity after the last message of the same Run despite its timestamp', () => {
+  it('splits conversation, work journal, and execution facts without changing item order', () => {
     const items = buildAgentTimelineItems([
-      message('before', 'assistant', '2026-08-23T00:00:00.000Z'),
-      message('after', 'assistant', '2026-08-23T00:00:03.000Z'),
-    ], [], [activity('2026-08-23T00:00:01.000Z')]);
-
-    expect(items.map(item => item.type === 'message'
-      ? item.message.id
-      : item.type === 'tool-activity'
-        ? item.activity.id
-        : item.workflow.runId))
-      .toEqual(['before', 'after', 'activity-run-1-call-1']);
-  });
-
-  it('anchors a task projection directly after its user message', () => {
-    const items = buildAgentTimelineItems([
-      message('user', 'user', '2026-08-23T00:00:00.000Z'),
-      message('answer', 'assistant', '2026-08-23T00:00:03.000Z'),
-    ], [run()], [activity('2026-08-23T00:00:01.000Z')]);
+      user('user', '2026-08-23T00:00:00.000Z'),
+      assistant('commentary', '2026-08-23T00:00:01.000Z', {
+        content: '先检查目录。',
+        phase: 'commentary',
+      }),
+      toolMessage('tool', '2026-08-23T00:00:02.000Z', 'call-1'),
+      assistant('final', '2026-08-23T00:00:03.000Z'),
+    ], [run('running')], [activity('read', 2, { callId: 'call-1', groupable: false })]);
+    const layers = splitAgentTimelineLayers(items);
 
     expect(items.map(item => item.type)).toEqual([
       'message',
-      'workflow',
-      'message',
+      'assistant-work-item',
       'tool-activity',
+      'message',
+    ]);
+    expect(layers.conversation.map(item => item.key)).toEqual(['message:user', 'message:final']);
+    expect(layers.workJournal.map(item => item.key)).toEqual(['message:commentary']);
+    expect(layers.executionFacts.map(item => item.key)).toEqual(['activity:read']);
+  });
+
+  it('keeps a stable message identity while assistant phase and revision change', () => {
+    const streaming = buildAgentTimelineItems([
+      assistant('item-1', '2026-08-23T00:00:01.000Z', {
+        content: '正在整理',
+        phase: 'unknown',
+        status: 'streaming',
+      }),
+    ], [], []);
+    const completed = buildAgentTimelineItems([
+      assistant('item-1', '2026-08-23T00:00:01.000Z', {
+        content: '整理完成',
+        phase: 'final',
+        status: 'completed',
+      }),
+    ], [], []);
+
+    expect(streaming[0].key).toBe('message:item-1');
+    expect(completed[0].key).toBe('message:item-1');
+  });
+
+  it('suppresses empty commentary and empty terminal incomplete items', () => {
+    const emptyStates: AgentAssistantItemSnapshot['assistantItem']['status'][] = [
+      'failed',
+      'cancelled',
+      'interrupted',
+    ];
+    const messages = [
+      assistant('commentary', '2026-08-23T00:00:01.000Z', {
+        content: '   ',
+        phase: 'commentary',
+      }),
+      ...emptyStates.map((status, index) => assistant(
+        `empty-${status}`,
+        `2026-08-23T00:00:0${index + 2}.000Z`,
+        { content: '', phase: 'unknown', status },
+      )),
+    ];
+
+    expect(buildAgentTimelineItems(messages, [], [])).toEqual([]);
+  });
+
+  it('does not add standalone workflow chrome for a planned Run', () => {
+    const items = buildAgentTimelineItems([
+      user('user', '2026-08-23T00:00:00.000Z'),
+      assistant('answer', '2026-08-23T00:00:03.000Z'),
+    ], [run('running', { plan: true })], []);
+
+    expect(items.map(item => item.key)).toEqual([
+      'message:user',
+      'message:answer',
     ]);
   });
 
-  it('shows an active task before its first Tool call', () => {
+  it('keeps terminal commentary without adding standalone workflow chrome', () => {
     const items = buildAgentTimelineItems([
-      message('user', 'user', '2026-08-23T00:00:00.000Z'),
-    ], [run('running')], []);
+      user('user', '2026-08-23T00:00:00.000Z'),
+      assistant('later-commentary', '2026-08-23T00:00:03.000Z', {
+        content: '中段输出仍被截断；改为提取章节要点。',
+        phase: 'commentary',
+      }),
+    ], [{ ...run('cancelled'), currentStep: '已取消' }], []);
 
-    expect(items.map(item => item.type)).toEqual(['message', 'workflow']);
+    expect(items.map(item => item.key)).toEqual([
+      'message:user',
+      'message:later-commentary',
+      'run-status:run-1',
+    ]);
   });
 
-  it('does not add a workflow item for a completed Tool-free plain conversation', () => {
+  it('does not add workflow chrome to a completed Tool-free plain conversation', () => {
     const items = buildAgentTimelineItems([
-      message('user', 'user', '2026-08-23T00:00:00.000Z'),
-      message('answer', 'assistant', '2026-08-23T00:00:01.000Z'),
+      user('user', '2026-08-23T00:00:00.000Z'),
+      assistant('answer', '2026-08-23T00:00:01.000Z'),
     ], [run('completed')], []);
-
     expect(items.map(item => item.type)).toEqual(['message', 'message']);
   });
 
-  it('keeps a completed Tool-free plan so its unexecuted steps remain visible', () => {
-    const plannedRun = withPlan(run('completed'));
+  it('groups only consecutive successful read activities from the same Run and stage', () => {
+    const activities = [
+      activity('first', 1, { callId: 'call-1' }),
+      activity('second', 2, { callId: 'call-2' }),
+    ];
     const items = buildAgentTimelineItems([
-      message('user', 'user', '2026-08-23T00:00:00.000Z'),
-    ], [plannedRun], []);
+      toolMessage('tool-1', '2026-08-23T00:00:01.000Z', 'call-1'),
+      toolMessage('tool-2', '2026-08-23T00:00:02.000Z', 'call-2'),
+    ], [], activities);
 
-    expect(items.map(item => item.type)).toEqual(['message', 'workflow']);
-    expect(items[1]).toMatchObject({
-      type: 'workflow',
-      workflow: {
-        settledStepCount: 0,
-        steps: [{ status: 'not_run' }, { status: 'not_run' }],
-        totalStepCount: 2,
-      },
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({
+      key: 'activity-group:first',
+      type: 'tool-group',
     });
-  });
-
-  it('anchors at most one workflow card when the same Run has repeated user anchors', () => {
-    const items = buildAgentTimelineItems([
-      message('user-first', 'user', '2026-08-23T00:00:00.000Z'),
-      message('assistant', 'assistant', '2026-08-23T00:00:01.000Z'),
-      message('user-duplicate', 'user', '2026-08-23T00:00:02.000Z'),
-    ], [withPlan(run('running'))], []);
-
-    expect(items.filter(item => item.type === 'workflow')).toHaveLength(1);
-    expect(items.map(item => item.key)).toEqual([
-      'message:user-first',
-      'workflow:run-1',
-      'message:assistant',
-      'message:user-duplicate',
-    ]);
-  });
-
-  it('keeps workflow and Tool positions stable after canonical message restoration', () => {
-    const runSnapshot = withPlan(run('running'));
-    const toolActivity = {
-      ...activity('2026-08-23T00:00:02.000Z'),
-      planStepId: 'step-1',
-    };
-    const liveItems = buildAgentTimelineItems([
-      message('live-user', 'user', '2026-08-23T00:00:00.000Z'),
-      message('live-before', 'assistant', '2026-08-23T00:00:01.000Z'),
-      message('live-tool-anchor', 'tool', '2026-08-23T00:00:02.000Z', 'call-1'),
-      message('live-after', 'assistant', '2026-08-23T00:00:03.000Z'),
-    ], [runSnapshot], [toolActivity]);
-    const restoredItems = buildAgentTimelineItems([
-      message('stored-user', 'user', '2026-08-23T00:00:00.000Z'),
-      message('stored-before', 'assistant', '2026-08-23T00:00:01.000Z'),
-      message('stored-tool', 'tool', '2026-08-23T00:00:02.000Z', 'call-1'),
-      message('stored-after', 'assistant', '2026-08-23T00:00:03.000Z'),
-    ], [runSnapshot], [toolActivity]);
-    const shape = (items: ReturnType<typeof buildAgentTimelineItems>) => items.map(item => (
-      item.type === 'workflow'
-        ? `workflow:${item.workflow.runId}`
-        : item.type === 'tool-activity'
-          ? `tool:${item.activity.call.id}`
-          : `message:${item.message.role}`
-    ));
-
-    expect(shape(liveItems)).toEqual([
-      'message:user',
-      'workflow:run-1',
-      'message:assistant',
-      'tool:call-1',
-      'message:assistant',
-    ]);
-    expect(shape(restoredItems)).toEqual(shape(liveItems));
-  });
-
-  it('keeps the current same-millisecond fallback order without inventing a timestamp tie-break', () => {
-    const timestamp = '2026-08-23T00:00:01.000Z';
-    const items = buildAgentTimelineItems([
-      message('user', 'user', timestamp),
-      message('legacy-tool', 'tool', timestamp, 'matched'),
-      message('answer', 'assistant', timestamp),
-    ], [run('completed', 'run-1', timestamp)], [
-      activity(timestamp, 'run-1', 'matched', 1),
-      activity(timestamp, 'run-1', 'fallback-first', 2),
-      activity(timestamp, 'run-1', 'fallback-second', 3),
-    ]);
-
-    expect(items.map(item => item.key)).toEqual([
-      'message:user',
-      'workflow:run-1',
-      'activity:activity-run-1-matched',
-      'message:answer',
-      'activity:activity-run-1-fallback-first',
-      'activity:activity-run-1-fallback-second',
-    ]);
-  });
-
-  it('keeps deterministic order for a long mixed conversation', () => {
-    const messages: AgentMessage[] = [];
-    const runs: AgentRunSnapshot[] = [];
-    const activities: AgentToolActivitySnapshot[] = [];
-    const expected: string[] = [];
-    const start = Date.parse('2026-08-23T00:00:00.000Z');
-
-    for (let index = 0; index < 160; index += 1) {
-      const runId = `run-${index}`;
-      const base = start + index * 10_000;
-      const at = (offset: number) => new Date(base + offset).toISOString();
-      messages.push(
-        message(`user-${index}`, 'user', at(0), undefined, runId),
-        message(`legacy-tool-${index}`, 'tool', at(2_000), 'matched', runId),
-        message(`answer-${index}`, 'assistant', at(4_000), undefined, runId),
-      );
-      runs.push(run('completed', runId, at(0)));
-      activities.push(
-        activity(at(1_000), runId, 'matched', 1),
-        activity(at(3_000), runId, 'fallback', 2),
-      );
-      expected.push(
-        `message:user-${index}`,
-        `workflow:${runId}`,
-        `activity:activity-${runId}-matched`,
-        `message:answer-${index}`,
-        `activity:activity-${runId}-fallback`,
-      );
+    if (items[0].type === 'tool-group') {
+      expect(items[0].activities.map(item => item.id)).toEqual(['first', 'second']);
     }
-
-    expect(buildAgentTimelineItems(messages, runs, activities).map(item => item.key))
-      .toEqual(expected);
   });
 
-  it('indexes run identities with linear access counts instead of rescanning cross products', () => {
-    const runCount = 120;
-    const activityCount = 240;
-    let activityRunIdReads = 0;
-    let messageRunIdReads = 0;
-    let runIdReads = 0;
-    const runs = Array.from({ length: runCount }, (_, index) => {
-      const runId = `run-${index}`;
-      const value = run('running', runId, new Date(index * 10_000).toISOString());
-      Object.defineProperty(value, 'id', {
-        configurable: true,
-        enumerable: true,
-        get: () => {
-          runIdReads += 1;
-          return runId;
+  it.each([
+    'commentary',
+    'failure',
+    'approval',
+    'unknown',
+  ] as const)('breaks a read group at a %s boundary', (boundary) => {
+    const first = activity('first', 1, { callId: 'call-1' });
+    const second = activity('second', 3, { callId: 'call-2' });
+    const messages: AgentMessage[] = [
+      toolMessage('tool-1', '2026-08-23T00:00:01.000Z', 'call-1'),
+    ];
+    const activities: AgentToolActivitySnapshot[] = [first];
+    if (boundary === 'commentary') {
+      messages.push(assistant('commentary', '2026-08-23T00:00:02.000Z', {
+        content: '调整读取方向。',
+        phase: 'commentary',
+      }));
+    } else if (boundary === 'failure') {
+      const failed = activity('failed', 2, { callId: 'call-failed', status: 'failed' });
+      messages.push(toolMessage('tool-failed', '2026-08-23T00:00:02.000Z', 'call-failed'));
+      activities.push(failed);
+    } else if (boundary === 'approval') {
+      const approved = {
+        ...activity('approved', 2, { callId: 'call-approved' }),
+        approval: {
+          approvalId: 'approval-1',
+          decidedAt: '2026-08-23T00:00:02.000Z',
+          preview: { description: '读取', risk: 'read' as const, title: '确认读取' },
+          status: 'approved' as const,
         },
-      });
-      return value;
-    });
-    const activities = Array.from({ length: activityCount }, (_, index) => {
-      const runId = `run-${index % runCount}`;
-      const value = activity(
-        new Date(index * 4_000 + 1_000).toISOString(),
-        runId,
-        `call-${index}`,
-        Math.floor(index / runCount) + 1,
-      );
-      Object.defineProperty(value, 'runId', {
-        configurable: true,
-        enumerable: true,
-        get: () => {
-          activityRunIdReads += 1;
-          return runId;
-        },
-      });
-      return value;
-    });
-    const messages = runs.map((_, index) => {
-      const runId = `run-${index}`;
-      const value = message(
-        `user-${index}`,
-        'user',
-        new Date(index * 10_000).toISOString(),
-        undefined,
-        runId,
-      );
-      Object.defineProperty(value, 'runId', {
-        configurable: true,
-        enumerable: true,
-        get: () => {
-          messageRunIdReads += 1;
-          return runId;
-        },
-      });
-      return value;
-    });
+      };
+      messages.push(toolMessage('tool-approved', '2026-08-23T00:00:02.000Z', 'call-approved'));
+      activities.push(approved);
+    } else {
+      const unknown = activity('unknown', 2, { callId: 'call-unknown', groupable: false });
+      messages.push(toolMessage('tool-unknown', '2026-08-23T00:00:02.000Z', 'call-unknown'));
+      activities.push(unknown);
+    }
+    messages.push(toolMessage('tool-2', '2026-08-23T00:00:03.000Z', 'call-2'));
+    activities.push(second);
 
-    const prepared = prepareAgentTimelineProjection(runs, activities);
-    buildAgentTimelineItemsFromProjection(messages, prepared);
+    const items = buildAgentTimelineItems(messages, [], activities);
+    const groups = items.filter(item => item.type === 'tool-group');
+    expect(groups.some(group => (
+      group.activities.some(item => item.id === 'first')
+      && group.activities.some(item => item.id === 'second')
+    ))).toBe(false);
+    expect(groups.some(group => group.activities.some(item => item.id === 'first'))).toBe(true);
+    expect(groups.some(group => group.activities.some(item => item.id === 'second'))).toBe(true);
+  });
 
-    expect(activityRunIdReads).toBeLessThanOrEqual(activityCount);
-    expect(messageRunIdReads).toBeLessThanOrEqual(messages.length);
-    expect(runIdReads).toBeLessThanOrEqual(runs.length * 2);
+  it('keeps the group key derived from its first ToolRun when later reads append', () => {
+    const firstMessages = [toolMessage('tool-1', '2026-08-23T00:00:01.000Z', 'call-1')];
+    const firstActivities = [activity('first', 1, { callId: 'call-1' })];
+    const initial = buildAgentTimelineItems(firstMessages, [], firstActivities);
+    const appended = buildAgentTimelineItems([
+      ...firstMessages,
+      toolMessage('tool-2', '2026-08-23T00:00:02.000Z', 'call-2'),
+    ], [], [
+      ...firstActivities,
+      activity('second', 2, { callId: 'call-2' }),
+    ]);
+
+    expect(initial[0].key).toBe('activity-group:first');
+    expect(appended[0].key).toBe(initial[0].key);
+  });
+
+  it('prepares indexes once and reuses them for the final projection', () => {
+    const messages = [user('user', '2026-08-23T00:00:00.000Z')];
+    const runs = [run('running')];
+    const activities = [activity('read', 1, { groupable: false })];
+    const prepared = prepareAgentTimelineProjection(messages, runs, activities);
+
+    expect(buildAgentTimelineItemsFromProjection(messages, prepared).map(item => item.key))
+      .toEqual(['message:user', 'activity:read']);
   });
 });

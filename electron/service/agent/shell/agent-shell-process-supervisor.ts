@@ -9,12 +9,18 @@ import {
   isAgentShellExecutionLeaseGrant,
   type AgentShellExecutionLeaseGrant,
 } from './agent-shell-execution-lease';
+import {
+  createAgentShellOutputProjectionCollector,
+  type AgentShellProviderStreamOutputV1,
+} from './agent-shell-output-projection';
 import { createAgentShellCommandHash } from './agent-shell-prepared-action';
 
 const DEFAULT_MAX_CONCURRENT_PROCESSES = 2;
 const MAX_CONCURRENT_PROCESSES = 4;
 const DEFAULT_MAX_OUTPUT_BYTES = 1024 * 1024;
 const MAX_OUTPUT_BYTES = 10 * 1024 * 1024;
+const MAX_CAPTURED_OUTPUT_EVENTS = 4_096;
+const OUTPUT_TAIL_COMPACT_OFFSET = 64;
 const DEFAULT_TERMINATION_GRACE_MS = 1_500;
 const MAX_TERMINATION_GRACE_MS = 30_000;
 const DEFAULT_TERMINATION_SETTLE_MS = 5_000;
@@ -157,16 +163,21 @@ interface ActiveExecution {
 }
 
 interface OutputCollector {
-  readonly events: AgentShellProcessOutputEvent[];
-  readonly stderrChunks: Buffer[];
-  readonly stdoutChunks: Buffer[];
   readonly decoders: {
     readonly stderr: StringDecoder;
     readonly stdout: StringDecoder;
   };
-  capturedBytes: number;
-  droppedBytes: number;
+  readonly events: {
+    complete: AgentShellProcessOutputEvent[];
+    head: AgentShellProcessOutputEvent[];
+    tail: AgentShellProcessOutputEvent[];
+    tailBytes: number;
+    tailStart: number;
+    totalBytes: number;
+    truncated: boolean;
+  };
   outputBytes: number;
+  readonly projection: ReturnType<typeof createAgentShellOutputProjectionCollector>;
   sequence: number;
 }
 
@@ -211,7 +222,11 @@ function validateGrant(
   if (!pathApi.isAbsolute(grant.cwdPath) || grant.cwdPath.includes('\0')) {
     invalidSupervisor('Agent Shell execution grant cwd 无效');
   }
-  if (grant.cwdPath !== grant.workspace.physicalCwdPath) {
+  if (grant.executionContext === 'host') {
+    if (!grant.host || grant.cwdPath !== grant.host.cwd.canonicalPath) {
+      invalidSupervisor('Agent Shell execution grant host cwd identity 不匹配');
+    }
+  } else if (!grant.workspace || grant.cwdPath !== grant.workspace.physicalCwdPath) {
     invalidSupervisor('Agent Shell execution grant cwd identity 不匹配');
   }
   if (!pathApi.isAbsolute(grant.invocation.executable) || grant.invocation.executable.includes('\0')) {
@@ -268,20 +283,199 @@ function validateGrant(
   });
 }
 
-function createOutputCollector(): OutputCollector {
+function createOutputCollector(maximumBytes: number): OutputCollector {
   return {
     decoders: {
       stderr: new StringDecoder('utf8'),
       stdout: new StringDecoder('utf8'),
     },
-    droppedBytes: 0,
-    events: [],
+    events: {
+      complete: [],
+      head: [],
+      tail: [],
+      tailBytes: 0,
+      tailStart: 0,
+      totalBytes: 0,
+      truncated: false,
+    },
     outputBytes: 0,
-    capturedBytes: 0,
+    projection: createAgentShellOutputProjectionCollector(maximumBytes),
     sequence: 0,
-    stderrChunks: [],
-    stdoutChunks: [],
   };
+}
+
+function textByteLength(value: string): number {
+  return Buffer.byteLength(value, 'utf8');
+}
+
+function takeUtf8Prefix(value: string, maximumBytes: number): string {
+  if (maximumBytes <= 0 || !value) return '';
+  if (textByteLength(value) <= maximumBytes) return value;
+  let result = '';
+  let usedBytes = 0;
+  for (const character of value) {
+    const characterBytes = textByteLength(character);
+    if (usedBytes + characterBytes > maximumBytes) break;
+    result += character;
+    usedBytes += characterBytes;
+  }
+  return result;
+}
+
+function takeUtf8Suffix(value: string, maximumBytes: number): string {
+  if (maximumBytes <= 0 || !value) return '';
+  if (textByteLength(value) <= maximumBytes) return value;
+  const characters = [...value];
+  const result: string[] = [];
+  let usedBytes = 0;
+  for (let index = characters.length - 1; index >= 0; index -= 1) {
+    const character = characters[index];
+    const characterBytes = textByteLength(character);
+    if (usedBytes + characterBytes > maximumBytes) break;
+    result.push(character);
+    usedBytes += characterBytes;
+  }
+  return result.reverse().join('');
+}
+
+function sliceOutputEvent(
+  event: AgentShellProcessOutputEvent,
+  maximumBytes: number,
+  edge: 'prefix' | 'suffix',
+): AgentShellProcessOutputEvent | null {
+  const text = edge === 'prefix'
+    ? takeUtf8Prefix(event.text, maximumBytes)
+    : takeUtf8Suffix(event.text, maximumBytes);
+  if (!text) return null;
+  return Object.freeze({
+    ...event,
+    byteLength: textByteLength(text),
+    text,
+  });
+}
+
+function takeOutputEventPrefix(
+  events: readonly AgentShellProcessOutputEvent[],
+  maximumBytes: number,
+  maximumEvents: number,
+): AgentShellProcessOutputEvent[] {
+  const result: AgentShellProcessOutputEvent[] = [];
+  let remaining = maximumBytes;
+  for (const event of events) {
+    if (remaining <= 0 || result.length >= maximumEvents) break;
+    const sliced = sliceOutputEvent(event, remaining, 'prefix');
+    if (!sliced) continue;
+    result.push(sliced);
+    remaining -= textByteLength(sliced.text);
+  }
+  return result;
+}
+
+function takeOutputEventSuffix(
+  events: readonly AgentShellProcessOutputEvent[],
+  maximumBytes: number,
+  maximumEvents: number,
+): AgentShellProcessOutputEvent[] {
+  const result: AgentShellProcessOutputEvent[] = [];
+  let remaining = maximumBytes;
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    if (remaining <= 0 || result.length >= maximumEvents) break;
+    const sliced = sliceOutputEvent(events[index], remaining, 'suffix');
+    if (!sliced) continue;
+    result.push(sliced);
+    remaining -= textByteLength(sliced.text);
+  }
+  return result.reverse();
+}
+
+function compactOutputEventTail(output: OutputCollector): void {
+  const { events } = output;
+  if (
+    events.tailStart < OUTPUT_TAIL_COMPACT_OFFSET
+    || events.tailStart * 2 < events.tail.length
+  ) {
+    return;
+  }
+  events.tail = events.tail.slice(events.tailStart);
+  events.tailStart = 0;
+}
+
+function captureOutputEvent(
+  output: OutputCollector,
+  event: AgentShellProcessOutputEvent,
+  maximumBytes: number,
+): void {
+  const eventBytes = textByteLength(event.text);
+  if (eventBytes === 0) return;
+  output.events.totalBytes += eventBytes;
+  if (
+    !output.events.truncated
+    && output.events.totalBytes <= maximumBytes
+    && output.events.complete.length < MAX_CAPTURED_OUTPUT_EVENTS
+  ) {
+    output.events.complete.push(event);
+    return;
+  }
+
+  const headBytes = Math.ceil(maximumBytes / 2);
+  const tailBytes = Math.floor(maximumBytes / 2);
+  const headEvents = Math.ceil(MAX_CAPTURED_OUTPUT_EVENTS / 2);
+  const tailEvents = Math.floor(MAX_CAPTURED_OUTPUT_EVENTS / 2);
+  if (!output.events.truncated) {
+    const source = [...output.events.complete, event];
+    output.events.complete = [];
+    output.events.head = takeOutputEventPrefix(source, headBytes, headEvents);
+    output.events.tail = takeOutputEventSuffix(source, tailBytes, tailEvents);
+    output.events.tailBytes = output.events.tail.reduce(
+      (total, item) => total + textByteLength(item.text),
+      0,
+    );
+    output.events.tailStart = 0;
+    output.events.truncated = true;
+    return;
+  }
+  output.events.tail.push(event);
+  output.events.tailBytes += eventBytes;
+  while (
+    output.events.tailBytes > tailBytes
+    || output.events.tail.length - output.events.tailStart > tailEvents
+  ) {
+    const first = output.events.tail[output.events.tailStart];
+    if (!first) break;
+    const firstBytes = textByteLength(first.text);
+    const excessBytes = output.events.tailBytes - tailBytes;
+    if (
+      output.events.tail.length - output.events.tailStart > tailEvents
+      || firstBytes <= excessBytes
+    ) {
+      output.events.tailStart += 1;
+      output.events.tailBytes -= firstBytes;
+      continue;
+    }
+    const retained = sliceOutputEvent(first, firstBytes - excessBytes, 'suffix');
+    if (!retained) {
+      output.events.tailStart += 1;
+      output.events.tailBytes -= firstBytes;
+      continue;
+    }
+    output.events.tail[output.events.tailStart] = retained;
+    output.events.tailBytes -= firstBytes - textByteLength(retained.text);
+  }
+  compactOutputEventTail(output);
+}
+
+function capturedOutputEvents(output: OutputCollector): readonly AgentShellProcessOutputEvent[] {
+  return output.events.truncated
+    ? Object.freeze([
+      ...output.events.head,
+      ...output.events.tail.slice(output.events.tailStart),
+    ])
+    : Object.freeze([...output.events.complete]);
+}
+
+function formattedCapturedStream(output: AgentShellProviderStreamOutputV1): string {
+  if (!output.truncated) return output.head;
+  return `${output.head}\n[... ${output.omittedBytes} bytes omitted ...]\n${output.tail}`;
 }
 
 function createEnvironment(
@@ -313,7 +507,7 @@ export function createAgentShellProcessSupervisor(
     options.maxOutputBytes,
     DEFAULT_MAX_OUTPUT_BYTES,
     MAX_OUTPUT_BYTES,
-    'Agent Shell Supervisor 输出上限',
+    'Agent Shell Supervisor 输出捕获上限',
   );
   const terminationGraceMs = boundedInteger(
     options.terminationGraceMs,
@@ -379,23 +573,9 @@ export function createAgentShellProcessSupervisor(
   ): void {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
     record.output.outputBytes += buffer.byteLength;
-    const remaining = Math.max(0, maxOutputBytes - record.output.capturedBytes);
-    const accepted = buffer.subarray(0, remaining);
-    const dropped = buffer.byteLength - accepted.byteLength;
-    record.output.droppedBytes += dropped;
-    if (dropped > 0 && !record.terminationRequest) {
-      beginTermination(record, {
-        confirmedStatus: 'failed',
-        errorMessage: `Agent Shell 输出超过 ${maxOutputBytes} 字节上限`,
-        status: 'failed',
-      });
-    }
-    if (accepted.byteLength === 0) return;
-    record.output.capturedBytes += accepted.byteLength;
-    (stream === 'stdout' ? record.output.stdoutChunks : record.output.stderrChunks).push(accepted);
-    const text = record.output.decoders[stream].write(accepted);
+    const text = record.output.decoders[stream].write(buffer);
     const event = Object.freeze({
-      byteLength: accepted.byteLength,
+      byteLength: buffer.byteLength,
       executionId: record.executionId,
       kind: 'output' as const,
       sequence: record.output.sequence,
@@ -404,7 +584,8 @@ export function createAgentShellProcessSupervisor(
       timestamp: now(),
     });
     record.output.sequence += 1;
-    record.output.events.push(event);
+    record.output.projection.append([event]);
+    captureOutputEvent(record.output, event, maxOutputBytes);
     emit(record, event);
   }
 
@@ -421,7 +602,8 @@ export function createAgentShellProcessSupervisor(
       timestamp: now(),
     });
     record.output.sequence += 1;
-    record.output.events.push(event);
+    record.output.projection.append([event]);
+    captureOutputEvent(record.output, event, maxOutputBytes);
     emit(record, event);
   }
 
@@ -455,17 +637,28 @@ export function createAgentShellProcessSupervisor(
     flushOutput(record, 'stderr');
     setState(record, status);
     activeExecutions.delete(record.executionId);
+    const outputProjection = record.output.projection.snapshot();
+    const outputEvents = capturedOutputEvents(record.output);
+    const retainedEventBytes = outputEvents.reduce(
+      (total, event) => total + textByteLength(event.text),
+      0,
+    );
+    const droppedOutputBytes = Math.max(
+      outputProjection.stdout.omittedBytes + outputProjection.stderr.omittedBytes,
+      Math.max(0, record.output.outputBytes - maxOutputBytes),
+      Math.max(0, record.output.events.totalBytes - retainedEventBytes),
+    );
     const result: AgentShellProcessResult = Object.freeze({
       ...(errorMessage ? { errorMessage } : {}),
       durationMs: Math.max(0, now() - record.startedAt),
       executionId: record.executionId,
       exitCode,
-      output: Object.freeze([...record.output.events]),
+      output: outputEvents,
       outputBytes: record.output.outputBytes,
-      droppedOutputBytes: record.output.droppedBytes,
+      droppedOutputBytes,
       status,
-      stderr: Buffer.concat(record.output.stderrChunks).toString('utf8'),
-      stdout: Buffer.concat(record.output.stdoutChunks).toString('utf8'),
+      stderr: formattedCapturedStream(outputProjection.stderr),
+      stdout: formattedCapturedStream(outputProjection.stdout),
       terminationConfirmed,
       terminationSignal,
     });
@@ -566,7 +759,7 @@ export function createAgentShellProcessSupervisor(
       executionId,
       grant: input.grant,
       onEvent: input.onEvent,
-      output: createOutputCollector(),
+      output: createOutputCollector(maxOutputBytes),
       promise,
       promiseResolve,
       settled: false,

@@ -25,6 +25,8 @@ export interface AgentSummaryPayloadInput {
   messages: readonly AgentSummaryTranscriptMessage[];
 }
 
+export const AGENT_CONVERSATION_SUMMARY_MAX_OUTPUT_TOKENS = 4_096;
+
 export const AGENT_CONVERSATION_SUMMARY_LIMITS = Object.freeze({
   fieldCharacters: 1_200,
   fieldItems: 8,

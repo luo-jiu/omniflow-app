@@ -12,11 +12,13 @@ describe('built-in Agent Skill catalog', () => {
   it('contains one narrow media extraction recipe with existing Tool names', () => {
     expect(getBuiltInAgentSkills()).toEqual([mediaExtractAudioSkill]);
     expect(mediaExtractAudioSkill.toolAllowlist).toEqual([
+      'file.search', 'file.resolve',
       'file.list',
       'file.stat',
       'media.inspect',
       'interaction.request',
       'media.extractAudio',
+      'shell.run', 'file.stage', 'file.publish', 'file.upload',
     ]);
     expect(mediaExtractAudioSkill.instructions).not.toMatch(/ffmpeg\s*[/：:]/iu);
     expect(mediaExtractAudioSkill.instructions).toContain('重新用 file.list 或 file.stat');
@@ -46,6 +48,6 @@ describe('built-in Agent Skill catalog', () => {
     const skills = getBuiltInAgentSkills();
     const mutableAllowlist = skills[0].toolAllowlist as unknown as string[];
     mutableAllowlist[0] = 'unexpected.tool';
-    expect(getBuiltInAgentSkills()[0].toolAllowlist[0]).toBe('file.list');
+    expect(getBuiltInAgentSkills()[0].toolAllowlist[0]).toBe('file.search');
   });
 });

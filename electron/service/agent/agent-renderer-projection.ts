@@ -6,6 +6,10 @@ import type {
 } from '@/shared/agent/agent.types';
 import { AGENT_SKILL_ACTIVATE_TOOL_NAME } from './skills/agent-skill.types';
 import { AGENT_SHELL_RUN_TOOL_NAME } from '../../../src/shared/agent/shell/agent-shell.types';
+import {
+  agentToolRegistry,
+  type AgentToolSnapshot,
+} from './agent-tool-registry';
 
 function compactSkillActivationResult(result: AgentToolResult): AgentToolResult {
   if (!result.data || typeof result.data !== 'object' || Array.isArray(result.data)) {
@@ -42,6 +46,7 @@ function compactShellResult(result: AgentToolResult): AgentToolResult {
   const rendererData = { ...result.data } as Record<string, unknown>;
   delete rendererData.executionId;
   delete rendererData.logRef;
+  delete rendererData.providerOutput;
   return {
     data: rendererData,
     ...(result.message ? { message: result.message } : {}),
@@ -51,17 +56,34 @@ function compactShellResult(result: AgentToolResult): AgentToolResult {
 
 export function projectAgentToolActivityForRenderer(
   activity: AgentToolActivitySnapshot,
+  resolveTool: (name: string) => AgentToolSnapshot | null = name => agentToolRegistry.get(name),
 ): AgentToolActivitySnapshot {
-  if (!activity.result) return activity;
+  const tool = resolveTool(activity.call.name);
+  const toolMetadata = tool
+    ? {
+        kind: tool.kind,
+        ...(tool.presentation ? {
+          groupKind: tool.presentation.groupKind,
+          operationKind: tool.presentation.operationKind,
+        } : {}),
+        risk: tool.risk,
+      } as const
+    : undefined;
+  const projectedActivity = toolMetadata
+    ? { ...activity, toolMetadata }
+    : activity.toolMetadata
+      ? { ...activity, toolMetadata: undefined }
+      : activity;
+  if (!activity.result) return projectedActivity;
   if (activity.call.name === AGENT_SHELL_RUN_TOOL_NAME) {
     return {
-      ...activity,
+      ...projectedActivity,
       result: compactShellResult(activity.result),
     };
   }
-  if (activity.call.name !== AGENT_SKILL_ACTIVATE_TOOL_NAME) return activity;
+  if (activity.call.name !== AGENT_SKILL_ACTIVATE_TOOL_NAME) return projectedActivity;
   return {
-    ...activity,
+    ...projectedActivity,
     result: compactSkillActivationResult(activity.result),
   };
 }
@@ -71,7 +93,9 @@ export function projectAgentSessionForRenderer(
 ): AgentSessionSnapshot {
   return {
     ...session,
-    toolActivities: session.toolActivities.map(projectAgentToolActivityForRenderer),
+    toolActivities: session.toolActivities.map(
+      activity => projectAgentToolActivityForRenderer(activity),
+    ),
   };
 }
 
@@ -100,7 +124,11 @@ export function projectAgentChatStreamEventForRenderer(
         ? { result: compactShellResult(source.result) }
       : {}),
     ...(source.toolActivities
-      ? { toolActivities: source.toolActivities.map(projectAgentToolActivityForRenderer) }
+      ? {
+          toolActivities: source.toolActivities.map(
+            activity => projectAgentToolActivityForRenderer(activity),
+          ),
+        }
       : {}),
   } as AgentChatStreamEvent;
 }

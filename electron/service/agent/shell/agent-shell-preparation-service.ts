@@ -42,6 +42,11 @@ import {
   type AgentShellCommandAnalysis,
   type AgentShellCommandAnalyzer,
 } from './agent-shell-command-analyzer';
+import {
+  resolveAgentShellHostContext,
+  type AgentShellHostContext,
+  type AgentShellHostContextDependencies,
+} from './agent-shell-host-context';
 
 export const AGENT_SHELL_ENVIRONMENT_BINDING_VERSION = 1 as const;
 export const AGENT_SHELL_ENVIRONMENT_POLICY_REVISION = 'shell-environment-policy-v1';
@@ -52,13 +57,15 @@ const MAX_AI_PROFILE_ID_BYTES = 256;
 const MAX_AI_PROVIDER_TYPE_BYTES = 128;
 const MAX_PATH_ENTRIES = 32;
 const MAX_PATH_ENTRY_BYTES = 2_048;
+const MAX_EFFECTIVE_ENVIRONMENT_ENTRIES = 128;
+const MAX_EFFECTIVE_ENVIRONMENT_VALUE_BYTES = 16 * 1024;
 const VERSIONED_IDENTITY_PATTERN = /^v[1-9]\d*:[a-f0-9]{64}$/u;
 
 export interface AgentShellPreparationRequest {
   readonly context: AgentToolMainPreparationContext;
   readonly input: unknown;
   readonly requestedAction?: AgentPreparedActionPublic;
-  readonly workspaceId: string;
+  readonly workspaceId?: string;
 }
 
 export interface AgentShellPreparationWorkspaceReader {
@@ -69,6 +76,11 @@ export interface CreateAgentShellPreparationServiceOptions {
   readonly additionalPathEntries?: readonly string[];
   readonly commandAnalyzer?: Pick<AgentShellCommandAnalyzer, 'analyze'>;
   readonly hostEnvironment?: AgentShellPreparationHostEnvironment;
+  /** Frozen main-process cwd used when a host action omits an explicit cwd. */
+  readonly hostCwd?: string;
+  /** Injectable only for deterministic main-process tests. */
+  readonly hostHome?: string;
+  readonly hostContextDependencies?: AgentShellHostContextDependencies;
   readonly workspaceStore: AgentShellPreparationWorkspaceReader;
 }
 
@@ -82,6 +94,7 @@ export interface AgentShellPreparationHostEnvironment {
 }
 
 export interface AgentShellEffectiveEnvironment {
+  readonly executionContext: 'host' | 'run-workspace';
   readonly entries: readonly { name: string; value: string }[];
   readonly identity: string;
   readonly pathHash: string;
@@ -187,12 +200,18 @@ function requestedInput(
 ): AgentShellRunInputV1 {
   if (!requestedAction) return input;
   const requested = normalizeAgentShellPreparedActionPublicV1(requestedAction);
+  const requestedContext = requested.cwd.kind;
+  const inputContext = input.executionContext || 'run-workspace';
+  if (requestedContext !== inputContext) {
+    throw new Error('Agent Shell 执行上下文不能在审批后改变');
+  }
   const environment = Object.create(null) as Record<string, string>;
   for (const entry of requested.environment) environment[entry.name] = entry.value;
   return normalizeAgentShellRunInputV1({
     command: requested.command,
     cwd: requested.cwd.path,
     env: environment,
+    executionContext: requestedContext,
     providerId: requested.provider.id,
     timeoutMs: requested.timeoutMs,
   });
@@ -292,9 +311,78 @@ export function buildAgentShellEffectiveEnvironment(input: {
   overrides: Readonly<Record<string, string>>;
   provider: AgentShellProvider;
   providerBinding: AgentShellProviderMainBinding;
-  workspace: AgentShellWorkspacePreparationContext;
+  workspace?: AgentShellWorkspacePreparationContext;
+  hostContext?: AgentShellHostContext;
 }): AgentShellEffectiveEnvironment {
   const providerIdentity = input.provider.publicIdentity;
+  if (input.workspace && input.hostContext) {
+    throw new Error('Agent Shell execution context 不能同时绑定 workspace 和 host');
+  }
+  if (!input.workspace && !input.hostContext) {
+    throw new Error('Agent Shell execution context 缺少 binding');
+  }
+  if (input.hostContext) {
+    const sourceEntries = input.hostContext.environment.entries;
+    const sourcePath = sourceEntries.find(entry => entry.name === 'PATH')?.value || '';
+    const separator = providerIdentity.platform === 'win32' ? ';' : ':';
+    const existingPathEntries = sourcePath
+      .split(separator)
+      .filter(entry => entry.length > 0);
+    const providerPathEntries = buildPathEntries(
+      input.provider,
+      input.providerBinding,
+      input.additionalPathEntries,
+      providerIdentity.platform === 'win32'
+        ? resolveWindowsSystemRoot(input.hostEnvironment)
+        : undefined,
+    );
+    const seenPathEntries = new Set<string>();
+    const mergedPathEntries: string[] = [];
+    for (const entry of [...existingPathEntries, ...providerPathEntries]) {
+      const key = providerIdentity.platform === 'win32' ? entry.toLowerCase() : entry;
+      if (seenPathEntries.has(key)) continue;
+      seenPathEntries.add(key);
+      mergedPathEntries.push(entry);
+    }
+    const pathValue = mergedPathEntries.join(separator);
+    if (utf8Length(pathValue) > MAX_EFFECTIVE_ENVIRONMENT_VALUE_BYTES) {
+      throw new Error('Agent Shell host PATH 超过执行上限');
+    }
+    const entries = Object.freeze([
+      ...sourceEntries
+        .filter(entry => entry.name !== 'PATH')
+        .map(entry => Object.freeze({ name: entry.name, value: entry.value })),
+      Object.freeze({ name: 'PATH', value: pathValue }),
+    ].sort((left, right) => left.name.localeCompare(right.name)));
+    if (entries.length > MAX_EFFECTIVE_ENVIRONMENT_ENTRIES) {
+      throw new Error('Agent Shell host 环境变量超过执行上限');
+    }
+    const policyRevision = hashIdentity('omniflow.agent.shell.host-environment-policy-v1', {
+      hostPolicyRevision: input.hostContext.environment.policyRevision,
+      providerPolicyRevision: providerIdentity.environmentRevision,
+      servicePolicyRevision: AGENT_SHELL_ENVIRONMENT_POLICY_REVISION,
+    });
+    return Object.freeze({
+      executionContext: 'host' as const,
+      entries,
+      identity: hashIdentity('omniflow.agent.shell.host-effective-environment-v1', {
+        entries,
+        policyRevision,
+        provider: providerIdentity.providerId,
+      }),
+      pathHash: hashIdentity('omniflow.agent.shell.host-path-v1', pathValue),
+      policyRevision,
+      providerPolicyRevision: providerIdentity.environmentRevision,
+      servicePolicyRevision: AGENT_SHELL_ENVIRONMENT_POLICY_REVISION,
+    });
+  }
+  const workspace = input.workspace;
+  if (!workspace) {
+    // The host branch returns above; keep the workspace branch explicitly
+    // narrowed so its virtual paths cannot accidentally be read from a
+    // partially constructed host binding.
+    throw new Error('Agent Shell workspace execution context 缺少 binding');
+  }
   const separator = providerIdentity.platform === 'win32' ? ';' : ':';
   const windowsSystemRoot = providerIdentity.platform === 'win32'
     ? resolveWindowsSystemRoot(input.hostEnvironment)
@@ -307,22 +395,22 @@ export function buildAgentShellEffectiveEnvironment(input: {
   ).join(separator);
   const environment: Record<string, string> = providerIdentity.platform === 'win32'
     ? {
-        HOME: input.workspace.physicalHomePath,
+        HOME: workspace.physicalHomePath,
         PATH: pathValue,
         PATHEXT: '.COM;.EXE;.BAT;.CMD',
         POWERSHELL_TELEMETRY_OPTOUT: '1',
-        TEMP: input.workspace.physicalTempPath,
-        TMP: input.workspace.physicalTempPath,
-        USERPROFILE: input.workspace.physicalHomePath,
+        TEMP: workspace.physicalTempPath,
+        TMP: workspace.physicalTempPath,
+        USERPROFILE: workspace.physicalHomePath,
       }
     : {
-        HOME: input.workspace.physicalHomePath,
+        HOME: workspace.physicalHomePath,
         LANG: providerIdentity.platform === 'darwin' ? 'en_US.UTF-8' : 'C.UTF-8',
         LC_ALL: providerIdentity.platform === 'darwin' ? 'en_US.UTF-8' : 'C.UTF-8',
         PATH: pathValue,
-        TEMP: input.workspace.physicalTempPath,
-        TMP: input.workspace.physicalTempPath,
-        TMPDIR: input.workspace.physicalTempPath,
+        TEMP: workspace.physicalTempPath,
+        TMP: workspace.physicalTempPath,
+        TMPDIR: workspace.physicalTempPath,
       };
   if (providerIdentity.platform === 'win32') {
     environment.SystemRoot = windowsSystemRoot!;
@@ -337,6 +425,7 @@ export function buildAgentShellEffectiveEnvironment(input: {
     servicePolicyRevision: AGENT_SHELL_ENVIRONMENT_POLICY_REVISION,
   });
   return Object.freeze({
+    executionContext: 'run-workspace' as const,
     entries,
     identity: hashIdentity('omniflow.agent.shell.environment-v1', {
       entries,
@@ -413,8 +502,10 @@ export function createAgentShellAuthorizationIdentity(input: {
   readonly analysisIdentity: string | null;
   readonly environmentIdentity: string;
   readonly providerRegistrationIdentity: string;
-  readonly workspaceContentIdentity: string;
-  readonly workspaceContentScannerRevision: string;
+  readonly executionContext?: 'host' | 'run-workspace';
+  readonly hostContextIdentity?: string;
+  readonly workspaceContentIdentity?: string;
+  readonly workspaceContentScannerRevision?: string;
 }): string | undefined {
   if (!input.analysisIdentity) return undefined;
   return hashIdentity('omniflow.agent.shell.authorization-v1', {
@@ -424,8 +515,14 @@ export function createAgentShellAuthorizationIdentity(input: {
     immutableDenyRevision: AGENT_SHELL_IMMUTABLE_DENY_REVISION,
     policyRevision: AGENT_SHELL_POLICY_REVISION,
     providerRegistrationIdentity: input.providerRegistrationIdentity,
-    workspaceContentIdentity: input.workspaceContentIdentity,
-    workspaceContentScannerRevision: input.workspaceContentScannerRevision,
+    executionContext: input.executionContext || 'run-workspace',
+    ...(input.hostContextIdentity ? { hostContextIdentity: input.hostContextIdentity } : {}),
+    ...(input.workspaceContentIdentity
+      ? { workspaceContentIdentity: input.workspaceContentIdentity }
+      : {}),
+    ...(input.workspaceContentScannerRevision
+      ? { workspaceContentScannerRevision: input.workspaceContentScannerRevision }
+      : {}),
   });
 }
 
@@ -473,8 +570,16 @@ export function createAgentShellPreparationService(
   if (!options?.workspaceStore) throw new Error('Agent Shell PreparationService 缺少 workspace');
   const commandAnalyzer = options.commandAnalyzer || createAgentShellCommandAnalyzer();
   const policyEngine = createAgentShellPolicyEngine();
-  const hostEnvironment = captureHostEnvironment(options.hostEnvironment || process.env);
+  const hostEnvironmentSource = options.hostEnvironment || process.env;
+  // Workspace preparation only needs the small platform bootstrap subset.
+  // Host preparation must receive the full inherited environment so PATH and
+  // ordinary user tooling (ffmpeg, git, npm, python, ...) remain discoverable;
+  // the host-context module performs the sensitive-variable filtering.
+  const workspaceHostEnvironment = captureHostEnvironment(hostEnvironmentSource);
   const additionalPathEntries = Object.freeze([...(options.additionalPathEntries || [])]);
+  // Capture the default once so an approval cannot silently move to a new cwd
+  // if the Electron process changes its cwd between prepare and spawn.
+  const frozenHostCwd = options.hostCwd || process.cwd();
 
   async function prepare(
     request: AgentShellPreparationRequest,
@@ -547,25 +652,48 @@ export function createAgentShellPreparationService(
       ...context.preparationIdentity.ownerScope,
       sessionId: context.preparationIdentity.sessionId,
     });
-    let preparedWorkspace: AgentShellWorkspacePreparationContext;
-    try {
-      preparedWorkspace = await options.workspaceStore.resolvePreparationContext(
-        request.workspaceId,
-        normalizedInput.cwd,
-        context.preparationIdentity.runId,
-        owner,
-        context.signal,
-      );
-      abortIfNeeded(context.signal);
-      assertWorkspaceBinding(
-        preparedWorkspace,
-        owner,
-        context.preparationIdentity.runId,
-        request.workspaceId,
-      );
-    } catch {
-      abortIfNeeded(context.signal);
-      throw new Error('Agent Shell workspace binding 无法确认');
+    const executionContext = normalizedInput.executionContext || 'run-workspace';
+    let preparedWorkspace: AgentShellWorkspacePreparationContext | undefined;
+    let preparedHost: AgentShellHostContext | undefined;
+    if (executionContext === 'host') {
+      try {
+        preparedHost = await resolveAgentShellHostContext({
+          defaultCwd: frozenHostCwd,
+          environment: {
+            overrides: normalizedInput.env,
+            source: hostEnvironmentSource,
+          },
+          platform: context.appContext.platform,
+          requestedCwd: normalizedInput.cwd,
+          ...(options.hostHome ? { homedir: options.hostHome } : {}),
+        }, options.hostContextDependencies);
+        abortIfNeeded(context.signal);
+      } catch (error) {
+        abortIfNeeded(context.signal);
+        if (error instanceof Error && error.message.includes('宿主')) throw error;
+        throw new Error('Agent Shell host context binding 无法确认');
+      }
+    } else {
+      if (!request.workspaceId) throw new Error('Agent Shell workspace ID 缺失');
+      try {
+        preparedWorkspace = await options.workspaceStore.resolvePreparationContext(
+          request.workspaceId,
+          normalizedInput.cwd,
+          context.preparationIdentity.runId,
+          owner,
+          context.signal,
+        );
+        abortIfNeeded(context.signal);
+        assertWorkspaceBinding(
+          preparedWorkspace,
+          owner,
+          context.preparationIdentity.runId,
+          request.workspaceId,
+        );
+      } catch {
+        abortIfNeeded(context.signal);
+        throw new Error('Agent Shell workspace binding 无法确认');
+      }
     }
     abortIfNeeded(context.signal);
     const aiDestination = Object.freeze({
@@ -600,11 +728,11 @@ export function createAgentShellPreparationService(
     });
     const effectiveEnvironment = buildAgentShellEffectiveEnvironment({
       additionalPathEntries,
-      hostEnvironment,
+      hostEnvironment: workspaceHostEnvironment,
       overrides: normalizedInput.env,
       provider,
       providerBinding,
-      workspace: preparedWorkspace,
+      ...(preparedHost ? { hostContext: preparedHost } : { workspace: preparedWorkspace }),
     });
     let commandAnalysis: AgentShellCommandAnalysis;
     try {
@@ -612,8 +740,10 @@ export function createAgentShellPreparationService(
         command: normalizedInput.command,
         dialect: provider.publicIdentity.dialect,
         hasEnvironmentOverrides: Object.keys(normalizedInput.env).length > 0,
-        logicalCwd: preparedWorkspace.logicalCwd,
-        persistentRuleEligible: AGENT_SHELL_WORKSPACE_PERSISTENT_RULE_IDENTITY_READY,
+        logicalCwd: preparedHost?.cwd.lexicalPath || preparedWorkspace!.logicalCwd,
+        persistentRuleEligible: preparedHost
+          ? false
+          : AGENT_SHELL_WORKSPACE_PERSISTENT_RULE_IDENTITY_READY,
         providerAnalyzerRevision: provider.publicIdentity.analyzerRevision,
       });
       abortIfNeeded(context.signal);
@@ -629,8 +759,13 @@ export function createAgentShellPreparationService(
       analysisIdentity: commandAnalysis.analysisIdentity,
       environmentIdentity: effectiveEnvironment.identity,
       providerRegistrationIdentity: provider.publicIdentity.registrationIdentity,
-      workspaceContentIdentity: preparedWorkspace.workspaceContentIdentity,
-      workspaceContentScannerRevision: preparedWorkspace.workspaceContentScannerRevision,
+      executionContext,
+      ...(preparedHost
+        ? { hostContextIdentity: preparedHost.contextIdentity }
+        : {
+            workspaceContentIdentity: preparedWorkspace!.workspaceContentIdentity,
+            workspaceContentScannerRevision: preparedWorkspace!.workspaceContentScannerRevision,
+          }),
     });
     const publicAction = sealAgentShellPreparedActionPublicV1({
       aiDestination: Object.freeze({
@@ -640,10 +775,15 @@ export function createAgentShellPreparationService(
       }),
       assessment,
       command: normalizedInput.command,
-      cwd: Object.freeze({ kind: 'run-workspace', path: preparedWorkspace.logicalCwd }),
+      cwd: Object.freeze({
+        kind: executionContext,
+        path: preparedHost ? normalizedInput.cwd : preparedWorkspace!.logicalCwd,
+      }),
       dataScope: Object.freeze({
         stagedInputs: Object.freeze([]),
-        unresolvedWorkspaceRead: !commandAnalysis.workspaceBoundaryVerified,
+        unresolvedWorkspaceRead: executionContext === 'host'
+          ? true
+          : !commandAnalysis.workspaceBoundaryVerified,
       }),
       environment: Object.freeze(Object.entries(normalizedInput.env)
         .sort(([left], [right]) => left.localeCompare(right))
@@ -700,7 +840,7 @@ export function createAgentShellPreparationService(
           resolvedExecutable: providerBinding.resolvedExecutable,
           terminationRevision: provider.publicIdentity.terminationRevision,
         }),
-        workspace: preparedWorkspace,
+        ...(preparedHost ? { host: preparedHost } : { workspace: preparedWorkspace }),
       }),
       decision: createPreparationDecision(policyDecision, publicAction),
       publicAction,
@@ -716,12 +856,21 @@ export function createAgentShellPreparationService(
         policyReasonCodes: policyDecision.reasonCodes,
         providerAnalyzerRevision: provider.publicIdentity.analyzerRevision,
         providerSnapshotIdentity: context.runCapabilitySnapshot.shellProviderSnapshotIdentity,
-        workspaceContentIdentity: preparedWorkspace.workspaceContentIdentity,
-        workspaceContentScannerRevision: preparedWorkspace.workspaceContentScannerRevision,
-        workspaceEntryCount: preparedWorkspace.workspaceEntryCount,
-        workspaceGeneration: preparedWorkspace.generation,
-        workspaceMetadataIdentity: preparedWorkspace.workspaceMetadataIdentity,
-        workspaceTotalBytes: preparedWorkspace.workspaceTotalBytes,
+        ...(preparedHost
+          ? {
+              executionContext,
+              hostContextIdentity: preparedHost.contextIdentity,
+              hostCwdIdentity: preparedHost.cwd.identity,
+              hostEnvironmentIdentity: preparedHost.environment.environmentIdentity,
+            }
+          : {
+              workspaceContentIdentity: preparedWorkspace!.workspaceContentIdentity,
+              workspaceContentScannerRevision: preparedWorkspace!.workspaceContentScannerRevision,
+              workspaceEntryCount: preparedWorkspace!.workspaceEntryCount,
+              workspaceGeneration: preparedWorkspace!.generation,
+              workspaceMetadataIdentity: preparedWorkspace!.workspaceMetadataIdentity,
+              workspaceTotalBytes: preparedWorkspace!.workspaceTotalBytes,
+            }),
         workspaceBoundaryVerified: commandAnalysis.workspaceBoundaryVerified,
       }),
     });

@@ -93,40 +93,56 @@ function mediaInspectPresenter(activity: AgentToolActivitySnapshot): AgentPresen
   return entries.length > 0 ? [{ entries, title: '媒体信息', type: 'details' }] : [];
 }
 
-function shellRunPresenter(activity: AgentToolActivitySnapshot): AgentPresentationBlock[] {
-  const data = asRecord(activity.result?.data);
-  if (!data) return [];
-  const durationMs = Number(data.durationMs);
-  const exitCode = data.exitCode === null ? '无' : textValue(data.exitCode);
-  const entries = [
-    { label: '状态', value: textValue(data.status) },
-    { label: '退出码', value: exitCode },
-    {
-      label: '耗时',
-      value: Number.isFinite(durationMs) && durationMs >= 0 ? `${durationMs} ms` : '',
-    },
-    { label: '标准输出', value: textValue(data.stdoutTail) },
-    { label: '错误输出', value: textValue(data.stderrTail) },
-    { label: '输出截断', value: data.tailTruncated === true ? '是' : '' },
-  ].filter(entry => entry.value);
-  return entries.length > 0 ? [{ entries, title: 'Shell 执行结果', type: 'details' }] : [];
-}
-
 const TOOL_TITLES: Record<string, string> = {
+  'skill.activate': '加载流程',
   'directory.create': '创建文件夹',
   'file.list': '读取目录',
+  'file.search': '搜索资料库',
+  'file.resolve': '定位路径',
+  'file.publish': '发布 Agent 输出',
+  'file.stage': '暂存文件',
   'file.stat': '读取文件信息',
+  'file.upload': '上传本机文件',
   'interaction.request': '用户输入',
   'media.extractAudio': '提取音频',
   'media.inspect': '检查媒体',
   'shell.run': '运行 Shell 命令',
 };
 
+export function buildAgentToolSummary(activity: AgentToolActivitySnapshot, libraryId: number): {
+  label: string;
+  subject?: string;
+  action?: Extract<import('@/shared/agent/agent.types').AgentPresentationAction, { action: 'tree.revealNode' }>;
+} {
+  const data = asRecord(activity.result?.data);
+  if (activity.status !== 'completed') return { label: getAgentToolTitle(activity) };
+  const file = activity.call.name === 'file.stat' || activity.call.name === 'file.resolve' ? data
+    : activity.call.name === 'file.list' ? asRecord(data?.directory)
+      : activity.call.name === 'media.inspect' ? asRecord(data?.file) : null;
+  const subject = activity.call.name === 'file.resolve' ? textValue(file?.path) || textValue(file?.name) : textValue(file?.name);
+  const nodeId = positiveId(file?.id ?? file?.nodeId);
+  if (subject) return {
+    label: asRecord(file?.storage)?.availability === 'unavailable'
+      ? '已读取元数据 · 源存储不可达' : activity.call.name === 'media.inspect' ? '已检查' : activity.call.name === 'file.resolve' ? '已定位' : '已读取',
+    subject,
+    ...(nodeId ? { action: { action: 'tree.revealNode', label: subject, libraryId, nodeId } } : {}),
+  };
+  if (activity.call.name === 'skill.activate') return { label: '已加载流程', subject: textValue(data?.skillId) || undefined };
+  if ((activity.call.name === 'media.extractAudio' || activity.call.name === 'directory.create') && textValue(data?.name)) {
+    const name = textValue(data?.name);
+    const createdNodeId = positiveId(data?.createdNodeId);
+    return {
+      label: activity.call.name === 'directory.create' ? '已创建' : '已保存', subject: name,
+      ...(createdNodeId ? { action: { action: 'tree.revealNode', label: name, libraryId, nodeId: createdNodeId } } : {}),
+    };
+  }
+  return { label: `已完成${getAgentToolTitle(activity)}` };
+}
+
 const TOOL_PRESENTERS: Record<string, ToolPresenter> = {
   'directory.create': artifactPresenter,
   'media.extractAudio': artifactPresenter,
   'media.inspect': mediaInspectPresenter,
-  'shell.run': shellRunPresenter,
 };
 
 export function getAgentToolTitle(activity: AgentToolActivitySnapshot): string {

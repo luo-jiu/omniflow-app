@@ -325,6 +325,7 @@ export function createAgentRunCapabilitySnapshot(
     for (const toolName of skill.toolAllowlist) {
       const referencedTool = options.toolSnapshot.get(toolName);
       if (!referencedTool) {
+        if (skill.optionalTools.includes(toolName)) continue;
         throw new Error(`Agent Skill ${skill.id} 引用了 Run 快照中不存在的 Tool：${toolName}`);
       }
       if (referencedTool.kind !== 'business') {

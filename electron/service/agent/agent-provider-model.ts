@@ -8,6 +8,10 @@ import {
   appendBoundedAIServiceStreamText,
 } from '../aiServiceStreamLimits';
 import type { AgentReasoningEffort } from '@/shared/agent/agent.types';
+import {
+  AGENT_PROVIDER_TOOL_NAME_MAX_LENGTH,
+  toAgentProviderToolName,
+} from './agent-provider-tool-name';
 
 export interface AgentProviderToolDefinition {
   description: string;
@@ -20,6 +24,14 @@ export interface AgentProviderToolCall {
   input: unknown;
   inputError?: string;
   name: string;
+}
+
+export interface AgentProviderTokenUsage {
+  cachedInputTokens?: number;
+  inputTokens: number;
+  outputTokens: number;
+  reasoningOutputTokens?: number;
+  totalTokens: number;
 }
 
 export type AgentProviderMessage =
@@ -48,16 +60,13 @@ interface AgentProviderToolNameMap {
   providerToCanonical: Map<string, string>;
 }
 
-const PROVIDER_TOOL_NAME_MAX_LENGTH = 64;
-const PROVIDER_TOOL_NAME_PATTERN = /^[a-zA-Z0-9_-]+$/;
-const PROVIDER_TOOL_CALL_ID_MAX_LENGTH = 128;
+export const AGENT_PROVIDER_TOOL_CALL_ID_MAX_LENGTH = 128;
 
 export interface AgentProviderStreamLimits {
   maxAssistantContentCharacters?: number;
   maxEventBufferCharacters?: number;
   maxToolArgumentCharacters?: number;
   maxToolArgumentTotalCharacters?: number;
-  maxToolCalls?: number;
 }
 
 export interface ResolvedAgentProviderStreamLimits {
@@ -65,7 +74,6 @@ export interface ResolvedAgentProviderStreamLimits {
   maxEventBufferCharacters: number;
   maxToolArgumentCharacters: number;
   maxToolArgumentTotalCharacters: number;
-  maxToolCalls: number;
 }
 
 export const DEFAULT_AGENT_PROVIDER_STREAM_LIMITS: Readonly<ResolvedAgentProviderStreamLimits> = Object.freeze({
@@ -73,14 +81,16 @@ export const DEFAULT_AGENT_PROVIDER_STREAM_LIMITS: Readonly<ResolvedAgentProvide
   maxEventBufferCharacters: 128_000,
   maxToolArgumentCharacters: 64_000,
   maxToolArgumentTotalCharacters: 128_000,
-  maxToolCalls: 16,
 });
 
 export interface AgentProviderStreamState {
   content: string;
+  finishReason?: string;
+  streamCompleted?: boolean;
   limits: ResolvedAgentProviderStreamLimits;
   toolArgumentCharacters: number;
   toolCalls: Map<number, StreamingToolCallState>;
+  usage?: AgentProviderTokenUsage;
 }
 
 function positiveInteger(value: unknown, fallback: number): number {
@@ -108,22 +118,7 @@ export function resolveAgentProviderStreamLimits(
       limits.maxToolArgumentTotalCharacters,
       DEFAULT_AGENT_PROVIDER_STREAM_LIMITS.maxToolArgumentTotalCharacters,
     ),
-    maxToolCalls: positiveInteger(
-      limits.maxToolCalls,
-      DEFAULT_AGENT_PROVIDER_STREAM_LIMITS.maxToolCalls,
-    ),
   };
-}
-
-function toProviderToolName(name: string): string {
-  const canonicalName = String(name || '').trim();
-  const providerName = canonicalName
-    .replace(/[^a-zA-Z0-9_-]/g, '_')
-    .slice(0, PROVIDER_TOOL_NAME_MAX_LENGTH);
-  if (!providerName || !PROVIDER_TOOL_NAME_PATTERN.test(providerName)) {
-    throw new Error(`Agent Tool 名称无法转换为 Provider 支持的格式：${canonicalName || '(empty)'}`);
-  }
-  return providerName;
 }
 
 function createProviderToolNameMap(tools: AgentProviderToolDefinition[]): AgentProviderToolNameMap {
@@ -131,7 +126,7 @@ function createProviderToolNameMap(tools: AgentProviderToolDefinition[]): AgentP
   const providerToCanonical = new Map<string, string>();
   tools.forEach((tool) => {
     const canonicalName = String(tool.name || '').trim();
-    const providerName = toProviderToolName(canonicalName);
+    const providerName = toAgentProviderToolName(canonicalName);
     const collision = providerToCanonical.get(providerName);
     if (collision && collision !== canonicalName) {
       throw new Error(
@@ -155,7 +150,7 @@ function requireProviderToolName(name: string, names: AgentProviderToolNameMap):
 
 function providerToolHistoryName(name: string, names: AgentProviderToolNameMap): string {
   const canonicalName = String(name || '').trim();
-  return names.canonicalToProvider.get(canonicalName) || toProviderToolName(canonicalName);
+  return names.canonicalToProvider.get(canonicalName) || toAgentProviderToolName(canonicalName);
 }
 
 function openAITool(tool: AgentProviderToolDefinition, names: AgentProviderToolNameMap) {
@@ -268,7 +263,7 @@ export function buildAgentProviderRequestBody(
       ...(reasoningEffort ? { output_config: { effort: reasoningEffort } } : {}),
       stream: true,
       system: input.systemPrompt,
-      tools: input.tools.map(tool => claudeTool(tool, toolNames)),
+      ...(input.tools.length ? { tools: input.tools.map(tool => claudeTool(tool, toolNames)) } : {}),
     };
   }
   return {
@@ -277,7 +272,10 @@ export function buildAgentProviderRequestBody(
     model: input.model,
     ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
     stream: true,
-    tools: input.tools.map(tool => openAITool(tool, toolNames)),
+    ...(connection.providerType === 'openai' || connection.providerType === 'deepseek'
+      ? { stream_options: { include_usage: true } }
+      : {}),
+    ...(input.tools.length ? { tools: input.tools.map(tool => openAITool(tool, toolNames)) } : {}),
   };
 }
 
@@ -292,12 +290,69 @@ export function createAgentProviderStreamState(
   };
 }
 
+function nonnegativeTokenCount(value: unknown): number | undefined {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : undefined;
+}
+
+function updateAgentProviderUsage(
+  providerType: AIServiceRuntimeConnection['providerType'],
+  payload: Record<string, any>,
+  state: AgentProviderStreamState,
+): void {
+  if (providerType === 'claude') {
+    const source = payload.type === 'message_start'
+      ? payload.message?.usage
+      : payload.type === 'message_delta'
+        ? payload.usage
+        : undefined;
+    if (!source || typeof source !== 'object' || Array.isArray(source)) return;
+    const directInputTokens = nonnegativeTokenCount(source.input_tokens);
+    const cacheCreationTokens = nonnegativeTokenCount(source.cache_creation_input_tokens);
+    const cacheReadTokens = nonnegativeTokenCount(source.cache_read_input_tokens);
+    const cachedInputTokens = cacheCreationTokens === undefined && cacheReadTokens === undefined
+      ? state.usage?.cachedInputTokens
+      : (cacheCreationTokens || 0) + (cacheReadTokens || 0);
+    const observedInputTokens = directInputTokens === undefined
+      ? undefined
+      : directInputTokens + (cachedInputTokens || 0);
+    const observedOutputTokens = nonnegativeTokenCount(source.output_tokens);
+    if (observedInputTokens === undefined && observedOutputTokens === undefined) return;
+    const inputTokens = Math.max(state.usage?.inputTokens || 0, observedInputTokens || 0);
+    const outputTokens = Math.max(state.usage?.outputTokens || 0, observedOutputTokens || 0);
+    state.usage = {
+      ...(cachedInputTokens === undefined ? {} : { cachedInputTokens }),
+      inputTokens,
+      outputTokens,
+      totalTokens: inputTokens + outputTokens,
+    };
+    return;
+  }
+
+  const source = payload.usage;
+  if (!source || typeof source !== 'object' || Array.isArray(source)) return;
+  const inputTokens = nonnegativeTokenCount(source.prompt_tokens);
+  const outputTokens = nonnegativeTokenCount(source.completion_tokens);
+  const totalTokens = nonnegativeTokenCount(source.total_tokens);
+  if (inputTokens === undefined && outputTokens === undefined && totalTokens === undefined) return;
+  const cachedInputTokens = nonnegativeTokenCount(source.prompt_tokens_details?.cached_tokens);
+  const reasoningOutputTokens = nonnegativeTokenCount(
+    source.completion_tokens_details?.reasoning_tokens,
+  );
+  const normalizedInputTokens = inputTokens || 0;
+  const normalizedOutputTokens = outputTokens || 0;
+  state.usage = {
+    ...(cachedInputTokens === undefined ? {} : { cachedInputTokens }),
+    inputTokens: normalizedInputTokens,
+    outputTokens: normalizedOutputTokens,
+    ...(reasoningOutputTokens === undefined ? {} : { reasoningOutputTokens }),
+    totalTokens: totalTokens ?? (normalizedInputTokens + normalizedOutputTokens),
+  };
+}
+
 function toolCallAt(state: AgentProviderStreamState, index: number): StreamingToolCallState {
   const existing = state.toolCalls.get(index);
   if (existing) return existing;
-  if (state.toolCalls.size >= state.limits.maxToolCalls) {
-    throw new Error(`Agent Tool 调用数量超过安全上限（最多 ${state.limits.maxToolCalls} 个）`);
-  }
   const current = {
     arguments: '',
     id: '',
@@ -373,18 +428,23 @@ export function consumeAgentProviderStreamEvent(
 ): string {
   if (!event || typeof event !== 'object' || Array.isArray(event)) return '';
   const payload = event as Record<string, any>;
+  updateAgentProviderUsage(providerType, payload, state);
+  const finishReason = providerType === 'claude'
+    ? payload.delta?.stop_reason : payload.choices?.[0]?.finish_reason;
+  if (typeof finishReason === 'string') state.finishReason = finishReason;
+  if (providerType === 'claude' && payload.type === 'message_stop') state.streamCompleted = true;
   if (providerType === 'claude') {
     const index = toolCallIndex(payload.index, state.toolCalls.size);
     if (payload.type === 'content_block_start' && payload.content_block?.type === 'tool_use') {
       const call = toolCallAt(state, index);
       call.id = boundedToolCallIdentity(
         payload.content_block.id || call.id,
-        PROVIDER_TOOL_CALL_ID_MAX_LENGTH,
+        AGENT_PROVIDER_TOOL_CALL_ID_MAX_LENGTH,
         'Agent Tool 调用 ID',
       );
       call.name = boundedToolCallIdentity(
         payload.content_block.name || call.name,
-        PROVIDER_TOOL_NAME_MAX_LENGTH,
+        AGENT_PROVIDER_TOOL_NAME_MAX_LENGTH,
         'Agent Tool 名称',
       );
       setInitialToolInput(state, call, payload.content_block.input);
@@ -423,14 +483,14 @@ export function consumeAgentProviderStreamEvent(
       if (chunk.id) {
         call.id = boundedToolCallIdentity(
           chunk.id,
-          PROVIDER_TOOL_CALL_ID_MAX_LENGTH,
+          AGENT_PROVIDER_TOOL_CALL_ID_MAX_LENGTH,
           'Agent Tool 调用 ID',
         );
       }
       call.name = appendBoundedAIServiceStreamText(
         call.name,
         String(chunk.function?.name || ''),
-        PROVIDER_TOOL_NAME_MAX_LENGTH,
+        AGENT_PROVIDER_TOOL_NAME_MAX_LENGTH,
         'Agent Tool 名称',
       );
       appendToolArguments(state, call, String(chunk.function?.arguments || ''));

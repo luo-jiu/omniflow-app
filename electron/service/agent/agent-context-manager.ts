@@ -6,9 +6,11 @@ import type {
   AgentRunSnapshot,
   AgentToolActivitySnapshot,
 } from '@/shared/agent/agent.types';
+import { isAgentConversationMessage } from '../../../src/shared/agent/agent.types';
 import { streamAIServiceProfile } from '../aiServiceClient';
 import type { AIServiceRuntimeConnection } from '../aiServiceClientModel';
 import {
+  AGENT_CONVERSATION_SUMMARY_MAX_OUTPUT_TOKENS,
   AGENT_CONVERSATION_SUMMARY_LIMITS,
   buildAgentSummaryPayloadBatch,
   buildAgentSummarySystemPrompt,
@@ -102,9 +104,7 @@ function toSummaryTranscript(
   messages: readonly AgentMessage[],
 ): AgentSummaryTranscriptMessage[] {
   return messages.flatMap((message) => {
-    if (message.role !== 'user' && message.role !== 'assistant') {
-      return [];
-    }
+    if (!isAgentConversationMessage(message)) return [];
     return [{
       content: message.content,
       role: message.role,
@@ -254,7 +254,7 @@ export function createAgentContextManager(
           startIndex: cursor,
         });
         const output = await summarize({
-          maxOutputTokens: budget.outputReserveTokens,
+          maxOutputTokens: AGENT_CONVERSATION_SUMMARY_MAX_OUTPUT_TOKENS,
           messages: [{ content: batch.payload, role: 'user' }],
           model: input.model,
           profileId: input.profileId,

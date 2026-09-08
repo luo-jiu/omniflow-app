@@ -382,6 +382,7 @@ export class FileTransferDownloadUrlBroker {
     })
     if (!upstream.ok || !upstream.body) {
       await upstream.body?.cancel().catch(() => undefined)
+      response.setHeader('X-OmniFlow-Source-Status', String(upstream.status))
       writeError(response, 502, `文件来源响应异常: ${upstream.status}`)
       return
     }

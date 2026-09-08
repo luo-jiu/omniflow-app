@@ -1,4 +1,6 @@
 import type { AgentToolPrepareRequest } from '@/shared/agent/agent.types';
+import { normalizeAgentLibraryDirectoryPath } from '@/shared/agent/agent-library-path';
+import { resolveAgentLibraryDirectoryTarget } from './agent-library.api';
 import { fetchNodeDetailById } from '@/features/file-explorer/services/file.api';
 import {
   fetchProviders,
@@ -7,6 +9,9 @@ import {
 } from '@/features/storage-config/services/storage-config.api';
 
 interface MediaExtractAudioPrepareInput {
+  parentId?: number;
+  directoryPath?: string;
+  destination: 'library' | 'local';
   fileSize: number;
   libraryId: number;
   mimeType?: string;
@@ -24,6 +29,7 @@ function outputMimeType(format: OutputFormat): string {
 }
 
 export interface AgentRendererToolPreparerDependencies {
+  resolveDirectory?: typeof resolveAgentLibraryDirectoryTarget;
   fetchNodeDetail?: typeof fetchNodeDetailById;
   listProviders?: typeof fetchProviders;
   resolveStorageTarget?: typeof resolveTarget;
@@ -61,11 +67,16 @@ function normalizeMediaExtractAudioPrepareInput(
     || nodeId <= 0
     || !Number.isFinite(fileSize)
     || fileSize < 0
+    || (source.parentId !== undefined && (!Number.isSafeInteger(source.parentId) || Number(source.parentId) <= 0))
+    || (source.parentId !== undefined && source.directoryPath !== undefined)
     || (outputFormat !== 'm4a' && outputFormat !== 'mp3' && outputFormat !== 'wav')
   ) {
     throw new Error('音频提取准备参数无效');
   }
   return {
+    destination: source.destination === 'local' ? 'local' : 'library',
+    ...(source.directoryPath !== undefined ? { directoryPath: normalizeAgentLibraryDirectoryPath(source.directoryPath) } : {}),
+    ...(Number.isSafeInteger(source.parentId) && Number(source.parentId) > 0 ? { parentId: Number(source.parentId) } : {}),
     fileSize,
     libraryId,
     ...(mimeType ? { mimeType } : {}),
@@ -86,6 +97,19 @@ export async function prepareAgentRendererTool(
   const fetchNodeDetail = dependencies.fetchNodeDetail || fetchNodeDetailById;
   const resolveStorageTarget = dependencies.resolveStorageTarget || resolveTarget;
   const verifyProvider = dependencies.verifyProvider || testProvider;
+  const finish = async (providerBindings: unknown): Promise<unknown> => {
+    if (input.destination === 'local') return { providerBindings };
+    try {
+      const targetDirectory = await (dependencies.resolveDirectory || resolveAgentLibraryDirectoryTarget)(input.libraryId, {
+        path: input.directoryPath, nodeId: input.parentId || (!input.directoryPath ? request.appContext.currentDirectory?.id : undefined),
+      });
+      throwIfAborted(dependencies.signal);
+      return { providerBindings, targetDirectory };
+    } catch (error) {
+      throwIfAborted(dependencies.signal);
+      return { providerBindings, targetError: error instanceof Error ? error.message.slice(0, 500) : '目标目录解析失败' };
+    }
+  };
   throwIfAborted(dependencies.signal);
 
   try {
@@ -95,6 +119,9 @@ export async function prepareAgentRendererTool(
     ]);
     throwIfAborted(dependencies.signal);
     const providers = Array.isArray(providerData.providers) ? providerData.providers : [];
+    if (nodeDetail.id !== input.nodeId || nodeDetail.libraryId !== input.libraryId || nodeDetail.type !== 'file') {
+      return { sourceFailure: 'source_unknown', providerBindings: {} };
+    }
     const knownAliases = new Set(providers.map(provider => String(provider.alias || '').trim()));
     const sourceProvider = String(nodeDetail.storageProvider || '').trim();
     const inheritedAlias = knownAliases.has(sourceProvider) ? sourceProvider : '';
@@ -107,15 +134,16 @@ export async function prepareAgentRendererTool(
         .then(result => result?.success === true)
         .catch(() => false);
       throwIfAborted(dependencies.signal);
+      if (!inheritedHealthy) {
+        return { sourceFailure: 'source_unreachable', providerBindings: {} };
+      }
       if (inheritedHealthy) {
         const provider = providers.find(item => item.alias === inheritedAlias);
         const binding = {
           providerAlias: inheritedAlias,
           providerLabel: String(provider?.label || inheritedAlias).trim().slice(0, 160),
         };
-        return {
-          providerBindings: Object.fromEntries(OUTPUT_FORMATS.map(format => [format, binding])),
-        };
+        return await finish(Object.fromEntries(OUTPUT_FORMATS.map(format => [format, binding])));
       }
     }
     const aliasesByFormat = new Map<OutputFormat, string[]>();
@@ -134,7 +162,7 @@ export async function prepareAgentRendererTool(
       }
       aliasesByFormat.set(
         format,
-        Array.from(new Set([providerAlias, fallbackAlias].filter(Boolean))),
+        Array.from(new Set([providerAlias, fallbackAlias, ...knownAliases].filter(Boolean))),
       );
     }));
     const uniqueAliases = Array.from(new Set(Array.from(aliasesByFormat.values()).flat()));
@@ -153,11 +181,9 @@ export async function prepareAgentRendererTool(
         providerLabel: String(provider?.label || providerAlias).trim().slice(0, 160),
       }]];
     }));
-    return {
-      providerBindings,
-    };
+    return await finish(providerBindings);
   } catch {
     throwIfAborted(dependencies.signal);
-    return { providerBindings: {} };
+    return { sourceFailure: 'source_unknown', providerBindings: {} };
   }
 }

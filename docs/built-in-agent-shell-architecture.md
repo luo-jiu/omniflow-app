@@ -1,8 +1,10 @@
 # 内置 Agent Shell 架构
 
-更新时间：2026-08-31
+更新时间：2026-09-02
 
 状态：**macOS Zsh 的三权限模式、终态日志分页、本机与资料库文件桥已接入生产 Registry、Orchestrator、Runtime、日志与配额，作为开发预览；Linux / Windows 与持久规则仍 fail-closed，尚未达到稳定发布标准**。
+
+宿主机 raw Shell 的迁移目标、Codex 对照结论和 `host` / `run-workspace` 执行上下文契约见 [`built-in-agent-host-execution-contract.md`](./built-in-agent-host-execution-contract.md)。macOS `host` 分支已经接入本文描述的 Registry、Runtime、lease、preflight、Supervisor 与日志链，当前仍是开发预览；Linux / Windows 与持久规则继续 fail-closed，不能把这段预览实现称为稳定跨平台能力。
 
 适用范围：
 
@@ -28,17 +30,18 @@
 - Shell 只能经 Tool Registry、main prepare、权限判断、ToolRun、AgentToolBroker 和平台 Provider 执行；不得直接暴露 `AgentLocalProcessRunner`、Node `spawn` 或 raw IPC。
 - V1 产品协议只提供非交互、前台命令：没有 stdin、PTY、密码输入、TUI、后台 Job 或跨重启续跑，并拒绝分析器能识别的脱离语法。宿主权限下的 raw command 仍可能借助其他解释器、本机程序或 GUI API 间接 daemonize、注册计划任务或弹出窗口；没有 OS containment 时不能声称完全阻止。
 - macOS / Linux 与 Windows 使用独立 Provider；Windows 默认 PowerShell，不用 POSIX quoting 模拟 Windows。
-- 每个 Run 有独立虚拟工作区。模型优先使用逻辑相对路径，宿主绝对路径只由 main 解析和持有。
-- 资料库文件必须经 `file.stage` 暂存后才能被 Shell 使用；Shell 产物必须经 `file.publish` 才能进入资料库或本机目标位置。
+- 每个 Run 有独立虚拟工作区。`cwd` 始终使用工作区逻辑相对路径；但用户在当前请求中明确给出的宿主绝对路径，可以直接出现在受支持只读命令的 `command` 中，用于查看、读取、概括或分析本机文件。外部路径仍由 Analyzer 与 Run 冻结的权限模式决策，不能据此取得 workspace 物理路径或自行指定任意本机输出路径。
+- `run-workspace` 中的 `~`、`$HOME` 与 `%USERPROFILE%` 指向 Run 虚拟 `home`；`host` 中则指向 main 冻结的宿主用户目录。直接读取宿主文件必须显式选择 `executionContext = host`，不能只靠相同路径文字隐式切换上下文；`file.stage` / `file.upload` 的 `~/` 来源仍由 main 按宿主路径单独规范化。
+- 资料库文件必须经 `file.stage` 暂存后才能被 Shell 使用；本机文件只有在需要工作副本、修改、转码或作为生成流程输入时才暂存。单纯读取明确宿主绝对路径不先 stage；Shell 产物必须经 `file.publish` 才能进入资料库或本机目标位置，原样上传本机文件仍使用 `file.upload`。
 - 普通 Tool 仍逐次审批。Shell 可以拥有独立、显式、可撤销、可审计的长期权限规则，但记忆、Skill、历史文本和普通 Tool 的一次批准都不能生成或扩大规则。
 - stdout / stderr 使用有序、有界的实时 tail；main 托管有配额的已清洗全流日志。超过日志上限后的输出只继续 drain 和计数，不能整体写入 SQLite、时间线或模型上下文。
 - `AgentLocalProcessRunner` 继续以绝对 executable + argv、`shell: false` 启动平台解释器；其当前内存收集、输出超限即终止和 Windows 取消兜底不能原样承担 Shell Runtime。
 
 ## 1.1 当前实现进度
 
-已落地但仍未接入生产 Tool 链的 Process Supervisor 位于 `electron/service/agent/shell/agent-shell-process-supervisor.ts`；LogStore 位于同目录的 `agent-shell-log-store.ts`，物理正文 Store 位于 `agent-shell-log-file-store.ts`，SpawnPreflight 位于 `agent-shell-spawn-preflight.ts`，Runtime 编排契约位于 `agent-shell-runtime.ts`。Supervisor 只接受 execution lease manager 消费后生成的 main-only grant，拒绝普通对象、过期 grant、命令 hash / Provider executable / cwd / fixed argv 漂移和同一 lease 重复 spawn；macOS / Linux 使用 detached process group，Windows 使用非 detached 子进程并复用平台进程树终止策略。
+已落地并接入 macOS 开发预览 Tool 链的 Process Supervisor 位于 `electron/service/agent/shell/agent-shell-process-supervisor.ts`；LogStore 位于同目录的 `agent-shell-log-store.ts`，物理正文 Store 位于 `agent-shell-log-file-store.ts`，SpawnPreflight 位于 `agent-shell-spawn-preflight.ts`，Runtime 编排契约位于 `agent-shell-runtime.ts`。Supervisor 只接受 execution lease manager 消费后生成的 main-only grant，拒绝普通对象、过期 grant、命令 hash / Provider executable / cwd / fixed argv 漂移和同一 lease 重复 spawn；macOS / Linux 使用 detached process group，Windows 使用非 detached 子进程并复用平台进程树终止策略。
 
-Supervisor 当前提供 `starting -> running -> terminating -> terminal` 生命周期、`completed / failed / cancelled / timed-out / interrupted` 终态、温和终止到强制终止的 grace / settle budget、单 Supervisor 并发上限、有序 stdout / stderr 事件、UTF-8 carry decoder、输出字节上限与继续 drain 后的丢弃计数。LogStore 接受 Supervisor 的输出事件并重新分配从 1 开始的统一序号，分别维护双流的 ANSI / OSC parser 和 redaction carry，保存有界详细日志与最新 tail，提供身份绑定的分页和过期清理；持久化与配额 adapter 通过注入接口保留。配额 adapter 契约已支持新建日志的异步 `reserve -> adjust / commit` 和 `markDeleting -> release` 生命周期，`agent-shell-log-quota-adapter.ts` 已将该契约映射到共享 `AgentLocalStorageQuotaManager`，并校验 reservation / resource 身份：输出热路径只合并目标字节数，不等待配额 I/O；详细日志达到上限后仍继续 drain 并累计丢弃字节。SQLite metadata、物理正文、共享 quota 和重启后的 resource ref reattach 已由生产 storage runtime 接线。`AgentShellSpawnPreflight` 已收敛 spawn 前 action / binding / workspace 重扫与观察窗口，并对 watcher 不可用、内容漂移、Provider / AI / policy identity 漂移 fail-closed。`AgentShellRuntime` 已收敛“获取并消费 lease -> spawn preflight -> 启动 Supervisor -> 绑定单条 LogStore -> 等待进程与当前日志 flush -> 生成结构化终态”，并将超时、日志失败、已确认取消、已确认中断和 termination incomplete 映射为稳定 settlement reason。Runtime / Supervisor / LogStore / SpawnPreflight 仍没有 Windows Job Object containment、safe presenter、生产 binding resolver 或 Orchestrator / ToolRun settlement 接线，因此不能作为用户可调用的 `shell.run` 能力。
+Supervisor 当前提供 `starting -> running -> terminating -> terminal` 生命周期、`completed / failed / cancelled / timed-out / interrupted` 终态、温和终止到强制终止的 grace / settle budget、单 Supervisor 并发上限、有序 stdout / stderr 事件和 UTF-8 carry decoder。它持续 drain 并向 Runtime 发送全部解码事件，同时维护最多 `1 MiB` 的 main-only head + tail 诊断采集；采集超限只丢中段、继续更新 tail 和省略字节数，不再终止命令。head / tail 同时受固定字节数和最多 `4,096` 个返回事件约束，尾部回收使用有界游标 / 周期压实而非 `Array.shift()` 搬移。LogStore 接受 Supervisor 的输出事件并重新分配从 1 开始的统一序号，分别维护双流的 ANSI / OSC parser 和 redaction carry，保存有界详细日志与最新 tail，并把同一批已清洗 frame 送入独立、最多 `160,000` UTF-8 bytes 的安全 head + tail 模型源；该模型源使用固定 Buffer 与环形 tail，不按来源碎片积累对象。Shell Tool 再让结构化结果自适应收口到约 `90,000` JSON 字符，以通过 Broker 的 `100,000` JSON 字符规范结果门禁并为清洗和传输字段留余量。详细日志达到自己的持久化上限后才按日志协议停止保存正文并继续 drain / 计数。LogStore 继续提供身份绑定的分页和过期清理；持久化与配额 adapter 通过注入接口保留。配额 adapter 契约已支持新建日志的异步 `reserve -> adjust / commit` 和 `markDeleting -> release` 生命周期，`agent-shell-log-quota-adapter.ts` 已将该契约映射到共享 `AgentLocalStorageQuotaManager`，并校验 reservation / resource 身份：输出热路径只合并目标字节数，不等待配额 I/O；详细日志达到上限后仍继续 drain 并累计丢弃字节。SQLite metadata、物理正文、共享 quota 和重启后的 resource ref reattach 已由生产 storage runtime 接线。`AgentShellSpawnPreflight` 已收敛 spawn 前 action / binding / workspace 重扫与观察窗口，并对 watcher 不可用、内容漂移、Provider / AI / policy identity 漂移 fail-closed。`AgentShellRuntime` 已收敛“获取并消费 lease -> spawn preflight -> 启动 Supervisor -> 绑定单条 LogStore -> 等待进程与当前日志 flush -> 生成结构化终态”，并将超时、日志失败、已确认取消、已确认中断和 termination incomplete 映射为稳定 settlement reason。Runtime / Supervisor / LogStore / SpawnPreflight 已接入 macOS 的 safe presenter、生产 binding resolver、Orchestrator 与 ToolRun settlement；Linux / Windows Provider、Windows Job Object containment 和对应安装包验收仍未完成，因此其他平台继续不注册用户可调用的 `shell.run`。
 
 ## 2. 目标与非目标
 
@@ -71,6 +74,7 @@ Supervisor 当前提供 `starting -> running -> terminating -> terminal` 生命�
 
 - 本地 `project/claude-code-book-main` 不是 Claude Code 官方源码。其 README 明确声明内容来自公开文档和产品行为分析，因此本文只能写成“解析材料声称”，不能把其中的接口、状态和实现细节当作 Anthropic 官方源码事实。
 - 本地 `project/opencode-dev` 是本轮可直接核对的源码快照，但本文没有锁定其上游 commit。下面关于 OpenCode 的结论只对应当前本地快照，升级参考项目后必须重新核对。
+- 本地 `project/codex` 是可直接核对的 Codex 官方开源仓库快照；本文关于输出分层和 Tool loop 的结论锁定到 commit `a9519cbcdd2d`，升级参考项目后必须重新核对。
 - OmniFlow 只吸收能由源码、测试或明确产品契约支撑的原则，不复制项目名称、模块形状或未经验证的内部实现。
 
 ### 3.2 两家共同支持的原则
@@ -84,13 +88,23 @@ OpenCode 当前源码提供了更直接的交叉证据：
 - `packages/core/src/tool-output-store.ts` 把模型结果限制为 2,000 行 / 50 KiB，超限正文写入托管目录；写入失败会让 settlement 失败，不会谎称全文已经保存。
 - `packages/core/src/cross-spawn-spawner.ts` 在 POSIX 尝试终止负 PID 进程组，在 Windows 使用 `taskkill /T /F`，必要时从 SIGTERM 升级到 SIGKILL 并等待进程关闭。
 
+Codex 当前源码把“命令实际输出”“模型看到的 Tool result”和“界面默认展开量”明确拆开：
+
+- `codex-rs/core/src/unified_exec/mod.rs` 把单次统一执行的进程结果采集限制为 `1 MiB`，并把模型 Tool 输出的默认预算设为 `10,000 tokens`；这两个数字属于不同层，不能互相替代，`10,000 tokens` 也是 Codex 调研事实，不是 OmniFlow 当前 `shell.run` 的上限。
+- `codex-rs/core/src/unified_exec/head_tail_buffer.rs` 等额保留 head 与 tail，超限时丢弃中段，而不是让长文件开头或错误结尾单独占满结果。
+- `codex-rs/core/src/tools/context.rs` 在进入模型上下文前再次做独立投影；进程采集上限不代表要把 `1 MiB` 全部发送给模型。
+- `codex-rs/tui/src/exec_cell/render.rs` 默认只展示约 5 行 Agent 命令输出，完整 transcript 由独立查看路径承担；这个对照只证明“摘要与完整输出应分层”，不要求 OmniFlow 复制其五行默认展示，OmniFlow 当前采用更紧凑的无框单行入口。
+- `codex-rs/core/src/session/turn.rs` 和 `stream_events_utils.rs` 以 Tool 执行后是否仍需要 follow-up 决定是否继续主循环，没有固定 Tool 调用次数计数器。源码中的 `256` 只限制 analytics 收集的 call ID 数量，不限制 Tool 执行。
+
+OmniFlow 同样不设置固定 provider turn 或 Tool 调用次数上限，但在 main 保留最近 24 轮稳定摘要：长度 `1..8` 的同一 Tool 调用 / 结果周期连续重复 3 次时停止，任一周期内容变化都会破坏匹配。普通 Tool 的业务 revision / 时间字段参与摘要，只有 `shell.run` 的 `result.data` 顶层 execution transport 元数据被忽略，不能以全局删字段制造“无进展”。
+
 这些证据支持 OmniFlow 继续采用以下 Shell 原则：
 
 - 原始命令先经过 schema、分析、权限和审批，再进入进程层。
 - 复合命令按原子操作、重定向和副作用逐项评估；无法可靠分析时默认询问。
 - AST 用于解释和生成规则，不改写将要执行的命令，也不是沙箱。
 - 非交互命令和 PTY 是两种不同产品能力，不共用一套含糊状态。
-- 输出先进入 main 的有界、已清洗全流托管；超过持久化配额后继续 drain 和计数，模型和 UI 只消费有界投影与 opaque reference，不能把内存捕获截断冒充完整日志。
+- Supervisor 的 main-only 诊断采集最多 `1 MiB`、最多返回 `4,096` 个事件并等额保留 head / tail；全部输出仍继续进入已清洗的有界全流托管，超过持久化配额后继续 drain 和计数。Runtime 的安全 head + tail 模型源最多保留 `160,000` UTF-8 bytes，使用固定 Buffer 与环形 tail；碎片化的一字节输出不能造成无界对象增长或反复数组头部搬移。规范结果再受 `100,000` JSON 字符硬门禁并自适应收口到约 `90,000` JSON 字符。单个 Shell provider 结果使用最高约 `40,000 tokens` 的独立投影预算，真实 continuation 空间不足时按 byte / token 再次收缩并重算真实 `omittedBytes`；renderer 每流只接收最多 `4 KiB` 摘要，但非审批 Shell 的默认 UI 只显示无框单行命令摘要，详细正文仅在点击后进入受控分页日志。原始诊断采集、规范结果中的模型源、provider Tool result、renderer 摘要和详细日志各有独立预算，不能相互替代或把任一完整正文直接铺满时间线。
 - 取消必须终止 supervisor 管理的进程组 / Job，并等待 teardown，不能只取消等待结果的 Promise；宿主程序主动脱离仍是没有 OS containment 时的残余风险。
 - Windows 使用独立的 PowerShell / 进程树策略，不能假设 POSIX 行为存在。
 
@@ -121,7 +135,7 @@ Backend：幂等 operation ID、authoritative committed receipt
 - 资料库目标、Provider、冲突策略、文件身份和一次性 artifact grant 在 main 冻结；renderer 不提交签名 URL、upload session、part、ETag 或任意网络目标。
 - 取消在本地执行阶段终止进程树并清理未提交资源；进入远端 complete / reconcile 边界后，先保存真实提交事实，再决定 Run 如何停止。
 - 托管日志和产物必须使用 owner-bound opaque reference。托管失败时 Tool 明确失败，不能只保留截断文本却声称完整结果可恢复；超过预先公开的持久化上限时必须明确记录丢弃字节数。
-- 现有 `media.extractAudio` sealed artifact 已按该边界完成 main-owned 上传事务：Renderer 不再协调 init / sign / complete，也不接触签名 URL。Shell `file.publish` 仍是目标设计，注册前必须复用同一结算原则，不能重新引入 Renderer control-plane 过渡接口。
+- 现有 `media.extractAudio` sealed artifact 已按该边界完成 main-owned 上传事务：Renderer 不再协调 init / sign / complete，也不接触签名 URL。开发预览中的 `file.publish` / `file.upload` 已复用同一结算原则，后续维护不能重新引入 Renderer control-plane 过渡接口。
 
 这不是对参考项目的无谓加层，而是在补 OpenCode 源码已经明确承认、Claude Code 解析材料没有覆盖的副作用持久化缺口。OmniFlow 仍不复制两者的编码、Git、CLI 或多 Agent 产品假设；Shell 必须继续服从资料库 scope、Run capability snapshot、ToolRun 审计和受控 UI 协议。
 
@@ -155,7 +169,8 @@ Backend：幂等 operation ID、authoritative committed receipt
 Shell 输出作为 Tool result 进入下一轮模型上下文时，等价于把该输出发送给当前 AI provider。实现必须：
 
 - 在审批卡中说明本次命令的有界输出会用于 Agent 后续推理。
-- 只投影完成任务所需的有限 tail，不自动上传 main 托管的有界全流日志或整个生成文件。
+- 单个 `shell.run` Tool result 最高使用约 `40,000 tokens` 的 provider 投影预算，并在 continuation 空间不足时继续收缩；普通 Tool 保持约 `1,024 tokens`，`skill.activate` 为保证完整内置说明单独保留约 `10,000 tokens` 且禁止截断。预算依据 Provider 已解析回 canonical 的 Tool 名选择。Shell 文本结果来自 LogStore 清洗 frame 形成、最多 `160,000` UTF-8 bytes 的安全模型源；规范结果在 `100,000` JSON 字符门禁前自适应收口到约 `90,000` JSON 字符。未发生省略时 provider 投影使用完整 `content`；只有真实超限时才按 byte / token 选择 head + tail，并重新计算 `omittedBytes`。它不读取 Supervisor 的原始 `1 MiB` 诊断采集，也不自动上传 main 托管的有界全流日志或整个生成文件。
+- OpenAI-compatible 与 Claude 的实际 input usage 只用于校准当前 Run 后续请求预检：累计本地估算相对实际值的最大正向低估量，缺少 usage 时继续使用字符估算，估算更保守时不放宽预算。Provider 返回结构化 context overflow 时失败当前 Run，不新建 Run、不重放已经执行的 Shell Tool，也不自动重试同一 provider turn。
 - 在 provider 投影前继续执行凭据和敏感文本清洗。
 - 检测到明确凭据、认证头、Cookie、私钥、签名 URL 或其他高置信秘密时拒绝执行或拒绝投影，不能用占位符掩盖后继续建立长期规则。
 - 把本 Run 冻结的 AI profile / 配置 revision、provider 类型和规范 Base URL hash 合成为 `aiDestinationIdentity`；Shell 自动允许规则必须绑定该身份，切换本地 / 远端服务或修改 endpoint 后重新询问。
@@ -219,7 +234,7 @@ interface AgentShellRunInputV1 {
 
 字段语义：
 
-- `command`：原始命令正文，允许多行；1～24,576 UTF-8 bytes，禁止 NUL。完整 Tool input 的规范 JSON 仍必须落在现有 64,000 字符总上限内。
+- `command`：原始命令正文，允许多行；1～24,576 UTF-8 bytes，禁止 NUL。当前 macOS Analyzer 支持的 `cat / du / file / head / ls / stat / tail / wc` 等只读命令可以直接引用用户明确给出的宿主绝对路径；该路径仍属于外部访问，必须进入 Analyzer、Policy 和审批 / 放行链，不能扩展成对任意命令或相邻路径的授权。完整 Tool input 的规范 JSON 仍必须落在现有 64,000 字符总上限内。
 - `cwd`：Run 工作区内的逻辑相对路径，默认 `work`，最多 1,024 UTF-8 bytes；不接受宿主绝对路径、盘符、UNC 或未经授权的 `..` 逃逸。
 - `timeoutMs`：main 再钳制；初始默认 10 分钟，硬上限 6 小时。
 - `env`：只允许非秘密、任务级临时覆盖；最多 32 项，名称最多 64 ASCII 字符，单值最多 2,048 UTF-8 bytes、合计最多 16 KiB，不能覆盖 main 保留变量。
@@ -231,7 +246,7 @@ interface AgentShellRunInputV1 {
 
 main 使用显式基础环境，再叠加经过校验的 `env`：
 
-- `HOME / USERPROFILE` 映射到 Run 的 `home`。
+- `run-workspace` 的 `HOME / USERPROFILE` 映射到 Run `home`，其中 `~` 只展开到虚拟 home；`host` 使用 main 过滤并冻结的宿主环境，`HOME / USERPROFILE / ~` 表示宿主用户目录。
 - `TMPDIR / TEMP / TMP` 映射到 Run 的 `tmp`。
 - `PATH` 由平台 Provider 构造并冻结，模型不能覆盖。
 - locale 和编码由 Provider 固定为可预测值。
@@ -262,7 +277,7 @@ PSModulePath POWERSHELL_TELEMETRY_OPTOUT
 3. 解析逻辑 cwd，检查工作区 generation、realpath 和目录存在性。
 4. 规范 timeout 与环境覆盖，执行秘密检测和保留键校验。
 5. `AgentShellCommandAnalyzer` 根据冻结 Provider 方言，对**原始命令**使用对应 Tree-sitter grammar 生成 AST。
-6. Analyzer 从 AST 计算静态原子操作、重定向、网络、外部路径、删除、嵌套解释器和无法解析项；动态语法或不受支持参数 fail-closed。
+6. Analyzer 从 AST 计算静态原子操作、重定向、网络、外部路径、删除、嵌套解释器和无法解析项；动态语法、不受支持参数或解析器故障会记录 `unresolved` / `unknown_syntax`，由后续 Policy 按权限模式决定是否询问或放行，Analyzer 本身不把未知命令当成永久执行白名单。
 7. Policy Engine 先应用不可变 deny，再匹配显式 Shell 规则，并按 Run 冻结的 `ask / auto / full-access` 模式得出决定。
 8. 生成 public prepared action、main-only execution binding、单次 ID 和 snapshot hash。
 9. 持久化 ToolRun 后才向 renderer 展示审批或进入执行。
@@ -346,7 +361,7 @@ interactive / detached / privilege_escalation
 
 管道、`&&`、`||`、子 Shell、命令替换、重定向和脚本块都必须拆成原子操作。`npm test` 的规则不能覆盖 `npm test && rm ...`。任一原子操作、重定向或风险分面没有匹配时，整个动作不能自动允许。
 
-解析失败、动态 command head、`eval`、嵌套解释器、PowerShell encoded command 等可以在没有命中不可变 deny 时允许“仅本次”，但不得生成 Session 或持久规则。
+解析失败、动态 command head、`eval`、嵌套解释器、PowerShell encoded command 等在 `ask / auto` 下会进入询问路径；在 `full-access` 下，只要没有命中不可变 deny 或显式 deny，当前 Policy Engine 会直接放行（不限定为“仅本次”）。这些 assessment 仍不得据此生成 Session 或持久规则。
 
 ### 7.4 执行前权威复验
 
@@ -403,11 +418,11 @@ Provider 必须随 Run capability snapshot 冻结。批准后版本、可执行�
 
 Shell 权限模式固定为三种，并在 Run capability snapshot 创建时冻结；模式切换只影响后续新 Run，不能给正在执行或等待确认的 Run 中途提权：
 
-- `询问我（ask）`：没有精确规则覆盖的命令进入用户确认。它是当前生产准备链的默认值。
-- `自动批准（auto）`：只由 main 的确定性 Analyzer + Policy 决策，不调用第二个 LLM，也不接受模型自己声明安全。只有语法已经完整分析、所有路径均由 main 证明位于 Run workspace、且不涉及外部路径、网络、包安装、系统配置、环境覆盖或其他未解决分面的命令才能自动放行；其余继续询问或拒绝。
-- `完全访问（full-access）`：用户明确选择后，当前 Run 不再因为已经完整分析的外部路径、网络或系统修改而询问，语义上接近 Code Agent 的 full-access / no-approval 模式。它不是 OS sandbox：命令拥有当前宿主用户本来具备的文件、进程和网络权限。OmniFlow 仍不向进程环境注入 API Key、Cookie 或内部 token，且 V1 尚不支持的 PTY / interactive、后台脱离和提权保持不可变 deny。Analyzer 无法完整理解命令时直接拒绝，不能以“完全访问”为由跳过能力边界。
+- `询问我（ask）`：没有精确规则覆盖的命令进入用户确认。它是当前生产准备链的默认值；直接读取明确宿主绝对路径也属于需要确认的外部访问。
+- `自动批准（auto）`：只由 main 的确定性 Analyzer + Policy 决策，不调用第二个 LLM，也不接受模型自己声明安全。只有语法已经完整分析、所有路径均由 main 证明位于 Run workspace、且不涉及外部路径、网络、包安装、系统配置、环境覆盖或其他未解决分面的命令才能自动放行；直接读取宿主绝对路径仍继续询问，其他情况询问或拒绝。
+- `完全访问（full-access）`：用户明确选择后，当前 Run 不再因为外部路径、网络、系统修改、destructive 分面或 Analyzer 的 `unresolved` / `unknown_syntax` 结果而询问；在当前代码中，只要没有命中不可变 deny 或显式 deny，就直接 `allow`，语义上接近 Code Agent 的 full-access / no-approval 模式。它不是 OS sandbox：命令拥有当前宿主用户本来具备的文件、进程和网络权限。V1 尚不支持的 PTY、interactive、后台脱离和提权由不可变 deny 保持拒绝。若未来要让其他高影响分面在 `full-access` 下继续确认，必须新增并冻结 policy revision，不能把该意图写成当前行为。
 
-`AgentShellPolicyEngine` 只消费结构化 assessment、main 已匹配的规则与 Run 冻结模式；它不解析命令字符串、不调用模型、不执行进程。显式 deny 和不可变 deny 始终优先于模式。当前代码已经落地该纯策略核心，并把三态模式纳入 Run snapshot identity；Agent 页面通过受控 IPC 读写 main-owned 本机设置，模式切换只影响后续 Run。macOS Zsh 探测成功时 `shell.run` 会注册，其他平台不注册。
+`AgentShellPolicyEngine` 只消费结构化 assessment、main 已匹配的规则与 Run 冻结模式；它不解析命令字符串、不调用模型、不执行进程。显式 deny 和不可变 deny 始终优先于模式；随后 `full-access` 无条件放行剩余 assessment，`auto` 只放行完整分析且已验证 workspace 边界、没有自动确认分面的动作，`ask` 默认询问。当前代码已经落地该纯策略核心，并把三态模式纳入 Run snapshot identity；Agent 页面通过受控 IPC 读写 main-owned 本机设置，模式切换只影响后续 Run。macOS Zsh 探测成功时 `shell.run` 会注册，其他平台不注册。
 
 ### 9.1 决策优先级
 
@@ -425,15 +440,11 @@ main 按下面顺序得出最终行为：
 
 `allow` 也必须经过本次 schema、prepare、Provider、cwd 和规则 revision 复验。不存在“因为以前运行过，所以直接执行”。
 
-V1 不可变 deny 至少包括：
+当前 `AgentShellPolicyEngine` 的不可变 deny 分支明确对应 `detached`、`interactive` 和 `privilege_escalation` 三个风险分面；接入规则时显式 deny 也始终优先。Provider / prepared action / workspace / rule 身份漂移由 prepare、lease 和 preflight 单独 fail-closed，protected / sensitive 环境覆盖在输入规范化阶段拒绝，并不是该 Policy 分支。
 
-- 提权和 UAC。
-- PTY、stdin 依赖和后台脱离。
-- 覆盖 Provider / PATH / HOME / loader / credential 环境。
-- 读写 main 控制目录、权限数据库、日志 store 或其他不向 Shell 暴露的内部路径。
-- prepared action、Provider、工作区或规则身份漂移。
+PTY、stdin、后台脱离、提权、控制目录访问和凭据 / 动态加载器注入仍是 V1 的整体能力边界；其中尚未映射为上述不可变分面的目标门禁，不能在文档中暗示已经由 `full-access` 自动保留确认。当前实现对 `filesystem.delete`、网络、包安装、系统配置、外部路径和其他 destructive 分面，在 `full-access` 且未命中 deny 时直接放行；若要收窄，必须增加新的 policy revision 和对应测试。
 
-命令能否删除工作区文件、访问网络、安装包或启动子进程由风险分析、明确规则和审批决定，不用硬编码 CLI 白名单冒充 raw Shell。
+命令范围仍不靠硬编码 CLI 白名单限制 raw Shell；风险分析、明确规则和三种权限模式共同决定是否执行。
 
 ### 9.2 `AgentShellPermissionRuleStore`
 
@@ -500,7 +511,7 @@ agent-shell-control/
 
 规则：
 
-- 模型、Tool result 和 SQLite 只保存 `input/...`、`work/...`、`output/...` 等逻辑路径。
+- Workspace cwd、Tool result 和 workspace SQLite 事实只使用 `input/...`、`work/...`、`output/...` 等逻辑路径。精确 Shell command、prepared action 与审批审计可以包含用户明确给出的宿主绝对读取路径；`file.stage` / `file.upload` 的本机来源显示路径是另一处独立窄例外。两者都不会变成 Shell cwd、workspace realpath、相邻路径授权或任意本机输出授权。
 - main 在执行前将逻辑路径解析为 realpath，并绑定工作区 ID / generation。
 - 已暂存输入记录来源、大小、content hash 和只读语义；不能通过同名覆盖偷换内容。
 - 工作区 manifest 维护单调累积的数据来源 provenance。Shell 把 staged 内容复制或转换到 `work / output` 后，来源不会因路径变化而消失；在具备可信细粒度 lineage 前，后续可能读取 workspace 数据的规则都按保守来源集合评估。
@@ -546,9 +557,11 @@ sweep(reason)
 
 ## 11. 资料库与本机文件桥
 
-`file.stage` 与 `file.publish` 都是 Tool Registry 中的 `business` Tool，各自创建规范 ToolRun，并计入现有每 Run 8 次业务 Tool 配额。它们不因被 `shell.run` 前后调用而变成免费内部步骤，也不能由 Skill、Shell wrapper 或 renderer 合并成一个不留审计的隐藏动作。两者的 Schema 递归 strict 到根对象、每个嵌套对象和判别联合分支：各分支按 `kind` 固定自己的 `required`，并分别设置 `additionalProperties: false`；危险对象键在通用 Schema 边界拒绝，不做类型转换、默认值注入或未知字段删除。`local-picker` 分支额外携带 `path`、library 分支混入本机字段、或 destination 分支出现另一分支字段都必须在 ToolRun 创建前失败。
+`file.stage`、`file.publish` 与 `file.upload` 都是 Tool Registry 中的 `business` Tool，各自创建规范 ToolRun。它们不因被 `shell.run` 前后调用而变成免费内部步骤，也不能由 Skill、Shell wrapper 或 renderer 合并成一个不留审计的隐藏动作；Run 是否继续由上下文预算、终态和重复循环门禁决定，不使用固定业务 Tool 配额。三者的 Schema 递归 strict 到根对象、每个嵌套对象和判别联合分支：各分支按 `kind` 固定自己的 `required`，并分别设置 `additionalProperties: false`；危险对象键在通用 Schema 边界拒绝，不做类型转换、默认值注入或未知字段删除。`local-picker` 分支额外携带 `path`、library 分支混入本机字段、或 destination 分支出现另一分支字段都必须在 ToolRun 创建前失败。
 
-当前实现状态（2026-08-31）：开发预览已经启用 `local-picker -> input`、`library-node -> input`、`output -> local-save-as` 和 `output -> library` 四条分支。main 持有 picker、Save As、打开文件句柄、Workspace Store、共享 Quota Manager、hash、generation 与 owned-file 复验；资料库 adapter 只通过绑定 renderer 提供的短期一次性 authority 取得节点快照、签名下载 URL 或上传凭据。prepare 不取得正文 URL / credentials，execute 重新授权；stage 下载后再次重验节点身份，publish 复用 main-owned 上传管理器并保留 `committed / uncommitted / commit_unknown` 三态。确认卡只展示 public action 和安全 preview，结果只返回逻辑路径、文件名或已提交节点身份，不包含 token、签名 URL、credentials 或物理路径。Run 释放与应用关闭会取消并等待文件桥的权威结算后再清理 workspace。Windows 与 Linux 文件身份、reparse point / junction / UNC 和安装包验收继续延期；macOS 真实资料库行为也仍需人工验收。
+当前实现状态（2026-08-31）：开发预览已经启用 `local-picker -> input`、`local-path -> input`、`library-node -> input`、`output -> local-save-as`、`output -> library` 和 `local-path -> library`。资料库写入目标同时接受 parent node ID 与从当前资料库根开始的绝对目录路径；路径从根逐段精确解析，不模糊搜索且不自动创建。main 持有 picker、Save As、打开文件句柄、Workspace Store、共享 Quota Manager、hash、generation 与 owned-file 复验；资料库 adapter 只通过绑定 renderer 提供的短期一次性 authority 取得节点快照、路径解析结果、签名下载 URL 或上传凭据。prepare 不取得正文 URL / credentials，execute 重新授权；stage 下载后再次重验节点身份，publish / upload 复用 main-owned 上传管理器并保留 `committed / uncommitted / commit_unknown` 三态。确认卡只展示 public action 和安全 preview，结果只返回逻辑路径、文件名或已提交节点身份；用户明确提供的来源显示路径是窄例外，canonical 路径、token、签名 URL、credentials 和 workspace 物理路径仍不外泄。Run 释放与应用关闭会取消并等待文件桥的权威结算后再清理 workspace。Windows 与 Linux 文件身份、reparse point / junction / UNC 和安装包验收继续延期；macOS 真实资料库行为也仍需人工验收。
+
+文件路由固定为：查看、读取、概括或分析用户明确给出的宿主绝对路径时，直接使用 `shell.run` 的受支持只读命令，不先 `file.stage`；需要工作副本、修改、转码或生成新文件时，使用 `file.stage -> shell.run -> file.publish`；本机普通文件无需加工而原样上传资料库时，使用 `file.upload`。这三条是 Tool 语义边界，不是按自然语言关键词写死的生产分支。
 
 ### 11.1 `file.stage`
 
@@ -558,6 +571,7 @@ V1 模型输入和安全结果冻结为：
 interface AgentFileStageInputV1 {
   source:
     | { kind: 'library-node'; nodeId: number }
+    | { kind: 'local-path'; path: string }
     | { kind: 'local-picker' };
 }
 
@@ -566,28 +580,28 @@ interface AgentFileStageResultV1 {
   displayName: string;
   sizeBytes: number;
   contentHash: string;
-  sourceKind: 'library-node' | 'local-picker';
+  sourceKind: 'library-node' | 'local-path' | 'local-picker';
 }
 ```
 
-`nodeId` 必须是正整数；本机来源不接受 path 字段。`logicalPath`、`displayName`、大小和 hash 由 main 在原子落盘后生成：逻辑路径不超过 1,024 UTF-8 bytes，文件名不超过 240 UTF-8 bytes，大小是未超过单文件 quota 的安全整数，hash 使用固定 `sha256:<64 lowercase hex>` 格式。结果中不出现 library provider、签名 URL、本机路径、picker token、workspace realpath 或 capability。
+`nodeId` 必须是正整数。`local-path` 只接受当前平台绝对路径或 `~/` 路径，最长 4,096 UTF-8 bytes；相对路径、控制字符、Windows device / UNC / ADS、目录、symlink、hardlink 和特殊文件都拒绝。`local-picker` 仍不接受 path 字段。`logicalPath`、`displayName`、大小和 hash 由 main 在原子落盘后生成：逻辑路径不超过 1,024 UTF-8 bytes，文件名不超过 240 UTF-8 bytes，大小是未超过单文件 quota 的安全整数，hash 使用固定 `sha256:<64 lowercase hex>` 格式。结果中不出现 library provider、签名 URL、canonical 本机路径、picker token、workspace realpath 或 capability。
 
-`file.stage` 把受控来源复制到当前 Run 的 `input`：
+`file.stage` 把需要工作副本的受控来源复制到当前 Run 的 `input`；它不是查看本机文件的前置步骤：
 
 - 资料库来源使用安全 `nodeId`，但 node 必须来自本 Run 当前感知集合或用户通过受控交互显式选择的集合；main 重新校验 canonical backend / account / library owner、节点类型、可见性和内容读取授权，不能只验证“nodeId 是正整数”。
 - 通过校验后才生成一次性 renderer capability 取得内容；Shell 永远看不到 MinIO 签名 URL。
-- 本机来源只能来自 main 的系统文件选择器或其他显式用户授权 capability，模型不能提交宿主绝对路径。
+- 本机来源可以来自 main 的系统文件选择器，也可以是用户在当前请求中明确给出的绝对或 `~/` 文件路径。模型不能自行发明、扩展、枚举或把历史路径当作新授权；所有明确路径仍显示 main 生成的内联审批。
 - V1 一次暂存一个普通文件；目录、symlink、special file 和无限递归复制不支持。
-- 完成后返回逻辑相对路径、文件名、大小和 content hash；来源 token、物理路径和临时 URL 不进入模型或 SQLite。
+- 完成后返回逻辑相对路径、文件名、大小和 content hash；来源 token、canonical 路径、workspace 物理路径和临时 URL 不进入模型或 SQLite。用户明确提供的显示路径只保留在 Tool input、public action 与审计事实中。
 - 暂存失败不创建半文件；先写临时文件，校验大小 / hash 后原子进入 `input`。
 
 `file.stage` 是正式 Registry Tool，不是 Shell Runtime 的私有下载方法。当前资料库感知范围内的普通文件可以按只读策略评估；本机选择、外部来源和超出既有感知的对象仍需显式交互或审批，并完整经过 ToolRun、Broker、取消和审计。
 
-stage 的 main-only binding 至少冻结：canonical owner / library、source kind、node ID 或 local-picker capability、node revision / content hash、感知或显式 grant provenance、storage binding、workspace ID / generation、目标 realpath、single-use ID 和 expiry。stage 只把内容放入本机工作区，不等于允许把正文发送给 AI；后续 `shell.run` 仍需按 staged data scope 与 `aiDestinationIdentity` 独立决策。
+stage 的 main-only binding 至少冻结：canonical owner / library、source kind、node ID、local-picker capability 或 local-path 文件 identity、node revision / content hash、感知或显式 grant provenance、storage binding、workspace ID / generation、目标 realpath、single-use ID 和 expiry。stage 只把内容放入本机工作区，不等于允许把正文发送给 AI；后续 `shell.run` 仍需按 staged data scope 与 `aiDestinationIdentity` 独立决策。
 
-prepare 和执行 owner 固定如下：main 创建 ToolRun、校验 Schema、工作区和配额，并生成一次性 binding；资料库 adapter 依赖 renderer 认证时，经独立 `AgentFileAuthorityBroker` 向绑定窗口请求短期一次性回执，同时校验窗口、owner、资料库、Session、Run、ToolRun 和 authority ID，真正下载、hash、上传和三态结算都由 main 托管。`local-picker` 必须先展示受控交互或审批动作，只有用户在绑定主窗口中直接操作后，main 才打开系统选择器并取得一次性 grant；模型调用、历史恢复和后台重试都不能自动弹选择器。未来 adapter 完全迁入 main 时可以替换授权来源，但不能改变 Tool 输入、ToolRun、授权和结果契约。
+prepare 和执行 owner 固定如下：main 创建 ToolRun、校验 Schema、工作区和配额，并生成一次性 binding；资料库 adapter 依赖 renderer 认证时，经独立 `AgentFileAuthorityBroker` 向绑定窗口请求短期一次性回执，同时校验窗口、owner、资料库、Session、Run、ToolRun 和 authority ID，真正下载、hash、上传和三态结算都由 main 托管。`local-picker` 必须先展示受控交互或审批动作，只有用户在绑定主窗口中直接操作后，main 才打开系统选择器并取得一次性 grant；模型调用、历史恢复和后台重试都不能自动弹选择器。`local-path` 则展示包含用户原始显示路径的内联审批，批准后直接复验并读取该文件，不能再次弹 picker。未来 adapter 完全迁入 main 时可以替换授权来源，但不能改变 Tool 输入、ToolRun、授权和结果契约。
 
-一次性来源 capability 在 fetch 开始时原子 claim，失败后不能重放。claim 前 main 必须重新权威校验 canonical backend / account / owner / library、node revision、可见性、读取 grant、storage binding 与 capability expiry；任一漂移都在读取正文前拒绝。下载到临时文件并计算大小 / hash 后、原子进入 `input` 前，再次校验 node revision、content identity / ETag、storage binding 和读取授权；漂移时删除半文件、经 Quota Manager 取消 reservation 并废止 capability。若后端无法提供可比较的稳定 revision / content identity，该资料库来源不得静默 commit，只能重新 prepare 或报告当前 adapter 不支持一致暂存。本机 picker 则绑定实际打开的 file handle / 平台文件 identity，并以从该 handle 读取到的字节 hash 为准，不能在选择后重新按可替换 path 打开。
+一次性来源 capability 在 fetch 开始时原子 claim，失败后不能重放。claim 前 main 必须重新权威校验 canonical backend / account / owner / library、node revision、可见性、读取 grant、storage binding 与 capability expiry；任一漂移都在读取正文前拒绝。下载到临时文件并计算大小 / hash 后、原子进入 `input` 前，再次校验 node revision、content identity / ETag、storage binding 和读取授权；漂移时删除半文件、经 Quota Manager 取消 reservation 并废止 capability。若后端无法提供可比较的稳定 revision / content identity，该资料库来源不得静默 commit，只能重新 prepare 或报告当前 adapter 不支持一致暂存。本机 picker 绑定实际打开的 file handle / 平台文件 identity，并以从该 handle 读取到的字节 hash 为准，不能在选择后重新按可替换 path 打开。`local-path` 在 prepare 时以 `lstat + realpath + O_NOFOLLOW handle + fstat` 冻结单链接普通文件 identity，执行时重新打开并要求路径、canonical path、`dev / ino / ctimeNs / mtimeNs / mode / size` 与 identity hash 全部一致；上传或暂存期间持续持有同一 handle，消费结束前再复验。
 
 ### 11.2 `file.publish`
 
@@ -600,6 +614,13 @@ interface AgentFilePublishInputV1 {
     | {
         kind: 'library';
         parentId: number;
+        fileName?: string;
+        providerId?: string;
+        conflictPolicy?: 'rename' | 'fail';
+      }
+    | {
+        kind: 'library-path';
+        directoryPath: string;
         fileName?: string;
         providerId?: string;
         conflictPolicy?: 'rename' | 'fail';
@@ -630,12 +651,12 @@ interface AgentFilePublishResultV1 {
 }
 ```
 
-`sourcePath` 只能是 `output/...` 逻辑相对路径，最长 1,024 UTF-8 bytes；`parentId` 必须是正整数，文件名沿用当前上传边界的 240 UTF-8 bytes 上限，`providerId` 最多 128 ASCII 字符且只能来自本 Run 的安全 Effective View。省略 `conflictPolicy` 表示以 `rename` 解释，但不把默认字段写回原始 Tool input；省略 provider 时由 prepare 从当前目标目录解析安全路由。结果中的大小 / hash 服从 stage 的同一格式，不返回本机目标路径、物理 provider alias、上传 session 或 capability。资料库 authoritative commit 已成功但刷新暂时失败时，结果可以明确区分 `committed + pending`；Agent 可以说明文件已经提交，但在重新感知前不能声称目录树已看到或继续用该节点执行后续动作。
+`sourcePath` 只能是 `output/...` 逻辑相对路径，最长 1,024 UTF-8 bytes；`parentId` 必须是正整数。`directoryPath` 必须是从当前资料库根开始的绝对目录路径，最长 2,048 UTF-8 bytes，逐段不超过 512 UTF-8 bytes且不接受空段、`.`、`..` 或反斜杠。文件名沿用当前上传边界的 240 UTF-8 bytes 上限，`providerId` 最多 128 ASCII 字符且只能来自本 Run 的安全 Effective View。省略 `conflictPolicy` 表示以 `rename` 解释，但不把默认字段写回原始 Tool input；省略 provider 时由 prepare 从当前目标目录解析安全路由。结果中的大小 / hash 服从 stage 的同一格式，不返回本机目标路径、物理 provider alias、上传 session 或 capability。资料库 authoritative commit 已成功但刷新暂时失败时，结果可以明确区分 `committed + pending`；Agent 可以说明文件已经提交，但在重新感知前不能声称目录树已看到或继续用该节点执行后续动作。
 
 `file.publish` 把 `output` 中的普通文件发布到资料库或本机：
 
 - 输入只接受工作区逻辑路径，main 重新检查 realpath、类型、大小、hash 和 workspace generation。
-- 资料库目标冻结 `libraryId / parentId / provider / conflictPolicy`，复用现有上传、authoritative commit、刷新和再感知语义。
+- 资料库目标以 parent node ID 或绝对目录路径表达；路径由绑定 renderer 从根逐段精确解析，prepare 后冻结 `libraryId / parentId / provider / conflictPolicy`，execute 再解析并要求同一目录 identity，随后复用现有上传、authoritative commit、刷新和再感知语义。
 - 数据面遵循现有媒体产物的 main-owned sealed consumption：Renderer 至多提交 opaque workspace output ref、当前认证凭据和 execution / owner 身份，不能协调 init / sign / complete，也不能取得 workspace / artifact 物理路径；main 必须从已验证句柄的显式 offset 读取，上传完复验源身份后，才允许进入 authoritative complete。
 - 本机目标由 main 系统 Save As 选择；模型不提供绝对目标路径。
 - 用户可在审批卡修改目标目录、文件名、Provider 或冲突策略；任何修改都会重新 prepare 并生成新 hash。
@@ -650,15 +671,29 @@ publish 的 main-only binding 至少冻结：canonical backend / account / owner
 
 Shell 在 `output` 写出文件不等于发布成功。资料库只有取得 authoritative commit 后才能声称“已经提交”；重新感知前只能保留 `perceptionState: pending`，不能声称目录树已出现节点或继续使用该节点。本机 Save As 则以 main 原子复制完成为准。
 
-### 11.3 Renderer 与卸载生命周期
+### 11.3 `file.upload`
+
+`file.upload` 专门表达“本机普通文件 -> 当前资料库目录”的原样传输。模型输入固定为一个 `local-path` 来源和一个 `library` 或 `library-path` 目标；它不接受 picker、不接受本机输出目标，也不先占用 Run workspace。任务只要求先查看再上传同一原文件时，可以直接 `shell.run` 只读检查后调用 `file.upload`；只有需要工作副本、改写、转码或生成新文件时，才改用 `file.stage -> shell.run -> file.publish`，不能借 upload 绕过工作区与 Shell 审计。
+
+prepare 先按 `file.stage` 的 local-path 身份规则打开并冻结来源，再解析目标目录、Provider、文件名与冲突策略，只返回用户显示路径、文件名、大小和目标标签组成的 public action；canonical 来源和 opened identity 留在 main-only binding。批准后 execute 重新打开来源并复验完整 identity，若目标来自 `library-path` 则再次逐段解析并要求同一 parent identity，再领取短期上传凭据。整个上传从同一个已验证 handle 读取，复用 `file.publish` 的 main-owned init / sign / PUT / complete / reconcile 和 `committed / uncommitted / commit_unknown` 结算；任一路径、文件或目标漂移都要求重新 prepare，不能自动换文件、换目录、重传或落本机兜底。
+
+系统提示词只允许模型在当前请求明确给出来源路径时提出这类调用，并要求按“来源资源、目标资源、是否需要加工”理解任务，而不是匹配“上传、拷贝、放入”等动词表。这是 Tool 选择约束，不是运行时代码能够证明的语言来源，也不能单独构成文件访问授权。
+
+运行时不把路径字符串本身当成授权。`file.upload` 在 `ask / auto` 下显示可恢复的无框内联审批；`full-access` 下由 main 对已验证、非破坏性的来源与目标自动授权。两种路径都必须冻结来源显示路径、文件名、大小和资料库目标，复验来源与目标身份，并签发一次性 execution capability。拒绝后不能原样重试；目录和多文件不支持。此行为沿用 Run 冻结模式，不创建另一份权限状态。
+
+### 11.4 Renderer 与卸载生命周期
 
 - Tool registration 必须声明该 adapter 的 prepare / execute 是否依赖 renderer。需要 renderer 而当前绑定主窗口页面不在场时，main 立即以稳定的 `renderer_unavailable` 结构化失败收口当前 ToolRun；不把它暂停到后台，不在页面回来后自动续跑，也不静默改成本机或另一个 provider。用户返回后由新的 Tool call 重试。
 - `file.stage` 在 main 已取得可独立消费的一次性来源能力后可以继续 main-owned 下载；若数据仍由 renderer 传输，页面卸载或 renderer 销毁会取消传输、删除临时文件并释放 reservation。只有大小与 hash 校验后原子进入 `input` 才算完成。
-- `file.publish` 在批准后由 main 持有事务，普通 Agent 页面卸载本身不取消；Run 停止、owner release 或窗口销毁在 authoritative commit 前中止上传 session 和未提交临时文件。进入 complete 后在上传管理器的有界关键结算窗口内使用独立 signal 核对真实结果；commit 后任何卸载或停止都不能撤销写入、触发重传或生成本机副本。页面再次出现只能从规范 Session / ToolRun 投影和正常目录刷新感知结果，不得续跑旧 execution。
+- `file.publish` / `file.upload` 在批准后由 main 持有事务，普通 Agent 页面卸载本身不取消；Run 停止、owner release 或窗口销毁在 authoritative commit 前中止上传 session 和未提交临时文件。进入 complete 后在上传管理器的有界关键结算窗口内使用独立 signal 核对真实结果；commit 后任何卸载或停止都不能撤销写入、触发重传或生成本机副本。页面再次出现只能从规范 Session / ToolRun 投影和正常目录刷新感知结果，不得续跑旧 execution。
 - main-owned 本机 picker / Save As 只要 owner 窗口仍存活即可完成；owner 释放、窗口销毁、注销或 Run 停止会取消。系统确认覆盖后仍从已验证句柄复制到同目录临时文件，提交前复验来源身份，成功时使用平台可用的原子替换语义，失败时不留下被误报成功的半文件。
 - 页面卸载不删除已经完成的 staged input、已提交资料库文件或已经完成的本机保存；这些结果继续由 ToolRun、workspace manifest 和 quota ledger 管理。应用重启不恢复未完成的 picker、renderer capability、上传或 Save As。
 
 ## 12. 进程、输出、取消与恢复
+
+### 12.0 内置操作的权限联动
+
+2026-09-07 起，现有 Run 冻结的权限模式同时用于已校验的非破坏性内置操作。`full-access` 可自动授权创建目录、非覆盖音频提取及文件桥；原有 source / target、binding、一次性凭据和提交复验仍然执行。文件桥不再无条件要求人工审批；`ask / auto` 保持原确认方式，未知 Tool、明确 deny 和破坏性动作不受此联动放行。Shell 自己的分析器与 Policy Engine 不变。详见 `agent-media-availability-and-permissions.md`。
 
 ### 12.1 前台执行
 
@@ -723,7 +758,7 @@ interface AgentShellLogPageV1 {
 }
 ```
 
-处理顺序固定为：有状态增量解码 -> 有状态终端控制序列 parser -> 有状态敏感文本 redactor -> 按 Unicode 边界切分安全 frame -> 分配 sequence -> 写 main log -> 更新有界 tail -> 进入有界事件调度器。
+处理顺序固定为两段：Supervisor 对原始 chunk 做有状态增量解码，同时更新 main-only `1 MiB` head + tail 诊断采集并把全部解码事件继续交给 Runtime；LogStore 再执行有状态终端控制序列 parser -> 有状态敏感文本 redactor -> 按 Unicode 边界切分安全 frame -> 分配 sequence -> 写 main log -> 更新最多 `160,000` UTF-8 bytes 的安全模型源与有界实时 tail -> 进入有界事件调度器。
 
 `sequence` 在每个 `executionId` 内从 `1` 单调递增，由 stdout / stderr 共用同一个分配器。它表达 main 实际接收并完成清洗的顺序，不宣称两个 OS pipe 之间存在更强的因果顺序。实时事件使用 batch 降低 IPC 压力；batch 内 frame 构成连续递增区间，且 `firstSequence / lastSequence` 与首尾 frame 一致。重试发送、恢复分页与实时事件允许区间重叠，因此 renderer 不能把“收到一次事件”当成唯一性依据。
 
@@ -737,10 +772,12 @@ V1 实时 IPC 还必须具备明确背压，不能把有界日志实现成无界
 - Provider 负责 UTF-8 / PowerShell 编码一致性和跨 chunk 解码；UTF-8 字符、ANSI / OSC 序列和秘密即使横跨多个 raw chunk 也不能被拆开后绕过处理。
 - ANSI CSI 可以转换为纯文本效果；OSC hyperlink、标题、剪贴板和其他控制序列必须由跨 chunk parser 删除。
 - 二进制输出不直接渲染；提示命令把内容写入 `output` 文件。
-- UI tail、模型 tail 和 main 托管的有界全流日志各有独立上限。达到全流日志上限后继续 drain 子进程输出并标记 truncated，不能因不再保存而堵塞 pipe；超出上限的正文只有仍落在独立最新 tail 中时可恢复，中间未被任一 Store 保留的 sequence 通过 gap 协议明确丢失。
-- SQLite 只保存有界 `AgentShellOutputTailV1`、总字节数、行数、截断标记、exit 信息和不含路径的 `logRef`。`truncatedBefore = N` 表示 sequence `< N` 已从该 tail 移除；它不代表详细日志仍一定保留这些 frame。
+- main-only 诊断采集、UI 预览、模型 Tool result 和 main 托管的有界全流日志各有独立上限。达到全流日志上限后继续 drain 子进程输出并标记 truncated，不能因不再保存而堵塞 pipe；超出上限的正文只有仍落在独立最新 tail 中时可恢复，中间未被任一 Store 保留的 sequence 通过 gap 协议明确丢失。
+- Supervisor 诊断采集最多保留 `1 MiB` 已解码但尚未做控制序列清洗和脱敏的正文；超限时 head 与 tail 各使用约一半预算并写入明确的中段省略事实。该采集只存在于 main 的进程结果中，不进入 SQLite、provider 或 renderer，也不替代 LogStore。
+- SQLite 的 Shell ToolRun 结果保存有界 `AgentShellOutputTailV1` 摘要字段、由已清洗 frame 形成且经过规范结果门禁收口的 provider source、总字节数、截断标记、exit 信息和不含路径的 `logRef`。上游模型源最多 `160,000` UTF-8 bytes，Shell Tool 会把整个结构化结果自适应收口到约 `90,000` JSON 字符，随后再通过 Broker 的 `100,000` JSON 字符硬门禁；renderer 投影删除 provider source、executionId 和 logRef，只保留最多每流 `4 KiB` 的 head + tail 显示摘要。`truncatedBefore = N` 表示 sequence `< N` 已从该实时 tail 移除；它不代表详细日志仍一定保留这些 frame。
 - 配额内的已清洗全流日志在 main 的 TTL Store 中；renderer 通过绑定 owner / Session / Run / ToolRun 的分页 IPC 读取，永远不取得文件路径。
-- 模型默认只获得有界 stdout / stderr 尾部、exit code、duration、timeout / cancellation 和 truncation 事实。
+- 模型从规范结果中的安全 provider source 生成独立的 `shell.run` Tool result，单个 Shell 结果最高使用约 `40,000 tokens`，并始终保留 exit code、duration、timeout / cancellation 和各层 truncation 事实；该上限足以让当前 27.5 KiB 中文 Markdown fixture 完整进入大窗口模型。完整输出流使用 `content + truncated=false + omittedBytes=0`；只有 `_omniflowProjection.truncated=true`、对应流 `truncated=true` 或 `omittedBytes>0` 才表示这条命令产生的正文被省略，此时才按 byte / token 选择 head + tail，并用原始总字节数减去本次实际保留字节得到真实 `omittedBytes`。传输完整性不证明源覆盖完整性：`cat` 明确文件且完整交付时可以认定全文可见，`head`、`tail` 和限定范围的 `sed` 即使 `truncated=false` 也只能证明所选范围完整。模型已经消费过、连续完整且允许压缩的旧 Tool 回合不再从 canonical result 机械重投影；Active Context 会把这些回合批量生成低权限严格 JSON 语义摘要，先在副本 staging，全部成功后才原子替换 main 内存上下文。终态 Run 的 ToolRun 事实另有总计最高约 `48,000 tokens` 的低权限跨 Run 投影；完成的 Shell 即使 Run 随后取消或中断，安全 stdout 仍可连同 ordinal 和 main public prepared action 中的命令进入下一 Run，而不是退化成状态文案。该投影删除 `executionId`、`logRef` 和 renderer preview；`skill.activate` 无论成功失败都不回灌完整说明或 allowlist。SQLite 规范结果、renderer 投影与详细日志始终不变，模型不能读取原始诊断采集或详细日志分页来绕过上下文预算。
+- 等待审批的 Shell 继续使用完整确认卡；非审批 Shell 默认是无框单行，只显示最低状态和 main public prepared action 中的单行命令摘要，不显示输出预览、耗时、退出码或预览截断。只有具备 owner-bound 结果的行可以点击；展开区最高约 `156px`，超出后内部滚动，并按 cursor 读取受控日志。详细日志真实过期或存在不可恢复缺口时只在展开区弱提示；分页大小、滚动和保留期不反向改变模型投影。默认命令与展开命令都不得从 `call.input` 回退拼接。
 
 受控日志读取请求至少绑定 owner、`sessionId / runId / toolRunId / executionId`、页大小，以及用于实时补洞的 `afterSequence` 或用于继续分页的 opaque cursor；两者不能同时提交。main 将单页钳制为最多 128 frame 或 256 KiB，并把 main 有界详细日志与 SQLite / 内存 tail 视为一个只读恢复视图。`availableRanges` 返回当前仍保留的合并连续区间，V1 最多是“详细日志前缀 + 最新 tail”两个区间；单页 frame 自身不能跨 gap。对于 `afterSequence = N`，`nextAvailableSequence` 是仍可读取的最早 sequence `> N`；若它大于 `N + 1`，`unavailableThrough = nextAvailableSequence - 1`。若直到规范 `lastSequence` 都没有可读 frame，则 `nextAvailableSequence = null`、`unavailableThrough = lastSequence`。cursor 同时绑定 `logRef` generation 与区间位置；日志轮转、清理或 identity 漂移后旧 cursor 失败，不能落到另一条日志。renderer 的恢复与合并规则固定为：
 
@@ -751,7 +788,9 @@ V1 实时 IPC 还必须具备明确背压，不能把有界日志实现成无界
 5. 用户向前分页详细日志时，新页与当前 live tail 仍按 sequence 合并；滚动位置和展开状态属于 renderer 临时投影，规范 tail、终态和截断事实仍只来自 main / SQLite。
 6. Tool 进入终态前，main 先 flush decoder、control parser、redactor、日志 append 与最终 tail checkpoint，再持久化 exit 事实并发布终态。应用崩溃仍可能丢失尚未完成该 checkpoint 的最后少量 frame，恢复时必须以已提交水位为准，不能猜测补齐。
 
-日志清洗只能降低风险，不能保证识别所有秘密。有界全流日志不跨机器同步，不自动附加到模型，不进入普通应用日志；过期后 UI 保留终态摘要并显示“详细日志已清理”。
+日志清洗只能降低风险，不能保证识别所有秘密。有界全流日志不跨机器同步，不自动附加到模型，不进入普通应用日志；过期后 UI 保留无框终态单行，只有用户展开时才弱提示“详细输出已清理”。
+
+跨 Run 的近期 ToolRun 事实先扣除当前对话、低权限 envelope 和命令关联占用，再把真实剩余 token 交给结果投影；Shell 命令关联最多占单条事实预算的四分之一且不超过约 `2,048 tokens`，超出时明确标记省略。事实按新到旧填充总计约 `48,000 tokens` 的预算；下一条最新事实连最小安全结果都无法容纳时立即停止，不继续同步重投影更旧的大日志。
 
 ### 12.3 取消与超时
 
@@ -807,7 +846,7 @@ Shell 审批卡必须显示：
 
 规则管理页属于 Shell 基建的一部分，至少支持查看 scope、命令 matcher、风险、最近命中、停用和删除。它不属于长期记忆管理，也不能把任意文本编辑成 matcher。
 
-当前 UI 契约禁止直接展示 `call.input`、本地路径和进程参数；Shell 是一个需要新增集中 safe presenter 的窄例外。Renderer 只能展示 main 生成的 public prepared action 和日志投影，不能自己从 `call.input` 拼命令卡，也不能渲染 ANSI、HTML、任意 URL 或可点击命令输出。
+当前 UI 契约禁止直接展示 `call.input`、自行生成的本地路径和进程参数；Shell 与用户明确提供的本机来源路径是集中 safe presenter 的窄例外。Renderer 的单行命令摘要、完整审批卡和展开区命令都只能来自 main 生成的 public prepared action，不能自己从 `call.input` 拼命令或路径，也不能渲染 ANSI、HTML、任意 URL 或可点击命令输出。三处命令展示复用同一个 display-safe formatter：普通首尾空格和连续空格保持不变，反斜杠、换行、Tab、C0 / C1、Unicode 行分隔符与 Bidi 控制字符使用可审计转义；执行字节不因显示投影而改变。
 
 ## 14. 持久化与审计
 
@@ -841,7 +880,7 @@ Coordinator 的启动过程必须在单个事务中：
 3. 删除并重新创建所有受影响的已知 trigger，避免旧 trigger 因 `IF NOT EXISTS` 静默保留旧规则。
 4. 运行结构和关键不变量自检，成功后仍写 `user_version = 2`；任一步失败回滚并拒绝打开。
 
-`prepared_action_json` 已升级为 `kind / version` 判别联合。三字段 `prepared_action_id / prepared_action_json / prepared_snapshot_hash` 继续全有或全无；prepared action 存在时，三者与 `approval_input_hash` 必须以 SQLite `text` 保存，且审批 hash 必须与冻结快照 hash 完全相等。当前 `media.extractAudio@1`、`shell.run@1`、`file.stage@1` 与 `file.publish@1` 分支都由共享身份清单、TypeScript strict normalizer、Tool / action 绑定校验和 SQLite 独立 trigger branch 共同约束，验证 JSON 根对象、原始字段类型、精确字段集合、重复键、跨字段规则与有界长度；Shell 的 main canonical normalizer 还会验证 command hash 对应精确 command bytes，文件桥分别验证资料库身份、Provider、大小、SHA-256 和逻辑输出路径。现有媒体结构在 reconcile 时补成明确的 `kind = 'media.extractAudio', version = 1` 分支，历史 snapshot hash 原样保留但不恢复执行能力；任何损坏行、hash 绑定漂移、Shell command hash 漂移或 BLOB 类型漂移都会让 bootstrap 事务整体回滚。新增 prepared action 必须继续使用独立分支，不能复用其他 Tool 字段校验，也不能让未知 kind 绕过约束。
+`prepared_action_json` 已升级为 `kind / version` 判别联合。三字段 `prepared_action_id / prepared_action_json / prepared_snapshot_hash` 继续全有或全无；prepared action 存在时，三者与 `approval_input_hash` 必须以 SQLite `text` 保存，且审批 hash 必须与冻结快照 hash 完全相等。当前 `media.extractAudio@1`、`shell.run@1`、`file.stage@1`、`file.publish@1` 与 `file.upload@1` 分支都由共享身份清单、TypeScript strict normalizer、Tool / action 绑定校验和 SQLite 独立 trigger branch 共同约束，验证 JSON 根对象、原始字段类型、精确字段集合、重复键、跨字段规则与有界长度；Shell 的 main canonical normalizer 还会验证 command hash 对应精确 command bytes，文件桥分别验证资料库身份、Provider、大小、SHA-256、逻辑输出路径和明确本机来源路径。现有媒体结构在 reconcile 时补成明确的 `kind = 'media.extractAudio', version = 1` 分支，历史 snapshot hash 原样保留但不恢复执行能力；任何损坏行、hash 绑定漂移、Shell command hash 漂移或 BLOB 类型漂移都会让 bootstrap 事务整体回滚。新增 prepared action 必须继续使用独立分支，不能复用其他 Tool 字段校验，也不能让未知 kind 绕过约束。
 
 首次公开稳定版冻结 baseline 后，才切换为编号迁移：create DDL 代表最新 schema，旧版本按一次性、有序 migration 升级，未知更高版本继续 fail-closed。届时不得继续用“项目未发布”为由原地重写已经发布的数据契约。
 
@@ -921,7 +960,7 @@ src/features/agent/
 
 当前 macOS Zsh 已能注册并执行 `shell.run`，但仍只达到开发预览。下面同时记录已完成的生产链和进入稳定发布前仍需收口的差距：
 
-- `shell.run@1` strict public action、main-only exact command hash、AI destination binding、Provider Registry、Run snapshot、Tree-sitter Analyzer、三态 Policy、PreparationService、execution lease、SpawnPreflight、Process Supervisor、Runtime 和生产 Service composition root 已落地。应用启动先探测 Provider；macOS 系统 Zsh 为 `executionReady: true` 时动态注册 Tool，并把 Provider 快照与 main-owned 本机设置中的权限模式注入 Orchestrator。Linux Bash 与 Windows PowerShell 保持 `executionReady: false`。Parser / WASM 初始化失败、动态语法、未知命令或参数、交互 / 后台 / 提权能力和任一冻结身份漂移仍 fail-closed。扩展元数据身份和同用户 TOCTOU 尚未由 native handle 收口，因此 `persistentRuleEligible` 固定为 `false`，不能生成持久规则。
+- `shell.run@1` strict public action、main-only exact command hash、AI destination binding、Provider Registry、Run snapshot、Tree-sitter Analyzer、三态 Policy、PreparationService、execution lease、SpawnPreflight、Process Supervisor、Runtime 和生产 Service composition root 已落地。应用启动先探测 Provider；macOS 系统 Zsh 为 `executionReady: true` 时动态注册 Tool，并把 Provider 快照与 main-owned 本机设置中的权限模式注入 Orchestrator。Linux Bash 与 Windows PowerShell 保持 `executionReady: false`。在 macOS 的 `full-access` Run 中，普通未知命令以及带 `unresolved` assessment 的命令不会仅因分析不完整而 fail-closed；当前实现对未命中不可变 deny / 显式 deny 的其余分面直接放行，只有策略明确列出的不可变能力继续拒绝。任一冻结身份漂移仍 fail-closed。扩展元数据身份和同用户 TOCTOU 尚未由 native handle 收口，因此 `persistentRuleEligible` 固定为 `false`，不能生成持久规则。
 - 通用 main prepare hook 已落地：Registry 冻结 `none / renderer / main` preparation identity，Orchestrator 复用同一 `preparing -> approval -> execution` 生命周期；main-only binding 与 snapshot material 被有界深拷贝、冻结并纳入 snapshot hash，任一单项和完整规范快照均限制为 256 KiB，只经 main execution context 交给 Run 快照中的同一 Tool 实现。批准时始终重新 prepare；稳定时以 SQLite CAS 保存并执行最新 capability，任一公开审批语义、私有 binding 或 material 漂移都建立新确认轮次。生产 `shell.run` 已使用该 hook，并有动态 prepared risk 的真实 Orchestrator 集成测试。
 - `AgentPermissionGate` 没有 Shell rule Store、canonical matcher、analyzer / policy / env policy revision、workspace content identity 和命中审计。
 - AI destination main snapshot 已绑定 profile、配置 revision、provider 与规范 endpoint identity，生产 binding resolver 与 Provider snapshot 已注入；当前仍缺持久规则命中 audit 与 staged source provenance。
@@ -929,7 +968,7 @@ src/features/agent/
 - `AgentToolProgress` 只有 message / percent，不能承载带完整事件身份、sequence 水位、gap replay 和 cursor 分页的双流日志 tail。
 - `AgentLocalProcessRunner` 把完整输出留在内存并在超限时杀进程，环境与输出策略也不适合 raw Shell。
 - Windows 当前取消兜底不能证明任意孙进程已经结束。
-- UI 已有 Shell 专用审批块和结果 presenter：审批从规范 public action 渲染完整冻结 command、Provider、逻辑 cwd、风险、timeout 与非敏感环境覆盖，结果只展示清洗后的有界 tail 和 opaque `logRef`。终态与恢复后的卡片可以经 owner / Session / Run / ToolRun / execution 绑定的 IPC 分页读取详细日志；当前仍没有实时双流时间线和规则管理入口，不能从 `call.input` 或未清洗输出自行拼 UI。
+- UI 已有 Shell 专用审批块和轻量结果 presenter：审批从规范 public action 渲染完整冻结 command、Provider、逻辑 cwd、风险、timeout 与非敏感环境覆盖；非审批结果默认只显示无框单行最低状态和同一 public action 的命令摘要，不显示耗时、退出码、输出预览或预览截断。具备 owner-bound 结果时可以点击展开最高约 `156px`、内部滚动的紧凑 Shell 区域，并经 owner / Session / Run / ToolRun / execution 绑定的 IPC 分页读取详细日志；真实过期或缺口只在展开区弱提示。当前仍没有实时双流时间线和规则管理入口，不能从 `call.input`、模型 Tool result、日志第一页或未清洗输出自行拼默认正文。
 - `AgentShellWorkspaceStore` 已提供 main-only Run 工作区、owner / Session 绑定、逻辑路径解析、symlink / hardlink / traversal 拒绝、generation、累计 provenance、SQLite 恢复、共享 quota adapter 和串行 mutation / persistence gate。Preparation 在 Quota live lease 下以 25 秒预算扫描五个逻辑根；SpawnPreflight 消费一次性 execution lease，并在短期 watcher 前后权威重扫。生产 Orchestrator 已注入 Provider / AI binding resolver。执行开始前另行预留默认 512 MiB growth headroom，reservation TTL 至少覆盖命令 timeout 加 60 秒；执行中默认每 500 ms 运行轻量 usage scanner，按 `max(logical size, st_blocks * 512)` 计费并拒绝链接、硬链接、特殊文件、超深、超条目、超单文件和超额度；进程结束后再执行完整 scanner v3 哈希扫描，并把 growth reservation 原子结算进既有 workspace resource。超限或计量不可信时取消进程、隔离 / 清理 workspace 并返回 `quota_exceeded`。应用关闭先关闭准入、abort execution、`interruptAll()`，等待日志 flush、最终扫描和配额结算后才释放 workspace。Windows content identity 继续 fail-closed；macOS generic xattr / ACL / file flags 和 path-based root guard 仍有同用户 TOCTOU，当前单次批准只是在明确残余风险下运行，不是 OS containment，也不能生成持久规则。
 - Workspace Store lifecycle 也由 main 独占：首次 dispose 同步关闭公开方法准入，等待已经接纳但尚未进入 mutation queue 的 create / prepare / cleanup 等完整多阶段操作，再关闭 adapter 准入、等待已进入 adapter 的回调，最后注销 adapter 和关闭 persistence；重复 dispose 复用同一 Promise。同步 `get()` 在 closing 后只返回 `null`。同步读仍不是 read-committed 事务视图，当前只用于 main 内诊断，不能作为 Shell 执行授权依据。
 - 当前 schema 2 已包含 workspace metadata、共享存储 ledger、Shell log metadata 和严格 prepared action 判别联合，并由统一 bootstrap 原地 reconcile / 自检；当前仍没有 Shell Rule 表和额外的规则命中审计字段。`AgentShellLogStore`、`AgentShellLogFileStore`、SQLite log persistence、物理正文、quota reattach、`AgentShellRuntime`、Orchestrator、动态 Registry 注册、生产 binding resolver、审批块、结果 presenter 和终态详细日志分页已接线。实时双流时间线仍未接到 renderer。
@@ -944,12 +983,13 @@ src/features/agent/
 - 实时阶段仍只投影有界 tail；终态 / 恢复后支持详细日志分页。实时双流时间线仍未实现，Shell 与文件桥的专用取消结算预算已补齐。
 - macOS / Linux generic xattr、ACL、file flags 与 root guard 仍需 handle-based adapter 或 native directory anchor；当前仅本次审批明确接受残余风险，持久规则继续 fail-closed。
 - Windows reparse point / ADS / UNC / 大小写敏感 NTFS、Job Object 和真机取消验收全部延期，Windows Provider 保持不可执行。Linux 也保持不可执行，直到独立宿主验收完成。
-- 2026-08-31 已生成 unsigned macOS arm64 unpacked 包：Tree-sitter CommonJS 入口保持为 main 的外部依赖，ASAR 中该依赖只包含许可证、package metadata、`wasm/tree-sitter.js`、runtime WASM、Bash grammar WASM 与 PowerShell grammar WASM；使用打包 Electron runtime 从 ASAR 加载后，Bash 与 PowerShell fixture 均解析为无错误 `program` 根节点。真实 macOS 非交互命令、取消、超时和退出仍需手工验收。
+- 2026-08-31 已生成 unsigned macOS arm64 unpacked 包：Tree-sitter CommonJS 入口保持为 main 的外部依赖，ASAR 中该依赖只包含许可证、package metadata、`wasm/tree-sitter.js`、runtime WASM、Bash grammar WASM 与 PowerShell grammar WASM；使用打包 Electron runtime 从 ASAR 加载后，Bash 与 PowerShell fixture 均解析为无错误 `program` 根节点。macOS-only 自动化已通过真实 `/bin/zsh`、Runtime、Supervisor 与 LogStore 执行 PATH 中的临时 fixture CLI，并验证 host cwd、环境过滤和 stdout；真实应用 / 安装包中的常用 CLI、取消、超时、进程树和退出仍需手工验收。
 
 ### Phase 1B：文件闭环
 
-- `file.stage` 的资料库 / 本机输入、递归 strict Schema、prepared action / SQLite 联合、下载后来源复验与 workspace provenance 已完成。
+- `file.stage` 的资料库 / 本机工作副本输入、递归 strict Schema、prepared action / SQLite 联合、下载后来源复验与 workspace provenance 已完成；明确宿主绝对路径的只读查看直接走 `shell.run`，不额外复制进 Run。
 - `file.publish` 的资料库 / Save As、main-owned upload、authoritative 三态与取消结算已完成；真实资料库刷新和再感知体验仍需人工验收。
+- `file.upload` 的用户明确本机路径、资料库绝对目录路径、内联审批、main-owned upload、来源 / 目标双重验与 authoritative 三态已完成；它只负责原样传输，不替代需要转换的 stage / shell / publish 链。
 
 ### Phase 1C：可撤销权限
 
@@ -981,18 +1021,18 @@ src/features/agent/
 
 至少覆盖：
 
-- Analyzer：`@vscode/tree-sitter-wasm` 必须使用与 analyzer revision 同步提升的精确版本；安装包与开发环境都能解析 runtime、Bash grammar 和 PowerShell grammar。静态已知子集生成稳定 `analysisIdentity / authorizationIdentity`，动态语法、未知参数、link-producing copy、交互参数、Zsh `=command`、named-home 展开和 Parser / WASM 故障均 fail-closed。electron-builder 只收集许可证、包元数据与三份所需 WASM，不能遗漏运行资源或误收整套无关 grammar。
+- Analyzer：`@vscode/tree-sitter-wasm` 必须使用与 analyzer revision 同步提升的精确版本；安装包与开发环境都能解析 runtime、Bash grammar 和 PowerShell grammar。静态已知子集生成稳定 `analysisIdentity / authorizationIdentity`；`cat / du / file / head / ls / stat / tail / wc` 对明确宿主绝对路径生成完整的外部只读路径 assessment，未支持的搜索 / 文本命令、动态语法、未知参数、link-producing copy、交互参数、Zsh `=command`、named-home 展开和 Parser / WASM 故障会标记 `unresolved` / `unknown_syntax`，再由 `ask / auto / full-access` Policy 处理；只有不可变 / 显式 deny 会在所有模式下无条件拒绝，其他分面可能在 `ask / auto` 下询问、在 `full-access` 下放行。electron-builder 只收集许可证、包元数据与三份所需 WASM，不能遗漏运行资源或误收整套无关 grammar。
 
 - JSON Schema：空命令、NUL、24,576 bytes command、1,024 bytes cwd、32 项 / 16 KiB env、64,000 字符总 Tool input、timeout、provider ID 和危险对象键边界。
 - Prepare：Provider 漂移、cwd realpath 漂移、workspace generation、env policy revision、审批重放，以及批准后由外部进程改写 cwd 时的 spawn 前 rehash / execution generation 失效。
 - Bash / Zsh / PowerShell：Unicode、空格路径、多行、管道、重定向、条件、替换、解析失败。
-- Permission：exact / token prefix、复合命令、原子操作、重定向目标、网络目的地、动态 head、nested shell、encoded PowerShell、deny 优先级、canonical matcher、analyzer / policy / env policy revision 和跨 owner / library / provider 隔离。
+- Permission：exact / token prefix、复合命令、原子操作、重定向目标、网络目的地、动态 head、nested shell、encoded PowerShell、deny 优先级、canonical matcher、analyzer / policy / env policy revision 和跨 owner / library / provider 隔离；完整分析的宿主绝对路径只读命令在 `ask / auto` 下询问、在 `full-access` 下直接执行；分析不完整时，`ask / auto` 询问，`full-access` 对未命中不可变 deny / 显式 deny 的 assessment（包括普通未知命令、高影响分面和 `unresolved`）直接放行。不可变 deny 仍优先于所有模式。
 - Data scope：未感知 node、跨 owner / library node、过期 picker capability、fetch 前撤销读取授权、下载期间 node revision / ETag / storage binding 漂移、同名不同 hash、derived workspace 数据、不同项目的 `npm test`、网络 / 前序命令生成文件、无法证明 read set、AI profile / 配置 / Base URL 切换后均重新 ask 或拒绝，不能沿用旧内容读取规则。
 - Environment：Key / Cookie / token、loader 变量、PATH / HOME 覆盖和宿主环境泄漏。
-- Output：跨 chunk UTF-8、秘密、ANSI / OSC、Windows 编码、二进制、输出洪泛、双流顺序、batch identity、sequence 重叠去重、gap replay、详细日志前缀与最新 tail 中间缺口、`availableRanges / nextAvailableSequence / unavailableThrough`、cursor 失效、tail / 有界全流日志截断和 TTL；终态前 flush，恢复只使用已提交水位。
+- Output：跨 chunk UTF-8、秘密、ANSI / OSC、Windows 编码、二进制、输出洪泛、双流顺序、batch identity、sequence 重叠去重、gap replay、详细日志前缀与最新 tail 中间缺口、`availableRanges / nextAvailableSequence / unavailableThrough`、cursor 失效、`1 MiB` 等额 head / tail 进程结果采集、最多 `160,000` UTF-8 bytes 的安全模型源、约 `90,000` JSON 字符的 Shell 规范结果收口、`100,000` JSON 字符 Broker 门禁、最高约 `40,000 tokens` 的 Shell provider 投影、每流最多 `4 KiB` renderer 摘要、无框单行默认 UI、最高约 `156px` 的内部滚动日志展开区、详细日志独立分页、tail / 有界全流日志截断和 TTL；必须覆盖 27.5 KiB 中文 Markdown 完整投影，断言完整流使用 `content` 且 `truncated=false / omittedBytes=0`，模型不得因文件长度、字段名或 UI 状态误判截断；真实省略时验证二次 byte / token 投影会保留 head + tail 并重算 `omittedBytes`。Run A 取消后同一 Session 的 Run B 仍要收到已完成 Shell 的安全 stdout、ordinal 和可用命令关联，不得只恢复状态文案或泄漏 execution ID、logRef、renderer preview。后续 turn 只对连续、完整、已消费且允许压缩的旧 Tool 回合生成严格 JSON 语义摘要，副本 staging 全部成功后才原子提交，最新结果、`skill.activate` 与 canonical ToolRun 保持不变。UI 自动化还必须验证：审批态保留完整卡片；其他状态只从 main public prepared action 显示最低状态和单行命令，不从 `call.input` 回退；默认不显示输出、耗时、退出码或预览截断；只有 owner-bound 结果可以展开，真实缺失只在展开区弱提示。分别以大量一字节 / 小 chunk 输入验证诊断采集与安全模型源的 retained bytes、retained object count 和处理耗时有界，且热路径不依赖数组头部搬移。终态前 flush，恢复只使用已提交水位。
 - Process：正常退出、非零 exit、超时、停止、普通孙进程和 Broker 取消预算；单纯 renderer 页面卸载时 main 命令继续且返回后恢复 tail，注销、窗口销毁、应用退出时取消，崩溃后清理仍受 supervisor 管理的孤儿。
 - Workspace：stage hash、同名冲突、并发原子 reservation、真实大小校正、低磁盘、Shell 直接高速写盘、崩溃 ledger 回收、symlink / junction / UNC、逻辑路径替换和终态清理。
-- File bridge：两个 strict Tool Schema、8 次业务 Tool 配额、renderer 不在场、页面中途卸载、main-owned handoff 和失败后不得自动续跑。
+- File bridge：三个 strict Tool Schema、上下文驱动 Tool loop、用户明确路径不弹 picker、renderer 不在场、页面中途卸载、main-owned handoff 和失败后不得自动续跑；本机只读查看不创建 `file.stage` ToolRun，需要工作副本 / 修改 / 转码 / 生成时才 stage，无加工原样上传使用 `file.upload`。
 - Publish：canonical backend / account / owner / parent 写授权、commit 前重验、资料库 commit、刷新失败、commit unknown、Save As 取消、重复提交和一次性 grant / capability 重放。
 - SQLite：单一 Schema Coordinator barrier、并发 Store 启动失败隔离、canonical schema 2 全新建库、已知旧 schema 2 幂等补列 / 补表 / 重建 trigger、判别 prepared action 联合、Rule unique index、ToolRun audit snapshot、Session 删除与 `deleting` 资源崩溃回收；不得生成 schema 3 / 4。
 - UI：完整命令可见、风险与规则来源、日志恢复、未知 block 降级、无 HTML / URL / 原始路径渲染。
@@ -1006,7 +1046,7 @@ macOS 与 Windows 必须分别验证：
 - 运行产生普通子孙进程的 fixture 后停止，确认 supervisor 管理的进程组 / Job 消失；另用 `setsid` / daemonize / 计划任务 fixture 验证已知识别与残余风险报告，不把 POSIX 进程组描述成不可逃逸容器。
 - renderer 页面切换后命令继续、返回后 tail 恢复；Run 停止和应用退出后不残留进程。
 - 从非第一个资料库 stage 一个中性文本 / 二进制 fixture，处理后 publish 回资料库并重新感知。
-- 本机文件选择与 Save As 不泄露路径给模型或 SQLite。
+- 本机 picker 与 Save As 不泄露路径给模型或 SQLite；用户明确给出的宿主绝对读取路径可以进入精确 Shell command、public action、确认卡和 SQLite 审计，`file.stage` / `file.upload` 来源显示路径也可以进入对应 strict Tool input 与相同受控投影，但 canonical 路径、其他本机路径和任意输出目标仍不得泄露。
 - Session / 持久规则只命中预期 token、cwd、风险和 scope，能够停用与删除。
 - 在本地 AI profile 下批准读取 fixture 后切换到 Claude / OpenAI-compatible profile，旧规则不命中；重新暂存同名不同内容后也必须重新询问。
 

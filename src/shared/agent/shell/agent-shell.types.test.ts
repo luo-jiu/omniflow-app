@@ -8,6 +8,7 @@ import {
   AGENT_SHELL_PREPARED_ACTION_VERSION,
   AGENT_SHELL_RUN_TOOL_NAME,
   normalizeAgentShellPreparedActionPublicV1,
+  normalizeAgentShellHostPath,
   normalizeAgentShellRunInputV1,
 } from './agent-shell.types';
 
@@ -70,6 +71,49 @@ describe('Agent Shell public contract', () => {
     });
   });
 
+  it('keeps workspace as the default context and accepts an explicit host context', () => {
+    expect(normalizeAgentShellRunInputV1({ command: 'pwd' })).not.toHaveProperty(
+      'executionContext',
+    );
+    expect(normalizeAgentShellRunInputV1({
+      command: 'pwd',
+      executionContext: 'host',
+    })).toMatchObject({
+      cwd: '.',
+      executionContext: 'host',
+    });
+    expect(normalizeAgentShellRunInputV1({
+      command: 'pwd',
+      cwd: '/Users/example/Documents',
+      executionContext: 'host',
+    })).toMatchObject({
+      cwd: '/Users/example/Documents',
+      executionContext: 'host',
+    });
+  });
+
+  it.each([
+    ['/Users/example/../private', '回退'],
+    ['C:relative', 'macOS'],
+    ['C:/Windows', 'macOS'],
+    ['C:\\Windows', 'macOS'],
+    ['relative\\path', 'macOS'],
+    ['/Users/example\\Documents', 'macOS'],
+    ['~\\Documents', 'macOS'],
+    ['\\\\server\\share', 'macOS'],
+    ['//server/share', 'macOS'],
+    ['~other/Documents', 'named-home'],
+    ['~/Documents/../private', '回退'],
+    ['/Users/example\u0000/Documents', '无效'],
+    ['\t/Users/example/Documents', '无效'],
+  ])('rejects unsafe host cwd %s', (cwd, message) => {
+    expect(() => normalizeAgentShellRunInputV1({
+      command: 'pwd',
+      cwd,
+      executionContext: 'host',
+    })).toThrow(message);
+  });
+
   it('clamps timeout and accepts the maximum command byte boundary', () => {
     expect(normalizeAgentShellRunInputV1({
       command: 'a'.repeat(AGENT_SHELL_MAX_COMMAND_BYTES),
@@ -130,6 +174,27 @@ describe('Agent Shell public contract', () => {
     expect(Object.isFrozen(normalized.dataScope.stagedInputs[0])).toBe(true);
   });
 
+  it('normalizes a host prepared cwd without treating it as workspace logical path', () => {
+    const absolute = normalizeAgentShellPreparedActionPublicV1(shellAction({
+      cwd: { kind: 'host', path: '/Users/example/Documents' },
+    }));
+    const relative = normalizeAgentShellPreparedActionPublicV1(shellAction({
+      cwd: { kind: 'host', path: 'Documents/fixtures' },
+    }));
+    expect(absolute.cwd).toEqual({ kind: 'host', path: '/Users/example/Documents' });
+    expect(relative.cwd).toEqual({ kind: 'host', path: 'Documents/fixtures' });
+  });
+
+  it('accepts macOS absolute, home shorthand, and safe relative host paths', () => {
+    expect(normalizeAgentShellHostPath('/Users/example/Documents')).toBe(
+      '/Users/example/Documents',
+    );
+    expect(normalizeAgentShellHostPath('~')).toBe('~');
+    expect(normalizeAgentShellHostPath('~/Documents')).toBe('~/Documents');
+    expect(normalizeAgentShellHostPath('.')).toBe('.');
+    expect(normalizeAgentShellHostPath('Documents/fixtures')).toBe('Documents/fixtures');
+  });
+
   it.each([
     ['unknown root field', shellAction({ extra: true })],
     ['wrong version', shellAction({ version: 2 })],
@@ -151,6 +216,11 @@ describe('Agent Shell public contract', () => {
         providerType: 'local',
       },
     })],
+    ['Windows drive host cwd', shellAction({ cwd: { kind: 'host', path: 'C:/outside' } })],
+    ['Windows UNC host cwd', shellAction({ cwd: { kind: 'host', path: '\\\\server\\share' } })],
+    ['named-home host cwd', shellAction({ cwd: { kind: 'host', path: '~other/private' } })],
+    ['host cwd traversal', shellAction({ cwd: { kind: 'host', path: '/Users/example/../private' } })],
+    ['unknown cwd field', shellAction({ cwd: { kind: 'host', path: '/tmp', extra: true } })],
   ])('rejects malformed prepared action: %s', (_label, input) => {
     expect(() => normalizeAgentShellPreparedActionPublicV1(input)).toThrow();
   });

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { createAgentRunCapabilitySnapshot } from '../agent-run-capability-snapshot';
 import { createAgentCapabilitySnapshot } from '../capabilities/agent-capability-registry';
 import { agentToolRegistry } from '../agent-tool-registry';
-import { fileListTool, fileStatTool } from '../tools/file-read-tools';
+import { fileListTool, fileStatTool, fileSearchTool, fileResolveTool } from '../tools/file-read-tools';
 import { interactionRequestTool } from '../tools/interaction-request-tool';
 import { mediaExtractAudioTool } from '../tools/media-extract-audio-tool';
 import { mediaInspectTool } from '../tools/media-inspect-tool';
@@ -20,6 +20,8 @@ describe('built-in Agent Skill runtime', () => {
   it('registers the control Tool and validated built-in catalog idempotently', () => {
     [
       fileListTool,
+      fileSearchTool,
+      fileResolveTool,
       fileStatTool,
       mediaInspectTool,
       interactionRequestTool,
@@ -69,5 +71,6 @@ describe('built-in Agent Skill runtime', () => {
     expect(runSnapshot.getSkillActivationEnvelope('media-extract-audio')).toMatchObject({
       skillId: 'media-extract-audio',
     });
+    expect(runSnapshot.listTools('media-extract-audio').some(tool => tool.name === 'shell.run')).toBe(false);
   });
 });

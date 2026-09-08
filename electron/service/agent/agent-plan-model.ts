@@ -6,6 +6,7 @@ import type {
 } from '@/shared/agent/agent.types';
 import type { AgentProviderToolDefinition } from './agent-provider-model';
 import { containsAgentSensitiveData } from './agent-sensitive-data';
+import { toAgentProviderToolName } from './agent-provider-tool-name';
 
 export const AGENT_PLAN_CONTROL_TOOL_NAME = 'agent.plan.set';
 
@@ -119,14 +120,17 @@ export function normalizeAgentRunPlan(
   const steps = input.steps.map((rawStep, index): AgentRunPlanStepSnapshot => {
     const step = requirePlainObject(rawStep, `Agent 计划第 ${index + 1} 步`);
     rejectUnknownKeys(step, ALLOWED_PLAN_STEP_KEYS, `Agent 计划第 ${index + 1} 步`);
-    const expectedToolName = normalizeText(
+    const requestedToolName = normalizeText(
       step.toolName,
       `Agent 计划第 ${index + 1} 步的 Tool 名称`,
       120,
     );
-    if (!availableToolNames.has(expectedToolName)) {
-      throw new Error(`Agent 计划引用了本轮不可用的 Tool：${expectedToolName}`);
+    const matches = Array.from(availableToolNames).filter(name =>
+      name === requestedToolName || toAgentProviderToolName(name) === requestedToolName);
+    if (matches.length !== 1) {
+      throw new Error(`Agent 计划引用了本轮不可用的 Tool 或名称有歧义：${requestedToolName}`);
     }
+    const expectedToolName = matches[0];
     const id = normalizeText(createId(), 'Agent 计划步骤 ID', 200);
     if (generatedIds.has(id)) throw new Error('Agent 计划步骤 ID 生成冲突');
     generatedIds.add(id);

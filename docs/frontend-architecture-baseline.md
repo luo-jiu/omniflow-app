@@ -131,6 +131,9 @@ views -> features -> components / hooks -> service / preload bridge -> electron 
 - `file-viewer`
 - `browser`
 - `tools`
+- `system`
+
+`search-home` 当前承载资料库默认的内置 Agent 工作区，不存在独立 `agent-home` 模式。Agent 的 Session / Run / ToolRun 不进入 `LibraryDetailWorkspaceState`，页面只向 Agent 投影当前资料库和目录树上下文。
 
 对应状态定义位于：
 
@@ -316,7 +319,10 @@ Renderer 只能持有这些状态的投影，不要把 main 的内部结构当�
 
 AI 服务使用独立的 `window.electronAIService` bridge，且 main 只接受主窗口 main frame 的调用。列表和修改响应只暴露 `hasApiKey`；模型列表与补全请求也通过该 bridge 进入主进程 provider 适配层。磁盘密文永不暴露；已保存 Key 的明文只允许在进入单个已有档案编辑页时通过 `revealApiKey(id)` 单次返回，并在取消或保存后从 renderer 草稿清除。批量 AI 任务通过 main 内存运行会话冻结连接快照，会话按 profile 和 renderer owner 隔离，生命周期内禁止编辑或删除来源档案；停止任务或 owner 销毁时由 main 取消该会话仍在执行的网络请求后释放配置锁。
 
-内置 Agent 使用独立的 `window.electronAgent` bridge。Session 持久化由 Electron main 的 SQLite Store 独占，renderer 只持有当前投影；所有会话操作按 API 基址、数字用户 ID 和资料库 ID 共同隔离。每个 Agent Run 复用 AI Service 运行会话边界冻结连接并锁定来源配置，认证会话释放时由 workspace disposer 通过 bridge 取消当前窗口全部 Run。写操作确认、后端写入成功后的 authoritative commit 和刷新再感知后的 Renderer execution completion 均经该 bridge 的受控 IPC 进入 main，并同时校验发起窗口、owner scope、资料库、Session、Run 和一次性关联 ID；Renderer 只能把一次性请求分发给显式注册的业务 executor，不能直接执行模型提供的任意函数。commit 前取消由 main 反向通知 Renderer 中止，commit 后 main 必须保留成功结果作为刷新失败或回执超时的降级事实，避免重复写入。
+内置 Agent 使用独立的 `window.electronAgent` bridge。Session 持久化由 Electron main 的 SQLite Store 独占，renderer 只持有当前投影；所有会话操作按 API 基址、数字用户 ID 和资料库 ID 共同隔离。每个 Agent Run 复用 AI Service 运行会话边界冻结连接并锁定来源配置，认证会话释放时由 workspace disposer 通过 bridge 取消当前窗口全部 Run。消息和 ToolActivity 共同组成 renderer 时间线，Tool 进度、确认、受控 `choice / form` 交互、结果和中断状态均以 main 侧 ToolRun 为唯一事实，不再单独维护待确认 / 待输入列表或把工具状态伪装成文本消息。交互卡的未提交草稿属于 renderer 临时态；请求、一次性 interaction ID、最终回答和终态属于 SQLite。展示卡片只消费共享协议中的固定语义块和本地注册动作，不接受模型提供的 JSX、HTML、回调或 IPC channel。交互回答、写操作确认、后端写入成功后的 authoritative commit 和刷新再感知后的 Renderer execution completion 均经该 bridge 的受控 IPC 进入 main，并同时校验发起窗口、owner scope、资料库、Session、Run 和一次性关联 ID；Renderer 只能把一次性请求分发给显式注册的业务 executor，不能直接执行模型提供的任意函数。commit 前取消由 main 反向通知 Renderer 中止，commit 后 main 必须保留成功结果作为刷新失败或回执超时的降级事实，避免重复写入。
+
+Agent 长期记忆继续复用同一个 bridge，但由独立 `AgentMemoryStore` 持有 `agent_memories` 事实，renderer 不能接触 SQLite。用户明确要求记住时，`memory.propose` 必须先走现有 Tool 审批；批准后才保存，管理页的编辑 / 删除使用 `revision` 乐观锁。管理页临时投影只由 `useAgentMemories` 持有，按 owner、资料库和查询代次拒绝迟到结果；更新直接采用 main 返回的 authoritative row，删除只应用 main 已确认的成功结果，不通过写后全量重载维持第二份状态。管理列表通过 `AgentMemoryPage` 按 `updatedAt + memoryId` 每页 50 条游标读取，并返回当前搜索的真实 `total`；任一 owner 的“global + 当前资料库”可见集合最多 200 条，第 201 条由 SQLite trigger 拒绝，不同资料库不会互相占满配额。原地 schema 每次初始化都重建当前 quota trigger；开发期遗留超限数据保留管理和删除能力，但在清理到 200 条前不允许 Retriever 静默截取其中一部分。main 按 owner 与 global / 当前资料库 scope 召回最多 5 条、6,000 字符的候选，先完成规范近期历史投影，再只用剩余 token 预算注入低权限消息；记忆不进入 system role、不持久化回会话，也不形成 Tool 授权。当前结构化 Retriever 可被后续 FTS / 向量派生索引替换，SQLite row 仍是唯一事实源。
+
 
 ### 6.3 Electron Main
 
@@ -336,6 +342,8 @@ AI 服务使用独立的 `window.electronAIService` bridge，且 main 只接受�
 
 当前前端值得长期维护的文档：
 
+内置 Agent 是这里的明确例外：Agent loop、Run 生命周期、Tool 调度、审批决策和任务状态机由 Electron main 持有，renderer 只负责编排展示、用户草稿和 main 明确请求的一次性业务 executor 分发。具体边界见 `docs/built-in-agent-architecture.md` 与 `docs/built-in-agent-ui-contract.md`。
+
 - `.agent-docs/frontend-review-standard.md`
 - `.agent-docs/frontend-handoff.md`
 - `.agent-docs/frontend-documentation-standard.md`
@@ -348,6 +356,10 @@ AI 服务使用独立的 `window.electronAIService` bridge，且 main 只接受�
 - `docs/cat-catch-migration-audit.md`
 - `src/modules/upload-center/README.md`
 
+- `docs/built-in-agent-architecture.md`
+- `docs/built-in-agent-shell-architecture.md`
+- `docs/built-in-agent-host-execution-contract.md`
+- `docs/built-in-agent-ui-contract.md`
 建议后续继续补的方向：
 
 - `embedded-browser` 的 IPC / 生命周期文档

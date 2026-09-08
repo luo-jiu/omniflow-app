@@ -11,7 +11,11 @@ import {
   normalizeAgentMediaExtractAudioPreparedActionPublicV1,
 } from '../../../../src/shared/agent/agent-prepared-action';
 import type { AgentTool } from '../agent-tool-registry';
-import { AGENT_CAPABILITY_MEDIA_FFMPEG } from '../capabilities/agent-capability-runtime';
+import { AGENT_CAPABILITY_MEDIA_FFMPEG, AGENT_CAPABILITY_MEDIA_FFPROBE } from '../capabilities/agent-capability-runtime';
+import { AgentMediaError } from '../../../../src/shared/agent/agent-media-error';
+import { normalizeAgentLibraryDirectoryPath } from '../../../../src/shared/agent/agent-library-path';
+import { normalizeAgentLibraryNode, type AgentLibraryNode } from '../../../../src/shared/agent/agent-library-query';
+import { sanitizeAgentSensitiveText } from '../agent-sensitive-data';
 import { buildAgentMediaFileName, resolveAgentMediaNode } from './media-tool-node';
 
 export const AGENT_AUDIO_OUTPUT_FORMATS = ['m4a', 'mp3', 'wav'] as const;
@@ -92,14 +96,19 @@ interface MediaExtractAudioProviderBinding {
 }
 
 interface MediaExtractAudioPreparationResult {
+  targetDirectory?: AgentLibraryNode;
   providerBindings: Partial<Record<AgentAudioOutputFormat, MediaExtractAudioProviderBinding>>;
 }
 
-function normalizePreparationResult(input: unknown): MediaExtractAudioPreparationResult {
+function normalizePreparationResult(input: unknown, libraryId: number): MediaExtractAudioPreparationResult {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     return { providerBindings: {} };
   }
   const source = input as Record<string, unknown>;
+  if (source.sourceFailure) {
+    throw new AgentMediaError(source.sourceFailure === 'source_unreachable' ? 'source_unreachable' : 'source_unknown');
+  }
+  if (source.targetError) throw new Error(sanitizeAgentSensitiveText(String(source.targetError)).slice(0, 500));
   const bindings = source.providerBindings && typeof source.providerBindings === 'object'
     && !Array.isArray(source.providerBindings)
     ? source.providerBindings as Record<string, unknown>
@@ -119,6 +128,7 @@ function normalizePreparationResult(input: unknown): MediaExtractAudioPreparatio
     }
   }
   return {
+    ...(source.targetDirectory ? { targetDirectory: normalizeAgentLibraryNode(source.targetDirectory, libraryId) } : {}),
     providerBindings,
   };
 }
@@ -139,16 +149,20 @@ function buildPreparedAction(
   const providerBinding = rendererResult.providerBindings[requestedFormat];
   const sourceFileName = buildAgentMediaFileName(node);
   const libraryId = Number(context.appContext.libraryId);
-  const currentParentId = Number(context.appContext.currentDirectory?.id);
-  const currentDirectoryName = String(context.appContext.currentDirectory?.name || '当前目录');
-  const defaultDestination = providerBinding ? 'library' : 'local';
+  const target = rendererResult.targetDirectory;
+  const currentParentId = target?.id || Number(context.appContext.currentDirectory?.id);
+  const currentDirectoryName = target?.path || target?.name || String(context.appContext.currentDirectory?.name || '当前目录');
+  const requestedInput = input && typeof input === 'object' ? input as Record<string, unknown> : {};
+  const defaultDestination = requestedInput.destination === 'local' ? 'local' : 'library';
   const defaultAction: AgentMediaExtractAudioPreparedActionPublicV1 = {
     conflictPolicy: 'auto_rename',
     destination: defaultDestination,
     fallbackPolicy: defaultDestination === 'library' ? 'prompt_local' : 'none',
     kind: AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_KIND,
     libraryId,
-    outputFileName: deriveAgentAudioOutputFileName(sourceFileName, requestedFormat),
+    outputFileName: requestedInput.fileName
+      ? normalizeAgentAudioOutputFileName(requestedInput.fileName, requestedFormat)
+      : deriveAgentAudioOutputFileName(sourceFileName, requestedFormat),
     outputFormat: requestedFormat,
     ...(defaultDestination === 'library' ? { parentId: currentParentId } : {}),
     sourceNodeId: node.id,
@@ -166,10 +180,18 @@ function buildPreparedAction(
   const outputFormat = normalizeAgentAudioOutputFormat({ format: action.outputFormat });
   const outputFileName = normalizeAgentAudioOutputFileName(action.outputFileName, outputFormat);
   if (action.destination === 'library' && !providerBinding) {
-    throw new Error('资料库存储当前不可用，请改为保存到本机');
+    throw new AgentMediaError('destination_unavailable');
+  }
+  if (action.destination === 'library') {
+    if ((requestedInput.directoryPath || requestedInput.parentId || action.parentId !== Number(context.appContext.currentDirectory?.id)) && !target) {
+      throw new Error('目标目录尚未解析，不能根据路径或节点 ID 猜测写入位置');
+    }
+    if (target && (target.type !== 'dir' || target.libraryId !== libraryId || target.id !== action.parentId)) {
+      throw new Error('目标目录与准备好的写入位置不匹配');
+    }
   }
   const targetLabel = action.destination === 'library'
-    ? action.targetLabel
+    ? target?.path || target?.name || action.targetLabel
     : '本机（执行时选择位置）';
   const publicAction = normalizeAgentMediaExtractAudioPreparedActionPublicV1({
     ...action,
@@ -215,6 +237,7 @@ function buildPreparedAction(
       outputFileName: publicAction.outputFileName,
       outputFormat,
       ...(publicAction.parentId ? { parentId: publicAction.parentId } : {}),
+      ...(publicAction.destination === 'library' && target?.path ? { targetDirectoryPath: target.path } : {}),
       ...(publicAction.destination === 'library' && providerBinding
         ? { storageProvider: providerBinding.providerAlias }
         : {}),
@@ -229,13 +252,17 @@ function buildPreparedAction(
 
 export const mediaExtractAudioTool: AgentTool = {
   availability: {
-    requiredCapabilities: [AGENT_CAPABILITY_MEDIA_FFMPEG],
+    requiredCapabilities: [AGENT_CAPABILITY_MEDIA_FFMPEG, AGENT_CAPABILITY_MEDIA_FFPROBE],
   },
-  description: '从当前可见的单个媒体文件中提取第一条音轨。支持 m4a、mp3、wav，默认 m4a；执行前会准备并冻结资料库或本机目标、输出文件名、格式和安全兜底策略，再由用户确认。',
+  description: '从已选中或通过资料库查询读取的媒体提取第一条音轨。可用 directoryPath 或 parentId 直接指定资料库目标，缺省当前目录；支持本机目标、格式和文件名。运行时检查源和目标，按权限执行，不需要为了其他目录绕经本机暂存。',
   executor: 'renderer',
   inputSchema: {
     additionalProperties: false,
     properties: {
+      directoryPath: { type: 'string', minLength: 1, maxLength: 2048, description: '目标目录在当前资料库中的绝对路径，例如 /音乐；与 parentId 互斥，可直接指定，不必先存到本机。' },
+      parentId: { type: 'integer', minimum: 1, description: '目标目录节点 ID，与 directoryPath 互斥。' },
+      destination: { enum: ['library', 'local'], type: 'string', description: '默认 library；local 使用本机 Save As。内部优先是默认偏好，不限制为满足任务选择其他目标。' },
+      fileName: { type: 'string', minLength: 1, maxLength: 240, description: '可选输出文件名，扩展名必须匹配 format。' },
       format: {
         default: 'm4a',
         description: '输出音频格式，默认 m4a。',
@@ -243,10 +270,11 @@ export const mediaExtractAudioTool: AgentTool = {
         type: 'string',
       },
       nodeId: {
-        description: '当前选中项或当前目录直属文件的节点 ID；只有一个选中节点时可以省略。',
+        description: '当前选中项或 file.stat/list/search/resolve 已读取的当前资料库文件 ID；唯一选中节点可省略。',
         type: 'integer',
       },
     },
+    not: { properties: { parentId: {}, directoryPath: {} }, required: ['parentId', 'directoryPath'] },
     type: 'object',
   },
   name: 'media.extractAudio',
@@ -256,6 +284,9 @@ export const mediaExtractAudioTool: AgentTool = {
     try {
       resolveAgentMediaNode(input, context);
       normalizeAgentAudioOutputFormat(input);
+      const fields = input as Record<string, unknown>;
+      if (fields.directoryPath !== undefined) normalizeAgentLibraryDirectoryPath(fields.directoryPath);
+      if (fields.destination === 'local' && (fields.directoryPath !== undefined || fields.parentId !== undefined)) throw new Error('本机目标不能同时指定资料库目录');
     } catch (error) {
       return {
         message: error instanceof Error ? error.message : '音频提取参数无效',
@@ -263,23 +294,28 @@ export const mediaExtractAudioTool: AgentTool = {
       };
     }
     const libraryId = Number(context.appContext.libraryId);
-    const parentId = Number(context.appContext.currentDirectory?.id);
-    if (!Number.isFinite(libraryId) || libraryId <= 0 || !Number.isFinite(parentId) || parentId <= 0) {
+    if (!Number.isFinite(libraryId) || libraryId <= 0) {
       return { message: '当前没有可写入的目录上下文', ok: false };
     }
     return { ok: true };
   },
-  createRendererPrepareRequest(input, context) {
+  createRendererPrepareRequest(input, context, requestedAction) {
     const node = resolveAgentMediaNode(input, context);
     const format = normalizeAgentAudioOutputFormat(input);
     const sourceFileName = buildAgentMediaFileName(node);
+    const fields = input as Record<string, unknown>;
+    const action = requestedAction ? normalizeAgentMediaExtractAudioPreparedActionPublicV1(requestedAction) : undefined;
+    const destination = action?.destination || (fields.destination === 'local' ? 'local' : 'library');
+    const directoryPath = !action && fields.directoryPath ? normalizeAgentLibraryDirectoryPath(fields.directoryPath) : undefined;
     return {
       fileSize: Number(node.fileSize || 0),
       libraryId: Number(context.appContext.libraryId),
       mimeType: node.mimeType,
       nodeId: node.id,
       outputFormat: format,
-      parentId: Number(context.appContext.currentDirectory?.id),
+      destination,
+      ...(directoryPath ? { directoryPath } : {}),
+      ...(destination === 'library' && !directoryPath ? { parentId: action?.parentId || fields.parentId || context.appContext.currentDirectory?.id } : {}),
       sourceFileName,
     };
   },
@@ -287,7 +323,7 @@ export const mediaExtractAudioTool: AgentTool = {
     return buildPreparedAction(
       input,
       context,
-      normalizePreparationResult(rendererResult),
+      normalizePreparationResult(rendererResult, Number(context.appContext.libraryId)),
       requestedAction,
     );
   },

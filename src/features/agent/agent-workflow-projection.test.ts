@@ -1,15 +1,23 @@
 import { describe, expect, it } from 'vitest';
 
 import type {
+  AgentMessage,
   AgentRunSnapshot,
   AgentToolActivitySnapshot,
 } from '@/shared/agent/agent.types';
-import { buildAgentWorkflowProjection } from './agent-workflow-projection';
+import {
+  buildAgentWorkflowProjection,
+  selectActiveAgentWorkflowProjection,
+} from './agent-workflow-projection';
 
-function run(status: AgentRunSnapshot['status']): AgentRunSnapshot {
+const BASE_TIME = '2026-08-23T00:00:00.000Z';
+
+function run(
+  status: AgentRunSnapshot['status'],
+  overrides: Partial<AgentRunSnapshot> = {},
+): AgentRunSnapshot {
   return {
-    createdAt: '2026-08-23T00:00:00.000Z',
-    currentStep: status === 'running' ? '根据工具结果继续思考' : '已完成',
+    createdAt: BASE_TIME,
     id: 'run-1',
     model: 'model-a',
     profileId: 'profile-a',
@@ -17,288 +25,252 @@ function run(status: AgentRunSnapshot['status']): AgentRunSnapshot {
     revision: 1,
     sessionId: 'session-1',
     status,
-    updatedAt: '2026-08-23T00:00:03.000Z',
+    updatedAt: '2026-08-23T00:00:09.000Z',
     userPrompt: '整理当前目录',
+    ...overrides,
   };
+}
+
+function plannedRun(status: AgentRunSnapshot['status']): AgentRunSnapshot {
+  return run(status, {
+    plan: {
+      createdAt: '2026-08-23T00:00:00.500Z',
+      steps: [
+        { expectedToolName: 'file.stat', id: 'step-2', ordinal: 2, title: '检查文件' },
+        { expectedToolName: 'file.list', id: 'step-1', ordinal: 1, title: '读取目录' },
+        { expectedToolName: 'file.read', id: 'step-3', ordinal: 3, title: '读取内容' },
+      ],
+      title: '整理目录',
+      version: 1,
+    },
+  });
 }
 
 function activity(
   id: string,
   ordinal: number,
   status: AgentToolActivitySnapshot['status'],
-  planStepId?: string,
+  options: {
+    kind?: 'business' | 'control';
+    planStepId?: string;
+    toolName?: string;
+  } = {},
 ): AgentToolActivitySnapshot {
   return {
-    call: { id: `call-${id}`, input: {}, name: `tool.${id}` },
+    call: { id: `call-${id}`, input: {}, name: options.toolName || `tool.${id}` },
     createdAt: `2026-08-23T00:00:0${ordinal}.000Z`,
     id,
     ordinal,
     permissionBehavior: 'allow',
-    ...(planStepId ? { planStepId } : {}),
-    revision: 1,
+    ...(options.planStepId ? { planStepId: options.planStepId } : {}),
+    progress: status === 'running' ? { message: `${id} 正在执行`, percent: 45 } : undefined,
     result: status === 'completed' ? { message: `${id} 完成`, ok: true } : undefined,
+    revision: 1,
     runId: 'run-1',
     sessionId: 'session-1',
     status,
-  };
-}
-
-function plannedRun(status: AgentRunSnapshot['status']): AgentRunSnapshot {
-  return {
-    ...run(status),
-    plan: {
-      createdAt: '2026-08-23T00:00:00.500Z',
-      steps: [
-        {
-          expectedToolName: 'file.stat',
-          id: 'plan-second',
-          ordinal: 2,
-          title: '检查文件信息',
-        },
-        {
-          expectedToolName: 'file.list',
-          id: 'plan-first',
-          ordinal: 1,
-          title: '读取目标目录',
-        },
-      ],
-      title: '整理目录内容',
-      version: 1,
+    toolMetadata: {
+      groupKind: 'resource-read',
+      kind: options.kind || 'business',
+      operationKind: 'read',
+      risk: 'read',
     },
   };
 }
 
-describe('Agent workflow projection', () => {
-  it('shows an active run before its first tool call', () => {
-    expect(buildAgentWorkflowProjection(run('running'), [])).toMatchObject({
-      currentStep: '根据工具结果继续思考',
-      status: 'running',
-      steps: [],
-    });
-  });
-
-  it('does not add a task card to a completed plain conversation', () => {
-    expect(buildAgentWorkflowProjection(run('completed'), [])).toBeNull();
-  });
-
-  it.each([
-    ['failed', '模型服务暂时不可用'],
-    ['cancelled', '用户已取消任务'],
-    ['interrupted', '应用退出导致任务中断'],
-  ] as const)('keeps a Tool-free %s Run visible', (status, detail) => {
-    expect(buildAgentWorkflowProjection({
-      ...run(status),
-      currentStep: detail,
-      ...(status === 'failed' || status === 'interrupted' ? { error: detail } : {}),
-    }, [])).toMatchObject({
-      currentStep: detail,
+function assistantItem(
+  id: string,
+  phase: 'unknown' | 'commentary' | 'final',
+  content: string,
+  turnOrdinal: number,
+  status: 'streaming' | 'completed' | 'failed' = 'completed',
+): AgentMessage {
+  const createdAt = `2026-08-23T00:00:0${turnOrdinal}.000Z`;
+  return {
+    assistantItem: {
+      ...(status === 'completed' ? { finishedAt: createdAt } : {}),
+      phase,
+      revision: status === 'streaming' ? 1 : 2,
       status,
+      turnOrdinal,
+      updatedAt: createdAt,
+    },
+    content,
+    createdAt,
+    id,
+    role: 'assistant',
+    runId: 'run-1',
+    sessionId: 'session-1',
+  };
+}
+
+describe('Agent workflow projection', () => {
+  it('uses main currentStep before the generic thinking fallback', () => {
+    expect(buildAgentWorkflowProjection(run('running', {
+      currentStep: '正在连接模型服务',
+    }), [])).toMatchObject({
+      active: true,
+      primaryStatus: { kind: 'run', label: '正在连接模型服务' },
       steps: [],
     });
+    expect(buildAgentWorkflowProjection(run('running'), [])?.primaryStatus)
+      .toEqual({ kind: 'thinking', label: '正在思考' });
   });
 
-  it('orders actual tool facts by ordinal and derives their summaries', () => {
-    const projection = buildAgentWorkflowProjection(run('completed'), [
-      activity('second', 2, 'failed'),
-      activity('first', 1, 'completed'),
-    ]);
-
-    expect(projection).toMatchObject({
-      settledStepCount: 2,
-      totalStepCount: 2,
-    });
-    expect(projection?.steps).toEqual([
-      expect.objectContaining({
-        detail: 'first 完成',
-        key: 'activity:first',
-        toolName: 'tool.first',
-      }),
-      expect.objectContaining({
-        detail: '执行失败',
-        key: 'activity:second',
-        toolName: 'tool.second',
-      }),
-    ]);
-  });
-
-  it('counts a failed Tool as settled when its Run completed', () => {
+  it('does not create historical workflow chrome for a completed run without a plan', () => {
     expect(buildAgentWorkflowProjection(run('completed'), [
-      activity('failed', 1, 'failed'),
-    ])).toMatchObject({
-      settledStepCount: 1,
-      status: 'completed',
-      totalStepCount: 1,
+      activity('read', 1, 'completed'),
+    ])).toBeNull();
+  });
+
+  it('keeps factual terminal errors without inventing an active status', () => {
+    expect(buildAgentWorkflowProjection(run('failed', {
+      currentStep: '执行失败',
+      error: '模型服务暂时不可用',
+    }), [])).toMatchObject({
+      active: false,
+      primaryStatus: { kind: 'run', label: '模型服务暂时不可用' },
+      status: 'failed',
     });
   });
 
-  it('projects an active plan in plan ordinal order without inventing Tool facts', () => {
-    const projection = buildAgentWorkflowProjection(plannedRun('running'), []);
+  it('derives current and next only from explicit plan bindings', () => {
+    const projection = buildAgentWorkflowProjection(plannedRun('running'), [
+      activity('first', 1, 'completed', { planStepId: 'step-1', toolName: 'file.list' }),
+      activity('second', 2, 'running', { planStepId: 'step-2', toolName: 'file.stat' }),
+    ]);
 
     expect(projection).toMatchObject({
-      settledStepCount: 0,
-      title: '整理目录内容',
-      totalStepCount: 2,
+      currentPlanStep: { id: 'step-2', ordinal: 2, title: '检查文件' },
+      nextPlanStep: { id: 'step-3', ordinal: 3, title: '读取内容' },
+      primaryStatus: {
+        activityId: 'second',
+        kind: 'tool',
+        label: 'second 正在执行',
+      },
+      settledStepCount: 1,
+      totalStepCount: 3,
     });
-    expect(projection?.steps).toEqual([
-      {
-        detail: '等待执行',
-        key: 'plan-step:plan-first',
-        ordinal: 1,
-        status: 'planned',
-        title: '读取目标目录',
-        toolName: 'file.list',
-      },
-      {
-        detail: '等待执行',
-        key: 'plan-step:plan-second',
-        ordinal: 2,
-        status: 'planned',
-        title: '检查文件信息',
-        toolName: 'file.stat',
-      },
+    expect(projection?.steps.map(step => [step.id, step.status])).toEqual([
+      ['step-1', 'completed'],
+      ['step-2', 'running'],
+      ['step-3', 'planned'],
     ]);
+  });
+
+  it('selects the first unstarted plan step when no plan step is active', () => {
+    const projection = buildAgentWorkflowProjection(plannedRun('running'), [
+      activity('first', 1, 'completed', { planStepId: 'step-1' }),
+    ]);
+    expect(projection).toMatchObject({
+      nextPlanStep: { id: 'step-2', title: '检查文件' },
+    });
+    expect(projection?.currentPlanStep).toBeUndefined();
+  });
+
+  it('does not infer plan bindings from matching Tool names', () => {
+    const projection = buildAgentWorkflowProjection(plannedRun('running'), [
+      activity('same-name', 1, 'completed', { toolName: 'file.list' }),
+    ]);
+
+    expect(projection?.steps[0]).toMatchObject({ status: 'planned' });
+    expect(projection?.steps[0].activityId).toBeUndefined();
+    expect(projection?.offPlanActivityIds).toEqual(['same-name']);
+  });
+
+  it('marks only unbound business Tools as plan deviations', () => {
+    const projection = buildAgentWorkflowProjection(plannedRun('running'), [
+      activity('business', 1, 'completed'),
+      activity('control', 2, 'completed', { kind: 'control' }),
+      { ...activity('unknown', 3, 'completed'), toolMetadata: undefined },
+    ]);
+
+    expect(projection?.offPlanActivityIds).toEqual(['business']);
+  });
+
+  it('prioritizes waiting interaction and approval over active Tool progress', () => {
+    const running = activity('running', 1, 'running');
+    const approval = activity('approval', 2, 'awaiting_approval');
+    const interaction = activity('interaction', 3, 'awaiting_interaction');
+
+    expect(buildAgentWorkflowProjection(run('awaiting_interaction'), [
+      running,
+      approval,
+      interaction,
+    ])?.primaryStatus).toMatchObject({
+      activityId: 'interaction',
+      kind: 'awaiting_interaction',
+    });
+  });
+
+  it('uses latest commentary only until a later Tool fact starts', () => {
+    const commentary = assistantItem('commentary', 'commentary', '我先检查目录内容。', 1);
+    expect(buildAgentWorkflowProjection(run('running'), [], [commentary])?.primaryStatus)
+      .toEqual({
+        assistantItemId: 'commentary',
+        kind: 'commentary',
+        label: '我先检查目录内容。',
+      });
+
+    expect(buildAgentWorkflowProjection(run('running', {
+      currentStep: '根据工具结果继续处理',
+    }), [activity('read', 2, 'completed')], [commentary])?.primaryStatus).toEqual({
+      kind: 'run',
+      label: '根据工具结果继续处理',
+    });
+  });
+
+  it('does not resurrect commentary after a later assistant turn starts', () => {
+    expect(buildAgentWorkflowProjection(run('running'), [], [
+      assistantItem('commentary', 'commentary', '准备读取文件。', 1),
+      assistantItem('next-turn', 'unknown', '', 2, 'streaming'),
+    ])?.primaryStatus).toEqual({ kind: 'thinking', label: '正在思考' });
   });
 
   it.each([
-    'completed',
-    'failed',
-    'cancelled',
-    'interrupted',
-  ] as const)('marks unexecuted plan steps as not_run for a terminal %s Run', (status) => {
-    const projection = buildAgentWorkflowProjection(plannedRun(status), []);
+    ['completed', undefined],
+    ['cancelled', undefined],
+    ['failed', { kind: 'run', label: '模型服务暂时不可用' }],
+    ['interrupted', { kind: 'run', label: '模型服务暂时不可用' }],
+  ] as const)(
+    'does not reuse historical commentary after a Run becomes %s',
+    (status, expectedPrimaryStatus) => {
+      const terminalRun = {
+        ...plannedRun(status),
+        ...(status === 'failed' || status === 'interrupted'
+          ? { error: '模型服务暂时不可用' }
+          : {}),
+      };
+      const projection = buildAgentWorkflowProjection(
+        terminalRun,
+        [],
+        [assistantItem('commentary', 'commentary', '继续分段读取中间章节。', 1)],
+      );
 
-    expect(projection).not.toBeNull();
-    expect(projection?.steps.map(step => step.status)).toEqual(['not_run', 'not_run']);
-    expect(projection).toMatchObject({ settledStepCount: 0, totalStepCount: 2 });
-  });
+      expect(projection?.primaryStatus).toEqual(expectedPrimaryStatus);
+    },
+  );
 
-  it('keeps plan titles and order while deriving linked status and detail from actual Tools', () => {
-    const first = {
-      ...activity('first-tool', 8, 'completed', 'plan-first'),
-      call: { id: 'call-first-tool', input: {}, name: 'file.list' },
-    };
-    const second = {
-      ...activity('second-tool', 3, 'running', 'plan-second'),
-      call: { id: 'call-second-tool', input: {}, name: 'file.stat' },
-      progress: { message: '正在读取元数据', percent: 45 },
-    };
-    const projection = buildAgentWorkflowProjection(plannedRun('running'), [first, second]);
-
-    expect(projection?.steps).toEqual([
-      expect.objectContaining({
-        activityId: 'first-tool',
-        detail: 'first-tool 完成',
-        ordinal: 1,
-        status: 'completed',
-        title: '读取目标目录',
-      }),
-      expect.objectContaining({
-        activityId: 'second-tool',
-        detail: '正在读取元数据',
-        ordinal: 2,
-        status: 'running',
-        title: '检查文件信息',
-      }),
-    ]);
-    expect(projection).toMatchObject({ settledStepCount: 1, totalStepCount: 2 });
-  });
-
-  it('appends unmatched and duplicate real Tools after the plan without dropping them', () => {
-    const linked = activity('linked', 5, 'completed', 'plan-first');
-    const duplicate = activity('duplicate', 6, 'failed', 'plan-first');
-    const unknown = activity('unknown', 1, 'completed', 'missing-plan-step');
+  it('does not expose a next step after a Run becomes terminal', () => {
     const projection = buildAgentWorkflowProjection(plannedRun('completed'), [
-      duplicate,
-      linked,
-      unknown,
+      activity('first', 1, 'completed', { planStepId: 'step-1' }),
     ]);
-
-    expect(projection?.steps.map(step => step.activityId || step.key)).toEqual([
-      'linked',
-      'plan-step:plan-second',
-      'unknown',
-      'duplicate',
+    expect(projection?.nextPlanStep).toBeUndefined();
+    expect(projection?.steps.map(step => step.status)).toEqual([
+      'completed',
+      'not_run',
+      'not_run',
     ]);
-    expect(projection?.steps.slice(2)).toEqual([
-      expect.objectContaining({
-        key: 'activity:unknown',
-        status: 'completed',
-        toolName: 'tool.unknown',
-      }),
-      expect.objectContaining({
-        key: 'activity:duplicate',
-        status: 'failed',
-        toolName: 'tool.duplicate',
-      }),
-    ]);
-    expect(projection).toMatchObject({ settledStepCount: 3, totalStepCount: 4 });
+    expect(projection?.primaryStatus).toBeUndefined();
   });
 
-  it('does not infer a plan link from a matching Tool name', () => {
-    const sameToolWithoutLink = {
-      ...activity('same-tool', 1, 'completed'),
-      call: { id: 'call-same-tool', input: {}, name: 'file.list' },
-    };
-    const projection = buildAgentWorkflowProjection(
-      plannedRun('running'),
-      [sameToolWithoutLink],
-    );
-
-    expect(projection?.steps.map(step => ({
-      activityId: step.activityId,
-      key: step.key,
-      status: step.status,
-    }))).toEqual([
-      { activityId: undefined, key: 'plan-step:plan-first', status: 'planned' },
-      { activityId: undefined, key: 'plan-step:plan-second', status: 'planned' },
-      { activityId: 'same-tool', key: 'activity:same-tool', status: 'completed' },
-    ]);
-  });
-
-  it('keeps an unlinked retry visible after the linked plan attempt failed', () => {
-    const failedAttempt = {
-      ...activity('failed-attempt', 1, 'failed', 'plan-first'),
-      call: { id: 'call-failed-attempt', input: {}, name: 'file.list' },
-    };
-    const retry = {
-      ...activity('retry', 2, 'completed'),
-      call: { id: 'call-retry', input: {}, name: 'file.list' },
-    };
-    const projection = buildAgentWorkflowProjection(
-      plannedRun('completed'),
-      [retry, failedAttempt],
-    );
-
-    expect(projection?.steps).toEqual([
-      expect.objectContaining({
-        activityId: 'failed-attempt',
-        status: 'failed',
-        title: '读取目标目录',
-      }),
-      expect.objectContaining({
-        key: 'plan-step:plan-second',
-        status: 'not_run',
-        title: '检查文件信息',
-      }),
-      expect.objectContaining({
-        activityId: 'retry',
-        key: 'activity:retry',
-        status: 'completed',
-        toolName: 'file.list',
-      }),
-    ]);
-    expect(projection).toMatchObject({ settledStepCount: 2, totalStepCount: 3 });
-  });
-
-  it('ignores Tools from another Run before linking plan steps', () => {
-    const foreign = {
-      ...activity('foreign', 1, 'completed', 'plan-first'),
-      runId: 'run-other',
-    };
-
-    expect(buildAgentWorkflowProjection(plannedRun('running'), [foreign])?.steps)
-      .toEqual(expect.arrayContaining([
-        expect.objectContaining({ key: 'plan-step:plan-first', status: 'planned' }),
-      ]));
+  it('selects only the newest active Run for the dock and withdraws after terminal', () => {
+    const older = run('running', { id: 'run-old', createdAt: '2026-08-23T00:00:00.000Z' });
+    const newer = run('running', { id: 'run-new', createdAt: '2026-08-23T00:00:01.000Z' });
+    expect(selectActiveAgentWorkflowProjection([], [older, newer], [])?.runId).toBe('run-new');
+    expect(selectActiveAgentWorkflowProjection([], [
+      { ...older, status: 'completed' },
+      { ...newer, status: 'failed' },
+    ], [])).toBeNull();
   });
 });

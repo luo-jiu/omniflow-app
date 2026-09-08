@@ -13,6 +13,7 @@ import type {
   AgentPreparedActionPublic,
   AgentPerceptionSnapshot,
   AgentToolProgress,
+  AgentToolDisplayMetadata,
   AgentToolResult,
   AgentToolRisk,
 } from '@/shared/agent/agent.types';
@@ -111,6 +112,10 @@ export interface AgentToolMainPreparationSealResult {
 }
 
 export interface AgentToolExecutionContext {
+  readLibraryMetadata?: (
+    query: import('@/shared/agent/agent-library-query').AgentLibraryQuery,
+    signal: AbortSignal,
+  ) => Promise<import('@/shared/agent/agent-library-query').AgentLibraryReadResult>;
   appContext: AgentAppContext;
   onProgress: (progress: AgentToolProgress) => void;
   perception?: AgentPerceptionSnapshot;
@@ -199,6 +204,7 @@ export interface AgentTool {
   readonly createRendererPrepareRequest?: (
     input: unknown,
     context: AgentToolExecutionContext,
+    requestedAction?: AgentPreparedActionPublic,
   ) => unknown;
   readonly description: string;
   readonly execute?: (
@@ -212,6 +218,8 @@ export interface AgentTool {
   readonly name: string;
   /** Prepared actions whose analyzer assigns the effective risk at prepare time. */
   readonly preparedRisk?: 'dynamic';
+  /** Renderer-safe semantics for factual Tool grouping and summaries. */
+  readonly presentation?: AgentToolDisplayMetadata;
   readonly risk: AgentToolRisk;
   /**
    * Optional stable identity for this implementation. Built-in tools should
@@ -564,6 +572,7 @@ function deriveRegistrationId(input: {
   name: string;
   preparationMode: AgentToolPreparationMode;
   preparedRisk?: 'dynamic';
+  presentation?: AgentToolDisplayMetadata;
   risk: AgentToolRisk;
   timeoutMs?: number;
   explicitRegistrationId?: unknown;
@@ -571,7 +580,7 @@ function deriveRegistrationId(input: {
   const explicit = normalizeRegistrationId(input.explicitRegistrationId);
   if (explicit) return explicit;
   const fingerprint = crypto.createHash('sha256').update(stableSerialize({
-    schemaVersion: 3,
+    schemaVersion: 4,
     availability: input.availability,
     cancellationSettleTimeoutMs: input.cancellationSettleTimeoutMs,
     description: input.description,
@@ -581,6 +590,7 @@ function deriveRegistrationId(input: {
     name: input.name,
     preparationMode: input.preparationMode,
     preparedRisk: input.preparedRisk ?? null,
+    presentation: input.presentation ?? null,
     risk: input.risk,
     timeoutMs: input.timeoutMs ?? null,
   })).digest('hex');
@@ -855,6 +865,20 @@ export function createAgentToolRegistry(initialTools: AgentTool[] = []) {
     )) {
       throw new Error(`Agent Tool 不能注册未声明的控制能力：${name}`);
     }
+    const presentation = tool.presentation === undefined
+      ? undefined
+      : Object.freeze({
+          groupKind: tool.presentation.groupKind,
+          operationKind: tool.presentation.operationKind,
+        });
+    if (presentation && (
+      kind !== 'business'
+      || tool.risk !== 'read'
+      || presentation.groupKind !== 'resource-read'
+      || !['list', 'stat', 'read', 'search'].includes(presentation.operationKind)
+    )) {
+      throw new Error(`Agent Tool 展示分组元数据无效：${name}`);
+    }
     const availability = normalizeAvailabilityPolicy(tool.availability);
     if (
       kind === 'control'
@@ -929,6 +953,7 @@ export function createAgentToolRegistry(initialTools: AgentTool[] = []) {
       name,
       preparationMode,
       preparedRisk: tool.preparedRisk,
+      presentation,
       risk: tool.risk,
       timeoutMs: tool.timeoutMs,
     });
@@ -943,6 +968,7 @@ export function createAgentToolRegistry(initialTools: AgentTool[] = []) {
       inputSchema,
       kind,
       name,
+      presentation,
       registrationId,
     }));
     inputValidators.set(name, validator);

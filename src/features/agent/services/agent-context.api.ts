@@ -7,6 +7,7 @@ import {
   fetchNodeDetailById,
   getChildrenByNodeId,
 } from '@/features/file-explorer/services/file.api';
+import { ensureStorageProviderAvailable } from '@/features/resource-monitor/services/storage-provider-health';
 
 function toPositiveId(value: unknown): number | null {
   const id = Number(value);
@@ -22,7 +23,14 @@ function normalizeEntry(value: unknown): AgentDirectoryEntry | null {
   if (!id || !type || !name) return null;
 
   const fileSize = Number(source.fileSize ?? source.file_size);
+  const providerAlias = String(source.storageProvider ?? source.storage_provider ?? '').trim();
+  const providerLabel = String(source.storageProviderLabel ?? source.storage_provider_label ?? '').trim();
   return {
+    ...(providerAlias ? { storage: {
+      providerAlias,
+      ...(providerLabel ? { providerLabel } : {}),
+      availability: 'unknown' as const,
+    } } : {}),
     ...(source.ext ? { ext: String(source.ext) } : {}),
     ...(Number.isFinite(fileSize) && fileSize >= 0 ? { fileSize } : {}),
     id,
@@ -39,6 +47,7 @@ function normalizeEntry(value: unknown): AgentDirectoryEntry | null {
 
 export async function readAgentPerception(
   appContext: AgentAppContext,
+  dependencies: { checkStorage?: typeof ensureStorageProviderAvailable } = {},
 ): Promise<AgentPerceptionSnapshot> {
   const currentDirectoryId = toPositiveId(appContext.currentDirectory?.id);
   const libraryId = toPositiveId(appContext.libraryId);
@@ -64,11 +73,10 @@ export async function readAgentPerception(
     Promise.all(selectedNodePromises),
   ]);
 
-  const entries = rawEntries
+  const allEntries = rawEntries
     .map(normalizeEntry)
-    .filter((entry): entry is AgentDirectoryEntry => entry !== null)
-    .slice(0, 200)
-    .sort((left, right) => {
+    .filter((entry): entry is AgentDirectoryEntry => entry !== null);
+  const entries = allEntries.slice(0, 200).sort((left, right) => {
       if (left.type !== right.type) return left.type === 'dir' ? -1 : 1;
       return left.name.localeCompare(right.name, 'zh-Hans-CN');
     });
@@ -76,11 +84,28 @@ export async function readAgentPerception(
     .map(normalizeEntry)
     .filter((entry): entry is AgentDirectoryEntry => entry !== null);
 
+  const visibleNodes = [...entries, ...selectedNodes];
+  const aliases = Array.from(new Set(visibleNodes.flatMap(node => node.storage ? [node.storage.providerAlias] : [])));
+  const availability = new Map(await Promise.all(aliases.map(async alias => {
+    try {
+      const result = await (dependencies.checkStorage || ensureStorageProviderAvailable)(alias);
+      return [alias, result.available ? 'available' : result.status === 'error' ? 'unavailable' : 'unknown'] as const;
+    } catch { return [alias, 'unknown'] as const; }
+  })));
+  for (const node of visibleNodes) {
+    if (node.storage) node.storage = {
+      ...node.storage,
+      availability: availability.get(node.storage.providerAlias) || 'unknown',
+      observedAt: new Date().toISOString(),
+    };
+  }
+
   return {
     ...(currentDirectoryId && libraryId
       ? {
           currentDirectory: {
-            entryCount: entries.length,
+            entryCount: allEntries.length,
+            truncated: allEntries.length > entries.length,
             entries,
             id: currentDirectoryId,
             name: appContext.currentDirectory?.name || '当前目录',

@@ -34,6 +34,7 @@ import { executeAgentRendererTool } from '../services/agent-tool-executor';
 import { prepareAgentRendererTool } from '../services/agent-tool-preparer';
 import {
   appendBufferedAgentEvent,
+  mergeAgentAssistantStreamEvent,
   reconcileCanonicalAgentRunMessages,
 } from '../agent-stream-messages';
 import {
@@ -111,8 +112,9 @@ export function useAgentSession({
   const sessionScopeKeyRef = React.useRef(sessionScopeKey);
   const sessionIdRef = React.useRef<string | null>(null);
   const optimisticMessageIdRef = React.useRef<string | null>(null);
-  const streamMessageIdRef = React.useRef<string | null>(null);
-  const streamedContentLengthRef = React.useRef<Map<string, number>>(new Map());
+  const desyncedAssistantItemIdsRef = React.useRef<Set<string>>(new Set());
+  const assistantRepairTokensRef = React.useRef<Map<string, symbol>>(new Map());
+  const applyEventRef = React.useRef<(event: AgentChatStreamEvent) => void>(() => undefined);
   const pendingEventsRef = React.useRef<Map<string, AgentChatStreamEvent[]>>(new Map());
   const acceptPendingEventsRef = React.useRef(false);
   const restoringSessionIdRef = React.useRef<string | null>(null);
@@ -235,11 +237,52 @@ export function useAgentSession({
     }
   }, []);
 
+  const repairAssistantStream = React.useCallback((targetSessionId: string) => {
+    if (assistantRepairTokensRef.current.has(targetSessionId)) return;
+    const libraryId = Number(appContext.libraryId);
+    if (
+      !ownerScope
+      || !ownerScopeKey
+      || !Number.isFinite(libraryId)
+      || libraryId <= 0
+      || sessionIdRef.current !== targetSessionId
+    ) return;
+    const repairToken = Symbol(targetSessionId);
+    const repairScopeKey = sessionScopeKey;
+    assistantRepairTokensRef.current.set(targetSessionId, repairToken);
+    pendingEventsRef.current.delete(targetSessionId);
+
+    void getAgentSession(ownerScope, libraryId, targetSessionId)
+      .then((snapshot) => {
+        if (
+          !mountedRef.current
+          || assistantRepairTokensRef.current.get(targetSessionId) !== repairToken
+          || sessionScopeKeyRef.current !== repairScopeKey
+          || sessionIdRef.current !== targetSessionId
+          || snapshot.libraryId !== libraryId
+        ) return;
+        setMessages(snapshot.messages);
+        setRuns(snapshot.runs);
+        setToolActivities(snapshot.toolActivities);
+        desyncedAssistantItemIdsRef.current.clear();
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (assistantRepairTokensRef.current.get(targetSessionId) !== repairToken) return;
+        assistantRepairTokensRef.current.delete(targetSessionId);
+        const pending = pendingEventsRef.current.get(targetSessionId) || [];
+        pendingEventsRef.current.delete(targetSessionId);
+        if (
+          !mountedRef.current
+          || sessionScopeKeyRef.current !== repairScopeKey
+          || sessionIdRef.current !== targetSessionId
+        ) return;
+        pending.forEach(event => applyEventRef.current(event));
+      });
+  }, [appContext.libraryId, ownerScope, ownerScopeKey, sessionScopeKey]);
+
   const applyEvent = React.useCallback((event: AgentChatStreamEvent) => {
     if (event.type === 'started') {
-      if (!streamedContentLengthRef.current.has(event.runId)) {
-        streamedContentLengthRef.current.set(event.runId, 0);
-      }
       const optimisticMessageId = optimisticMessageIdRef.current;
       if (optimisticMessageId) {
         setMessages(current => current.map(message => (
@@ -258,32 +301,27 @@ export function useAgentSession({
       setRuns(current => upsertAgentRun(current, event.run));
       return;
     }
-    if (event.type === 'delta') {
-      streamedContentLengthRef.current.set(
-        event.runId,
-        (streamedContentLengthRef.current.get(event.runId) || 0) + event.delta.length,
-      );
+    if (
+      event.type === 'assistant-item-started'
+      || event.type === 'assistant-item-delta'
+      || event.type === 'assistant-item-finished'
+    ) {
+      const itemId = event.type === 'assistant-item-delta' ? event.itemId : event.item.id;
+      if (
+        event.type === 'assistant-item-delta'
+        && desyncedAssistantItemIdsRef.current.has(itemId)
+      ) return;
       setIsStreaming(true);
       setMessages((current) => {
-        const messageId = streamMessageIdRef.current || createMessageId('agent-stream');
-        streamMessageIdRef.current = messageId;
-        const existing = current.find(message => message.id === messageId);
-        if (!existing) {
-          return [
-            ...current,
-            {
-              content: event.delta,
-              createdAt: new Date().toISOString(),
-              id: messageId,
-              role: 'assistant',
-              runId: event.runId,
-              sessionId: event.sessionId,
-            },
-          ];
+        const result = mergeAgentAssistantStreamEvent(current, event);
+        if (result.issue) {
+          const alreadyDesynced = desyncedAssistantItemIdsRef.current.has(result.issue.itemId);
+          desyncedAssistantItemIdsRef.current.add(result.issue.itemId);
+          if (!alreadyDesynced) repairAssistantStream(event.sessionId);
+        } else if (event.type === 'assistant-item-finished') {
+          desyncedAssistantItemIdsRef.current.delete(itemId);
         }
-        return current.map(message => message.id === messageId
-          ? { ...message, content: `${message.content}${event.delta}` }
-          : message);
+        return result.messages;
       });
       return;
     }
@@ -301,7 +339,6 @@ export function useAgentSession({
         status: 'running' as const,
       };
       setMessages(current => ensureToolTimelineAnchor(current, activity));
-      streamMessageIdRef.current = null;
       setToolActivities(current => upsertAgentToolActivity(current, activity));
       return;
     }
@@ -399,7 +436,6 @@ export function useAgentSession({
         status: event.result.ok ? 'completed' as const : 'failed' as const,
       };
       setToolActivities(current => upsertAgentToolActivity(current, activity));
-      streamMessageIdRef.current = null;
       return;
     }
     if (event.type === 'completed' || event.type === 'cancelled' || event.type === 'error') {
@@ -409,12 +445,6 @@ export function useAgentSession({
       rendererExecutionsInFlightRef.current.forEach((execution) => {
         if (execution.runId === event.runId) execution.controller.abort();
       });
-      const renderedLength = streamedContentLengthRef.current.get(event.runId) || 0;
-      const missingContent = event.content.slice(Math.min(renderedLength, event.content.length));
-      streamedContentLengthRef.current.set(
-        event.runId,
-        Math.max(renderedLength, event.content.length),
-      );
       setIsStreaming(false);
       if (event.run) {
         const runSnapshot = event.run;
@@ -431,54 +461,28 @@ export function useAgentSession({
         if (event.messages) {
           return reconcileCanonicalAgentRunMessages(current, event.runId, event.messages);
         }
-        const messageId = streamMessageIdRef.current;
-        if (!messageId) {
-          if (!missingContent) return current;
-          return [
-            ...current,
-            {
-              content: missingContent,
-              createdAt: new Date().toISOString(),
-              id: createMessageId('agent-complete'),
-              role: 'assistant',
-              runId: event.runId,
-              sessionId: event.sessionId,
-            },
-          ];
-        }
-        const existing = current.find(message => message.id === messageId);
-        if (!existing && !missingContent) return current;
-        if (!existing) {
-          return [
-            ...current,
-            {
-              content: missingContent,
-              createdAt: new Date().toISOString(),
-              id: messageId,
-              role: 'assistant',
-              runId: event.runId,
-              sessionId: event.sessionId,
-            },
-          ];
-        }
-        if (!missingContent) return current;
-        return current.map(message => message.id === messageId
-          ? { ...message, content: `${message.content}${missingContent}` }
-          : message);
+        return current;
       });
-      streamMessageIdRef.current = null;
-      streamedContentLengthRef.current.delete(event.runId);
-      if (event.type === 'error') setError(event.message);
+      desyncedAssistantItemIdsRef.current.clear();
+      if (event.type === 'error') setError(event.run ? null : event.message);
       else if (event.type === 'cancelled') setError(null);
       onSessionChanged?.(event.sessionId);
       return;
     }
-  }, [executeRendererRequest, onSessionChanged, prepareRendererRequest]);
+  }, [
+    executeRendererRequest,
+    onSessionChanged,
+    prepareRendererRequest,
+    repairAssistantStream,
+  ]);
+  applyEventRef.current = applyEvent;
 
   React.useEffect(() => {
     const pendingEvents = pendingEventsRef.current;
     const approvalsInFlight = approvalsInFlightRef.current;
     const interactionsInFlight = interactionsInFlightRef.current;
+    const desyncedAssistantItemIds = desyncedAssistantItemIdsRef.current;
+    const assistantRepairTokens = assistantRepairTokensRef.current;
     const rendererPreparationsInFlight = rendererPreparationsInFlightRef.current;
     const rendererExecutionsInFlight = rendererExecutionsInFlightRef.current;
     mountedRef.current = true;
@@ -490,6 +494,8 @@ export function useAgentSession({
       pendingEvents.clear();
       approvalsInFlight.clear();
       interactionsInFlight.clear();
+      desyncedAssistantItemIds.clear();
+      assistantRepairTokens.clear();
       rendererPreparationsInFlight.forEach(preparation => preparation.controller.abort());
       rendererPreparationsInFlight.clear();
       const sessionsToStop = new Set<string>();
@@ -508,7 +514,10 @@ export function useAgentSession({
   }, []);
 
   React.useEffect(() => subscribeAgentChat((event) => {
-    if (restoringSessionIdRef.current === event.sessionId) {
+    if (
+      restoringSessionIdRef.current === event.sessionId
+      || assistantRepairTokensRef.current.has(event.sessionId)
+    ) {
       const pending = pendingEventsRef.current.get(event.sessionId) || [];
       pendingEventsRef.current.set(event.sessionId, appendBufferedAgentEvent(pending, event));
       return;
@@ -556,6 +565,7 @@ export function useAgentSession({
     acceptPendingEventsRef.current = false;
     restoringSessionIdRef.current = null;
     pendingEventsRef.current.clear();
+    assistantRepairTokensRef.current.clear();
     rendererPreparationsInFlightRef.current.forEach(preparation => preparation.controller.abort());
     rendererPreparationsInFlightRef.current.clear();
     const sessionsToStop = new Set<string>();
@@ -570,10 +580,9 @@ export function useAgentSession({
     sessionsToStop.forEach(activeSessionId => {
       void stopAgentChat(activeSessionId).catch(() => undefined);
     });
-    streamedContentLengthRef.current.clear();
+    desyncedAssistantItemIdsRef.current.clear();
     sessionIdRef.current = null;
     optimisticMessageIdRef.current = null;
-    streamMessageIdRef.current = null;
     setSessionId(null);
     setMessages([]);
     setDraft('');
@@ -607,8 +616,9 @@ export function useAgentSession({
     const restoreScopeKey = sessionScopeKey;
     const preparationToken = preparationTokenRef.current + 1;
     preparationTokenRef.current = preparationToken;
+    assistantRepairTokensRef.current.clear();
     restoringSessionIdRef.current = nextSessionId;
-    pendingEventsRef.current.delete(nextSessionId);
+    pendingEventsRef.current.clear();
     setPreparing(true);
     setError(null);
     setWarning(null);
@@ -628,17 +638,8 @@ export function useAgentSession({
       interactionsInFlightRef.current.clear();
       setApprovalBusyIds(new Set());
       setInteractionBusyIds(new Set());
-      const restoredContentLengths = new Map<string, number>();
-      snapshot.messages.forEach((message) => {
-        if (message.role !== 'assistant' || !message.runId) return;
-        restoredContentLengths.set(
-          message.runId,
-          (restoredContentLengths.get(message.runId) || 0) + message.content.length,
-        );
-      });
-      streamedContentLengthRef.current = restoredContentLengths;
       setDraft('');
-      streamMessageIdRef.current = null;
+      desyncedAssistantItemIdsRef.current.clear();
       const running = snapshot.lastRunStatus === 'running'
         || snapshot.lastRunStatus === 'preparing'
         || snapshot.lastRunStatus === 'awaiting_approval'
@@ -699,7 +700,7 @@ export function useAgentSession({
     setDraft('');
     setError(null);
     setWarning(null);
-    streamMessageIdRef.current = null;
+    desyncedAssistantItemIdsRef.current.clear();
     const preparationToken = preparationTokenRef.current + 1;
     preparationTokenRef.current = preparationToken;
     const submissionScopeKey = sessionScopeKey;
@@ -762,7 +763,7 @@ export function useAgentSession({
           optimisticMessageIdRef.current = null;
         }
         setMessages(current => current.filter(message => message.id !== optimisticId));
-        setDraft(userPrompt);
+        setDraft(current => current || userPrompt);
         setError(submitError instanceof Error ? submitError.message : 'Agent 请求失败');
         setIsStreaming(false);
       }
@@ -804,7 +805,13 @@ export function useAgentSession({
       }
     });
     if (deferStopUntilCommitReceipt) return;
-    await stopAgentChat(currentSessionId);
+    try {
+      await stopAgentChat(currentSessionId);
+    } catch (stopError) {
+      if (mountedRef.current && sessionIdRef.current === currentSessionId) {
+        setError(stopError instanceof Error ? stopError.message : '停止 Agent 失败');
+      }
+    }
   }, [isStreaming]);
 
   const resolveApproval = React.useCallback(async (
@@ -922,10 +929,10 @@ export function useAgentSession({
     rendererExecutionsInFlightRef.current.forEach(execution => execution.controller.abort());
     rendererExecutionsInFlightRef.current.clear();
     restoringSessionIdRef.current = null;
-    streamedContentLengthRef.current.clear();
+    assistantRepairTokensRef.current.clear();
+    desyncedAssistantItemIdsRef.current.clear();
     sessionIdRef.current = null;
     optimisticMessageIdRef.current = null;
-    streamMessageIdRef.current = null;
     setSessionId(null);
     setMessages([]);
     setDraft('');

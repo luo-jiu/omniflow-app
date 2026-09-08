@@ -3,9 +3,7 @@ import {
   IconBookmark,
   IconHistory,
   IconPlus,
-  IconSend,
   IconShieldStroked,
-  IconStop,
 } from '@douyinfe/semi-icons';
 import { Dropdown, Toast } from '@douyinfe/semi-ui';
 import styled, { css } from 'styled-components';
@@ -35,6 +33,8 @@ import AgentMemoryManager, {
 } from './components/AgentMemoryManager';
 import AgentSessionManager from './components/AgentSessionManager';
 import AgentTimeline from './components/AgentTimeline';
+import AgentSubmitButton from './components/AgentSubmitButton';
+import { shouldSubmitAgentComposer } from './agent-composer-keyboard';
 import {
   loadAgentModelPreferences,
   saveAgentModelPreferences,
@@ -622,7 +622,6 @@ export default function AgentWorkspace({
     || session.toolActivities.length > 0;
   const submitInteraction = session.submitInteraction;
   const toolActivities = session.toolActivities;
-
   const handlePresentationAction = React.useCallback((action: AgentPresentationAction) => {
     if (action.action === 'tree.revealNode') {
       if (
@@ -853,10 +852,9 @@ export default function AgentWorkspace({
           />
           <textarea
             aria-label="Agent 输入"
-            disabled={session.isBusy}
             onChange={(event) => session.setDraft(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === 'Enter' && !event.shiftKey) {
+              if (shouldSubmitAgentComposer(event, session.isBusy)) {
                 event.preventDefault();
                 shouldFollowScrollRef.current = true;
                 void session.submit();
@@ -951,16 +949,8 @@ export default function AgentWorkspace({
                 <IconPlus aria-hidden="true" />
               </button>
             ) : null}
-            <button
-              aria-label={session.isStreaming ? '停止 Agent' : '发送消息'}
-              className={`agent-submit ${session.isStreaming ? 'stop' : ''}`}
-              disabled={session.isStreaming ? false : session.isBusy || !canSubmit}
-              onClick={session.isStreaming ? () => { void session.stop(); } : undefined}
-              title={session.isStreaming ? '停止' : session.isBusy ? '正在读取当前上下文' : '发送'}
-              type={session.isStreaming ? 'button' : 'submit'}
-            >
-              {session.isStreaming ? <IconStop aria-hidden="true" /> : <IconSend aria-hidden="true" />}
-            </button>
+            <AgentSubmitButton streaming={session.isStreaming} busy={session.isBusy}
+              canSubmit={canSubmit} onStop={() => { void session.stop(); }} />
           </div>
         </Composer>
       </ComposerFrame> : null}

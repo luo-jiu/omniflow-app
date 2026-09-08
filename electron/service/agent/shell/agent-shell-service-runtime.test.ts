@@ -48,6 +48,12 @@ const OWNER: AgentShellWorkspaceOwner = Object.freeze({
   sessionId: 'session-1',
 });
 
+const VALID_SHELL_PREPARE_INPUT = Object.freeze({
+  command: 'printf hello',
+  cwd: 'work',
+  timeoutMs: 1_000,
+});
+
 function runtimeResult(): AgentShellRuntimeResult {
   return Object.freeze({
     droppedDetailedBytes: 0,
@@ -58,6 +64,23 @@ function runtimeResult(): AgentShellRuntimeResult {
     logRef: 'log:v1:ref',
     ok: true,
     outputBytes: 0,
+    outputProjection: Object.freeze({
+      stderr: Object.freeze({
+        head: '',
+        omittedBytes: 0,
+        tail: '',
+        totalBytes: 0,
+        truncated: false,
+      }),
+      stdout: Object.freeze({
+        head: '',
+        omittedBytes: 0,
+        tail: '',
+        totalBytes: 0,
+        truncated: false,
+      }),
+      version: 1 as const,
+    }),
     outputTail: Object.freeze({
       executionId: 'execution-1',
       firstSequence: null,
@@ -206,8 +229,21 @@ function createFixture(options: {
         version: 1,
       };
     }
+    if (input.operation.operation === 'resolve-library-directory') {
+      return {
+        operation: 'resolve-library-directory',
+        parent: authorityNode({
+          fileSize: 0,
+          id: 9,
+          name: 'Output',
+          parentId: 0,
+          type: 'dir',
+        }),
+        version: 1,
+      };
+    }
     return {
-      ...(input.operation.includeCredentials
+      ...(input.operation.operation === 'publish-library-file' && input.operation.includeCredentials
         ? { credentials: { token: 'private-token', username: 'user-7' } }
         : {}),
       operation: 'publish-library-file',
@@ -355,6 +391,108 @@ describe('Agent Shell service runtime', () => {
       owner: OWNER,
       workspaceId: 'workspace-1',
     }));
+  });
+
+  it('stages a user-provided local path without reopening the system picker', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'omniflow-agent-stage-path-'));
+    temporaryDirectories.push(directory);
+    const filePath = path.join(directory, 'provided.txt');
+    await writeFile(filePath, 'provided path', 'utf8');
+    const fixture = createFixture();
+    const prepared = await fixture.service.prepareFileStage({
+      source: { kind: 'local-path', path: filePath },
+    }, undefined, fixture.preparationContext);
+
+    const result = await fixture.service.executeFileStage({
+      onProgress: vi.fn(),
+      preparation: {
+        binding: prepared.binding,
+        identity: fixture.preparationContext.preparationIdentity,
+        preparedActionId: 'prepared-1',
+        publicAction: prepared.publicAction,
+        snapshotHash: 'a'.repeat(64),
+      },
+      signal: new AbortController().signal,
+    } as unknown as AgentToolExecutionContext);
+
+    expect(result).toMatchObject({
+      data: {
+        displayName: 'selected.txt',
+        logicalPath: 'input/selected.txt',
+        sourceKind: 'local-path',
+      },
+      ok: true,
+    });
+    expect(fixture.pickLocalFile).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['committed', { commitState: 'committed', node: { id: 31, name: 'prompt.md' } }, true],
+    ['uncommitted', { commitState: 'uncommitted' }, false],
+    ['commit_unknown', { commitState: 'commit_unknown' }, false],
+  ] as const)('uploads a user-provided path to an exact library path and preserves %s settlement', async (
+    _label,
+    uploadResult,
+    expectedOk,
+  ) => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'omniflow-agent-upload-path-'));
+    temporaryDirectories.push(directory);
+    const filePath = path.join(directory, 'prompt.md');
+    await writeFile(filePath, '# Prompt', 'utf8');
+    const upload = vi.fn(async () => uploadResult as AgentMediaArtifactUploadResult);
+    const fixture = createFixture({ fileUploadManager: { upload } });
+    const uploadContext = {
+      ...fixture.preparationContext,
+      preparationIdentity: {
+        ...fixture.preparationContext.preparationIdentity,
+        toolName: 'file.upload',
+        toolRegistrationId: 'file.upload@1',
+      },
+    } as AgentToolMainPreparationContext;
+    const prepared = await fixture.service.prepareFileUpload({
+      destination: { directoryPath: '/文档/提示词', kind: 'library-path' },
+      source: { kind: 'local-path', path: filePath },
+    }, undefined, uploadContext);
+
+    expect(vi.mocked(fixture.requestFileAuthority).mock.calls.map(
+      call => call[0].operation.operation,
+    ))
+      .toEqual(['resolve-library-directory', 'publish-library-file']);
+    expect(fixture.pickLocalFile).not.toHaveBeenCalled();
+
+    const result = await fixture.service.executeFileUpload({
+      onProgress: vi.fn(),
+      preparation: {
+        binding: prepared.binding,
+        identity: uploadContext.preparationIdentity,
+        preparedActionId: 'prepared-1',
+        publicAction: prepared.publicAction,
+        snapshotHash: 'a'.repeat(64),
+      },
+      signal: new AbortController().signal,
+    } as unknown as AgentToolExecutionContext);
+
+    expect(result.ok).toBe(expectedOk);
+    expect(result.data).toMatchObject({ uploadCommitState: uploadResult.commitState });
+    expect(vi.mocked(fixture.requestFileAuthority).mock.calls.map(
+      call => call[0].operation.operation,
+    ))
+      .toEqual([
+        'resolve-library-directory',
+        'publish-library-file',
+        'resolve-library-directory',
+        'publish-library-file',
+      ]);
+    expect(upload).toHaveBeenCalledWith(expect.objectContaining({
+      target: expect.objectContaining({
+        fileName: 'prompt.md',
+        libraryId: 3,
+        parentId: 9,
+        storageProvider: 'local',
+      }),
+    }));
+    expect(JSON.stringify(result)).not.toContain(directory);
+    expect(JSON.stringify(result)).not.toContain('private-token');
   });
 
   it('publishes a verified output through Save As and returns only the basename', async () => {
@@ -569,8 +707,8 @@ describe('Agent Shell service runtime', () => {
   it('creates one workspace per Run and releases it exactly once while closing', async () => {
     const fixture = createFixture();
 
-    await fixture.service.prepare({}, undefined, fixture.preparationContext);
-    await fixture.service.prepare({}, undefined, fixture.preparationContext);
+    await fixture.service.prepare(VALID_SHELL_PREPARE_INPUT, undefined, fixture.preparationContext);
+    await fixture.service.prepare(VALID_SHELL_PREPARE_INPUT, undefined, fixture.preparationContext);
     expect(fixture.workspaceStore.create).toHaveBeenCalledOnce();
 
     const firstClose = fixture.service.close();
@@ -578,13 +716,13 @@ describe('Agent Shell service runtime', () => {
     await Promise.all([firstClose, secondClose]);
     expect(fixture.interruptAll).toHaveBeenCalledOnce();
     expect(fixture.workspaceStore.requestCleanup).toHaveBeenCalledOnce();
-    await expect(fixture.service.prepare({}, undefined, fixture.preparationContext))
+    await expect(fixture.service.prepare(VALID_SHELL_PREPARE_INPUT, undefined, fixture.preparationContext))
       .rejects.toThrow('正在关闭');
   });
 
   it('holds execution headroom until the authoritative post-run scan settles it', async () => {
     const fixture = createFixture();
-    await fixture.service.prepare({}, undefined, fixture.preparationContext);
+    await fixture.service.prepare(VALID_SHELL_PREPARE_INPUT, undefined, fixture.preparationContext);
     const preparation = {
       identity: {
         ownerScope: {
@@ -632,7 +770,7 @@ describe('Agent Shell service runtime', () => {
 
   it('fails closed and cleans the workspace when execution-time accounting cannot continue', async () => {
     const fixture = createFixture({ pollIntervalMs: 1 });
-    await fixture.service.prepare({}, undefined, fixture.preparationContext);
+    await fixture.service.prepare(VALID_SHELL_PREPARE_INPUT, undefined, fixture.preparationContext);
     fixture.workspaceStore.scanExecutionQuotaUsage.mockRejectedValueOnce(
       new Error('Agent workspace 用量超过执行预留额度'),
     );
@@ -687,7 +825,7 @@ describe('Agent Shell service runtime', () => {
 
   it('waits for the full execution settlement before releasing workspaces during close', async () => {
     const fixture = createFixture();
-    await fixture.service.prepare({}, undefined, fixture.preparationContext);
+    await fixture.service.prepare(VALID_SHELL_PREPARE_INPUT, undefined, fixture.preparationContext);
     let resolveRuntime!: (result: AgentShellRuntimeResult) => void;
     let executionSignal: AbortSignal | undefined;
     fixture.run.mockImplementationOnce((input: AgentShellRuntimeRunInput) => {
@@ -737,6 +875,57 @@ describe('Agent Shell service runtime', () => {
     await closing;
     expect(fixture.workspaceStore.resolveExecutionResultContext).toHaveBeenCalledOnce();
     expect(fixture.workspaceStore.requestCleanup).toHaveBeenCalledOnce();
+  });
+
+  it('aborts and waits for an active host execution when its Run is released', async () => {
+    let resolveRuntime!: (result: AgentShellRuntimeResult) => void;
+    let executionSignal: AbortSignal | undefined;
+    const fixture = createFixture();
+    fixture.run.mockImplementationOnce((input: AgentShellRuntimeRunInput) => {
+      executionSignal = input.signal;
+      return new Promise<AgentShellRuntimeResult>((resolve) => {
+        resolveRuntime = resolve;
+      });
+    });
+    const preparation = {
+      identity: {
+        ownerScope: {
+          accountScope: OWNER.accountScope,
+          backendScope: OWNER.backendScope,
+        },
+        runCapabilityIdentity: 'capability-host',
+        runId: 'host-run-1',
+        sessionId: OWNER.sessionId,
+        toolRunId: 'tool-run-host-1',
+      },
+      publicAction: {
+        cwd: { kind: 'host', path: '/tmp' },
+        kind: 'shell.run',
+        timeoutMs: 1,
+        version: 1,
+      },
+    };
+    const execution = fixture.service.execute({
+      onProgress: vi.fn(),
+      preparation,
+      signal: new AbortController().signal,
+    } as unknown as AgentToolExecutionContext);
+    await vi.waitFor(() => expect(fixture.run).toHaveBeenCalledOnce());
+
+    const releasing = fixture.service.releaseRun('host-run-1');
+    await vi.waitFor(() => expect(executionSignal?.aborted).toBe(true));
+    expect(fixture.workspaceStore.requestCleanup).not.toHaveBeenCalled();
+    resolveRuntime(Object.freeze({
+      ...runtimeResult(),
+      exitCode: null,
+      ok: false,
+      processStatus: 'cancelled',
+      status: 'cancelled',
+      terminationReason: 'cancelled',
+    }));
+
+    await expect(execution).resolves.toMatchObject({ status: 'cancelled' });
+    await releasing;
   });
 
   it('waits for library upload settlement before releasing its Run workspace', async () => {

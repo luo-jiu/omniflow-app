@@ -82,7 +82,15 @@ Windows 不模拟 macOS vibrancy：目录树侧栏和主内容圆角背板通过
 
 平台能力如果需要跨 preload 暴露，先更新本专题和 `electron/electron-env.d.ts`，再提供 renderer service；页面不得直接新增原始 IPC channel。
 
-Agent 的受控本地进程生命周期继续由共享 `electron/service/agent/agent-local-process-runner.ts` 持有，不按平台复制 Tool 或任务状态。Runner 只把“如何结束整棵进程树”委托给 `electron/platform/processTree.ts`：macOS / Linux 终止独立进程组，Windows 使用系统 `taskkill.exe /T` 并在不可用时退回直接终止子进程。该能力没有 preload / IPC 暴露，也不是任意 Shell 入口。
+固定媒体 Tool 的受控本地进程生命周期继续由共享 `electron/service/agent/agent-local-process-runner.ts` 持有，不按平台复制 Tool 或任务状态。Runner 只把“如何请求结束受管进程组 / 进程树”委托给 `electron/platform/processTree.ts`：macOS / Linux 终止独立进程组，Windows 使用系统 `taskkill.exe /T` 并在不可用时退回直接终止子进程。该能力没有 preload / IPC 暴露，也不是任意 Shell 入口；raw Shell 走独立的 Provider、Process Supervisor、Runtime 与权限链。当前媒体 fallback 也不构成任意宿主命令不可逃逸的证明。
+
+### 4.1 Agent Shell 目标平台边界
+
+当前应用启动时会探测平台 Provider；只有 macOS 系统 Zsh 的 `executionReady` 为真时动态注册 `shell.run@1`，Linux Bash 与 Windows PowerShell 继续保持不可执行且不注册。共享 Tool / Run / ToolRun 不按平台复制，解释器、方言分析、编码、启动参数和受管进程生命周期交给平台 Provider；Provider 仍以绝对 executable + argv、`shell: false` 启动，模型和 renderer 不能选择任意可执行路径。
+
+macOS 开发预览中，`cwd` 仍只能是 Run 工作区逻辑路径，但受支持只读命令可以直接引用用户明确给出的宿主绝对路径。`ask / auto` 对这类外部路径读取进入确认，`full-access` 在 Analyzer 完整理解命令时直接执行；Shell 的 `~` 固定指向 Run 虚拟 home，不是宿主 Home。只读查看不先 `file.stage`，需要工作副本、修改或转码时才暂存，原样上传仍使用 `file.upload`。
+
+Windows 的 `taskkill.exe /T` 失败后直接终止子进程，足以作为当前固定媒体子进程的保守兜底，但不足以证明 raw Shell 的任意孙进程已经清理。Shell V1 在 Windows 上必须使用 Job Object 或等价可验证 supervisor；否则取消只能报告 `termination_incomplete`，不能宣称双平台完成。当前 Shell 实现事实见 `docs/built-in-agent-shell-architecture.md`，宿主机迁移目标见 `docs/built-in-agent-host-execution-contract.md`。
 
 ## 5. Renderer 演进准则
 

@@ -29,7 +29,7 @@ export function normalizeAgentDirectoryName(input: unknown): string {
 }
 
 export const directoryCreateTool: AgentTool = {
-  description: '在 OmniFlow 当前目录中创建一个文件夹。只接受文件夹名称，目标固定为当前目录；每次执行前必须由用户确认。',
+  description: '在 OmniFlow 当前目录中创建一个文件夹。只接受文件夹名称，目标固定为当前目录；运行时根据当前权限模式决定是否需要确认，不覆盖同名内容。',
   executor: 'renderer',
   inputSchema: {
     additionalProperties: false,

@@ -44,6 +44,7 @@
 - MediaHub 契约（出声实体注册 / 浮窗 / tab 关闭释放）：`docs/media-hub-contract.md`
 - 内置 Agent 架构（执行 / 持久化 / IPC / 安全）：`docs/built-in-agent-architecture.md`
 - 内置 Agent Shell 目标架构（raw Shell / 权限 / Provider / 工作区桥）：`docs/built-in-agent-shell-architecture.md`
+- 内置 Agent 宿主机执行契约（Codex-like host execution / context migration）：`docs/built-in-agent-host-execution-contract.md`
 - 内置 Agent UI 契约（工作区 / 状态投影 / 受控交互）：`docs/built-in-agent-ui-contract.md`
 - 前端验证矩阵：`docs/frontend-validation-matrix.md`
 - 资源捕捉重构现状摘要：`docs/cat-catch-migration-audit.md`

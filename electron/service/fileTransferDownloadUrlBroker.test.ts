@@ -55,6 +55,16 @@ afterEach(async () => {
 })
 
 describe('FileTransferDownloadUrlBroker', () => {
+  it('retains the upstream status for controlled diagnostics without exposing its body', async () => {
+    const broker = new FileTransferDownloadUrlBroker({ fetcher: async () => new Response('private upstream body', { status: 403 }) })
+    brokers.push(broker)
+    await broker.start()
+    const source = broker.createResolvedLoopbackSource({ fileName: 'fixture.mp4', sourceUrl: 'https://fixture.invalid/object' })
+    const response = await fetch(source.url)
+    expect(response.status).toBe(502)
+    expect(response.headers.get('X-OmniFlow-Source-Status')).toBe('403')
+    expect(await response.text()).not.toContain('private upstream body')
+  })
   it('waits for a signed source URL and streams it through a loopback claim', async () => {
     const sourceUrl = await createSourceServer('download-url-fixture')
     const broker = new FileTransferDownloadUrlBroker({
