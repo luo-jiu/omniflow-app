@@ -1,5 +1,5 @@
 import React from 'react';
-import { IconPulse, IconSetting } from '@douyinfe/semi-icons';
+import OutlineIcon from '@/components/ui/outline-icon';
 import {
   SideMenu,
   SideMenuHeader,
@@ -62,7 +62,7 @@ const QuickAccessSidebar: React.FC<QuickAccessSidebarProps> = ({
               title="资源监测"
               aria-label="资源监测"
             >
-              <IconPulse />
+              <OutlineIcon name="activity" />
             </SideMenuAction>
           ) : null}
           <SideMenuAction
@@ -73,7 +73,7 @@ const QuickAccessSidebar: React.FC<QuickAccessSidebarProps> = ({
             title="设置"
             aria-label="设置"
           >
-            <IconSetting />
+            <OutlineIcon name="settings" />
           </SideMenuAction>
         </div>
         {footerContent ? (

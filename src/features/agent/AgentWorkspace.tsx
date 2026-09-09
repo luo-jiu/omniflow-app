@@ -1,11 +1,7 @@
 import React from 'react';
-import {
-  IconBookmark,
-  IconHistory,
-  IconPlus,
-  IconShieldStroked,
-} from '@douyinfe/semi-icons';
-import { Dropdown, Toast } from '@douyinfe/semi-ui';
+import { createPortal } from 'react-dom';
+import OutlineIcon from '@/components/ui/outline-icon';
+import { Toast } from '@douyinfe/semi-ui';
 import styled, { css } from 'styled-components';
 
 import AIModelSettingsControl from '@/features/ai-services/components/AIModelSettingsControl';
@@ -34,7 +30,9 @@ import AgentMemoryManager, {
 import AgentSessionManager from './components/AgentSessionManager';
 import AgentTimeline from './components/AgentTimeline';
 import AgentSubmitButton from './components/AgentSubmitButton';
-import { shouldSubmitAgentComposer } from './agent-composer-keyboard';
+import AgentPermissionControl from './components/AgentPermissionControl';
+import { createAgentCompositionGuard, shouldSubmitAgentComposer } from './agent-composer-keyboard';
+import AgentConversationIndex from './components/AgentConversationIndex';
 import {
   loadAgentModelPreferences,
   saveAgentModelPreferences,
@@ -45,10 +43,11 @@ import {
   INITIAL_AGENT_COMPOSER_HEIGHT,
   MAX_AGENT_COMPOSER_HEIGHT,
   MIN_AGENT_COMPOSER_HEIGHT,
-  resolveAgentComposerDragHeight,
 } from './agent-composer-layout';
 import { useAgentMemories } from './hooks/useAgentMemories';
 import { useAgentSession } from './hooks/useAgentSession';
+import { useAgentSessionResume } from './hooks/useAgentSessionResume';
+import { loadAgentSessionSelection, saveAgentSessionSelection } from './agent-session-selection';
 import {
   deleteAgentSession,
   getAgentShellSettings,
@@ -58,6 +57,9 @@ import {
 } from './services/agent.api';
 
 const AgentRoot = styled.section`
+  position: relative;
+  isolation: isolate;
+  container-type: inline-size;
   width: 100%;
   height: 100%;
   min-width: 0;
@@ -72,10 +74,14 @@ const AgentRoot = styled.section`
 const AgentScroll = styled.div`
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: scroll;
   overflow-anchor: none;
   ${workspaceScrollbarStyles}
   padding: 24px 16px 18px;
+  padding-bottom: var(--agent-dock-space, 18px);
+  scroll-padding-bottom: var(--agent-dock-space, 18px);
+  @container (max-width: 720px) { padding-left: 52px; }
   display: flex;
   flex-direction: column;
 `;
@@ -92,6 +98,21 @@ const AgentContent = styled.div`
   display: flex;
   flex-direction: column;
   gap: 14px;
+`;
+
+const RecoveryNotice = styled.div`
+  ${agentColumnStyles}
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 0;
+  color: var(--app-text-muted);
+  font-size: 12px;
+  button {
+    flex: none; height: 28px; padding: 0 10px; border: 1px solid var(--app-border);
+    border-radius: var(--app-radius-medium); background: var(--app-bg-elevated);
+    color: var(--app-text); cursor: pointer;
+  }
 `;
 
 const AgentEmpty = styled.div`
@@ -118,15 +139,28 @@ const AgentEmpty = styled.div`
 `;
 
 const ComposerFrame = styled.div`
-  flex: none;
+  position: absolute;
+  z-index: 1;
+  bottom: 0;
+  left: 0;
+  right: var(--agent-scrollbar-width, 8px);
   min-width: 0;
-  margin-top: auto;
-  padding-top: 18px;
+  padding: 0 16px 18px;
+  @container (max-width: 720px) { padding-left: 52px; }
+  pointer-events: none;
+
+  &::before {
+    content: '';
+    position: absolute;
+    inset: calc((100% - 18px) / 2) 0 0;
+    background: var(--app-bg);
+  }
 `;
 
 const Composer = styled.form`
   ${agentColumnStyles}
   position: relative;
+  pointer-events: auto;
   border: 1px solid var(--app-border-strong);
   border-radius: 12px;
   background: var(--app-bg-elevated);
@@ -173,8 +207,7 @@ const Composer = styled.form`
     white-space: nowrap;
   }
 
-  .agent-submit,
-  .agent-reset {
+  .agent-submit {
     width: 30px;
     height: 30px;
     display: inline-flex;
@@ -186,33 +219,11 @@ const Composer = styled.form`
     cursor: pointer;
   }
 
-  .agent-permission-mode {
-    height: 28px;
-    max-width: 116px;
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    flex: none;
-    padding: 0 9px;
-    border: 0;
-    border-radius: var(--app-radius-medium);
-    color: var(--app-text-muted);
-    background: transparent;
-    cursor: pointer;
+  .agent-composer-footer .model-name,
+  .agent-composer-footer .reasoning-label {
     font-size: 12px;
-    white-space: nowrap;
-  }
-
-  .agent-permission-mode:hover,
-  .agent-permission-mode:focus-visible {
-    color: var(--app-text);
-    background: var(--app-hover-bg);
-    outline: 0;
-  }
-
-  .agent-permission-mode:disabled {
-    cursor: default;
-    opacity: 0.5;
+    font-weight: 400;
+    line-height: 20px;
   }
 
   .agent-submit {
@@ -229,71 +240,19 @@ const Composer = styled.form`
     opacity: 0.45;
   }
 
-  .agent-reset {
-    color: var(--app-text-muted);
-    background: transparent;
-  }
-
-  .agent-reset:hover,
   .agent-submit:not(:disabled):hover {
     filter: brightness(1.08);
   }
 `;
 
-const ComposerResizeHandle = styled.button`
-  position: absolute;
-  top: 1px;
-  left: 50%;
-  z-index: 1;
-  width: 46px;
-  height: 12px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  transform: translateX(-50%);
-  cursor: ns-resize;
-  touch-action: none;
-
-  &::after {
-    content: '';
-    position: absolute;
-    top: 4px;
-    left: 50%;
-    width: 28px;
-    height: 3px;
-    border-radius: var(--app-radius-large);
-    background: color-mix(in srgb, var(--app-text-muted) 48%, transparent);
-    transform: translateX(-50%);
-    transition: background-color 120ms ease;
-  }
-
-  &:hover::after,
-  &:focus-visible::after {
-    background: color-mix(in srgb, var(--app-text) 68%, transparent);
-  }
-
-  &:focus-visible {
-    outline: 0;
-  }
-`;
-
 type AgentWorkspaceProps = {
+  toolbarTarget?: HTMLDivElement | null;
   libraryId: number;
   onRefreshDirectory?: (directoryId: number) => Promise<void> | void;
   ownerScope: AgentOwnerScope | null;
   rootNodeId: number | null;
   selectedTreeNode: SelectedTreeNode | null;
 };
-
-const AGENT_PERMISSION_MODE_LABELS: Record<AgentShellPermissionMode, string> = {
-  ask: '询问我',
-  auto: '自动批准',
-  'full-access': '完全访问',
-};
-
-const AGENT_PERMISSION_MODES = Object.keys(
-  AGENT_PERMISSION_MODE_LABELS,
-) as AgentShellPermissionMode[];
 
 function buildAppContext(
   libraryId: number,
@@ -322,6 +281,7 @@ function buildAppContext(
 }
 
 export default function AgentWorkspace({
+  toolbarTarget,
   libraryId,
   onRefreshDirectory,
   ownerScope,
@@ -337,6 +297,11 @@ export default function AgentWorkspace({
   const [loadingModels, setLoadingModels] = React.useState(false);
   const [configError, setConfigError] = React.useState<string | null>(null);
   const [composerHeight, setComposerHeight] = React.useState(INITIAL_AGENT_COMPOSER_HEIGHT);
+  const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+  const compositionGuard = React.useRef(createAgentCompositionGuard());
+  const composerFrameRef = React.useRef<HTMLDivElement>(null);
+  const [composerDockHeight, setComposerDockHeight] = React.useState(0);
+  const [scrollbarWidth, setScrollbarWidth] = React.useState(8);
   const [shellPermissionMode, setShellPermissionMode] = React.useState<AgentShellPermissionMode>('ask');
   const [shellSettingsLoading, setShellSettingsLoading] = React.useState(true);
   const [sessions, setSessions] = React.useState<AgentSessionSummary[]>([]);
@@ -349,17 +314,12 @@ export default function AgentWorkspace({
   const scrollRef = React.useRef<HTMLDivElement | null>(null);
   const scrollFrameRef = React.useRef<number | null>(null);
   const shouldFollowScrollRef = React.useRef(true);
-  const restoredScopeKeyRef = React.useRef('');
+  const indexNavigationRef = React.useRef(false);
   const sessionsRequestIdRef = React.useRef(0);
   const ownerScopeKey = serializeAgentOwnerScope(ownerScope);
   const sessionScopeKey = `${ownerScopeKey}\u0000${libraryId}`;
   const currentSessionScopeKeyRef = React.useRef(sessionScopeKey);
   currentSessionScopeKeyRef.current = sessionScopeKey;
-  const resizeStateRef = React.useRef<{
-    pointerId: number;
-    startHeight: number;
-    startY: number;
-  } | null>(null);
   const appContext = React.useMemo(
     () => buildAppContext(libraryId, rootNodeId, selectedTreeNode),
     [libraryId, rootNodeId, selectedTreeNode],
@@ -431,9 +391,10 @@ export default function AgentWorkspace({
       }
     }
   }, [libraryId, ownerScope, ownerScopeKey, sessionScopeKey]);
-  const handleSessionChanged = React.useCallback(() => {
+  const handleSessionChanged = React.useCallback((id: string) => {
+    saveAgentSessionSelection(sessionScopeKey, id);
     void loadSessions();
-  }, [loadSessions]);
+  }, [loadSessions, sessionScopeKey]);
   const session = useAgentSession({
     appContext,
     model: modelPreferences.model,
@@ -445,7 +406,13 @@ export default function AgentWorkspace({
   });
   const restoreSession = session.restore;
   const resetSession = session.reset;
-  const sessionBusy = session.isBusy;
+  const resume = useAgentSessionResume({
+    scope: ownerScopeKey ? sessionScopeKey : null,
+    loadLatest: async () => ownerScope ? (await listAgentSessions(ownerScope, libraryId)).sessions[0]?.id || null : null,
+    restore: restoreSession,
+  });
+  const selectSession = resume.select;
+  const sessionBusy = session.isBusy || resume.loading;
   const currentSessionId = session.sessionId;
 
   const loadConfig = React.useCallback(async () => {
@@ -484,22 +451,12 @@ export default function AgentWorkspace({
   }, []);
 
   React.useEffect(() => {
-    if (restoredScopeKeyRef.current === sessionScopeKey) return;
-    restoredScopeKeyRef.current = sessionScopeKey;
     setSessions([]);
     setSessionsNextCursor(null);
     setSessionsTotal(0);
     setManagerMode(null);
     setSessionQuery('');
-    let active = true;
-    void loadSessions().then((nextSessions) => {
-      if (!active || nextSessions.length === 0) return;
-      void restoreSession(nextSessions[0].id);
-    });
-    return () => {
-      active = false;
-    };
-  }, [loadSessions, restoreSession, sessionScopeKey]);
+  }, [sessionScopeKey]);
 
   React.useEffect(() => {
     if (managerMode !== 'sessions') return;
@@ -508,6 +465,49 @@ export default function AgentWorkspace({
     }, 160);
     return () => window.clearTimeout(timer);
   }, [loadSessions, managerMode, sessionQuery]);
+
+  React.useEffect(() => {
+    const scroll = scrollRef.current;
+    if (!scroll) return;
+    const finishNavigation = () => { indexNavigationRef.current = false; };
+    scroll.addEventListener('scrollend', finishNavigation);
+    return () => scroll.removeEventListener('scrollend', finishNavigation);
+  }, []);
+
+  React.useLayoutEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    const measure = () => {
+      textarea.style.height = `${INITIAL_AGENT_COMPOSER_HEIGHT}px`;
+      const height = clampAgentComposerHeight(textarea.scrollHeight);
+      textarea.style.height = `${height}px`;
+      setComposerHeight(height);
+    };
+    measure();
+    let width = textarea.clientWidth;
+    const observer = new ResizeObserver(() => {
+      if (width === textarea.clientWidth) return;
+      width = textarea.clientWidth;
+      measure();
+    });
+    observer.observe(textarea);
+    return () => observer.disconnect();
+  }, [session.draft, managerMode]);
+
+  React.useLayoutEffect(() => {
+    const frame = composerFrameRef.current;
+    if (!frame) return;
+    const measure = () => {
+      setComposerDockHeight(frame.getBoundingClientRect().height);
+      const scroll = scrollRef.current;
+      if (scroll) setScrollbarWidth(scroll.offsetWidth - scroll.clientWidth);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(frame);
+    if (scrollRef.current) observer.observe(scrollRef.current);
+    return () => observer.disconnect();
+  }, [managerMode]);
 
   React.useLayoutEffect(() => {
     const element = scrollRef.current;
@@ -536,6 +536,7 @@ export default function AgentWorkspace({
     };
   }, [
     composerHeight,
+    composerDockHeight,
     managerMode,
     session.isStreaming,
     session.messages,
@@ -585,43 +586,14 @@ export default function AgentWorkspace({
     }
   }, [session.isBusy, shellPermissionMode, shellSettingsLoading]);
 
-  const handleComposerResizePointerDown = React.useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
-    if (event.button !== 0) return;
-    resizeStateRef.current = {
-      pointerId: event.pointerId,
-      startHeight: composerHeight,
-      startY: event.clientY,
-    };
-    event.currentTarget.setPointerCapture(event.pointerId);
-    event.preventDefault();
-  }, [composerHeight]);
-
-  const handleComposerResizePointerMove = React.useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
-    const resizeState = resizeStateRef.current;
-    if (!resizeState || resizeState.pointerId !== event.pointerId) return;
-    setComposerHeight(resolveAgentComposerDragHeight(
-      resizeState.startHeight,
-      resizeState.startY,
-      event.clientY,
-    ));
-  }, []);
-
-  const handleComposerResizePointerUp = React.useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
-    const resizeState = resizeStateRef.current;
-    if (!resizeState || resizeState.pointerId !== event.pointerId) return;
-    resizeStateRef.current = null;
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-  }, []);
-
   const contextLabel = selectedTreeNode
     ? `当前上下文：${selectedTreeNode.name}`
     : rootNodeId
       ? '当前上下文：资料库根目录'
       : '当前上下文：未选择文件';
   const canSubmit = Boolean(
-    ownerScope && session.draft.trim() && modelPreferences.model && activeProfile && !loadingConfig,
+    ownerScope && session.draft.trim() && modelPreferences.model && activeProfile && !loadingConfig
+    && !resume.loading && !resume.failed,
   );
   const workspaceError = ownerScope
     ? configError
@@ -664,10 +636,11 @@ export default function AgentWorkspace({
 
   const handleOpenSession = React.useCallback(async (target: AgentSessionSummary) => {
     if (await restoreSession(target.id)) {
+      selectSession(target.id);
       shouldFollowScrollRef.current = true;
       setManagerMode(null);
     }
-  }, [restoreSession]);
+  }, [restoreSession, selectSession]);
 
   const handleNewSession = React.useCallback(() => {
     if (sessionBusy) {
@@ -675,9 +648,10 @@ export default function AgentWorkspace({
       return;
     }
     resetSession();
+    selectSession(null);
     setSessionQuery('');
     setManagerMode(null);
-  }, [resetSession, sessionBusy]);
+  }, [resetSession, sessionBusy, selectSession]);
 
   const handleRenameSession = React.useCallback(async (
     target: AgentSessionSummary,
@@ -704,7 +678,8 @@ export default function AgentWorkspace({
         if (!ownerScope) return;
         try {
           await deleteAgentSession(ownerScope, libraryId, target.id);
-          if (currentSessionId === target.id) resetSession();
+          if (currentSessionId === target.id) { resetSession(); selectSession(null); }
+          else if (loadAgentSessionSelection(sessionScopeKey) === target.id) selectSession(null);
           await loadSessions(sessionQuery);
         } catch (error) {
           Toast.error(error instanceof Error ? error.message : 'Agent 会话删除失败');
@@ -713,7 +688,7 @@ export default function AgentWorkspace({
       },
       title: '删除 Agent 会话',
     });
-  }, [currentSessionId, libraryId, loadSessions, ownerScope, resetSession, sessionQuery]);
+  }, [currentSessionId, libraryId, loadSessions, ownerScope, resetSession, sessionQuery, selectSession, sessionScopeKey]);
 
   const handleUpdateMemory = React.useCallback(async (
     input: AgentMemoryUpdateInput,
@@ -749,10 +724,57 @@ export default function AgentWorkspace({
   }, [removeMemory]);
 
   return (
-    <AgentRoot>
+    <AgentRoot style={{
+      '--agent-dock-space': managerMode ? '18px' : `${composerDockHeight + 18}px`,
+      '--agent-scrollbar-width': `${scrollbarWidth}px`,
+    } as React.CSSProperties}>
+      {toolbarTarget ? createPortal(<>
+            <button
+              aria-label="管理 Agent 会话"
+              className="toolbar-action-btn"
+              disabled={sessionBusy}
+              onClick={() => {
+                setSessionQuery('');
+                setSessionsLoading(true);
+                setManagerMode('sessions');
+              }}
+              title="会话记录"
+              type="button"
+            >
+              <OutlineIcon name="history" />
+            </button>
+            <button
+              aria-label="管理 Agent 长期记忆"
+              className="toolbar-action-btn"
+              disabled={sessionBusy || !ownerScope}
+              onClick={() => {
+                setMemoryQuery('');
+                setManagerMode('memories');
+              }}
+              title="长期记忆"
+              type="button"
+            >
+              <OutlineIcon name="bookmark" />
+            </button>
+              <button
+                aria-label="新建 Agent 会话"
+                disabled={sessionBusy}
+                className="toolbar-action-btn"
+                onClick={handleNewSession}
+                title="新建会话"
+                type="button"
+              >
+                <OutlineIcon name="plus" />
+              </button>
+      </>, toolbarTarget) : null}
       <AgentScroll
+        onWheel={() => { indexNavigationRef.current = false; }}
+        onPointerDown={() => { indexNavigationRef.current = false; }}
+        onKeyDown={event => {
+          if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End'].includes(event.key)) indexNavigationRef.current = false;
+        }}
         onScroll={(event) => {
-          if (managerMode) return;
+          if (managerMode || indexNavigationRef.current) return;
           const element = event.currentTarget;
           shouldFollowScrollRef.current = (
             element.scrollHeight - element.scrollTop - element.clientHeight <= 48
@@ -806,7 +828,7 @@ export default function AgentWorkspace({
           <AgentEmpty>
             <div>
               <h1 className="agent-empty-title">OmniFlow Agent</h1>
-              <p className="agent-empty-subtitle">描述你想完成的工作</p>
+              <p className="agent-empty-subtitle">{resume.loading ? '正在恢复上次聊天…' : '描述你想完成的工作'}</p>
             </div>
           </AgentEmpty>
         ) : (
@@ -839,34 +861,35 @@ export default function AgentWorkspace({
         {!managerMode && !hasTimelineContent && session.error ? (
           <div role="alert">{session.error}</div>
         ) : null}
-        {!managerMode ? <ComposerFrame>
+        {resume.failed ? <RecoveryNotice role="alert">
+          上次聊天恢复失败，请重试或从会话记录中选择聊天。
+          <button type="button" onClick={resume.retry}>重试</button>
+        </RecoveryNotice> : null}
+      </AgentScroll>
+      {!managerMode && session.sessionId ? <AgentConversationIndex
+        key={`${sessionScopeKey}:${session.sessionId}`}
+        storageKey={`agent-index-marks:v1:${encodeURIComponent(sessionScopeKey)}:${session.sessionId}`}
+        messages={session.messages} runs={session.runs} scrollRef={scrollRef}
+        onNavigate={() => { indexNavigationRef.current = true; shouldFollowScrollRef.current = false; }}
+      /> : null}
+        {!managerMode ? <ComposerFrame ref={composerFrameRef}>
           <Composer onSubmit={(event) => {
             event.preventDefault();
+            if (resume.loading || resume.failed) return;
             shouldFollowScrollRef.current = true;
             void session.submit();
           }}>
-          <ComposerResizeHandle
-            aria-label="调整 Agent 输入框高度"
-            onKeyDown={(event) => {
-              if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
-                event.preventDefault();
-                setComposerHeight((current) => clampAgentComposerHeight(
-                  current + (event.key === 'ArrowUp' ? 12 : -12),
-                ));
-              }
-            }}
-            onPointerCancel={handleComposerResizePointerUp}
-            onPointerDown={handleComposerResizePointerDown}
-            onPointerMove={handleComposerResizePointerMove}
-            onPointerUp={handleComposerResizePointerUp}
-            title="向上拖动增高，向下拖动缩小"
-            type="button"
-          />
           <textarea
+            ref={textareaRef}
             aria-label="Agent 输入"
+            onCompositionStart={() => compositionGuard.current.start()}
+            onCompositionEnd={event => compositionGuard.current.end(event.timeStamp)}
+            onKeyUp={event => compositionGuard.current.keyUp(event.key)}
+            onBlur={() => compositionGuard.current.reset()}
             onChange={(event) => session.setDraft(event.target.value)}
             onKeyDown={(event) => {
-              if (shouldSubmitAgentComposer(event, session.isBusy)) {
+              const composing = compositionGuard.current.keyDown(event.key, event.timeStamp);
+              if (shouldSubmitAgentComposer(event, sessionBusy || resume.failed, composing)) {
                 event.preventDefault();
                 shouldFollowScrollRef.current = true;
                 void session.submit();
@@ -880,7 +903,7 @@ export default function AgentWorkspace({
             <span className="agent-context-label" title={contextLabel}>{contextLabel}</span>
             <AIModelSettingsControl
               availableModels={models}
-              disabled={session.isBusy || loadingConfig}
+              disabled={sessionBusy || loadingConfig}
               loadingModels={loadingModels}
               model={modelPreferences.model}
               modelSourceKey={activeProfile?.id || ''}
@@ -895,78 +918,13 @@ export default function AgentWorkspace({
                 reasoningEffort,
               })}
             />
-            <Dropdown
-              position="topRight"
-              render={(
-                <Dropdown.Menu>
-                  {AGENT_PERMISSION_MODES.map(permissionMode => (
-                    <Dropdown.Item
-                      active={permissionMode === shellPermissionMode}
-                      key={permissionMode}
-                      onClick={() => { void handleShellPermissionModeChange(permissionMode); }}
-                    >
-                      {AGENT_PERMISSION_MODE_LABELS[permissionMode]}
-                    </Dropdown.Item>
-                  ))}
-                </Dropdown.Menu>
-              )}
-              trigger="click"
-            >
-              <button
-                aria-label={`Agent 权限模式：${AGENT_PERMISSION_MODE_LABELS[shellPermissionMode]}`}
-                className="agent-permission-mode"
-                disabled={shellSettingsLoading}
-                title="设置后续 Agent 任务的 Shell 权限模式"
-                type="button"
-              >
-                <IconShieldStroked aria-hidden="true" />
-                <span>{AGENT_PERMISSION_MODE_LABELS[shellPermissionMode]}</span>
-              </button>
-            </Dropdown>
-            <button
-              aria-label="管理 Agent 会话"
-              className="agent-reset"
-              disabled={session.isBusy}
-              onClick={() => {
-                setSessionQuery('');
-                setSessionsLoading(true);
-                setManagerMode('sessions');
-              }}
-              title="会话记录"
-              type="button"
-            >
-              <IconHistory aria-hidden="true" />
-            </button>
-            <button
-              aria-label="管理 Agent 长期记忆"
-              className="agent-reset"
-              disabled={session.isBusy || !ownerScope}
-              onClick={() => {
-                setMemoryQuery('');
-                setManagerMode('memories');
-              }}
-              title="长期记忆"
-              type="button"
-            >
-              <IconBookmark aria-hidden="true" />
-            </button>
-            {hasTimelineContent && !session.isBusy ? (
-              <button
-                aria-label="新建 Agent 会话"
-                className="agent-reset"
-                onClick={handleNewSession}
-                title="新建会话"
-                type="button"
-              >
-                <IconPlus aria-hidden="true" />
-              </button>
-            ) : null}
-            <AgentSubmitButton streaming={session.isStreaming} busy={session.isBusy}
+            <AgentPermissionControl value={shellPermissionMode} disabled={shellSettingsLoading}
+              onChange={mode => { void handleShellPermissionModeChange(mode); }} />
+            <AgentSubmitButton streaming={session.isStreaming} busy={sessionBusy}
               canSubmit={canSubmit} onStop={() => { void session.stop(); }} />
           </div>
           </Composer>
         </ComposerFrame> : null}
-      </AgentScroll>
     </AgentRoot>
   );
 }

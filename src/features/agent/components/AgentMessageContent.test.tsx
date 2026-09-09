@@ -6,6 +6,15 @@ vi.mock('@douyinfe/semi-ui', () => ({ Toast: { error: vi.fn() } }));
 vi.mock('@douyinfe/semi-icons', () => ({ IconCopy: () => null }));
 
 describe('Agent message Markdown', () => {
+  it.each([['cpp', 'C++', 'int main() { return 42; }'], ['json', 'JSON', '{"name":"中文","n":42}']])(
+    'labels and highlights %s fenced blocks without making an editor', (language, label, code) => {
+      const renderer = TestRenderer.create(<AgentMessageContent content={'```' + language + '\n' + code + '\n```'} />);
+      expect(renderer.root.findByProps({ className: 'agent-code-language' }).children).toEqual([label]);
+      expect(renderer.root.findAll(node => node.type === 'span' && String(node.props.className).startsWith('tok-')).length).toBeGreaterThan(0);
+      expect(renderer.root.findAllByType('textarea')).toHaveLength(0);
+      renderer.unmount();
+    },
+  );
   it('renders structure without HTML execution, images, or navigable model links', () => {
     const renderer = TestRenderer.create(<AgentMessageContent content={[
       '# Title', '**bold**', '[link](javascript:alert(1))', '![image](https://example.com/track.png)',

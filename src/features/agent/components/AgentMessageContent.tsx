@@ -1,9 +1,11 @@
 import React from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { IconCopy } from '@douyinfe/semi-icons';
+import OutlineIcon from '@/components/ui/outline-icon';
 import { Toast } from '@douyinfe/semi-ui';
 import styled from 'styled-components';
+import { resolveCodeFenceLanguage } from '@/components/code/language';
+import { highlightCodeText } from '@/components/code/highlight';
 
 const Content = styled.div`
   min-width: 0;
@@ -19,8 +21,25 @@ const Content = styled.div`
   code { font-family: 'JetBrains Mono', monospace; font-size: 12px; }
   :not(pre) > code { background: var(--app-bg); padding: 1px 4px; border-radius: 3px; }
   .agent-code { border: 1px solid var(--app-border); border-radius: 6px; margin: 12px 0; min-width: 0; }
-  .agent-code-tools { display: flex; justify-content: flex-end; border-bottom: 1px solid var(--app-border); }
-  pre { padding: 12px; margin: 0; overflow: auto; max-height: 520px; white-space: pre; }
+  .agent-code-tools { display: flex; align-items: center; justify-content: space-between; padding: 0 8px 0 12px; min-height: 30px; border-bottom: 1px solid var(--app-border); }
+  .agent-code-language { color: var(--app-text-muted); font-size: 11px; }
+  .agent-code-body { color: var(--app-text); }
+  .agent-code-body, .agent-code-body span { transition: none; }
+  .agent-code-body .tok-keyword, .agent-code-body .tok-operator { color: #7850b8; }
+  .agent-code-body .tok-string, .agent-code-body .tok-regexp { color: #27724b; }
+  .agent-code-body .tok-number, .agent-code-body .tok-bool, .agent-code-body .tok-null { color: #a15b20; }
+  .agent-code-body .tok-comment { color: #71777d; }
+  .agent-code-body .tok-typeName, .agent-code-body .tok-propertyName { color: #236e92; }
+  .agent-code-body .tok-meta { color: #a04766; }
+  body[theme-mode='dark'] & {
+    .agent-code-body .tok-keyword, .agent-code-body .tok-operator { color: #c5a3ee; }
+    .agent-code-body .tok-string, .agent-code-body .tok-regexp { color: #9dc6a5; }
+    .agent-code-body .tok-number, .agent-code-body .tok-bool, .agent-code-body .tok-null { color: #e1b88c; }
+    .agent-code-body .tok-comment { color: #9a9fa6; }
+    .agent-code-body .tok-typeName, .agent-code-body .tok-propertyName { color: #8bc4dc; }
+    .agent-code-body .tok-meta { color: #dda1b8; }
+  }
+  pre { padding: 12px; margin: 0; overflow: auto; max-height: min(330px, 42vh); white-space: pre; }
   .agent-table { max-width: 100%; overflow: auto; }
   table { border-collapse: collapse; } th, td { border: 1px solid var(--app-border); padding: 6px 10px; }
   button { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px;
@@ -28,6 +47,7 @@ const Content = styled.div`
   button:hover { background: var(--app-bg); color: var(--app-text); }
   button:focus-visible { outline: 2px solid var(--semi-color-primary); }
   > :first-child { margin-top: 0; }
+  > :last-child { margin-bottom: 0; }
 `;
 
 function nodeText(node: React.ReactNode): string {
@@ -39,17 +59,28 @@ function nodeText(node: React.ReactNode): string {
 function CopyButton({ text, label }: { text: string; label: string }) {
   return <button type="button" aria-label={label} title={label} onClick={async () => {
     try { await navigator.clipboard.writeText(text); } catch { Toast.error('复制失败'); }
-  }}><IconCopy aria-hidden="true" /></button>;
+  }}><OutlineIcon name="copy" /></button>;
 }
+
+const AgentCodeBlock = React.memo(function AgentCodeBlock({ children }: { children?: React.ReactNode }) {
+  const child = React.Children.toArray(children).find(node => React.isValidElement(node));
+  const className = React.isValidElement<{ className?: string }>(child) ? child.props.className || '' : '';
+  const info = /(?:^|\s)language-([^\s]+)/u.exec(className)?.[1] || '';
+  const language = React.useMemo(() => resolveCodeFenceLanguage(info), [info]);
+  const code = nodeText(children);
+  const tokens = React.useMemo(() => highlightCodeText(code, language), [code, language]);
+  return <div className="agent-code">
+    <div className="agent-code-tools"><span className="agent-code-language">{language.label}</span><CopyButton text={code} label="复制代码" /></div>
+    <pre><code className="agent-code-body">{tokens.map((token, index) => token.className
+      ? <span key={index} className={token.className}>{token.text}</span> : token.text)}</code></pre>
+  </div>;
+});
 
 const components: React.ComponentProps<typeof Markdown>['components'] = {
   a: ({ children }) => <span>{children}</span>,
   img: ({ alt }) => <span>{alt}</span>,
   table: ({ children }) => <div className="agent-table"><table>{children}</table></div>,
-  pre: ({ children }) => <div className="agent-code">
-    <div className="agent-code-tools"><CopyButton text={nodeText(children)} label="复制代码" /></div>
-    <pre>{children}</pre>
-  </div>,
+  pre: ({ children }) => <AgentCodeBlock>{children}</AgentCodeBlock>,
 };
 
 const AgentMessageContent = React.memo(function AgentMessageContent({ content, showCopy = true }: { content: string; showCopy?: boolean }) {

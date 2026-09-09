@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Avatar, Popover, Toast } from '@douyinfe/semi-ui'
-import { IconMusic, IconRefresh } from '@douyinfe/semi-icons'
+import { IconMusic } from '@douyinfe/semi-icons'
+import OutlineIcon from '@/components/ui/outline-icon'
 
 import LibraryWrapper, {
   ContentRow,
@@ -422,7 +423,7 @@ const LibraryPage: React.FC = () => {
                 title="刷新库列表"
                 disabled={loading || renamingLibraryId !== null}
               >
-                <IconRefresh />
+                <OutlineIcon name="refresh" />
               </button>
             </div>
           </LibraryMainToolbar>

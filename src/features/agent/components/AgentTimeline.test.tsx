@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type {
   AgentAssistantItemSnapshot,
   AgentToolActivitySnapshot,
+  AgentRunSnapshot,
 } from '@/shared/agent/agent.types';
 import AgentTimeline from './AgentTimeline';
 import AgentMessageContent from './AgentMessageContent';
@@ -70,6 +71,99 @@ afterEach(() => {
 });
 
 describe('AgentTimeline commentary presentation', () => {
+  it.each(['running', 'preparing', 'awaiting_approval', 'awaiting_interaction', 'cancelled', 'failed', 'interrupted', 'completed'] as const)(
+    'keeps %s without a final answer visible and removes the fold control even on reload', status => {
+      const run: AgentRunSnapshot = {
+        id: `no-final-${status}`, sessionId: `no-final-${status}`, model: 'test', profileId: 'test', reasoningEffort: 'medium',
+        revision: 1, status, userPrompt: 'test', createdAt: '2026-09-09T00:00:00Z', updatedAt: '2026-09-09T00:01:28Z',
+      };
+      const props = { approvalBusyIds: new Set<string>(), interactionBusyIds: new Set<string>(), libraryId: 3,
+        ownerScope: null, onResolveApproval: vi.fn(), runs: [run],
+        messages: [{ ...commentary(), runId: run.id, sessionId: run.sessionId }], toolActivities: [] };
+      let renderer!: TestRenderer.ReactTestRenderer;
+      act(() => { renderer = TestRenderer.create(<AgentTimeline {...props} />); });
+      renderers.push(renderer);
+      expect(renderer.root.findByProps({ 'data-agent-elapsed': run.id }).findAllByType('button')).toHaveLength(0);
+      expect(renderer.root.findAll(node => node.type === 'div' && node.props.className === 'agent-timeline-entry' && node.props['aria-hidden'] === true)).toHaveLength(0);
+      if (status === 'cancelled') expect(JSON.stringify(renderer.toJSON())).toContain('你在 1m 28s 停止了任务');
+    },
+  );
+
+  it('starts restored final answers collapsed and preserves manual expansion across page remounts', () => {
+    const run: AgentRunSnapshot = {
+      id: 'restored-failure', sessionId: 'expansion-persistence', model: 'test', profileId: 'test', reasoningEffort: 'medium',
+      revision: 1, status: 'completed', userPrompt: 'test',
+      createdAt: '2026-09-08T00:00:00Z', updatedAt: '2026-09-08T00:00:10Z',
+    };
+    const props = {
+      approvalBusyIds: new Set<string>(), interactionBusyIds: new Set<string>(), libraryId: 3,
+      ownerScope: null, onResolveApproval: vi.fn(),
+      messages: [{ ...commentary(), runId: run.id, sessionId: run.sessionId },
+        { ...commentary(), id: 'restored-final', runId: run.id, sessionId: run.sessionId,
+          assistantItem: { ...commentary().assistantItem, phase: 'final' as const }, content: '最终结果' }], runs: [run],
+      toolActivities: [{ ...toolActivity(), runId: run.id, sessionId: run.sessionId, status: 'failed' as const }],
+    };
+    let renderer!: TestRenderer.ReactTestRenderer;
+    act(() => { renderer = TestRenderer.create(<AgentTimeline {...props} />); });
+    renderers.push(renderer);
+    expect(renderer.root.findByProps({ 'aria-expanded': false })).toBeTruthy();
+    act(() => renderer.root.findByProps({ 'aria-expanded': false }).props.onClick());
+    act(() => renderer.update(<AgentTimeline {...props} runs={[{ ...run, revision: 2 }]} />));
+    expect(renderer.root.findByProps({ 'aria-expanded': true })).toBeTruthy();
+    act(() => renderer.unmount());
+    act(() => { renderer = TestRenderer.create(<AgentTimeline {...props} />); });
+    renderers.push(renderer);
+    expect(renderer.root.findByProps({ 'aria-expanded': true })).toBeTruthy();
+    expect(renderer.root.findAll(node => node.type === 'div' && node.props.className === 'agent-timeline-entry' && node.props['aria-hidden'] === true)).toHaveLength(0);
+    act(() => renderer.update(<AgentTimeline {...props} libraryId={4} />));
+    expect(renderer.root.findByProps({ 'aria-expanded': false })).toBeTruthy();
+  });
+
+  it('collapses only a successful finished process and expands it without remounting tools', () => {
+    const run: AgentRunSnapshot = {
+      id: 'run-1', sessionId: 'session-1', model: 'test', profileId: 'test', reasoningEffort: 'medium',
+      revision: 1, status: 'running', userPrompt: 'test',
+      createdAt: '2026-09-08T00:00:00Z', updatedAt: '2026-09-08T00:00:00Z',
+    };
+    const final: AgentAssistantItemSnapshot = {
+      ...commentary(), id: 'final-1', content: '最终总结',
+      assistantItem: { ...commentary().assistantItem, phase: 'final', status: 'completed', turnOrdinal: 2 },
+    };
+    const props = {
+      approvalBusyIds: new Set<string>(), interactionBusyIds: new Set<string>(), libraryId: 3,
+      ownerScope: null, onResolveApproval: vi.fn(), onToolExpand: vi.fn(),
+      messages: [commentary(), final], runs: [run], toolActivities: [toolActivity()],
+    };
+    let renderer!: TestRenderer.ReactTestRenderer;
+    act(() => { renderer = TestRenderer.create(<AgentTimeline {...props} />); });
+    renderers.push(renderer);
+    const tool = renderer.root.findByProps({ 'data-testid': 'tool-expand' });
+    expect(renderer.root.findAll(node => node.type === 'div' && node.props.className === 'agent-timeline-entry' && node.props['aria-hidden'] === true)).toHaveLength(0);
+    const completed = { ...run, status: 'completed' as const, finishedAt: '2026-09-08T00:01:02Z' };
+    act(() => renderer.update(<AgentTimeline {...props} runs={[completed]} />));
+    expect(renderer.root.findAll(node => node.type === 'div' && node.props.className === 'agent-timeline-entry' && node.props['aria-hidden'] === true)).toHaveLength(2);
+    expect(renderer.root.findByProps({ 'data-testid': 'tool-expand' })).toBe(tool);
+    act(() => renderer.root.findByProps({ 'aria-expanded': false }).props.onClick());
+    expect(renderer.root.findAll(node => node.type === 'div' && node.props.className === 'agent-timeline-entry' && node.props['aria-hidden'] === true)).toHaveLength(0);
+    expect(props.onToolExpand).toHaveBeenCalledOnce();
+    expect(renderer.root.findByProps({ 'data-testid': 'tool-expand' })).toBe(tool);
+    act(() => renderer.root.findByProps({ 'aria-expanded': true }).props.onClick());
+    expect(renderer.root.findAll(node => node.type === 'div' && node.props.className === 'agent-timeline-entry' && node.props['aria-hidden'] === true)).toHaveLength(2);
+    act(() => renderer.update(<AgentTimeline {...props} runs={[completed]}
+      toolActivities={[{ ...toolActivity(), status: 'failed', result: { ok: false, message: '读取失败' } }]} />));
+    expect(renderer.root.findAll(node => node.type === 'div' && node.props.className === 'agent-timeline-entry' && node.props['aria-hidden'] === true)).toHaveLength(2);
+    act(() => renderer.root.findByProps({ 'aria-expanded': false }).props.onClick());
+    expect(renderer.root.findAll(node => node.type === 'div' && node.props.className === 'agent-timeline-entry' && node.props['aria-hidden'] === true)).toHaveLength(0);
+    act(() => renderer.update(<AgentTimeline {...props} runs={[completed]}
+      toolActivities={[{ ...toolActivity(), status: 'awaiting_approval' }]} />));
+    expect(renderer.root.findAll(node => node.type === 'div' && node.props.className === 'agent-timeline-entry' && node.props['aria-hidden'] === true)).toHaveLength(0);
+    act(() => renderer.update(<AgentTimeline {...props} runs={[completed]}
+      messages={[commentary()]} />));
+    expect(renderer.root.findAll(node => node.type === 'div' && node.props.className === 'agent-timeline-entry' && node.props['aria-hidden'] === true)).toHaveLength(0);
+    act(() => renderer.update(<AgentTimeline {...props} runs={[{ ...completed, status: 'interrupted' }]} />));
+    expect(renderer.root.findAll(node => node.type === 'div' && node.props.className === 'agent-timeline-entry' && node.props['aria-hidden'] === true)).toHaveLength(0);
+  });
+
   it('renders process replies as icon-free conversation-like text', () => {
     let renderer!: TestRenderer.ReactTestRenderer;
     act(() => {

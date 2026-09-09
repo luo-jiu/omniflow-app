@@ -117,6 +117,10 @@
 
 ### 4.1 `search-home`
 
+文件标签栏当前只在 `file-viewer` 工作区显示，Agent、工具和系统工作区不显示，也不保留占位；暂不提供设置开关。隐藏标签栏不关闭已打开文件、不清空 tab 顺序或 Viewer 状态，返回文件工作区后继续显示已有标签。工具工作区也不显示文件刷新按钮。
+
+Agent 模式的主工具栏右侧提供 DOM slot，由 AgentWorkspace 通过 React portal 放置会话记录、长期记忆、新建会话按钮；主工具栏在此模式隐藏刷新。slot 只负责布局，事件、busy 条件和 manager mode 仍归 Agent，切换工作区时随实例清理，不保存会话状态副本。
+
 表示当前显示内置 Agent 默认工作区，不显示文件预览、工具区、系统视图或浏览器页面。`search-home` 是兼容状态名，不得据此重新接回旧 `SearchWorkspace`，也不得新增并行的 `agent-home` 模式。
 
 典型进入路径：

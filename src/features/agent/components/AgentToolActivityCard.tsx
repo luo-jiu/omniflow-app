@@ -1,7 +1,6 @@
 import React from 'react';
 import {
   IconAlertCircle,
-  IconChevronRightStroked,
   IconFile,
   IconFolder,
   IconSpin,
@@ -28,6 +27,7 @@ import { formatAgentShellCommandForDisplay } from '../agent-shell-command-displa
 import AgentConfirmationCard from './AgentConfirmationCard';
 import AgentInteractionBlock from './AgentInteractionBlock';
 import AgentActivityText from './AgentActivityText';
+import AgentDisclosureChevron from './AgentDisclosureChevron';
 import { readAgentShellLogPage } from '../services/agent.api';
 
 const ActivityCard = styled.article`
@@ -49,7 +49,7 @@ const ActivityCard = styled.article`
     display: flex;
     align-items: center;
     gap: 7px;
-    min-height: 28px;
+    min-height: 23px;
   }
 
   &[data-expandable='true'] .agent-activity-header {
@@ -141,12 +141,6 @@ const ActivityCard = styled.article`
   .agent-activity-expand .semi-icon,
   .agent-activity-expand svg,
   .agent-activity-expand svg * { color: var(--agent-tool-record-color); }
-  .agent-activity-expand .semi-icon {
-    transform: rotate(0deg);
-    transform-origin: center;
-    transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
-  }
-  .agent-activity-expand[aria-expanded='true'] .semi-icon { transform: rotate(90deg); }
   .agent-activity-header:hover .agent-activity-expand,
   .agent-activity-expand:focus-visible { opacity: 1; pointer-events: auto; }
   button:focus-visible { outline: 2px solid var(--semi-color-primary); outline-offset: 2px; }
@@ -417,16 +411,6 @@ const ShellActivity = styled.section`
   .agent-shell-summary-chevron svg,
   .agent-shell-summary-chevron svg * {
     color: var(--agent-tool-record-color);
-  }
-
-  .agent-shell-summary-chevron .semi-icon {
-    transform: rotate(0deg);
-    transform-origin: center;
-    transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
-  }
-
-  button.agent-shell-summary[aria-expanded='true'] .agent-shell-summary-chevron .semi-icon {
-    transform: rotate(90deg);
   }
 
   button.agent-shell-summary:hover .agent-shell-summary-chevron,
@@ -821,7 +805,7 @@ function AgentShellActivity({ activity, libraryId, onExpand, ownerScope }: Agent
         >
           {summaryContent}
           <span className="agent-shell-summary-chevron">
-            <IconChevronRightStroked aria-hidden="true" />
+            <AgentDisclosureChevron expanded={open} />
           </span>
         </button>
       ) : (
@@ -965,7 +949,7 @@ export default function AgentToolActivityCard({
             event?.stopPropagation();
             toggleExpanded();
           }}>
-          <IconChevronRightStroked aria-hidden="true" />
+          <AgentDisclosureChevron expanded={showBody} />
         </button> : null}
       </div>
       {blocks.length > 0 ? (

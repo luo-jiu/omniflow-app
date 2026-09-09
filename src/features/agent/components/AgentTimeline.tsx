@@ -20,6 +20,47 @@ import AgentToolActivityGroup from './AgentToolActivityGroup';
 import AgentMessageContent from './AgentMessageContent';
 import AgentActivityText from './AgentActivityText';
 import { selectAgentLiveStatus } from '../agent-live-status';
+import { canCollapseAgentProcess, isAgentRunActive, shouldAutoCollapseAgentProcess, timelineItemRunId } from '../agent-run-presentation';
+import { serializeAgentOwnerScope } from '@/shared/agent/agent-owner-scope';
+import { useAgentProcessExpansion } from '../hooks/useAgentProcessExpansion';
+import type { AgentTimelineItem } from '../agent-timeline';
+import AgentRunElapsed from './AgentRunElapsed';
+
+const Timeline = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+  > [data-agent-elapsed] { margin-bottom: 8px; }
+  .agent-timeline-entry {
+    display: grid;
+    grid-template-rows: 1fr;
+    min-width: 0;
+    padding-bottom: 8px;
+    opacity: 1;
+    visibility: visible;
+    transition: grid-template-rows 220ms cubic-bezier(0.22, 1, 0.36, 1),
+      padding-bottom 220ms cubic-bezier(0.22, 1, 0.36, 1), opacity 150ms ease,
+      visibility 0s;
+  }
+  .agent-timeline-entry-inner { min-height: 0; overflow: hidden; }
+  .agent-timeline-entry-content { display: flex; flex-direction: column; min-width: 0; }
+  .agent-timeline-entry[aria-hidden='true'] {
+    grid-template-rows: 0fr;
+    padding-bottom: 0;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: grid-template-rows 220ms cubic-bezier(0.22, 1, 0.36, 1),
+      padding-bottom 220ms cubic-bezier(0.22, 1, 0.36, 1), opacity 150ms ease,
+      visibility 0s linear 220ms;
+  }
+  .agent-timeline-entry[data-user='true'] { margin: 8px 0; }
+  @media (prefers-reduced-motion: reduce) {
+    .agent-timeline-entry,
+    .agent-timeline-entry[aria-hidden='true'] { transition: none; }
+  }
+`;
 
 const LiveStatus = styled.div`
   display: flex;
@@ -173,10 +214,32 @@ export default function AgentTimeline({
     [messages, prepared],
   );
   const liveStatus = selectAgentLiveStatus(runs, messages, toolActivities);
+  const expansionScope = JSON.stringify([serializeAgentOwnerScope(ownerScope), libraryId, messages[0]?.sessionId || runs[0]?.sessionId || '']);
+  const { expanded: expandedRuns, setExpanded: setRunExpanded } = useAgentProcessExpansion(expansionScope);
+  const restoredRuns = React.useRef(new Set(runs.filter(run => !isAgentRunActive(run)).map(run => run.id)));
+  const runPresentations = React.useMemo(() => {
+    const byRun = new Map<string, AgentTimelineItem[]>();
+    items.forEach(item => {
+      const id = timelineItemRunId(item);
+      if (!id) return;
+      const group = byRun.get(id) || [];
+      group.push(item);
+      byRun.set(id, group);
+    });
+    return new Map(runs.map(run => {
+      const group = byRun.get(run.id) || [];
+      const autoCollapse = restoredRuns.current.has(run.id) || shouldAutoCollapseAgentProcess(run, group);
+      return [run.id, {
+        run,
+        autoCollapse,
+        expansionKey: run.id,
+        firstKey: group[0]?.key,
+        collapsible: canCollapseAgentProcess(run, group) && group.some(item => item.layer !== 'conversation'),
+      }];
+    }));
+  }, [items, runs]);
 
-  return (
-    <>
-      {items.map((item) => {
+  const renderItem = (item: AgentTimelineItem) => {
         if (item.type === 'run-status') {
           const labels: Record<string, string> = { failed: '执行失败', cancelled: '已停止', interrupted: '任务已中断' };
           return (
@@ -254,13 +317,46 @@ export default function AgentTimeline({
             <AgentMessageContent content={item.message.content} />
           </AssistantItemSurface>
         );
+  };
+
+  return (
+    <Timeline>
+      {items.map(item => {
+        const runId = timelineItemRunId(item);
+        const presentation = runId ? runPresentations.get(runId) : undefined;
+        const user = item.type === 'message' && item.message.role === 'user';
+        const expanded = presentation
+          ? expandedRuns.get(presentation.expansionKey) ?? !presentation.autoCollapse : true;
+        const collapsed = Boolean(presentation?.collapsible && !expanded
+          && item.layer !== 'conversation');
+        const elapsed = presentation?.firstKey === item.key ? (
+          <AgentRunElapsed run={presentation.run} collapsible={presentation.collapsible}
+            expanded={expanded} onToggle={() => {
+              onToolExpand?.();
+              setRunExpanded(presentation.expansionKey, !expanded);
+            }} />
+        ) : null;
+        return <React.Fragment key={item.key}>
+          {!user ? elapsed : null}
+          <div className="agent-timeline-entry" data-user={user}
+            data-agent-question={user && item.type === 'message' ? item.message.id : undefined}
+            aria-hidden={collapsed || undefined} {...(collapsed ? { inert: '' } : {})}>
+            <div className="agent-timeline-entry-inner">
+              <div className="agent-timeline-entry-content">{renderItem(item)}</div>
+            </div>
+          </div>
+          {user ? elapsed : null}
+        </React.Fragment>;
       })}
+      {[...runPresentations.values()].filter(presentation => !presentation.firstKey).map(({ run }) => (
+        <AgentRunElapsed key={run.id} run={run} collapsible={false} expanded={false} onToggle={() => {}} />
+      ))}
       {liveStatus ? (
         <LiveStatus role="status" aria-live="polite" data-agent-live-status={liveStatus.kind} key={`live:${liveStatus.runId}`}>
           {liveStatus.kind === 'compaction' ? <IconShrink aria-hidden="true" /> : <IconMore aria-hidden="true" />}
           <AgentActivityText $active>{liveStatus.label}</AgentActivityText>
         </LiveStatus>
       ) : null}
-    </>
+    </Timeline>
   );
 }

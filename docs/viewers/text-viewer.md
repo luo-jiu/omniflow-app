@@ -40,6 +40,8 @@
 
 ### 3.0 语法高亮
 
+语言注册实现已下沉到 `src/components/code/language.ts`，本目录 `language.ts` 保留兼容导出。文档编辑器继续消费同一个 resolveTextEditorLanguage；Agent 代码围栏通过 resolveCodeFenceLanguage 复用标签、Lezer 和 legacy grammar。聊天只使用解析器生成受控文本 token，不挂载文档编辑器，也不接入文件保存链路。
+
 `text-viewer` 当前继续使用 CodeMirror 6，不引入富文本编辑模型。语法高亮分三层：
 
 - 官方 Lezer parser：用于 JavaScript / TypeScript / JSON / Markdown / HTML / CSS / XML / Python / Go / Rust / Java / C/C++ / SQL / YAML / PHP 等主流代码文件。

@@ -57,6 +57,8 @@ export const ArchiveReturnIconSlot = styled.span`
 `;
 
 export const DetailWrapper = styled.div`
+  --workspace-nav-accent: #7850b8;
+  body[theme-mode="dark"] & { --workspace-nav-accent: #bd9af2; }
   display: flex;
   width: 100%;
   height: 100%;
@@ -134,7 +136,7 @@ export const TitlebarSidePanelToggleButton = styled.button`
   &.is-active *,
   body[theme-mode="dark"] &.is-active,
   body[theme-mode="dark"] &.is-active * {
-    color: #22d3ee;
+    color: var(--workspace-nav-accent);
   }
 
   &:disabled {
@@ -249,7 +251,7 @@ export const SidePanelFooter = styled.div`
   .footer-left {
     display: flex;
     align-items: center;
-    gap: 3px;
+    gap: 2px;
   }
 
   .footer-right {
@@ -348,12 +350,17 @@ const toolbarActionButtonStyles = css`
   .toolbar-action-btn.is-active *,
   body[theme-mode="dark"] & .toolbar-action-btn.is-active,
   body[theme-mode="dark"] & .toolbar-action-btn.is-active * {
-    color: #22d3ee;
+    color: var(--workspace-nav-accent);
   }
 
   .toolbar-action-btn:disabled {
     cursor: not-allowed;
     opacity: 0.45;
+  }
+
+  && .toolbar-action-btn.is-active .app-outline-icon,
+  && .toolbar-action-btn.is-active .app-outline-icon * {
+    color: var(--workspace-nav-accent);
   }
 `;
 
@@ -614,6 +621,7 @@ export const ContentToolbar = styled.div`
     -webkit-app-region: no-drag;
   }
   ${toolbarBackButtonStyles}
+  .agent-toolbar-actions { gap: 2px; margin-right: 0; }
   ${toolbarActionButtonStyles}
 `;
 

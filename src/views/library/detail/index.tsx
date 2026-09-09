@@ -1,4 +1,5 @@
 import AppMain from "@/components/business/app-main";
+import OutlineIcon from '@/components/ui/outline-icon';
 import FileTabsBar, { type FileTabsBarExtraTab } from "@/components/business/app-main/FileTabsBar";
 import {
   DirectorySidebar,
@@ -14,26 +15,14 @@ import { useMediaEntries, useMediaRegistry } from "@/hooks/useMediaRegistry";
 import MediaHubPopover from "@/components/business/media-hub-popover";
 import { useFileViewer } from "@/hooks/useFileViewer";
 import {
-  IconHome,
-  IconUpload,
-  IconDelete,
-  IconSetting,
-  IconRefresh,
   IconPlus,
   IconClose,
   IconArrowLeft,
   IconArrowRight,
-  IconGlobe,
-  IconFolder,
-  IconStar,
-  IconStarStroked,
   IconMore,
   IconEdit,
-  IconPulse,
-  IconWrench,
   IconMusic,
 } from "@douyinfe/semi-icons";
-import { ToolbarGridIcon } from './toolbar-icons';
 import { Avatar, Input, Modal, Popover, Select, Toast } from '@douyinfe/semi-ui';
 import ContextMenu, { type ContextMenuItem } from "@/components/ui/context-menu";
 import { beginDocumentDragSession } from '@/components/ui/document-drag-session';
@@ -1845,15 +1834,18 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     reloadActiveTab();
   }, [activeBrowserTab?.url, browserModeOpen, reloadActiveTab]);
 
-  const fileRefreshButton = !browserModeOpen ? (
+  const [agentToolbarTarget, setAgentToolbarTarget] = React.useState<HTMLDivElement | null>(null);
+
+  const fileRefreshButton = !browserModeOpen && workspaceDisplayMode !== 'search-home'
+    && workspaceDisplayMode !== 'tools' ? (
     <button
       type="button"
       className="toolbar-action-btn"
       onClick={handleToolbarRefresh}
       title="刷新当前标签页"
-      disabled={!activeTabId || workspaceDisplayMode === 'tools' || workspaceDisplayMode === 'system'}
+      disabled={!activeTabId || workspaceDisplayMode === 'system'}
     >
-      <IconRefresh />
+      <OutlineIcon name="refresh" />
     </button>
   ) : null;
 
@@ -2557,28 +2549,28 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
               onClick={() => navigate("/libraries")}
               title="返回库列表"
             >
-              <IconHome />
+              <OutlineIcon name="home" />
             </button>
             <button
               className="footer-btn"
               onClick={() => openSystemWorkspace('uploads')}
               title="上传中心"
             >
-              <IconUpload />
+              <OutlineIcon name="upload" />
             </button>
             <button
               className="footer-btn"
               onClick={() => openSystemWorkspace('recycle-bin')}
               title="回收站"
             >
-              <IconDelete />
+              <OutlineIcon name="trash" />
             </button>
             <button
               className="footer-btn"
               onClick={() => openSystemWorkspace('settings')}
               title="设置"
             >
-              <IconSetting />
+              <OutlineIcon name="settings" />
             </button>
           </div>
           <div className="footer-right">
@@ -2609,9 +2601,10 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
               type="button"
               className={`toolbar-action-btn ${workspaceDisplayMode === 'search-home' ? 'is-active' : ''}`}
               onClick={() => showSearchHome()}
-              title="打开搜索主页"
+              title="打开 Agent"
+              aria-label="打开 Agent"
             >
-              <ToolbarGridIcon />
+              <OutlineIcon name="agent" selected={workspaceDisplayMode === 'search-home'} />
             </button>
             {browserModeOpen ? (
               <button
@@ -2621,7 +2614,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                 title={activeTabId ? '打开文件模式' : '暂无打开的文件'}
                 disabled={!activeTabId}
               >
-                <IconFolder />
+                <OutlineIcon name="folder" />
               </button>
             ) : workspaceDisplayMode === 'file-viewer' && showBackToArchive && archiveReturnTarget ? (
               <button
@@ -2642,7 +2635,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                 title={activeTabId ? '打开文件模式' : '暂无打开的文件'}
                 disabled={!activeTabId}
               >
-                <IconFolder />
+                <OutlineIcon name="folder" selected={workspaceDisplayMode === 'file-viewer'} />
               </button>
             )}
             <button
@@ -2651,7 +2644,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
               onClick={openToolsWorkspace}
               title="打开工具区"
             >
-              <IconWrench />
+              <OutlineIcon name="tools" selected={workspaceDisplayMode === 'tools'} />
             </button>
             {isWindows ? fileRefreshButton : null}
             {!browserModeOpen ? (
@@ -2661,7 +2654,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                 onClick={openEmbeddedBrowser}
                 title="打开内置浏览器"
               >
-                <IconGlobe />
+                <OutlineIcon name="browser" selected={workspaceDisplayMode === 'browser'} />
               </button>
             ) : null}
           </div>
@@ -2810,10 +2803,13 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                 </button>
               </Popover>
             ) : null}
+            {workspaceDisplayMode === 'search-home' ? (
+              <div className="toolbar-right agent-toolbar-actions" ref={setAgentToolbarTarget} />
+            ) : null}
             {!isWindows ? fileRefreshButton : null}
           </div>
         </ContentToolbar>
-        {!browserModeOpen ? (
+        {!browserModeOpen && workspaceDisplayMode === 'file-viewer' ? (
           <FileTabsBar
             tabs={tabs}
             activeTabId={workspaceDisplayMode === 'file-viewer' ? activeTabId : null}
@@ -2836,7 +2832,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                   title="后退"
                   disabled={!activeBrowserTab?.canGoBack}
                 >
-                  <IconArrowLeft />
+                  <OutlineIcon name="back" />
                 </button>
                 <button
                   type="button"
@@ -2845,7 +2841,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                   title="前进"
                   disabled={!activeBrowserTab?.canGoForward}
                 >
-                  <IconArrowRight />
+                  <OutlineIcon name="forward" />
                 </button>
                 <button
                   type="button"
@@ -2853,7 +2849,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                   onClick={handleToolbarRefresh}
                   title="刷新网页"
                 >
-                  <IconRefresh />
+                  <OutlineIcon name="refresh" />
                 </button>
               </div>
               <div className="toolbar-spacer">
@@ -2875,9 +2871,10 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                   className="toolbar-action-btn"
                   onClick={toggleActiveBookmark}
                   title={bookmarkMatch.matched ? '取消收藏' : '加入书签栏'}
+                  aria-pressed={bookmarkMatch.matched}
                   disabled={!String(activeBrowserTab?.url || '').trim()}
                 >
-                  {bookmarkMatch.matched ? <IconStar /> : <IconStarStroked />}
+                  <OutlineIcon name="star" selected={bookmarkMatch.matched} />
                 </button>
                 <button
                   type="button"
@@ -2886,7 +2883,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                   title={browserResourcePanelVisible ? '折叠资源捕获面板' : '展开资源捕获面板'}
                   aria-label={browserResourcePanelVisible ? '折叠资源捕获面板' : '展开资源捕获面板'}
                 >
-                  <IconPulse />
+                  <OutlineIcon name="activity" selected={browserResourcePanelVisible} />
                 </button>
                 <button
                   type="button"
@@ -2895,7 +2892,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                   title="浏览器设置"
                   aria-label="浏览器设置"
                 >
-                  <IconSetting size="large" />
+                  <OutlineIcon name="settings" />
                 </button>
               </div>
             </ContentToolbar>
@@ -3025,6 +3022,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
           ) : workspaceDisplayMode === 'search-home' ? (
             <div className="workspace-pane active">
               <AgentWorkspace
+                toolbarTarget={agentToolbarTarget}
                 libraryId={libraryId}
                 onRefreshDirectory={(directoryId) => (
                   directorySidebarRef.current?.refreshNodeSubtree(directoryId)

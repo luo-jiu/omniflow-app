@@ -24,6 +24,22 @@
 
 ## 2. 当前结论
 
+刷新（文件/库列表/浏览器）统一为 RotateCw；浏览器前进/后退为 ArrowRight/ArrowLeft，收藏、资源捕获面板、设置复用 Star/Activity/Settings。均经 OutlineIcon 使用16px、1.25px实际描边，收藏保持空心并以主题色和 aria-pressed 表达选中，不因旧 Semi 星标画布不同缩小。
+
+资料库导航与侧栏展开按钮的当前态统一使用局部 --workspace-nav-accent：亮色 #7850b8、暗色 #bd9af2。普通图标保持中性灰，悬停即时提亮，不再混用青色与绿色；该调整不改变全局成功/错误状态或索引玫瑰色语义。
+
+资料库主导航采用用户选定的 A4/F1/T1/B1：Agent 为 Sparkles 星芒，文件为 FolderClosed 横线文件夹，工具为 SlidersHorizontal 水平滑杆，浏览器为 Globe 经纬球；统一经 OutlineIcon 渲染，沿用 16px / 1.25px 描边及即时反馈，当前工作区使用主题强调色。Agent 入口 tooltip 改为“打开 Agent”，内部 search-home 状态名不变。
+
+同组轻量图标范围扩展至仓库卡片收藏星标、仓库首页资源监测/设置、资料库工具入口。星标两态保持同一空心轮廓，收藏时使用主题强调色并提供 aria-pressed，不再切换成实心填充；沿用即时 hover、16px 尺寸和 1.25px 实际描边。
+
+2026-09-09 用户确认的轻量操作图标：Agent 代码/回答复制、右上角历史/长期记忆/新建，以及资料库侧栏底部首页/上传/回收站/设置统一使用 `components/ui/outline-icon.tsx` 的 Lucide 空心轮廓。最终槽位为 16px，实际描边 1.25px，子图形使用 non-scaling-stroke；没有 transform 缩放或透明度淡化。局部明确覆盖 SVG 尺寸、fill:none 与 color:inherit，避免原 15px 工具栏规则和全局 body * color 重置导致模糊、填白或状态色丢失。按钮热区保持原大小。
+
+该组细描边是用户对这批操作图标的显式偏好，不替换目录树、文件类型和其他模块的图标基线。1.25px 在 1x 显示器仍会有正常抗锯齿，不能承诺所有 DPI 下完全无灰边；需按实际 100% 显示尺寸和亮暗背景验收，不以放大图代替。
+
+常态轮廓使用 --app-text-secondary，悬停/键盘焦点使用 --app-text，禁用使用 --app-text-muted；以对比度维持细线可读性，不通过加粗或恢复实心填充补偿。
+
+OutlineIcon 的容器、SVG、子图形及宿主按钮均关闭 transition，避免全局 body * 的 200ms color 过渡在继承链上重复插值，造成悬停追亮和移开后拖尾。Agent 右上角操作组与侧栏底部按钮间隙统一为 2px，原按钮热区不缩小。
+
 小尺寸图标使用下面的固定策略：
 
 1. 统一图标槽位，当前工具导航为 `16×16px`。

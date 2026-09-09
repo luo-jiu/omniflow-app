@@ -1,6 +1,5 @@
 import React from 'react';
 import {
-  IconChevronRightStroked,
   IconSearch,
 } from '@douyinfe/semi-icons';
 import styled from 'styled-components';
@@ -14,6 +13,7 @@ import type {
   AgentToolApprovalSnapshot,
 } from '@/shared/agent/agent.types';
 import AgentToolActivityCard from './AgentToolActivityCard';
+import AgentDisclosureChevron from './AgentDisclosureChevron';
 
 const ActivityGroup = styled.section`
   --agent-tool-record-color: color-mix(
@@ -96,16 +96,6 @@ const ActivityGroup = styled.section`
     pointer-events: none;
     color: var(--agent-tool-record-color);
     transition: opacity 120ms ease;
-  }
-
-  .agent-activity-group-chevron .semi-icon {
-    transform: rotate(0deg);
-    transform-origin: center;
-    transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
-  }
-
-  .agent-activity-group-toggle[aria-expanded='true'] .agent-activity-group-chevron .semi-icon {
-    transform: rotate(90deg);
   }
 
   .agent-activity-group-toggle:hover .agent-activity-group-chevron,
@@ -247,7 +237,7 @@ export default function AgentToolActivityGroup({
         <span className="agent-activity-group-icon"><IconSearch aria-hidden="true" /></span>
         <span className="agent-activity-group-title">读取了 {activities.length} 项</span>
         <span className="agent-activity-group-chevron">
-          <IconChevronRightStroked aria-hidden="true" />
+          <AgentDisclosureChevron expanded={open} />
         </span>
       </button>
       <div

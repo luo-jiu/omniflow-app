@@ -520,7 +520,7 @@ reasoning-summary（Phase 2）
 - 空 commentary 不渲染空白行。
 - 空的 failed、cancelled 或 interrupted item 也不渲染空白行，Run 终态仍由执行事实展示。
 - 未完成 item 明确显示失败、取消或中断，不与 final 共用成功样式。
-- 每轮 user 消息后与 Composer 上方均不展示独立 Workflow / Run 摘要条。
+- 每轮 user 消息后只显示基于规范 Run 起止时间的轻量用时行，不展示 Workflow 卡或 Composer 上方的 Run 摘要条。成功完成且存在 final 后，安全完成的工作过程默认收起，用户可通过用时行的细线 Chevron 展开；失败、未完成和待决内容保持可见，详见 UI 契约。
 - Tool 卡是执行详情、审批和交互的唯一入口，不重复参数、日志和结果正文。
 
 ### 13.1 Tool 语义分组

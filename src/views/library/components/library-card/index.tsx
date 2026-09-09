@@ -1,4 +1,5 @@
 import React from 'react';
+import OutlineIcon from '@/components/ui/outline-icon';
 import {
   CardItem,
   CardActions,
@@ -11,25 +12,6 @@ import {
 import type { Library } from "@/features/file-explorer/services/file.api";
 import libraryFolderImage from '@/assets/images/library-folder-windows11.png';
 
-const LibraryCardStarIcon: React.FC<{ filled?: boolean }> = ({ filled = false }) => (
-  <svg
-    className="library-card-action-icon"
-    viewBox="0 0 16 16"
-    width="16"
-    height="16"
-    aria-hidden="true"
-    focusable="false"
-  >
-    <path
-      d="M8 1.75 9.83 5.5l4.14.6-3 2.92.71 4.12L8 11.2l-3.68 1.94.71-4.12-3-2.92 4.14-.6L8 1.75Z"
-      fill={filled ? 'currentColor' : 'none'}
-      stroke={filled ? 'none' : 'currentColor'}
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    />
-  </svg>
-);
 
 const LibraryCardMoreIcon: React.FC = () => (
   <svg
@@ -132,10 +114,11 @@ const LibraryCard: React.FC<LibraryCardProps> = ({
             <CardActions className="card-actions" onClick={(e) => e.stopPropagation()}>
               <ActionIconBtn
                 aria-label={library.starred ? '取消收藏' : '收藏'}
+                aria-pressed={Boolean(library.starred)}
                 onClick={onToggleStar}
                 title={library.starred ? '取消收藏' : '收藏'}
               >
-                <LibraryCardStarIcon filled={library.starred} />
+                <OutlineIcon name="star" selected={library.starred} />
               </ActionIconBtn>
 
               <ActionIconBtn
