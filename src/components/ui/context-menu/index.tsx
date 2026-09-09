@@ -189,7 +189,11 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
           >
             {item.icon && <span className="menu-item-icon">{item.icon}</span>}
             <span className="menu-item-label">{item.label}</span>
-            {item.children?.length ? <span className="menu-item-submenu-arrow">›</span> : null}
+            {item.children?.length ? (
+              <svg className="menu-item-submenu-arrow" width="10" height="12" viewBox="0 0 10 12" fill="none" aria-hidden="true">
+                <path d="M3 2 L7 6 L3 10" stroke="currentColor" strokeWidth="1" />
+              </svg>
+            ) : null}
           </div>
         );
 

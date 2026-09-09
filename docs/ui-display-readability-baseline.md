@@ -47,7 +47,8 @@
 - 应用级 `Cmd/Ctrl +/-/0` 页面缩放已禁用，不再作为 UI 尺寸比对手段；内置浏览器网页自身缩放暂不纳入这条限制
 - 已确认的参照样张是 `src/views/settings/index.tsx` 设置页；主工作区按同一密度继续收敛
 - 旧的“新页面文本不得低于 `16px`”不再作为迁移期硬约束；工作区高频控件可使用 `10px ~ 13px` 文案，但必须保证行高、截断、点击热区和主题对比度可用
-- 目录树右键菜单可在通用 `directory-context-menu` 基础上叠加更紧凑样式，但必须沿用同一套颜色、圆角、hover 和图标槽语义，只压缩宽度、行高、padding 与图标尺寸
+- 所有复用 `ContextMenu / MenuContent` 的菜单及其子菜单统一使用与 Agent 输入框一致的 `--app-bg-elevated` 背景、1px `--app-border-strong` 细边框和 `--app-shadow` 阴影，避免 Semi 暗色 elevated 阴影内置的 1px 内描边与边框叠加；各业务菜单原有宽度、行高、padding、圆角、hover、图标槽和交互保持不变。
+- 紧凑 `directory-context-menu` 的普通项和危险项悬停底色使用独立伪元素绘制，仅左右外扩 2px，上下与菜单项对齐（相对原四周外扩上下各收回 2px），不移动文字、不改变行高或点击区域。通用二级菜单箭头使用 `10px × 12px` SVG 中的 1px 细线折角，不使用字体字符。
 - 目录树右键触发的弹框 / overlay（新建文件、上传确认、删除确认、属性、重命名输入）必须使用紧凑工作区基线：标题约 `14px`、正文约 `12px`、按钮高约 `28px`、输入框高约 `24px ~ 28px`，不能回到旧缩放时代的 `16px ~ 18px` 正文和 `40px` 按钮
 - 业务二次确认统一通过 `src/components/ui/compact-confirm.ts` 的 `openCompactConfirm` 打开，由 `src/assets/css/common.less` 的 `.app-compact-confirm` 提供 `360px` 最大宽度、`14px` 标题、`12px` 正文和 `28px` 按钮基线；除明确需要更宽内容并同步记录原因外，不得直接调用 Semi 默认 `Modal.confirm`
 - 顶部滑入反馈（Semi Toast / Notification）按历史舒适尺寸收敛到约 `67%`：Toast 约 `10px / 14px`、`8px` 上下 padding、最大宽度约 `348px`；Notification 标题约 `11px`、正文约 `10px`。这类全局反馈只在 `src/assets/css/feedback.less` 统一调整，业务调用点不单独写尺寸

@@ -3,10 +3,10 @@ import styled from 'styled-components';
 export const MenuContent = styled.div`
   min-width: 240px;
   padding: 8px;
-  background: var(--semi-color-bg-3);
+  background: var(--app-bg-elevated);
   border-radius: 12px;
-  box-shadow: var(--semi-shadow-elevated);
-  border: 1px solid var(--semi-color-border);
+  box-shadow: var(--app-shadow);
+  border: 1px solid var(--app-border-strong);
   box-sizing: border-box;
   overflow-x: hidden;
   overflow-y: hidden;
@@ -167,6 +167,8 @@ export const MenuContent = styled.div`
     }
 
     .menu-item {
+      position: relative;
+      isolation: isolate;
       min-height: 24px;
       font-size: 12px;
       font-weight: 400;
@@ -178,6 +180,29 @@ export const MenuContent = styled.div`
 
     .menu-item + .menu-item {
       margin-top: 0;
+    }
+
+    .menu-item::before {
+      content: '';
+      position: absolute;
+      inset: 0 -2px;
+      z-index: -1;
+      border-radius: inherit;
+      pointer-events: none;
+      transition: background-color 0.15s ease;
+    }
+
+    .menu-item:hover,
+    .menu-item.danger:hover {
+      background: transparent;
+    }
+
+    .menu-item:hover::before {
+      background: var(--semi-color-fill-0);
+    }
+
+    .menu-item.danger:hover::before {
+      background: var(--semi-color-danger-light-default);
     }
 
     .menu-item-icon {
