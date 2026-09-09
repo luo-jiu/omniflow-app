@@ -1,5 +1,7 @@
 # File Explorer 与 File Viewer 边界说明
 
+Agent发布后的目录刷新、根目录右键刷新及折叠分支缓存失效规则见 [Agent发布与目录树同步](agent-publication-refresh.md)。刷新仍由目录树owner持有，不复制Agent或Viewer状态。
+
 更新时间：2026-08-18
 
 适用范围：`features/file-explorer`、`features/file-viewer`、`contexts/FileViewerContext.tsx`、`views/library/detail/` 中与文件树、文件打开、预览 tab、预览分发和缓存恢复相关的代码。

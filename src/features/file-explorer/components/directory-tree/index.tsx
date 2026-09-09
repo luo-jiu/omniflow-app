@@ -19,6 +19,7 @@ import CreateNodeModal from './modals/CreateNodeModal.tsx';
 import { buildFileFullName, splitFileBaseNameAndExt } from '@/utils/fileTreeSettings';
 import { validateWindowsLikeFileName } from '@/utils/windowsFileName';
 import { runtimeLogger } from '@/utils/runtimeLogger';
+import { resolveTreeRefreshTargetId } from '../../utils/tree-refresh-target';
 import { useFileViewer } from '@/hooks/useFileViewer';
 import { useViewerAccountScope } from '@/features/file-viewer/session';
 import { globalAudioPlayer } from '@/features/file-viewer/services/global-audio-player';
@@ -1829,11 +1830,13 @@ export default function DirectoryTree({
     }
 
     if (action === '刷新') {
-      if (!node || resolveNodeType(node) !== 'dir') {
+      if (node && resolveNodeType(node) !== 'dir') {
         return;
       }
       try {
-        await onRefreshNode?.(node);
+        const id = resolveTreeRefreshTargetId(node ? { id: node.id, type: resolveNodeType(node) } : null, ROOT_PARENT_ID);
+        if (!id || !onRefreshNode) throw new Error('目录尚未就绪，暂时无法刷新');
+        await onRefreshNode(node || { id, type: 'dir', key: 'root' });
         Toast.success('目录已刷新');
         scheduleRecompute();
       } catch (error: any) {

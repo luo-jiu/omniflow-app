@@ -1204,7 +1204,11 @@ export function createAgentShellServiceRuntime(
         sizeBytes: ownedFile.sizeBytes,
       }),
       context.signal,
-    );
+    ).catch(error => {
+      context.signal.throwIfAborted();
+      if (error instanceof Error && error.name === 'AbortError') throw error;
+      throw new Error(`无法读取待发布文件 ${normalizedInput.sourcePath}。sourcePath相对Run根目录；Shell的cwd=work时应写../output/文件名，或使用cwd=output直接写文件名。若误写到work/output，请移动到顶层output后重试，无需重新生成。`);
+    });
     if (normalizedInput.destination.kind !== 'local-save-as') {
       const fileName = normalizedInput.destination.fileName || metadata.displayName;
       const resolvedTarget = await resolveLibraryDestination(normalizedInput.destination, {

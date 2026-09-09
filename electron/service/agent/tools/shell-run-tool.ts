@@ -153,7 +153,7 @@ export function createAgentShellRunTool(runtime: AgentShellRunToolRuntime): Agen
         },
         cwd: {
           default: 'work',
-          description: '工作目录，不能是文件路径。run-workspace 下使用逻辑目录，例如 work、input 或 output/result；host 下使用宿主绝对目录、~ 或相对冻结 host cwd 的目录。用户给出文件路径时使用其父目录或省略本字段；省略时分别默认为 work 或宿主默认 cwd。',
+          description: '工作目录。用户给出文件路径时使用其父目录。run-workspace默认work；生成待发布文件建议cwd=output、命令写a.cpp，发布sourcePath用output/a.cpp。cwd=work时须写../output/a.cpp。host使用宿主目录，省略时用宿主默认cwd。',
           maxLength: AGENT_SHELL_MAX_CWD_BYTES,
           minLength: 1,
           type: 'string',

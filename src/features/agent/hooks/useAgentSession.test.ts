@@ -170,7 +170,7 @@ function sessionSnapshot(): AgentSessionSnapshot {
   };
 }
 
-function renderSessionHook() {
+function renderSessionHook(onRefreshDirectory?: (id: number) => Promise<void> | void) {
   let current: ReturnType<typeof useAgentSession> | null = null;
   const onSessionChanged = vi.fn();
   function Harness() {
@@ -183,6 +183,7 @@ function renderSessionHook() {
       },
       model: 'model-a',
       onSessionChanged,
+      onRefreshDirectory,
       ownerScope: OWNER_SCOPE,
       profileId: 'profile-a',
       reasoningEffort: 'medium',
@@ -205,6 +206,35 @@ function renderSessionHook() {
 }
 
 describe('useAgentSession event coordination', () => {
+  it('refreshes a committed publication on restoration and does not repeat it for duplicate events', async () => {
+    const published: AgentToolActivitySnapshot = {
+      ...activity(2, 'completed'), call: { id: 'publish-call', name: 'file.publish', input: {} },
+      result: { ok: true, data: { uploadCommitState: 'committed', destination: { kind: 'library', nodeId: 32, parentId: 20 } } },
+    };
+    apiMocks.getAgentSession.mockResolvedValue({ ...sessionSnapshot(), toolActivities: [published] });
+    const refresh = vi.fn();
+    const hook = renderSessionHook(refresh);
+    await act(async () => { await hook.current.restore('session-1'); });
+    expect(refresh).toHaveBeenCalledWith(20);
+    await act(async () => {
+      listener?.({ type: 'tool-completed', sessionId: 'session-1', runId: 'run-1',
+        activity: { ...published, revision: 3 }, call: published.call, result: published.result! });
+    });
+    expect(refresh).toHaveBeenCalledTimes(1);
+    hook.unmount();
+  });
+  it('keeps a committed upload successful when refreshing its tree fails', async () => {
+    const published: AgentToolActivitySnapshot = {
+      ...activity(2, 'completed'), call: { id: 'upload-call', name: 'file.upload', input: {} },
+      result: { ok: true, data: { uploadCommitState: 'committed', destination: { kind: 'library', nodeId: 32, parentId: 20 } } },
+    };
+    apiMocks.getAgentSession.mockResolvedValue({ ...sessionSnapshot(), toolActivities: [published] });
+    const hook = renderSessionHook(vi.fn().mockRejectedValue(new Error('offline')));
+    await act(async () => { await hook.current.restore('session-1'); });
+    expect(hook.current.warning).toContain('不要重复发布');
+    expect(hook.current.toolActivities[0].result?.ok).toBe(true);
+    hook.unmount();
+  });
   it('preserves a new draft typed while preparing a request that then fails', async () => {
     const started = deferred<never>();
     apiMocks.startAgentChat.mockReturnValueOnce(started.promise);

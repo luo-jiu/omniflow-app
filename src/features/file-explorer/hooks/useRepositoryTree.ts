@@ -641,6 +641,7 @@ export function useRepositoryTree(
   // 刷新某个父节点下的直接子节点（用于移动后同步排序/归属）
   const refreshParentChildren = useCallback(async (parentId: number) => {
     const children = (await getChildrenByNodeId(parentId, Number(selectedRepository))) as NodeRespDTO[];
+    if (disposedRef.current || selectedRepositoryRef.current !== selectedRepository) return;
     const currentRootNodeId = rootNodeIdRef.current;
     const current = treesCacheRef.current[selectedRepository] || [];
     const parentNode = currentRootNodeId !== null && parentId === currentRootNodeId
@@ -658,14 +659,14 @@ export function useRepositoryTree(
       if (currentRootNodeId !== null && parentId === currentRootNodeId) {
         return {
           ...prev,
-          [selectedRepository]: mergeNodesPreservingLoadedState(current, mapped),
+          [selectedRepository]: mergeNodesPreservingLoadedState(current, mapped, new Set(expandedKeysRef.current)),
         };
       }
 
       if (!current.length) return prev;
       const parentNode = findNodeById(current, parentId);
       if (!parentNode) return prev;
-      const mergedChildren = mergeNodesPreservingLoadedState(current, mapped);
+      const mergedChildren = mergeNodesPreservingLoadedState(current, mapped, new Set(expandedKeysRef.current));
 
       return {
         ...prev,

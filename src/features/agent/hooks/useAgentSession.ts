@@ -42,6 +42,9 @@ import {
   upsertAgentToolActivity,
 } from '../agent-tool-activities';
 import { upsertAgentRun } from '../agent-runs';
+import { committedAgentFileParent } from '../agent-published-file';
+import { markRepositoryTreeSnapshotDirty } from '@/features/file-explorer/hooks/use-repository-tree/snapshot-store';
+import { refreshDirectoryInTree } from '@/features/file-explorer/services/tree-locate';
 
 interface UseAgentSessionInput {
   appContext: AgentAppContext;
@@ -121,6 +124,32 @@ export function useAgentSession({
   const preparationTokenRef = React.useRef(0);
   const isPreparingRef = React.useRef(false);
   const mountedRef = React.useRef(true);
+  const refreshedPublicationsRef = React.useRef({ scope: '', ids: new Set<string>() });
+  React.useEffect(() => {
+    if (!sessionId || sessionIdRef.current !== sessionId || sessionScopeKeyRef.current !== sessionScopeKey) return;
+    const scope = `${sessionScopeKey}\u0000${sessionId}`;
+    if (refreshedPublicationsRef.current.scope !== scope) refreshedPublicationsRef.current = { scope, ids: new Set() };
+    const parents = new Set<number>();
+    for (const activity of toolActivities) {
+      if (activity.sessionId !== sessionId || refreshedPublicationsRef.current.ids.has(activity.id)) continue;
+      const parent = committedAgentFileParent(activity);
+      if (parent === null) continue;
+      refreshedPublicationsRef.current.ids.add(activity.id);
+      parents.add(parent);
+    }
+    if (!parents.size) return;
+    markRepositoryTreeSnapshotDirty(Number(appContext.libraryId));
+    for (const parent of parents) {
+      void Promise.resolve().then(() => {
+        if (!mountedRef.current || sessionIdRef.current !== sessionId || sessionScopeKeyRef.current !== sessionScopeKey) return;
+        return onRefreshDirectory ? onRefreshDirectory(parent) : refreshDirectoryInTree(parent);
+      }).catch(() => {
+        if (mountedRef.current && sessionIdRef.current === sessionId && sessionScopeKeyRef.current === sessionScopeKey) {
+          setWarning('文件已保存，但目录树刷新失败，请刷新目标目录；不要重复发布。');
+        }
+      });
+    }
+  }, [appContext.libraryId, onRefreshDirectory, sessionId, sessionScopeKey, toolActivities]);
   const approvalsInFlightRef = React.useRef<Set<string>>(new Set());
   const interactionsInFlightRef = React.useRef<Set<string>>(new Set());
   const rendererPreparationsInFlightRef = React.useRef<Map<string, {

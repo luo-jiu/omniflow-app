@@ -431,6 +431,17 @@ describe('Agent Shell service runtime', () => {
     expect(fixture.pickLocalFile).not.toHaveBeenCalled();
   });
 
+  it('explains the publication path base without exposing physical workspace paths', async () => {
+    const fixture = createFixture();
+    fixture.workspaceStore.withOwnedFile.mockRejectedValueOnce(new Error("ENOENT: lstat '/private/secret/workspace/output/result.txt'"));
+    const failure = await fixture.service.prepareFilePublish({ sourcePath: 'output/result.txt', destination: { kind: 'local-save-as' } },
+      undefined, fixture.preparationContext).catch(error => error);
+    expect(failure.message).toContain('相对Run根目录');
+    expect(failure.message).toContain('cwd=output');
+    expect(failure.message).not.toContain('/private/secret');
+    expect(fixture.requestFileAuthority).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['committed', { commitState: 'committed', node: { id: 31, name: 'prompt', ext: 'md' } }, true],
     ['uncommitted', { commitState: 'uncommitted' }, false],

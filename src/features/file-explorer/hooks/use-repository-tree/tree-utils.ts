@@ -88,7 +88,12 @@ export function findNodeById(nodes: Node[], id: number): Node | null {
   return null;
 }
 
-export function mergeNodesPreservingLoadedState(previousTree: Node[], nextNodes: Node[]): Node[] {
+export function mergeNodesPreservingLoadedState(previousTree: Node[], nextNodes: Node[], expandedKeys?: ReadonlySet<string>): Node[] {
+  const retainVisibleChildren = (nodes: Node[]): Node[] => nodes.map(node => {
+    if (node.type !== 'dir') return node;
+    if (expandedKeys && !expandedKeys.has(node.key)) return { ...node, loaded: false, children: undefined };
+    return node.children ? { ...node, children: retainVisibleChildren(node.children) } : node;
+  });
   return nextNodes.map((node) => {
     const previous = findNodeById(previousTree, node.id);
     if (!previous) {
@@ -100,10 +105,12 @@ export function mergeNodesPreservingLoadedState(previousTree: Node[], nextNodes:
     if (previous.loaded !== true) {
       return node;
     }
+    // A refreshed but collapsed branch must reload when next opened, not retain stale children forever.
+    if (expandedKeys && !expandedKeys.has(node.key)) return { ...node, loaded: false, children: undefined };
     return {
       ...node,
       loaded: true,
-      children: previous.children || [],
+      children: expandedKeys ? retainVisibleChildren(previous.children || []) : previous.children || [],
     };
   });
 }
