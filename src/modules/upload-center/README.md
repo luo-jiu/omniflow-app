@@ -50,3 +50,6 @@
 - `UploadTaskInput.storageProvider` 是用户在上传确认 overlay 中选择的目标 provider 别名，只由上传执行器透传给后端，不进入状态机派生逻辑。
 - 若未来支持断点续传，可新增 `sessionId/chunkIndex` 字段，但不破坏当前事件模型。
 - `UploadTaskEvent.PROGRESS` 的数据来源对 UI 透明：当前由 Electron 主进程 PUT 出口字节（按 partNumber 由 `runDirectUpload` 合并）push 上来，事件契约不变。
+## 提交阶段回调
+
+`runDirectUpload` 和 `uploadLocalPathAndCreateNode` 支持可选 `beforeCommit`：所有分片上传完成后、调用 complete 前等待回调，回调失败或取消时不提交节点。Agent 用它确认 Run 仍有效并开启提交回执等待；不改变其他上传入口的默认行为。complete 不确定错误继续使用 `UploadCommitUnknownError`，已返回但无法解析的节点回执使用 `UploadReceiptError`，调用方不能将其判断为未提交。

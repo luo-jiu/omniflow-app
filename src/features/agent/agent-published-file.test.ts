@@ -8,6 +8,14 @@ const activity: AgentToolActivitySnapshot = {
   result: { ok: true, data: { uploadCommitState: 'committed', destination: { kind: 'library', nodeId: 32, parentId: 20 } } },
 };
 describe('committed publication refresh target', () => {
+  it('refreshes direct writes only after an authoritative commit', () => {
+    const direct = { ...activity, call: { ...activity.call, name: 'file.write' } };
+    for (const state of ['committed', 'commit_unknown', 'uncommitted']) {
+      expect(committedAgentFileParent({ ...direct, result: { ok: true, data: {
+        writeCommitState: state, destination: { kind: 'library', nodeId: 32, parentId: 20 },
+      } } })).toBe(state === 'committed' ? 20 : null);
+    }
+  });
   it.each(['file.publish', 'file.upload'])('refreshes committed %s destinations', name => {
     expect(committedAgentFileParent({ ...activity, call: { ...activity.call, name } })).toBe(20);
   });

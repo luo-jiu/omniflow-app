@@ -65,6 +65,7 @@ describe('Agent long-term memory orchestration', () => {
     overrides: Parameters<typeof createAgentOrchestrator>[0] = {},
   ) {
     return createAgentOrchestrator({
+      contextBudget: { contextWindowTokens: 32_000 },
       getMemoryStore: async () => memoryStore,
       getRuntimeProfile: () => ({
         apiKey: 'test-key',

@@ -14,7 +14,7 @@
 - 使用公共 Viewer Session Registry 恢复选区、顶部行、滚动、字号和换行
 - 使用 IndexedDB DraftStore 持久化未保存正文，并显式处理恢复/放弃与 revision 冲突
 - 支持编辑器内快捷键字号缩放、自动换行、保存、另存为和下载
-- 保存时调用后端按 `nodeId` 更新内容的专用 API
+- 保存先核对读取时的正文 SHA-256，再通过带 expectedStorageKey 的条件 API 更新内容，版本冲突保留草稿并刷新远端资源；旧后端不支持条件端点时不退回无条件覆盖
 - 另存为先弹出文件名确认，再通过 Electron 暂存文本文件并走现有上传创建节点链路
 - 下载通过系统保存窗口将当前编辑器正文写到本地，不依赖对象存储签名链接的浏览器下载行为
 - 保存成功后刷新目录树和当前 tab 的文件链接，但不 reload 当前 viewer
@@ -57,6 +57,8 @@
 ### 3.1 加载
 
 `text-viewer` 收到 `url + reloadToken` 后直接 `fetch(url)` 读取文本。签名 URL 不作为 session 或 draft identity；稳定身份来自账号 scope、`libraryId` 和 `nodeId`。
+
+外部写入通过 FileViewerProvider 更新现存 tab 的链接及 reloadToken，不创建或切换 tab。刷新前必须先 flush 当前内存草稿；失败则保留缓冲区并停止刷新。成功后按新正文 revision 与已保存草稿比较，复用“恢复草稿 / 使用最新文件”的冲突交互，不静默覆盖草稿。
 
 节点详情暂时没有可靠服务端内容版本时，首次加载的原始正文会计算 SHA-256 作为 draft baseline。存在 draft 时不能静默替换正文：baseline 相同仍要求用户选择恢复或使用当前文件，baseline 不同则显示内容冲突提示。draft 与远端正文完全相同时视为保存后清理中断的残留，可以直接删除。
 

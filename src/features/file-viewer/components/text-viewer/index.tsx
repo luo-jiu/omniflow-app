@@ -8,7 +8,6 @@ import { useTheme } from '@/hooks/useTheme';
 import {
   fetchNodeDetailById,
   getFileLink,
-  updateNodeFileContent,
   uploadLocalPathAndCreateNode,
 } from '@/features/file-explorer/services/file.api';
 import { useFileViewer } from '@/hooks/useFileViewer';
@@ -40,7 +39,9 @@ import {
   TEXT_VIEWER_SESSION_SCHEMA_VERSION,
   type TextViewerSessionSnapshot,
 } from './text-viewer-session';
-import { resolveTextSaveFeedback } from './text-viewer-save';
+import { resolveTextSaveFeedback, saveTextWithRevision, TextFileConflictError } from './text-viewer-save';
+import { notifyLibraryFileContentChanged } from '@/features/file-viewer/services/file-content-events';
+import { API_CONFIG } from '@/config/api';
 import '@fontsource/jetbrains-mono/400.css';
 import '@fontsource/jetbrains-mono/700.css';
 
@@ -167,6 +168,7 @@ const TextViewer: React.FC<TextViewerProps> = ({
   const isDirtyRef = useRef(false);
   const latestSessionSnapshotRef = useRef<TextViewerSessionSnapshot | null>(null);
   const loadedUrlRef = useRef('');
+  const baseContentRevisionRef = useRef<string | null>(null);
   const pendingContentRef = useRef<string | null>(null);
   const pendingSessionHydrationRef = useRef(false);
   const pendingSessionSnapshotRef = useRef<TextViewerSessionSnapshot | null>(null);
@@ -430,6 +432,12 @@ const TextViewer: React.FC<TextViewerProps> = ({
 
     (async () => {
       try {
+        // Preserve the latest in-memory draft before an external reload replaces the buffer.
+        if (isDirtyRef.current && !(await flushDraft())) {
+          if (!cancelled) Toast.warning('草稿暂时无法保存，已保留当前编辑内容');
+          return;
+        }
+        if (cancelled) return;
         const response = await window.electronAPI.fetch(url, { method: 'GET' }) as IpcTextFetchResponse;
         const status = Number(response?.status ?? 0);
         if (status >= 400) throw new Error(`HTTP ${status}`);
@@ -444,6 +452,7 @@ const TextViewer: React.FC<TextViewerProps> = ({
           ? providedRevision
           : (contentHashRevision ?? providedRevision);
         if (cancelled) return;
+        baseContentRevisionRef.current = contentHashRevision;
         loadedUrlRef.current = loadKey;
         const currentDraftKey = resourceIdentity && remoteRevision
           ? createViewerDraftKey(resourceIdentity, remoteRevision)
@@ -490,6 +499,7 @@ const TextViewer: React.FC<TextViewerProps> = ({
     };
   }, [
     contentRevision,
+    flushDraft,
     reloadToken,
     resourceIdentity,
     setDraftPersistedState,
@@ -551,12 +561,11 @@ const TextViewer: React.FC<TextViewerProps> = ({
       } catch (error) {
         runtimeLogger.warn('创建已保存文本 revision 失败:', error);
       }
-      const detail = await fetchNodeDetailById(nodeId);
-      const savedNode = await updateNodeFileContent({
-        nodeId,
-        libraryId: detail.libraryId,
-        content: savedContent,
-        contentType: detail.mimeType || 'text/plain; charset=utf-8',
+      const { detail, savedNode } = await saveTextWithRevision({
+        nodeId, libraryId: Number(libraryId), content: savedContent, baseRevision: baseContentRevisionRef.current,
+        assertCurrent: () => {
+          if (!isAliveRef.current || resourceIdentityRef.current !== saveIdentity) throw new Error('文件或账号环境已变化，未继续保存');
+        },
       });
       const savedNodeId = Number(savedNode?.id || nodeId);
       if (!isAliveRef.current || resourceIdentityRef.current !== saveIdentity) {
@@ -564,6 +573,7 @@ const TextViewer: React.FC<TextViewerProps> = ({
         return;
       }
       const identity = saveIdentity;
+      baseContentRevisionRef.current = savedRevision;
       let draftCleanupFailed = false;
       if (identity) {
         try {
@@ -623,6 +633,9 @@ const TextViewer: React.FC<TextViewerProps> = ({
       if (isAliveRef.current && resourceIdentityRef.current === saveIdentity) {
         Toast.error(error?.message || '保存失败');
         scheduleDraftFlush();
+        if (error instanceof TextFileConflictError && accountScope && libraryId) {
+          notifyLibraryFileContentChanged({ accountScope, backendScope: API_CONFIG.BASE_URL, libraryId, nodeId });
+        }
       }
     } finally {
       saveInFlightRef.current = false;
@@ -630,6 +643,8 @@ const TextViewer: React.FC<TextViewerProps> = ({
     }
   }, [
     canUseEditorContent,
+    accountScope,
+    libraryId,
     clearDraftTimer,
     flushDraft,
     isSaving,

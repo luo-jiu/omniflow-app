@@ -1,6 +1,6 @@
 import { ipcRequest as request } from '@/service/request/ipcRequest';
 import type { ArchiveBuiltInType } from '@/shared/file-viewer-types';
-import { runDirectUpload } from '@/modules/upload-center/services/upload-direct';
+import { runDirectUpload, UploadReceiptError } from '@/modules/upload-center/services/upload-direct';
 
 export type Library = {
   createdAt: string;
@@ -283,16 +283,18 @@ export async function fetchNodeDetailById(nodeId: number): Promise<NodeDetailDTO
 }
 
 export async function updateNodeFileContent(payload: {
+  expectedStorageKey?: string;
   nodeId: number;
   libraryId: number;
   content: string;
   contentType?: string;
   storageProvider?: string;
 }): Promise<NodeDetailDTO> {
-  const body = await request(`/v1/nodes/${payload.nodeId}/content`, {
+  const body = await request(`/v1/nodes/${payload.nodeId}/content${payload.expectedStorageKey === undefined ? '' : '/conditional'}`, {
     method: 'PUT',
     body: JSON.stringify({
       libraryId: payload.libraryId,
+      expectedStorageKey: payload.expectedStorageKey,
       content: payload.content,
       contentType: payload.contentType,
       storageProvider: payload.storageProvider,
@@ -311,6 +313,7 @@ export async function uploadLocalPathAndCreateNode(
   parentId: number,
   libraryId: number,
   options?: {
+    beforeCommit?: () => Promise<void>;
     contentType?: string;
     conflictPolicy?: NodeNameConflictPolicy;
     onProgress?: (uploadedBytes: number) => void;
@@ -326,6 +329,7 @@ export async function uploadLocalPathAndCreateNode(
   const info = await window.electronAPI.getTempImportFileInfo(normalizedFilePath);
 
   const json = await runDirectUpload({
+    beforeCommit: options?.beforeCommit,
     filePath: info.filePath,
     fileName: info.name,
     fileSize: Number(info.size || 0),
@@ -340,9 +344,11 @@ export async function uploadLocalPathAndCreateNode(
 
   const d = extractDataPayload<Record<string, unknown>>(json);
   if (!d || typeof d !== 'object') {
-    throw new Error('上传响应数据异常');
+    throw new UploadReceiptError();
   }
-  return normalizeNodePayload(d as Record<string, unknown>, 'file');
+  const node = normalizeNodePayload(d as Record<string, unknown>, 'file');
+  if (!Number.isSafeInteger(node.id) || Number(node.id) <= 0) throw new UploadReceiptError();
+  return node;
 }
 
 // 创建节点（新建文件或文件夹）

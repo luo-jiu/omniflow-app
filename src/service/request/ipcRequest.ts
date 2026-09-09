@@ -8,6 +8,10 @@ interface IpcHttpResponse<T = unknown> {
   body?: T;
 }
 
+export class IpcRequestError extends Error {
+  constructor(message: string, readonly status: number) { super(message); this.name = 'IpcRequestError'; }
+}
+
 type ApiBody = {
   code?: string | number;
   message?: string | null;
@@ -75,7 +79,7 @@ export async function ipcRequest<T = any>(path: string, options?: any): Promise<
 
     if (status >= 400 && !businessSuccess) {
       const message = getErrorMessage(body, `HTTP error! status: ${status}`);
-      throw new Error(`${message} (${path})`);
+      throw new IpcRequestError(`${message} (${path})`, status);
     }
 
     if (isObject(body) && (body as ApiBody).success === false && !businessSuccess) {

@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   detail: vi.fn(), upload: vi.fn(), stage: vi.fn(), cleanup: vi.fn(), capture: vi.fn(), notify: vi.fn(),
-  dialog: vi.fn(),
+  dialog: vi.fn(), draftRead: vi.fn(), draftWrite: vi.fn(async () => undefined),
 }));
 vi.mock('@douyinfe/semi-ui', () => ({
   Button: (props: any) => <button {...props} />,
@@ -23,10 +23,10 @@ vi.mock('@/features/file-explorer/services/file.api', () => ({
 vi.mock('@/features/file-explorer/services/tree-locate', () => ({ refreshDirectoryInTree: vi.fn() }));
 vi.mock('@/features/file-viewer/session', () => ({
   createViewerResourceKey: (input: unknown) => input,
-  createViewerDraftKey: (resource: unknown, revision: unknown) => ({ resource, revision }),
+  createViewerDraftKey: (resource: object, revision: unknown) => ({ ...resource, contentRevision: revision }),
   useViewerSession: () => ({ capture: mocks.capture, notifyRetentionChanged: mocks.notify }),
   ViewerDraftStoreError: class extends Error {},
-  viewerDraftStore: { getWriteGeneration: () => 0, readLatest: async () => null, deleteDraft: async () => undefined },
+  viewerDraftStore: { getWriteGeneration: () => 0, readLatest: mocks.draftRead, writeDraft: mocks.draftWrite, deleteDraft: async () => undefined },
 }));
 
 import TextViewer from './index';
@@ -58,6 +58,32 @@ afterEach(() => {
 });
 
 describe('Text viewer save actions', () => {
+  it('persists an unsaved buffer before external reload and shows a conflict without losing the draft', async () => {
+    await mount();
+    act(() => renderer!.root.findByType(CodeMirror).props.onChange('my unsaved draft'));
+    mocks.draftRead.mockResolvedValueOnce({ key: { contentRevision: 'sha256:old' }, content: 'my unsaved draft' });
+    await act(async () => { renderer!.update(<TextViewer {...props} url="updated" reloadToken={1} />); });
+    expect(mocks.draftWrite).toHaveBeenCalledWith(expect.anything(), 'my unsaved draft', expect.anything());
+    await vi.waitFor(() => expect(renderer!.root.findAllByType(Modal).some(item => item.props.title === '检测到内容冲突' && item.props.visible)).toBe(true));
+    const modal = renderer!.root.findAllByType(Modal).find(item => item.props.title === '检测到内容冲突')!;
+    expect(modal.props.visible).toBe(true);
+    act(() => modal.props.onOk());
+    expect(renderer!.root.findByType(CodeMirror).props.value).toBe('my unsaved draft');
+  });
+  it('loads external updates directly when the buffer has no local edits', async () => {
+    await mount();
+    await act(async () => { renderer!.update(<TextViewer {...props} url="updated" reloadToken={1} />); });
+    await vi.waitFor(() => expect(renderer!.root.findByType(CodeMirror).props.value).toBe('updated body'));
+    expect(mocks.draftWrite).not.toHaveBeenCalled();
+  });
+  it('keeps the current buffer accessible when draft persistence fails during refresh', async () => {
+    await mount();
+    act(() => renderer!.root.findByType(CodeMirror).props.onChange('only in memory'));
+    mocks.draftWrite.mockRejectedValueOnce(new Error('disk full'));
+    await act(async () => { renderer!.update(<TextViewer {...props} url="updated" reloadToken={1} />); });
+    await vi.waitFor(() => expect(renderer!.root.findByType(CodeMirror).props.value).toBe('only in memory'));
+    expect(renderer!.root.findByProps({ 'aria-label': '下载' }).props.disabled).toBe(false);
+  });
   it('blocks save-as and download before document content is available', async () => {
     await mount(true);
     for (const label of ['另存为', '下载']) {

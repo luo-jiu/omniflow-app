@@ -502,4 +502,38 @@ describe('Agent tool broker', () => {
       vi.useRealTimers();
     }
   });
+  it('retains a direct file write commit that arrives just after cancellation', async () => {
+    const controller = new AbortController();
+    const broker = createAgentToolBroker({ createId: () => 'direct-write' });
+    const prepared = broker.prepareRendererExecution({ ...prepareInput(controller.signal), toolName: 'file.write' });
+    broker.reportRendererProgress(77, {
+      executionId: 'direct-write', libraryId: 3, ownerScope: OWNER_SCOPE,
+      runId: 'run-1', sessionId: 'session-1', phase: 'committing', progress: { message: '正在保存文件' },
+    });
+    controller.abort();
+    const result = { ok: true, data: { writeCommitState: 'committed' }, message: '已保存' };
+    expect(broker.markRendererExecutionCommitted(77, {
+      executionId: 'direct-write', libraryId: 3, ownerScope: OWNER_SCOPE,
+      result, runId: 'run-1', sessionId: 'session-1',
+    })).toBe(true);
+    await expect(prepared.outcome).resolves.toEqual({ result });
+  });
+  it('cancels file write preparation immediately, without a settlement timer', async () => {
+    const controller = new AbortController();
+    const broker = createAgentToolBroker({ createId: () => 'not-committing' });
+    const prepared = broker.prepareRendererExecution({ ...prepareInput(controller.signal), toolName: 'file.write' });
+    controller.abort();
+    await expect(prepared.outcome).rejects.toMatchObject({ name: 'AbortError' });
+  });
+  it('finishes a cancelled commit wait when the renderer confirms no write was committed', async () => {
+    const controller = new AbortController();
+    const broker = createAgentToolBroker({ createId: () => 'no-commit' });
+    const prepared = broker.prepareRendererExecution({ ...prepareInput(controller.signal), toolName: 'file.write' });
+    const identity = { executionId: 'no-commit', libraryId: 3, ownerScope: OWNER_SCOPE, runId: 'run-1', sessionId: 'session-1' };
+    broker.reportRendererProgress(77, { ...identity, phase: 'committing', progress: { message: '正在保存文件' } });
+    controller.abort();
+    const result = { ok: false, data: { writeCommitState: 'uncommitted' } };
+    broker.completeRendererExecution(77, { ...identity, result });
+    await expect(prepared.outcome).resolves.toEqual({ result });
+  });
 });

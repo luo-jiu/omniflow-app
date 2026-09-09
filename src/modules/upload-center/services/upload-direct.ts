@@ -30,6 +30,7 @@ function computeHeartbeatIntervalMs(expiresAtIso: string): number {
 }
 
 export interface DirectUploadInput {
+  beforeCommit?: () => Promise<void>;
   filePath: string;
   fileName: string;
   fileSize: number;
@@ -54,6 +55,10 @@ export class UploadCommitUnknownError extends Error {
     this.clientOperationId = clientOperationId;
     this.cause = cause;
   }
+}
+
+export class UploadReceiptError extends Error {
+  constructor() { super('上传已返回，但节点回执无效，需要核对提交结果'); }
 }
 
 function createCompletionOperationId(): string {
@@ -213,6 +218,8 @@ export async function runDirectUpload(input: DirectUploadInput): Promise<unknown
       etag: collectedEtags.get(partNumber) ?? '',
     }));
 
+    await input.beforeCommit?.();
+    if (aborted) throw new Error('upload canceled');
     const node = await completeWithReconciliation({
       uploadId,
       clientOperationId,

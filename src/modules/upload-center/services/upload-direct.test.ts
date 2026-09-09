@@ -64,6 +64,22 @@ describe('runDirectUpload completion reconciliation', () => {
     vi.stubGlobal('window', { electronAPI });
     configureSinglePartUpload();
   });
+  it('acknowledges the commit boundary after upload and before creating the node', async () => {
+    apiMocks.completeUploadSession.mockResolvedValue({ id: 42 });
+    const beforeCommit = vi.fn(async () => {
+      expect(electronAPI.uploadPresignedPut).toHaveBeenCalledOnce();
+      expect(apiMocks.completeUploadSession).not.toHaveBeenCalled();
+    });
+    await runDirectUpload({ filePath: '/tmp/file.txt', fileName: 'file.txt', fileSize: 4, libraryId: 3, parentId: 9, beforeCommit });
+    expect(beforeCommit).toHaveBeenCalledOnce();
+    expect(apiMocks.completeUploadSession).toHaveBeenCalledOnce();
+  });
+  it('does not commit if the acknowledged run was cancelled', async () => {
+    await expect(runDirectUpload({ filePath: '/tmp/file.txt', fileName: 'file.txt', fileSize: 4, libraryId: 3, parentId: 9,
+      beforeCommit: async () => { throw new Error('run cancelled'); },
+    })).rejects.toThrow('run cancelled');
+    expect(apiMocks.completeUploadSession).not.toHaveBeenCalled();
+  });
 
   it('returns the committed node when the complete response was lost', async () => {
     const committedNode = { id: 42, name: 'file.txt', type: 'file', libraryId: 2 };

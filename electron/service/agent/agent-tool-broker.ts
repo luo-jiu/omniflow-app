@@ -380,6 +380,12 @@ export function createAgentToolBroker(options: AgentToolBrokerOptions = {}) {
     if (pending.signal.aborted) throw abortError();
     const message = String(input.progress?.message || '').trim().slice(0, 500);
     if (!message) throw new Error('Agent Tool 进度消息不能为空');
+    if (input.phase !== undefined) {
+      if (input.phase !== 'committing' || pending.toolName !== 'file.write') {
+        throw new Error('该工具不支持提交阶段通知');
+      }
+      pending.beginCriticalSettlement();
+    }
     const percentValue = Number(input.progress?.percent);
     pending.onProgress({
       message,
@@ -407,10 +413,14 @@ export function createAgentToolBroker(options: AgentToolBrokerOptions = {}) {
     ) {
       throw new Error('当前窗口无权提交该 Agent Tool 结果');
     }
-    if (pending.signal.aborted && !pending.committedResult) throw abortError();
+    const result = normalizeAgentToolResult(input.result);
+    const state = (result.data as { writeCommitState?: string } | undefined)?.writeCommitState;
+    const writeSettled = pending.toolName === 'file.write' && !result.ok
+      && (state === 'uncommitted' || state === 'commit_unknown');
+    if (pending.signal.aborted && !pending.committedResult && !writeSettled) throw abortError();
     pending.resolve({
       perception: options.normalizePerception?.(input.perception),
-      result: normalizeAgentToolResult(input.result),
+      result: pending.committedResult || result,
     });
     return true;
   }

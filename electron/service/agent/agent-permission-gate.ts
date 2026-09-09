@@ -14,7 +14,7 @@ export function resolveAgentRunPermissionDecision(
   action?: AgentPreparedActionPublic,
 ): AgentToolPermissionDecision {
   if (mode !== 'full-access' || decision.behavior !== 'ask' || decision.risk !== 'write') return decision;
-  if (toolName === 'directory.create' && !action) return { behavior: 'allow', risk: 'write' };
+  if ((toolName === 'directory.create' || toolName === 'file.write') && !action) return { behavior: 'allow', risk: 'write' };
   if (!action || action.kind !== toolName) return decision;
   if (action.kind === 'media.extractAudio' && action.conflictPolicy !== 'replace') {
     return { behavior: 'allow', risk: 'write' };

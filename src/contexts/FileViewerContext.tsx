@@ -23,6 +23,10 @@ import {
 import { isDisposingLibraryWorkspace } from '@/features/workspace-resource-release';
 import type { FileViewerFileType } from '@/shared/file-viewer-types';
 import { updateExistingFileViewerTabResource } from './file-viewer-tab-resource';
+import { subscribeLibraryFileContentChanged } from '@/features/file-viewer/services/file-content-events';
+import { getFileLink } from '@/features/file-explorer/services/file.api';
+import { API_CONFIG } from '@/config/api';
+import { runtimeLogger } from '@/utils/runtimeLogger';
 import {
   disposeViewerSessionOnClose,
   useViewerAccountScope,
@@ -255,6 +259,28 @@ export const FileViewerProvider: React.FC<{
   });
   const activeCacheKeyRef = React.useRef<string | undefined>(cacheKey);
   const skipPersistRef = React.useRef(false);
+  const tabsRef = React.useRef(viewerState.tabs);
+  tabsRef.current = viewerState.tabs;
+  useEffect(() => {
+    let disposed = false;
+    const requests = new Map<number, number>();
+    const unsubscribe = subscribeLibraryFileContentChanged(change => {
+      if (change.accountScope !== viewerAccountScope || change.backendScope !== API_CONFIG.BASE_URL
+        || change.libraryId !== libraryId
+        || !tabsRef.current.some(tab => tab.nodeId === change.nodeId && tab.libraryId === libraryId)) return;
+      const sequence = (requests.get(change.nodeId) || 0) + 1;
+      requests.set(change.nodeId, sequence);
+      void getFileLink(change.nodeId, change.libraryId).then(fileUrl => {
+        if (disposed || requests.get(change.nodeId) !== sequence) return;
+        setViewerState(previous => {
+          const tabs = previous.tabs.map(tab => tab.nodeId === change.nodeId && tab.libraryId === change.libraryId
+            ? { ...tab, fileUrl, contentRevision: null, reloadToken: (tab.reloadToken || 0) + 1 } : tab);
+          return { ...previous, tabs, fileState: toFileState(tabs.find(tab => tab.id === previous.activeTabId) || null) };
+        });
+      }).catch(error => runtimeLogger.warn('刷新已修改文件的预览资源失败', error));
+    });
+    return () => { disposed = true; unsubscribe(); };
+  }, [libraryId, viewerAccountScope]);
 
   // 跨路由"待激活 tab"消费：预留给未来外部 MediaHub 入口 setPendingActivation；
   // 设计要点（解决 StrictMode 双 mount 把 setState 丢弃的问题）：

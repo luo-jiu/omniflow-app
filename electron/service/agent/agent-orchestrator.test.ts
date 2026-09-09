@@ -231,6 +231,7 @@ describe('Agent orchestrator', () => {
 
   function createOrchestrator(options: Parameters<typeof createAgentOrchestrator>[0] = {}) {
     return createAgentOrchestrator({
+      contextBudget: { contextWindowTokens: 32_000 },
       getRuntimeProfile: () => ({
         apiKey: 'test-key',
         baseUrl: 'https://ai.example.com/v1',
@@ -4373,6 +4374,7 @@ describe('Agent orchestrator', () => {
     const webContents = sender();
     const orchestrator = createAgentOrchestrator({
       approvalTimeoutMs: 5,
+      contextBudget: { contextWindowTokens: 32_000 },
       getRuntimeProfile: () => ({
         apiKey: 'test-key',
         baseUrl: 'https://ai.example.com/v1',
@@ -4567,6 +4569,7 @@ describe('Agent orchestrator', () => {
       }),
       getSessionStore: async () => store,
       interactionTimeoutMs: 5,
+      contextBudget: { contextWindowTokens: 32_000 },
       runSessionRegistry: createAIServiceRunSessionRegistry(),
     });
     const started = await orchestrator.start(webContents as never, request());
@@ -4644,6 +4647,7 @@ describe('Agent orchestrator', () => {
       });
     const webContents = sender();
     const orchestrator = createAgentOrchestrator({
+      contextBudget: { contextWindowTokens: 32_000 },
       getRuntimeProfile: () => ({
         apiKey: 'test-key',
         baseUrl: 'https://ai.example.com/v1',
@@ -4703,6 +4707,7 @@ describe('Agent orchestrator', () => {
       });
     const webContents = sender();
     const orchestrator = createAgentOrchestrator({
+      contextBudget: { contextWindowTokens: 32_000 },
       getRuntimeProfile: () => ({
         apiKey: 'test-key',
         baseUrl: 'https://ai.example.com/v1',
@@ -4750,6 +4755,7 @@ describe('Agent orchestrator', () => {
     });
     const webContents = sender();
     const orchestrator = createAgentOrchestrator({
+      contextBudget: { contextWindowTokens: 20_000 },
       getRuntimeProfile: () => ({
         apiKey: 'test-key',
         baseUrl: 'https://ai.example.com/v1',
@@ -5173,7 +5179,7 @@ describe('Agent orchestrator', () => {
     });
     const webContents = sender();
     const legacyRequest = { ...request(), model: 'gpt-5.4', modelBudget };
-    const started = await createOrchestrator().start(webContents as never, legacyRequest);
+    const started = await createOrchestrator({ contextBudget: undefined }).start(webContents as never, legacyRequest);
     await waitForCompletedFinal(webContents, '完成。', started);
     expect(mocks.streamAgentProviderTurn).toHaveBeenCalledTimes(1);
   });
@@ -5385,6 +5391,7 @@ describe('Agent orchestrator', () => {
     });
     const webContents = sender();
     const orchestrator = createAgentOrchestrator({
+      contextBudget: { contextWindowTokens: 32_000 },
       getRuntimeProfile,
       getSessionStore: async () => store,
       runSessionRegistry: registry,
@@ -5869,6 +5876,7 @@ describe('Agent orchestrator', () => {
       getSessionStore: async () => store,
       runSessionRegistry: createAIServiceRunSessionRegistry(),
       toolBroker: { executeMain } as never,
+      contextBudget: { contextWindowTokens: 32_000 },
     });
 
     const started = await orchestrator.start(webContents as never, request());

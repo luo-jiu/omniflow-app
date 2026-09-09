@@ -199,7 +199,7 @@ export function useAgentSession({
         onRefreshDirectory,
         signal: controller.signal,
       });
-      if (controller.signal.aborted && !outcome.committed) return;
+      if (controller.signal.aborted && !outcome.committed && request.toolName !== 'file.write') return;
       await completeAgentToolExecution({
         executionId: request.executionId,
         libraryId: Number(request.appContext.libraryId),

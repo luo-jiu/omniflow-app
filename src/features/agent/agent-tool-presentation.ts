@@ -103,6 +103,7 @@ const TOOL_TITLES: Record<string, string> = {
   'file.stage': '暂存文件',
   'file.stat': '读取文件信息',
   'file.read': '读取文件正文',
+  'file.write': '保存文件',
   'file.grep': '搜索文件正文',
   'file.upload': '上传本机文件',
   'interaction.request': '用户输入',
@@ -125,6 +126,7 @@ export function buildAgentToolSummary(activity: AgentToolActivitySnapshot, libra
     ...(activity.call.name === 'file.read' ? { subject: path.replace(/\\/g, '/').split('/').pop() || undefined } : {}) };
   }
   if (activity.status !== 'completed') return { label: getAgentToolTitle(activity) };
+  if (activity.call.name === 'file.write') return { label: '已保存', subject: textValue(data?.fileName) || undefined };
   if (activity.call.name === 'file.grep') return {
     label: data?.complete === false && !data?.hasMore ? '已搜索正文 · 结果不完整' : '已搜索正文',
     subject: textValue(data?.path) || undefined,

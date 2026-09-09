@@ -1,3 +1,39 @@
+import { fetchNodeDetailById, getFileLink, updateNodeFileContent } from '@/features/file-explorer/services/file.api';
+import { IpcRequestError } from '@/service/request/ipcRequest';
+import { createTextContentRevision } from './text-viewer-session';
+
+export class TextFileConflictError extends Error {
+  constructor() { super('文件已被其他操作修改，草稿已保留，请核对最新内容后再保存'); }
+}
+
+export async function saveTextWithRevision(input: {
+  nodeId: number; libraryId: number; content: string; baseRevision: string | null; assertCurrent: () => void;
+}, deps = {
+  detail: fetchNodeDetailById, link: getFileLink, update: updateNodeFileContent,
+  read: async (url: string) => {
+    const response = await window.electronAPI.fetch(url, { method: 'GET' }) as { status: number; body?: unknown };
+    if (response.status >= 400 || typeof response.body !== 'string') throw new Error('无法核对最新文件正文，未保存');
+    return response.body;
+  },
+}) {
+  if (!input.baseRevision) throw new Error('文件缺少读取版本，请重新加载后再保存');
+  input.assertCurrent();
+  const detail = await deps.detail(input.nodeId);
+  if (detail.libraryId !== input.libraryId || detail.id !== input.nodeId || detail.type !== 'file') throw new Error('文件身份已变化');
+  const remote = !detail.storageKey && Number(detail.fileSize) === 0 ? ''
+    : await deps.read(await deps.link(input.nodeId, input.libraryId));
+  if (await createTextContentRevision(remote) !== input.baseRevision) throw new TextFileConflictError();
+  input.assertCurrent();
+  try {
+    const savedNode = await deps.update({ nodeId: input.nodeId, libraryId: input.libraryId, content: input.content,
+      contentType: detail.mimeType || 'text/plain; charset=utf-8', expectedStorageKey: detail.storageKey || '' });
+    return { detail, savedNode };
+  } catch (error) {
+    if (error instanceof IpcRequestError && error.status === 409) throw new TextFileConflictError();
+    throw error;
+  }
+}
+
 export interface TextSaveFeedback {
   level: 'success' | 'warning';
   message: string;

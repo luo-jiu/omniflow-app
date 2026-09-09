@@ -238,6 +238,8 @@ Text dirty draft 属于用户数据，不跟随普通 tab 关闭、资料库释�
 2. `FileViewerContext.setFileUrl` / `updateFileTabResource`
 原因：前者决定同一文件是否复用并激活 tab；后者只允许保存回调更新指定现存 tab，不能创建或激活 tab。两者不能混用。
 
+外部文件写入使用 `file-content-events` 的账号、后端、资料库和节点范围通知，由 FileViewerProvider 重新获取链接并更新匹配 tab 的 reloadToken；旧请求、已关闭 tab 或跨账号通知不能写回。目录树刷新不承担预览内容失效。文本 viewer 负责草稿保护及条件保存，详见 `docs/viewers/text-viewer.md`。
+
 3. `file-dispatcher`
 原因：它看起来像最适合“顺手加业务判断”的地方，但实际上应该保持纯分发。
 

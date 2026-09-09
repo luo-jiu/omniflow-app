@@ -770,6 +770,7 @@ export interface AgentToolExecutionCommit {
 }
 
 export interface AgentToolExecutionProgressRequest {
+  phase?: 'committing';
   executionId: string;
   libraryId: number;
   ownerScope: AgentOwnerScope;

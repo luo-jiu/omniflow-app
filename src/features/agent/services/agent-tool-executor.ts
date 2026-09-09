@@ -24,6 +24,7 @@ import { buildFileFullName } from '@/utils/fileTreeSettings';
 import { readAgentMediaError } from '@/shared/agent/agent-media-error';
 import { normalizeAgentLibraryDirectoryPath } from '@/shared/agent/agent-library-path';
 import { readAgentLibraryNode } from './agent-library.api';
+import { executeAgentFileWrite } from './agent-file-write';
 
 interface DirectoryCreateExecutionInput {
   conflictPolicy: 'error';
@@ -316,6 +317,7 @@ export async function executeAgentRendererTool(
   dependencies: AgentRendererToolExecutorDependencies = {},
 ): Promise<AgentRendererToolOutcome> {
   throwIfAborted(dependencies.signal);
+  if (request.toolName === 'file.write') return executeAgentFileWrite(request, dependencies);
   if (request.toolName === 'media.inspect') {
     return executeMediaInspect(request, dependencies);
   }

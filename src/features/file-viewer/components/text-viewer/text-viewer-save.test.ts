@@ -1,5 +1,23 @@
-import { describe, expect, it } from 'vitest';
-import { resolveTextSaveFeedback } from './text-viewer-save';
+import { describe, expect, it, vi } from 'vitest';
+import { resolveTextSaveFeedback, saveTextWithRevision, TextFileConflictError } from './text-viewer-save';
+import { createTextContentRevision } from './text-viewer-session';
+import { IpcRequestError } from '@/service/request/ipcRequest';
+
+describe('text editor conditional save', () => {
+  it('blocks an outdated buffer before writing and guards against changes after validation', async () => {
+    const deps = { detail: vi.fn(async () => ({ id: 9, libraryId: 3, type: 'file', storageKey: 'new' })) as any,
+      link: vi.fn(async () => 'test-url'), read: vi.fn(async () => 'new content'), update: vi.fn() };
+    const input = { nodeId: 9, libraryId: 3, content: 'edited', baseRevision: await createTextContentRevision('old content'), assertCurrent: vi.fn() };
+    await expect(saveTextWithRevision(input, deps)).rejects.toBeInstanceOf(TextFileConflictError);
+    expect(deps.update).not.toHaveBeenCalled();
+    input.baseRevision = await createTextContentRevision('new content');
+    deps.update.mockRejectedValueOnce(new IpcRequestError('conflict', 409));
+    await expect(saveTextWithRevision(input, deps)).rejects.toBeInstanceOf(TextFileConflictError);
+    expect(deps.update).toHaveBeenCalledWith(expect.objectContaining({ expectedStorageKey: 'new' }));
+    deps.update.mockResolvedValueOnce({ id: 9 });
+    await expect(saveTextWithRevision(input, deps)).resolves.toMatchObject({ savedNode: { id: 9 } });
+  });
+});
 
 describe('Text viewer save feedback', () => {
   it('does not claim follow-up edits were persisted when the draft flush failed', () => {
