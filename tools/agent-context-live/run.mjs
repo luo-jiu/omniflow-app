@@ -11,7 +11,8 @@ if (process.env.OMNIFLOW_CONTEXT_LIVE !== '1') {
 }
 const directory = await mkdtemp(path.join(tmpdir(), 'omniflow-context-live-'));
 try {
-  await build({ entryPoints: [fileURLToPath(new URL('./main.ts', import.meta.url))],
+  const entry = process.argv.includes('--transport-smoke') ? './transport-smoke.ts' : './main.ts';
+  await build({ entryPoints: [fileURLToPath(new URL(entry, import.meta.url))],
     bundle: true, platform: 'node', format: 'cjs', external: ['electron'],
     outfile: path.join(directory, 'main.cjs'), logLevel: 'warning' });
   const env = { ...process.env, OMNIFLOW_CONTEXT_TEST_DIR: directory };

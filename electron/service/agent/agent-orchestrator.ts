@@ -72,7 +72,7 @@ import { aiServiceRunSessionRegistry } from '../aiServiceRunSession';
 import { getAIServiceRuntimeProfile } from '../aiServiceStore';
 import { streamAgentProviderTurn } from './agent-provider-client';
 import { AGENT_COMPLETION_CHECK_PROMPT, shouldCheckAgentCompletion } from './agent-completion-check';
-import { canResumeInterruptedReadTurn, retryBufferedAgentTransport } from './agent-transport-retry';
+import { canResumeInterruptedReadTurn, retryBufferedAgentTransport, waitForAgentRetry } from './agent-transport-retry';
 import {
   AGENT_PROVIDER_TOOL_CALL_ID_MAX_LENGTH,
   type AgentProviderMessage,
@@ -2729,12 +2729,20 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       const usageLedger = createAgentContextUsageLedger(contextBudget, windowSource);
       if (contextProjection.droppedMessageCount > 0) usageLedger.compacted();
       const getProviderRequestLimit = usageLedger.requestLimit;
+      let completionReviewPending = false;
+      const reportRetry = async (attempt: number, maximum: number) => {
+        controller.signal.throwIfAborted();
+        await updateRunAndEmit(sender, store, sessionId, runId, {
+          currentStep: `正在重新连接 ${attempt}/${maximum}`, status: 'running', updatedAt: now(),
+        });
+      };
       const publishContextUsage = async (request: AgentContextRequest, phase: AgentContextUsageSnapshot['phase']) => {
         if (controller.signal.aborted) return;
         const updatedAt = now();
         await updateRunAndEmit(sender, store, sessionId, runId, {
           contextUsage: usageLedger.snapshot(request, phase, updatedAt),
-          currentStep: phase === 'before-request' ? '请求 AI 服务' : phase === 'after-response' ? '处理模型响应' : '准备工具续接',
+          currentStep: completionReviewPending ? '正在核对结果'
+            : phase === 'before-request' ? '请求 AI 服务' : phase === 'after-response' ? '处理模型响应' : '准备工具续接',
           status: 'running', updatedAt,
         });
       };
@@ -2812,7 +2820,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
             temperature: 0,
           }, () => undefined, runtimeConnection, controller.signal, {
             maxContentCharacters: AGENT_ACTIVE_CONTEXT_SUMMARY_MAX_CHARACTERS,
-          }), controller.signal);
+          }), controller.signal, undefined, reportRetry);
           return normalizeAgentActiveContextSummary(output);
         },
         toolResults: activeToolResults,
@@ -2835,9 +2843,12 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       };
 
       for (let round = 0; ; round += 1) {
+        const bufferTurn = completionReviewPending || shouldCheckAgentCompletion({
+          checked: completionChecked, completedToolCalls, pendingToolCalls: 0, nonReadToolAttempted,
+        });
         const roundCapabilityView = getProviderCapabilityView(activeSkillId);
         await updateRunAndEmit(sender, store, sessionId, runId, {
-          currentStep: round === 0 ? '请求 AI 服务' : '根据工具结果继续思考',
+          currentStep: completionReviewPending ? '正在核对结果' : round === 0 ? '请求 AI 服务' : '根据工具结果继续思考',
           status: 'running',
           updatedAt: now(),
         });
@@ -2885,21 +2896,15 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
           );
           await publishContextUsage(providerTurnInput, 'before-request');
           turn = await streamAgentProviderTurn(runtimeConnection, providerTurnInput, (delta) => {
-            appendAndEmitAssistantDelta(delta);
+            if (!bufferTurn) appendAndEmitAssistantDelta(delta);
           }, controller.signal, {
             maxAssistantContentCharacters: Math.min(
               MAX_ASSISTANT_TURN_CHARACTERS,
               providerMaxOutputTokens * 4,
             ),
           }, {
-            onRetry: async (attempt, maximum) => {
-              controller.signal.throwIfAborted();
-              await updateRunAndEmit(sender, store, sessionId, runId, {
-                currentStep: `正在重新连接 ${attempt}/${maximum}`,
-                status: 'running',
-                updatedAt: now(),
-              });
-            },
+            bufferOutput: bufferTurn,
+            onRetry: reportRetry,
           });
           usageLedger.observe(providerTurnInput, turn.usage);
         } catch (error) {
@@ -2917,6 +2922,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
             emit(sender, { type: 'assistant-item-finished', item, runId, sessionId });
             messages.push({ role: 'assistant', content: partial.content + notice }, { role: 'user', content:
               '[OmniFlow runtime recovery] 上一轮模型输出连接中断，未完成的工具参数已丢弃且没有执行。已有成功工具结果仍有效。请继续原任务，不重复此前成功操作，不把中断片段当作已验证事实；当前权限不变。' });
+            await waitForAgentRetry(interruptedReadContinuations, controller.signal, { maximum: 2, onRetry: reportRetry });
             continue;
           }
           if (
@@ -2974,9 +2980,22 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         await publishContextUsage({ messages, systemPrompt: buildAgentSystemPrompt(input.appContext, currentPerception,
           roundCapabilityView.capabilities, skillSummaries, omittedSkillCount, modelAdapter),
           tools: roundCapabilityView.providerTools }, 'after-response');
+        controller.signal.throwIfAborted();
         const checkCompletion = shouldCheckAgentCompletion({
           checked: completionChecked, completedToolCalls, pendingToolCalls: toolCalls.length, nonReadToolAttempted,
         });
+        if (bufferTurn) {
+          if (checkCompletion) {
+            // Keep the candidate in model context only; its empty display item closes below.
+            if (turn.content.length > MAX_ASSISTANT_RUN_CHARACTERS - assistantRunCharacterCount) {
+              throw new AIServiceStreamLimitError('Agent 单次运行回答', MAX_ASSISTANT_RUN_CHARACTERS);
+            }
+            assistantRunCharacterCount += turn.content.length;
+          } else {
+            appendAndEmitAssistantDelta(turn.content);
+          }
+        }
+        completionReviewPending = false;
         if (toolCalls.length === 0 && !checkCompletion) {
           break;
         }
@@ -2997,6 +3016,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         });
         if (checkCompletion) {
           completionChecked = true;
+          completionReviewPending = true;
           messages.push({ role: 'user', content: AGENT_COMPLETION_CHECK_PROMPT });
           continue;
         }
@@ -3394,6 +3414,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       if (!activeAssistantWriter) {
         throw new Error('Agent 最终回答缺少 assistant item');
       }
+      controller.signal.throwIfAborted();
       const finalItem = activeAssistantWriter.close();
       const finishedAt = now();
       const completedResult = await store.finishRunWithAssistantFinal({

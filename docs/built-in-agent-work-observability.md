@@ -634,6 +634,8 @@ Reasoning summary 属于 Phase 2：
 
 ### Phase 2：Provider reasoning summary
 
+阶段收尾补充：长只读任务候选结尾和核对响应在main有界缓冲，候选正文不发送delta、不持久化为可见消息；对应空item按现有规则隐藏，只有核对后的正式回答或继续工具的过程说明被发布。当前核对状态与重连次数来自Run currentStep，不构造额外的renderer消息历史，也不代表reasoning summary。
+
 - 增加支持 Responses API 的 Provider adapter。
 - 显式请求并规范化 reasoning summary 生命周期。
 - 单独评审持久化、隐私和 UI 折叠策略。

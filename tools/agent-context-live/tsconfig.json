@@ -1,5 +1,5 @@
 {
   "extends": "../../tsconfig.json",
-  "include": ["./main.ts"],
+  "include": ["./main.ts", "./transport-smoke.ts"],
   "references": []
 }

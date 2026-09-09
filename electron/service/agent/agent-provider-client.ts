@@ -1,5 +1,5 @@
 import { net } from 'electron';
-import { isTransientAgentTransportError } from './agent-transport-retry';
+import { AGENT_REQUEST_MAX_RETRIES, isTransientAgentTransportError, parseAgentRetryAfter, waitForAgentRetry } from './agent-transport-retry';
 
 import {
   extractAIServiceErrorMessage,
@@ -29,6 +29,7 @@ export interface AgentProviderTurnResult {
 export type AgentProviderErrorKind = 'context_window_exceeded' | 'provider_error';
 
 interface AgentProviderErrorOptions {
+  retryAfterMs?: number;
   code?: string;
   kind: AgentProviderErrorKind;
   status?: number;
@@ -36,6 +37,7 @@ interface AgentProviderErrorOptions {
 }
 
 export class AgentProviderError extends Error {
+  readonly retryAfterMs?: number;
   readonly code?: string;
   readonly kind: AgentProviderErrorKind;
   readonly status?: number;
@@ -45,6 +47,7 @@ export class AgentProviderError extends Error {
     super(message);
     this.name = 'AgentProviderError';
     this.kind = options.kind;
+    this.retryAfterMs = options.retryAfterMs;
     if (options.code !== undefined) this.code = options.code;
     if (options.status !== undefined) this.status = options.status;
     if (options.type !== undefined) this.type = options.type;
@@ -75,6 +78,7 @@ function isExplicitClaudeContextWindowMessage(message: string): boolean {
 }
 
 function createAgentProviderError(input: {
+  retryAfterMs?: number;
   body: unknown;
   fallbackMessage: string;
   providerType: AIServiceRuntimeConnection['providerType'];
@@ -91,6 +95,7 @@ function createAgentProviderError(input: {
     ? type === 'invalid_request_error' && isExplicitClaudeContextWindowMessage(message)
     : code === 'context_length_exceeded';
   return new AgentProviderError(message, {
+    retryAfterMs: input.retryAfterMs,
     ...(code ? { code } : {}),
     kind: contextWindowExceeded ? 'context_window_exceeded' : 'provider_error',
     ...(input.status === undefined ? {} : { status: input.status }),
@@ -152,6 +157,7 @@ async function streamAgentProviderTurnOnce(
       fallbackMessage: 'Agent 请求失败',
       providerType: profile.providerType,
       status: response.status,
+      retryAfterMs: parseAgentRetryAfter(response.headers.get('retry-after')),
     });
   }
   if (!response.body) throw new Error('AI 服务未返回流式响应');
@@ -261,10 +267,11 @@ async function streamAgentProviderTurnOnce(
 }
 
 interface AgentProviderRequestPolicy {
+  bufferOutput?: boolean;
   idleTimeoutMs?: number;
   retryDelayMs?: number;
   maxRetries?: number;
-  onRetry?: (attempt: number, maxRetries: number) => void | Promise<void>;
+  onRetry?: (attempt: number, maxRetries: number, waitMs: number) => void | Promise<void>;
 }
 
 export async function streamAgentProviderTurn(
@@ -276,7 +283,8 @@ export async function streamAgentProviderTurn(
   policy: AgentProviderRequestPolicy = {},
 ): Promise<AgentProviderTurnResult> {
   let emittedContent = false;
-  const maxRetries = policy.maxRetries ?? 2;
+  const maxRetries = Number.isSafeInteger(policy.maxRetries) && Number(policy.maxRetries) >= 0
+    ? Math.min(Number(policy.maxRetries), AGENT_REQUEST_MAX_RETRIES) : AGENT_REQUEST_MAX_RETRIES;
   for (let attempt = 0; ; attempt += 1) {
     signal.throwIfAborted();
     const controller = new AbortController();
@@ -292,8 +300,10 @@ export async function streamAgentProviderTurn(
     let failure: unknown;
     try {
       return await streamAgentProviderTurnOnce(profile, input, delta => {
-        emittedContent = true;
-        onDelta(delta);
+        if (!policy.bufferOutput) {
+          emittedContent = true;
+          onDelta(delta);
+        }
       }, controller.signal, limits, resetIdle);
     } catch (error) {
       if (signal.aborted) throw signal.reason;
@@ -311,20 +321,9 @@ export async function streamAgentProviderTurn(
       );
     // Never replay a partially displayed turn or any Tool execution.
     if (!retryable || emittedContent || attempt >= maxRetries) throw failure;
-    await policy.onRetry?.(attempt + 1, maxRetries);
-    signal.throwIfAborted();
-    await new Promise<void>((resolve, reject) => {
-      const cancel = () => {
-        clearTimeout(delay);
-        signal.removeEventListener('abort', cancel);
-        reject(signal.reason);
-      };
-      const delay = setTimeout(() => {
-        signal.removeEventListener('abort', cancel);
-        resolve();
-      }, (policy.retryDelayMs ?? 500) * 2 ** attempt);
-      signal.addEventListener('abort', cancel, { once: true });
-      if (signal.aborted) cancel();
+    await waitForAgentRetry(attempt + 1, signal, {
+      delayMs: policy.retryDelayMs, maximum: maxRetries, onRetry: policy.onRetry,
+      retryAfterMs: failure instanceof AgentProviderError ? failure.retryAfterMs : undefined,
     });
   }
 }

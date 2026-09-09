@@ -16,6 +16,11 @@ const message: AgentAssistantItemSnapshot = {
 };
 
 describe('Agent live status', () => {
+  it('shows runtime verification and reconnection without leaking candidate text', () => {
+    expect(selectAgentLiveStatus([{ ...run, currentStep: '正在核对结果' }], [], [])?.label).toBe('正在核对结果');
+    expect(selectAgentLiveStatus([{ ...run, currentStep: '正在重新连接 2/5' }], [], [])?.label).toBe('正在重新连接 2/5');
+    expect(selectAgentLiveStatus([{ ...run, currentStep: '正在重新连接 2/5' }], [message], [])).toBeNull();
+  });
   it('shows compaction from main state, even before an empty provider turn', () => {
     expect(selectAgentLiveStatus([{ ...run, currentStep: '整理当前任务上下文' }], [message], []))
       .toEqual({ runId: 'r', kind: 'compaction', label: '正在压缩上下文' });

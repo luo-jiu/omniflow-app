@@ -45,7 +45,7 @@ describe('Agent provider client', () => {
         .resolves.toMatchObject({ content: 'ok' });
       expect(mocks.fetch).toHaveBeenCalledTimes(2);
       expect(mocks.fetch.mock.calls[0][1].body).toBe(mocks.fetch.mock.calls[1][1].body);
-      expect(retry).toHaveBeenCalledWith(1, 2);
+      expect(retry).toHaveBeenCalledWith(1, 5, 0);
     },
   );
   it('bounds transport retries and does not retry certificate or unknown errors', async () => {
@@ -53,7 +53,7 @@ describe('Agent provider client', () => {
     mocks.fetch.mockRejectedValue(new Error('net::ERR_CONNECTION_CLOSED'));
     await expect(streamAgentProviderTurn(profile, providerTurnInput, vi.fn(), new AbortController().signal,
       undefined, { retryDelayMs: 0 })).rejects.toThrow('net::ERR_CONNECTION_CLOSED');
-    expect(mocks.fetch).toHaveBeenCalledTimes(3);
+    expect(mocks.fetch).toHaveBeenCalledTimes(6);
     for (const message of ['net::ERR_CERT_AUTHORITY_INVALID', 'unexpected parser failure']) {
       mocks.fetch.mockReset().mockRejectedValue(new Error(message));
       await expect(streamAgentProviderTurn(profile, providerTurnInput, vi.fn(), new AbortController().signal,
@@ -77,6 +77,28 @@ describe('Agent provider client', () => {
   });
   beforeEach(() => {
     mocks.fetch.mockReset();
+  });
+
+  it('keeps buffered candidate deltas private and retries discarded partial content', async () => {
+    const event = (text: string, finish?: string) => `data: ${JSON.stringify({ choices: [{ delta: { content: text }, finish_reason: finish }] })}\n\n`;
+    let chunks = 0;
+    mocks.fetch.mockResolvedValueOnce(new Response(new ReadableStream({ pull(controller) {
+      if (chunks++ === 0) controller.enqueue(new TextEncoder().encode(event('wrong candidate')));
+      else controller.error(new Error('net::ERR_CONNECTION_CLOSED'));
+    } }))).mockResolvedValueOnce(new Response(event('checked answer', 'stop')));
+    const onDelta = vi.fn();
+    const output = await streamAgentProviderTurn({ apiKey: '', baseUrl: 'https://example.com', providerType: 'openai' },
+      providerTurnInput, onDelta, new AbortController().signal, undefined, { bufferOutput: true, retryDelayMs: 0 });
+    expect(output.content).toBe('checked answer');
+    expect(onDelta).not.toHaveBeenCalled();
+    expect(mocks.fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('preserves a bounded Retry-After value on HTTP errors', async () => {
+    mocks.fetch.mockResolvedValueOnce(new Response('busy', { status: 429, headers: { 'Retry-After': '25' } }));
+    await expect(streamAgentProviderTurn({ apiKey: '', baseUrl: 'https://example.com', providerType: 'openai' },
+      providerTurnInput, vi.fn(), new AbortController().signal, undefined, { maxRetries: 0 }))
+      .rejects.toMatchObject({ retryAfterMs: 25000, status: 429 });
   });
 
   it('preserves Chinese text when UTF-8 code points cross response chunks', async () => {

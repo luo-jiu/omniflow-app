@@ -1,5 +1,32 @@
 import { setTimeout as delay } from 'node:timers/promises';
 
+export const AGENT_REQUEST_MAX_RETRIES = 5;
+export const AGENT_RETRY_MAX_DELAY_MS = 60_000;
+
+export function agentRetryDelayMs(attempt: number, retryAfterMs?: number, random = Math.random()): number {
+  const base = Math.min(AGENT_RETRY_MAX_DELAY_MS, 5_000 * 2 ** Math.max(0, attempt - 1));
+  const jittered = Math.round(base * (0.9 + Math.max(0, Math.min(1, random)) * 0.2));
+  return Math.min(AGENT_RETRY_MAX_DELAY_MS, Math.max(jittered, retryAfterMs ?? 0));
+}
+
+export function parseAgentRetryAfter(value: string | null, now = Date.now()): number | undefined {
+  if (!value?.trim()) return undefined;
+  const raw = value.trim();
+  const ms = /^-?\d+(?:\.\d+)?$/u.test(raw) ? Number(raw) * 1000 : Date.parse(raw) - now;
+  return Number.isFinite(ms) && ms >= 0 ? Math.min(ms, AGENT_RETRY_MAX_DELAY_MS) : undefined;
+}
+
+export async function waitForAgentRetry(attempt: number, signal: AbortSignal, options: {
+  delayMs?: number; retryAfterMs?: number; onRetry?: (attempt: number, maximum: number, waitMs: number) => void | Promise<void>;
+  maximum?: number;
+} = {}): Promise<void> {
+  signal.throwIfAborted();
+  const waitMs = options.delayMs === undefined ? agentRetryDelayMs(attempt, options.retryAfterMs) : options.delayMs * 2 ** (attempt - 1);
+  await options.onRetry?.(attempt, options.maximum ?? AGENT_REQUEST_MAX_RETRIES, waitMs);
+  signal.throwIfAborted();
+  await delay(waitMs, undefined, { signal });
+}
+
 export function isTransientAgentTransportError(error: unknown): boolean {
   if (error instanceof TypeError && ['fetch failed', 'Failed to fetch', 'NetworkError when attempting to fetch resource.'].includes(error.message)) return true;
   if (!(error instanceof Error)) return false;
@@ -18,14 +45,15 @@ export function canResumeInterruptedReadTurn(input: {
 }
 
 // Only for fully buffered, side-effect-free model requests such as summaries.
-export async function retryBufferedAgentTransport<T>(request: () => Promise<T>, signal: AbortSignal, delayMs = 500): Promise<T> {
+export async function retryBufferedAgentTransport<T>(request: () => Promise<T>, signal: AbortSignal, delayMs?: number,
+  onRetry?: (attempt: number, maximum: number, waitMs: number) => void | Promise<void>): Promise<T> {
   for (let attempt = 0; ; attempt += 1) {
     signal.throwIfAborted();
     try { return await request(); }
     catch (error) {
       signal.throwIfAborted();
-      if (attempt >= 2 || !isTransientAgentTransportError(error)) throw error;
-      await delay(delayMs * 2 ** attempt, undefined, { signal });
+      if (attempt >= AGENT_REQUEST_MAX_RETRIES || !isTransientAgentTransportError(error)) throw error;
+      await waitForAgentRetry(attempt + 1, signal, { delayMs, onRetry });
     }
   }
 }
