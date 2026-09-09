@@ -630,6 +630,8 @@ Reasoning summary 属于 Phase 2：
 
 完成标准：刷新、卸载返回、重复事件和迟到事件都不产生重复卡片、空白气泡或内容跳位。
 
+当前补充：时间线末尾现在通过 `agent-live-status.ts` 从规范快照派生无框单行状态；活跃工具标题和压缩/等待状态使用 `AgentActivityText` 灰字扫光，不重建 Workflow 或 Active Run Dock。commentary 复用受限 Markdown，不加整段复制按钮、不做整段闪动；详细生命周期和待验收项见 UI 契约。该能力不是下面的 Provider reasoning summary。
+
 ### Phase 2：Provider reasoning summary
 
 - 增加支持 Responses API 的 Provider adapter。

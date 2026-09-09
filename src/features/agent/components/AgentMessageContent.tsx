@@ -52,14 +52,14 @@ const components: React.ComponentProps<typeof Markdown>['components'] = {
   </div>,
 };
 
-const AgentMessageContent = React.memo(function AgentMessageContent({ content }: { content: string }) {
+const AgentMessageContent = React.memo(function AgentMessageContent({ content, showCopy = true }: { content: string; showCopy?: boolean }) {
   return <Content>
     <Markdown skipHtml remarkPlugins={[remarkGfm]} components={components}
       allowedElements={['p', 'br', 'hr', 'strong', 'em', 'del', 'blockquote', 'ul', 'ol', 'li',
         'pre', 'code', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'a', 'img']}>
       {content}
     </Markdown>
-    <CopyButton text={content} label="复制回答" />
+    {showCopy ? <CopyButton text={content} label="复制回答" /> : null}
   </Content>;
 });
 

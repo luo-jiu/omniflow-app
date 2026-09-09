@@ -1,4 +1,5 @@
 import { net } from 'electron';
+import { isTransientAgentTransportError } from './agent-transport-retry';
 
 import {
   extractAIServiceErrorMessage,
@@ -263,6 +264,7 @@ interface AgentProviderRequestPolicy {
   idleTimeoutMs?: number;
   retryDelayMs?: number;
   maxRetries?: number;
+  onRetry?: (attempt: number, maxRetries: number) => void | Promise<void>;
 }
 
 export async function streamAgentProviderTurn(
@@ -302,13 +304,15 @@ export async function streamAgentProviderTurn(
       clearTimeout(timer!);
       signal.removeEventListener('abort', abort);
     }
-    const retryable = failure instanceof TypeError
+    const retryable = (!(failure instanceof AgentProviderError) && isTransientAgentTransportError(failure))
       || failure instanceof AgentProviderError && (
         ['stream_incomplete', 'request_timeout'].includes(failure.code || '')
         || [408, 429, 500, 502, 503, 504].includes(failure.status || 0)
       );
     // Never replay a partially displayed turn or any Tool execution.
     if (!retryable || emittedContent || attempt >= maxRetries) throw failure;
+    await policy.onRetry?.(attempt + 1, maxRetries);
+    signal.throwIfAborted();
     await new Promise<void>((resolve, reject) => {
       const cancel = () => {
         clearTimeout(delay);

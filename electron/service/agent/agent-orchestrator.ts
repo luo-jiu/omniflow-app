@@ -71,6 +71,8 @@ import {
 import { aiServiceRunSessionRegistry } from '../aiServiceRunSession';
 import { getAIServiceRuntimeProfile } from '../aiServiceStore';
 import { streamAgentProviderTurn } from './agent-provider-client';
+import { AGENT_COMPLETION_CHECK_PROMPT, shouldCheckAgentCompletion } from './agent-completion-check';
+import { canResumeInterruptedReadTurn, retryBufferedAgentTransport } from './agent-transport-retry';
 import {
   AGENT_PROVIDER_TOOL_CALL_ID_MAX_LENGTH,
   type AgentProviderMessage,
@@ -1908,6 +1910,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     activeSkillId: string | undefined,
     aiDestination: AgentToolMainAiDestinationSnapshot,
     onPerception: (next: AgentChatRequest['perception']) => void,
+    readOutputTokenBudget?: number,
   ): Promise<AgentToolResult> {
     const tool = capabilitySnapshot.getTool(call.name, activeSkillId);
     const registeredTool = capabilitySnapshot.toolSnapshot.get(call.name);
@@ -1956,6 +1959,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       });
     };
     const executionContext: AgentToolExecutionContext = {
+      readOutputTokenBudget,
       ...(options.readLibraryText ? { readLibraryText: (nodeId: number, requestSignal: AbortSignal) =>
         options.readLibraryText!({ sender, libraryId: Number(input.appContext.libraryId),
           ownerScope: input.ownerScope, sessionId, runId, toolRunId, signal: requestSignal,
@@ -2765,6 +2769,16 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         requestTokenLimit: number;
       }) => compactAgentActiveContextToFit({
         ...fitInput,
+        canSummarizeCandidate: candidate => {
+          try {
+            const payload = buildAgentActiveContextSummaryPayload({ candidate, userPrompt: input.userPrompt });
+            return estimateAgentProviderTurnTokens({
+              messages: [{ content: payload, role: 'user' }],
+              systemPrompt: AGENT_ACTIVE_CONTEXT_SUMMARY_SYSTEM_PROMPT,
+              tools: [],
+            }) + AGENT_ACTIVE_CONTEXT_SUMMARY_MAX_OUTPUT_TOKENS <= contextBudget.contextWindowTokens;
+          } catch { return false; }
+        },
         onCompacted: () => usageLedger.compacted(),
         messages,
         summarize: async (candidate) => {
@@ -2788,7 +2802,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
             status: 'running',
             updatedAt: now(),
           });
-          const output = await streamAIServiceProfile({
+          const output = await retryBufferedAgentTransport(() => streamAIServiceProfile({
             maxOutputTokens: AGENT_ACTIVE_CONTEXT_SUMMARY_MAX_OUTPUT_TOKENS,
             messages: [{ content: payload, role: 'user' }],
             model: input.model,
@@ -2798,12 +2812,16 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
             temperature: 0,
           }, () => undefined, runtimeConnection, controller.signal, {
             maxContentCharacters: AGENT_ACTIVE_CONTEXT_SUMMARY_MAX_CHARACTERS,
-          });
+          }), controller.signal);
           return normalizeAgentActiveContextSummary(output);
         },
         toolResults: activeToolResults,
       });
       const recentToolTurnProgressHashes: string[] = [];
+      let completedToolCalls = 0;
+      let completionChecked = false;
+      let interruptedReadContinuations = 0;
+      let nonReadToolAttempted = false;
       const assertToolTurnMadeProgress = (entries: AgentToolTurnProgressEntry[]) => {
         recentToolTurnProgressHashes.push(hashAgentToolTurnProgress(entries));
         if (recentToolTurnProgressHashes.length > AGENT_TOOL_PROGRESS_HISTORY_LIMIT) {
@@ -2873,9 +2891,34 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
               MAX_ASSISTANT_TURN_CHARACTERS,
               providerMaxOutputTokens * 4,
             ),
+          }, {
+            onRetry: async (attempt, maximum) => {
+              controller.signal.throwIfAborted();
+              await updateRunAndEmit(sender, store, sessionId, runId, {
+                currentStep: `正在重新连接 ${attempt}/${maximum}`,
+                status: 'running',
+                updatedAt: now(),
+              });
+            },
           });
           usageLedger.observe(providerTurnInput, turn.usage);
         } catch (error) {
+          if (canResumeInterruptedReadTurn({ error, aborted: controller.signal.aborted, nonReadToolAttempted,
+            recoveries: interruptedReadContinuations, hasPartialContent: assistantRunCharacterCount > characterCountBeforeTurn })) {
+            interruptedReadContinuations += 1;
+            const partial = activeAssistantWriter.close();
+            const notice = '\n\n[本段模型响应因连接中断而未完成，运行时正在续接；本段未执行任何新工具。]';
+            const item = await store.finishAssistantCommentary({
+              id: partial.id, expectedRevision: partial.expectedRevision,
+              content: partial.content + notice, now: now(),
+            });
+            activeAssistantWriter = null;
+            exposeActiveAssistantWriter(null);
+            emit(sender, { type: 'assistant-item-finished', item, runId, sessionId });
+            messages.push({ role: 'assistant', content: partial.content + notice }, { role: 'user', content:
+              '[OmniFlow runtime recovery] 上一轮模型输出连接中断，未完成的工具参数已丢弃且没有执行。已有成功工具结果仍有效。请继续原任务，不重复此前成功操作，不把中断片段当作已验证事实；当前权限不变。' });
+            continue;
+          }
           if (
             round !== 0
             || assistantRunCharacterCount !== characterCountBeforeTurn
@@ -2931,7 +2974,10 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         await publishContextUsage({ messages, systemPrompt: buildAgentSystemPrompt(input.appContext, currentPerception,
           roundCapabilityView.capabilities, skillSummaries, omittedSkillCount, modelAdapter),
           tools: roundCapabilityView.providerTools }, 'after-response');
-        if (toolCalls.length === 0) {
+        const checkCompletion = shouldCheckAgentCompletion({
+          checked: completionChecked, completedToolCalls, pendingToolCalls: toolCalls.length, nonReadToolAttempted,
+        });
+        if (toolCalls.length === 0 && !checkCompletion) {
           break;
         }
         const commentary = activeAssistantWriter.close();
@@ -2949,6 +2995,11 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
           sessionId,
           type: 'assistant-item-finished',
         });
+        if (checkCompletion) {
+          completionChecked = true;
+          messages.push({ role: 'user', content: AGENT_COMPLETION_CHECK_PROMPT });
+          continue;
+        }
         const activationCalls = toolCalls.filter(
           call => call.name === AGENT_SKILL_ACTIVATE_TOOL_NAME,
         );
@@ -3183,6 +3234,8 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
             }
           }
 
+          if (call.name !== AGENT_PLAN_CONTROL_TOOL_NAME
+            && capabilitySnapshot.getTool(call.name, activeSkillId)?.risk !== 'read') nonReadToolAttempted = true;
           const result = call.name === AGENT_PLAN_CONTROL_TOOL_NAME
             ? await executePlanControlCall(
                 sender,
@@ -3218,6 +3271,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
                       .map(node => [node.id, node])).values()).slice(-500),
                   } : currentPerception;
                 },
+                Math.min(10_000, Math.max(1, getProviderRequestLimit() - preExecutionMinimumTokens)),
               );
           toolTurnProgress.push({
             input: call.input,
@@ -3330,6 +3384,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
             toolName: call.name,
             toolResults: activeToolResults,
           });
+          if (result.ok) completedToolCalls += 1;
           await publishContextUsage({ messages, systemPrompt: currentSystemPrompt,
             tools: continuationCapabilityView.providerTools }, 'after-tool');
         }

@@ -114,7 +114,7 @@ function agentFileRoutingPrompt(capabilities: readonly string[]): string {
     rules.push(`名称或位置不明确时使用 ${providerToolName('file.search')} 搜索元数据；已给出 /音乐 这样的完整路径时，可以直接按 path 列目录或读文件，不要固定串联 search、resolve、stat。只有确实需要节点 ID 时才使用 ${providerToolName('file.resolve')}。查询发现的节点可继续交给文件和媒体工具，未知历史 ID 先用 ${providerToolName('file.stat')} 重新确认。`);
   }
   if (available.has('file.read')) {
-    rules.push(`${providerToolName('file.read')} 读取正文，file.stat 只读取元数据。文件工具默认 scope=library，明确本机资源使用 scope=host 和本机绝对路径；两者使用相同的路径、分页和读取范围语义。正文 offset/column 从 1 开始；hasMore=true 时使用 nextOffset、nextColumn 和 revision 续读，不能当作读完。默认一次读取 200 行，最多 2000 行，但输出预算可能提前结束一页。不要把二进制或 PDF 当 UTF-8；本机复杂管道仍可使用 Shell。目录和名称搜索默认 50、最多 100 条，不是正文搜索，也不把 | 当作管道。`);
+    rules.push(`${providerToolName('file.read')} 读取正文，file.stat 只读取元数据。文件工具默认 scope=library，明确本机资源使用 scope=host 和本机绝对路径。正文 offset/column 从1开始；不指定 limit 时尽量读到末尾，只在主动限定行数或达到输出预算时分段。默认输出10000 tokens，并受剩余上下文限制。content 为带行号文本；hasMore=true 时使用 nextOffset、nextColumn 和 revision 续读，不能当作读完。不要机械地先读一行、再逐行读取。不要把二进制或 PDF 当 UTF-8；本机复杂管道仍可使用 Shell。目录搜索默认50、最多100条，不是正文搜索，也不把 | 当作管道。`);
   }
   if (available.has('file.grep')) {
     rules.push(`${providerToolName('file.grep')} 搜索正文，pattern 是单行字面文本，默认区分大小写；文件名过滤使用 glob，支持 *、**、?、字符集，含 / 时相对 path 根匹配，不含 / 时匹配任意层级 basename，内外一致。正文结果包含路径、行号、上下文和 revision，命中按行计数。hasMore 时原条件携带 nextCursor 续搜；complete=false 或 skippedFiles>0 不能下“没有匹配”的完整结论。单个文本优先直接 file.read，正文定位优先 file.grep；本机大范围或复杂正则、管道再用 Shell，不必先把内部文件导出。`);

@@ -117,12 +117,22 @@ export function buildAgentToolSummary(activity: AgentToolActivitySnapshot, libra
   action?: Extract<import('@/shared/agent/agent.types').AgentPresentationAction, { action: 'tree.revealNode' }>;
 } {
   const data = asRecord(activity.result?.data);
+  if (activity.status === 'running' || activity.status === 'preparing') {
+    const path = textValue(asRecord(activity.call.input)?.path);
+    return { label: activity.call.name === 'file.read'
+      ? (activity.status === 'running' ? '正在读取' : '准备读取')
+      : `${activity.status === 'running' ? '正在' : '准备'}${getAgentToolTitle(activity)}`,
+    ...(activity.call.name === 'file.read' ? { subject: path.replace(/\\/g, '/').split('/').pop() || undefined } : {}) };
+  }
   if (activity.status !== 'completed') return { label: getAgentToolTitle(activity) };
   if (activity.call.name === 'file.grep') return {
-    label: data?.hasMore ? '已搜索正文 · 可继续' : data?.complete === false ? '已搜索正文 · 结果不完整' : '已搜索正文',
+    label: data?.complete === false && !data?.hasMore ? '已搜索正文 · 结果不完整' : '已搜索正文',
     subject: textValue(data?.path) || undefined,
   };
-  if (activity.call.name === 'file.read') return { label: data?.hasMore ? '已读取正文 · 可继续' : '已读取正文', subject: textValue(data?.path) || undefined };
+  if (activity.call.name === 'file.read') {
+    const path = textValue(data?.fileName) || textValue(data?.path) || textValue(asRecord(activity.call.input)?.path);
+    return { label: '已读取', subject: path?.replace(/\\/g, '/').split('/').pop() || undefined };
+  }
   if (data?.scope === 'host') {
     const node = asRecord(data.node) || asRecord(data.directory);
     return { label: '已读取本机', subject: textValue(node?.path) || undefined };

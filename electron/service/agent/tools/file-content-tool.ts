@@ -1,5 +1,7 @@
 import type { AgentTool, AgentToolExecutionContext, AgentToolPermissionDecision } from '../agent-tool-registry';
-import { AGENT_TEXT_MAX_BYTES, sliceAgentText, type AgentTextReadQuery } from '../agent-text-reader';
+import { AGENT_TEXT_MAX_BYTES, AGENT_READ_DEFAULT_OUTPUT_TOKENS, AGENT_READ_OUTPUT_MAX_BYTES,
+  decodeAgentText, sliceDecodedAgentText, type AgentTextReadQuery } from '../agent-text-reader';
+import { projectAgentToolResultForProvider } from '../agent-tool-result-projection';
 import { openAgentLocalFile, verifyOpenedAgentLocalFileUnchanged } from './agent-local-file';
 
 export function assessFileScope(input: unknown, context: AgentToolExecutionContext): AgentToolPermissionDecision {
@@ -45,18 +47,43 @@ export async function readAgentFileBytes(query: Pick<AgentTextReadQuery, 'scope'
 export const fileContentTool: AgentTool = {
   name: 'file.read', risk: 'read', timeoutMs: 30_000,
   presentation: { groupKind: 'resource-read', operationKind: 'stat' },
-  description: '按行读取 UTF-8 文本正文（最多 8 MiB），不是元数据。scope 默认 library；host 明确读取本机。直接提供路径，无需先 resolve/stat。offset 和 column 从 1 开始，column 按 Unicode 字符计数；默认 200 行、最多 2000 行。结果有行号、revision、hasMore；续读原路径并传 nextOffset/nextColumn/revision，长行也不会跳过。不能读取二进制、PDF 或媒体正文。',
+  description: '读取 UTF-8 正文（源文件最多8MiB），scope 默认 library，host 明确读取本机。直接给路径，不必先 resolve/stat。省略 limit 从 offset 读到文件末尾，只有输出预算不足才分段；limit 是主动选择的行数，没有200/2000行限制。默认输出10000 tokens，受当前上下文和运行时策略约束。content 为带行号文本；offset/column 从1开始，column 按Unicode字符计数；hasMore 时用 nextOffset/nextColumn/revision 续读。不读取PDF或二进制正文。',
   inputSchema: { type: 'object', additionalProperties: false, required: ['path'], properties: {
     scope: { type: 'string', enum: ['library', 'host'] },
     path: { type: 'string', minLength: 1, maxLength: 2048 },
     offset: { type: 'integer', minimum: 1 }, column: { type: 'integer', minimum: 1 },
-    limit: { type: 'integer', minimum: 1, maximum: 2000 },
+    limit: { type: 'integer', minimum: 1 },
+    maxOutputTokens: { type: 'integer', minimum: 1, maximum: AGENT_READ_OUTPUT_MAX_BYTES / 4,
+      description: '输出 token 预算，默认10000；更大请求仍受模型策略和剩余上下文限制。' },
     revision: { type: 'string', pattern: '^[a-f0-9]{64}$' },
   } },
   assess: assessFileScope,
   async execute(input, context) {
     const query = input as AgentTextReadQuery;
     const bytes = await readAgentFileBytes(query, context);
-    return { ok: true, data: sliceAgentText(bytes, query), message: `已读取 ${query.path} 的正文` };
+    const decoded = decodeAgentText(bytes);
+    const requested = query.maxOutputTokens ?? AGENT_READ_DEFAULT_OUTPUT_TOKENS;
+    if (!Number.isSafeInteger(requested) || requested < 1) throw new Error('输出预算无效');
+    const budget = Math.min(requested, context.readOutputTokenBudget ?? AGENT_READ_DEFAULT_OUTPUT_TOKENS);
+    let low = 0, high = Math.min(AGENT_READ_OUTPUT_MAX_BYTES, budget * 4);
+    const maximumBytes = high;
+    let firstAttempt = true;
+    const fileName = query.path.replace(/\\/g, '/').split('/').pop() || query.path;
+    let best: Awaited<ReturnType<NonNullable<AgentTool['execute']>>> | undefined;
+    // Pack the actual result envelope, not per-line JSON, into the provider budget.
+    while (low <= high) {
+      const size = firstAttempt ? high : Math.floor((low + high) / 2);
+      firstAttempt = false;
+      const { lines, ...data } = sliceDecodedAgentText(decoded, query, size);
+      const result = { ok: true, data: { ...data, fileName }, message: `已读取 ${fileName}` };
+      const fits = !projectAgentToolResultForProvider(result, budget).truncated;
+      if (fits && (lines.length || decoded.lines.length === 0)) {
+        best = result;
+        if (size === maximumBytes) break;
+        low = size + 1;
+      } else high = size - 1;
+    }
+    if (!best) throw new Error('当前上下文不足以交付正文，请缩小请求或整理上下文');
+    return best;
   },
 };

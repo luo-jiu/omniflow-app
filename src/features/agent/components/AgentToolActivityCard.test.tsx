@@ -10,11 +10,11 @@ import type {
 import type { AgentShellLogPageV1 } from '@/shared/agent/shell/agent-shell.types';
 import { readAgentShellLogPage } from '../services/agent.api';
 import AgentToolActivityCard from './AgentToolActivityCard';
+import AgentActivityText from './AgentActivityText';
 
 vi.mock('@douyinfe/semi-icons', () => ({
   IconAlertCircle: () => null,
-  IconChevronDown: () => null,
-  IconChevronRight: () => null,
+  IconChevronRightStroked: () => null,
   IconFile: () => null,
   IconFolder: () => null,
   IconSpin: () => null,
@@ -124,10 +124,11 @@ function logPage(overrides: Partial<AgentShellLogPageV1> = {}): AgentShellLogPag
 function renderCard(
   activity: AgentToolActivitySnapshot,
   ownerScope: AgentOwnerScope | null = OWNER_SCOPE,
+  onExpand?: () => void,
 ) {
   let renderer!: TestRenderer.ReactTestRenderer;
   act(() => {
-    renderer = TestRenderer.create(cardElement(activity, ownerScope));
+    renderer = TestRenderer.create(cardElement(activity, ownerScope, 3, onExpand));
   });
   renderers.push(renderer);
   return renderer;
@@ -137,12 +138,14 @@ function cardElement(
   activity: AgentToolActivitySnapshot,
   ownerScope: AgentOwnerScope | null = OWNER_SCOPE,
   libraryId = 3,
+  onExpand?: () => void,
 ) {
   return React.createElement(AgentToolActivityCard, {
     activity,
     approvalBusy: false,
     interactionBusy: false,
     libraryId,
+    onExpand,
     onResolveApproval: vi.fn(),
     ownerScope,
   });
@@ -162,8 +165,39 @@ afterEach(() => {
 });
 
 describe('AgentToolActivityCard Shell presentation', () => {
+  it('shows an active filename with shimmer, no extra status or body, and stops on completion', () => {
+    const activity: AgentToolActivitySnapshot = {
+      ...shellActivity(), preparation: undefined, result: undefined, status: 'running',
+      call: { id: 'read', name: 'file.read', input: { path: '/private/folder/正在审阅的长文件名.txt' } },
+    };
+    const renderer = renderCard(activity);
+    expect(textContent(renderer.root)).toBe('正在读取 正在审阅的长文件名.txt');
+    expect(renderer.root.findByType(AgentActivityText).props.$active).toBe(true);
+    expect(renderer.root.findAllByType('button')).toHaveLength(0);
+    expect(renderer.root.findAllByProps({ className: 'agent-activity-state' })).toHaveLength(0);
+    act(() => renderer.update(cardElement({ ...activity, status: 'completed', result: { ok: true } })));
+    expect(renderer.root.findAllByType(AgentActivityText)).toHaveLength(0);
+    expect(textContent(renderer.root)).toBe('已读取正在审阅的长文件名.txt');
+  });
+  it.each([true, false])('shows only the filename for a successful text read, hasMore=%s', (hasMore) => {
+    const activity: AgentToolActivitySnapshot = {
+      call: { id: 'body-read', name: 'file.read', input: { path: '/private/folder/report.txt' } },
+      id: 'body-tool', ordinal: 1, createdAt: '2026-09-08T00:00:00Z', permissionBehavior: 'allow',
+      revision: 1, runId: 'run', sessionId: 'session', status: 'completed',
+      toolMetadata: { kind: 'business', risk: 'read', groupKind: 'resource-read', operationKind: 'stat' },
+      result: { ok: true, data: { path: '/private/folder/report.txt', hasMore, content: 'body must stay hidden' } },
+    };
+    const onExpand = vi.fn();
+    const renderer = renderCard(activity, OWNER_SCOPE, onExpand);
+    expect(textContent(renderer.root)).toBe('已读取report.txt');
+    expect(renderer.root.findAllByType('button')).toHaveLength(0);
+    expect(renderer.root.findAllByProps({ className: 'agent-activity-collapse' })).toHaveLength(0);
+    expect(renderer.root.findByProps({ className: 'agent-activity-header' }).props.onClick).toBeUndefined();
+    expect(onExpand).not.toHaveBeenCalled();
+  });
   it('renders a file read as one row with controlled node navigation and opt-in details', () => {
     const onAction = vi.fn();
+    const onExpand = vi.fn();
     const activity: AgentToolActivitySnapshot = {
       call: { id: 'read-call', input: {}, name: 'file.stat' }, id: 'read-tool', ordinal: 1,
       createdAt: '2026-09-07T00:00:00Z',
@@ -172,14 +206,24 @@ describe('AgentToolActivityCard Shell presentation', () => {
       result: { ok: true, message: 'private-to-details summary', data: { id: 8, name: 'agent-orchestrator.ts' } },
     };
     const renderer = TestRenderer.create(<AgentToolActivityCard activity={activity} approvalBusy={false} interactionBusy={false}
-      libraryId={3} onAction={onAction} onResolveApproval={vi.fn()} ownerScope={OWNER_SCOPE} />);
+      libraryId={3} onAction={onAction} onExpand={onExpand} onResolveApproval={vi.fn()} ownerScope={OWNER_SCOPE} />);
     renderers.push(renderer);
     expect(textContent(renderer.root)).toContain('已读取agent-orchestrator.ts');
-    expect(renderer.root.findAllByProps({ className: 'agent-activity-body' })).toHaveLength(0);
+    expect(renderer.root.findByProps({ className: 'agent-activity-collapse' }).props['aria-hidden'])
+      .toBe(true);
     act(() => renderer.root.findByProps({ className: 'agent-activity-subject' }).props.onClick());
     expect(onAction).toHaveBeenCalledWith({ action: 'tree.revealNode', label: 'agent-orchestrator.ts', libraryId: 3, nodeId: 8 });
-    act(() => renderer.root.findByProps({ 'aria-label': '展开工具详情' }).props.onClick());
+    act(() => renderer.root.findByProps({ className: 'agent-activity-header' }).props.onClick());
+    expect(onExpand).toHaveBeenCalledTimes(1);
     expect(textContent(renderer.root)).toContain('private-to-details summary');
+    expect(renderer.root.findByProps({ className: 'agent-activity-collapse' }).props['aria-hidden'])
+      .toBe(false);
+    expect(renderer.root.findByProps({ className: 'agent-activity-body' }).props['data-scrollable'])
+      .toBe(true);
+    act(() => renderer.root.findByProps({ 'aria-label': '收起工具详情' }).props.onClick());
+    expect(onExpand).toHaveBeenCalledTimes(1);
+    expect(renderer.root.findByProps({ className: 'agent-activity-collapse' }).props['aria-hidden'])
+      .toBe(true);
   });
   it('renders a borderless single-line summary without result metadata by default', () => {
     const renderer = renderCard(shellActivity());
@@ -194,8 +238,12 @@ describe('AgentToolActivityCard Shell presentation', () => {
     expect(text).not.toContain('退出码');
     expect(text).not.toContain('输出截断');
     expect(text).not.toContain('must stay hidden');
+    expect(renderer.root.findAllByProps({ className: 'agent-shell-summary-chevron' }))
+      .toHaveLength(1);
     expect(renderer.root.findAllByType('article')).toHaveLength(0);
-    expect(renderer.root.findAllByProps({ role: 'region' })).toHaveLength(0);
+    expect(renderer.root.findByProps({ className: 'agent-shell-collapse' }).props['aria-hidden'])
+      .toBe(true);
+    expect(renderer.root.findAllByProps({ role: 'region' })).toHaveLength(1);
   });
 
   it('uses one safe whitespace-preserving command projection everywhere it exposes the command', async () => {
@@ -225,6 +273,7 @@ describe('AgentToolActivityCard Shell presentation', () => {
   });
 
   it('loads owner-bound log pages only after expansion and appends the next page', async () => {
+    const onExpand = vi.fn();
     readShellLogPageMock
       .mockResolvedValueOnce(logPage({ nextCursor: 'cursor-2' }))
       .mockResolvedValueOnce(logPage({
@@ -240,7 +289,7 @@ describe('AgentToolActivityCard Shell presentation', () => {
         pageLastSequence: 2,
         requestedAfter: 1,
       }));
-    const renderer = renderCard(shellActivity());
+    const renderer = renderCard(shellActivity(), OWNER_SCOPE, onExpand);
     const summary = renderer.root.findByProps({ className: 'agent-shell-summary' });
 
     expect(readShellLogPageMock).not.toHaveBeenCalled();
@@ -248,6 +297,7 @@ describe('AgentToolActivityCard Shell presentation', () => {
       summary.props.onClick();
     });
 
+    expect(onExpand).toHaveBeenCalledTimes(1);
     expect(readShellLogPageMock).toHaveBeenNthCalledWith(1, {
       libraryId: 3,
       maxBytes: 128 * 1024,
@@ -280,6 +330,9 @@ describe('AgentToolActivityCard Shell presentation', () => {
     }));
     expect(textContent(renderer.root.findByProps({ role: 'region' }))).toContain('first page');
     expect(textContent(renderer.root.findByProps({ role: 'region' }))).toContain('second page');
+
+    act(() => summary.props.onClick());
+    expect(onExpand).toHaveBeenCalledTimes(1);
   });
 
   it('ignores an old log response after the rendered Tool activity changes', async () => {

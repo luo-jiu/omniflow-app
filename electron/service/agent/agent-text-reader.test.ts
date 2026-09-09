@@ -16,12 +16,17 @@ describe('bounded text reading', () => {
     const bytes = Buffer.from(source);
     let offset = 1, column = 1, combined = '';
     for (let page = 0; page < 10; page += 1) {
-      const result = sliceAgentText(bytes, { path: '/a', offset, column });
+      const result = sliceAgentText(bytes, { path: '/a', offset, column }, 4096);
       combined += result.lines.map(line => line.text).join('');
       if (!result.hasMore) break;
       offset = result.nextOffset!; column = result.nextColumn!;
     }
     expect(combined).toBe(source);
+  });
+  it('does not impose default or explicit line-count caps', () => {
+    const bytes = Buffer.from('x\n'.repeat(3000));
+    expect(sliceAgentText(bytes, { path: '/a' })).toMatchObject({ totalLines: 3000, endLine: 3000, hasMore: false });
+    expect(sliceAgentText(bytes, { path: '/a', limit: 2500 })).toMatchObject({ endLine: 2500, nextOffset: 2501, hasMore: true });
   });
   it('handles empty files and refuses invalid ranges, binary and oversized content', () => {
     expect(sliceAgentText(Buffer.alloc(0), { path: '/a' })).toMatchObject({ lines: [], hasMore: false });

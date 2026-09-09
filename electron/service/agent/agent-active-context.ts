@@ -1,6 +1,7 @@
 import type { AgentProviderMessage } from './agent-provider-model';
 import type { AgentProviderToolResultProjection } from './agent-tool-result-projection';
 import { normalizeAgentActiveContextSummary } from './agent-active-context-summary';
+import { pruneAgentReadBodies } from './agent-context-pruning';
 
 export interface AgentActiveToolResultRecord {
   allowCompaction: boolean;
@@ -19,6 +20,8 @@ export interface AppendAgentActiveToolResultInput {
 }
 
 export interface CompactAgentActiveContextInput {
+  canSummarizeCandidate?: (candidate: AgentActiveContextSummaryCandidate) => boolean;
+  pruneReadBodies?: boolean;
   estimateTokens: (messages: readonly AgentProviderMessage[]) => number;
   messages: AgentProviderMessage[];
   onCompacted?: (toolCallIds: readonly string[]) => void;
@@ -29,12 +32,14 @@ export interface CompactAgentActiveContextInput {
 }
 
 export interface CompactAgentActiveContextResult {
+  prunedToolCallIds?: string[];
   compactedToolCallIds: string[];
   estimatedTokens: number;
   fits: boolean;
 }
 
 export interface AgentActiveContextSummaryCandidate {
+  previousSummaryIndices?: number[];
   endIndex: number;
   messages: AgentProviderMessage[];
   startIndex: number;
@@ -221,6 +226,7 @@ function listAgentActiveContextToolTurns(input: {
 }
 
 export function selectAgentActiveContextSummaryCandidate(input: {
+  canSummarizeCandidate?: (candidate: AgentActiveContextSummaryCandidate) => boolean;
   messages: readonly AgentProviderMessage[];
   preserveLatestToolResult?: boolean;
   toolResults: readonly AgentActiveToolResultRecord[];
@@ -234,24 +240,38 @@ export function selectAgentActiveContextSummaryCandidate(input: {
   if (firstEligibleIndex < 0) return null;
   const firstTurn = turns[firstEligibleIndex];
   let startIndex = firstTurn.assistantIndex;
-  while (isActiveContextSummaryMessage(input.messages[startIndex - 1])) startIndex -= 1;
+  for (let index = startIndex - 1; index >= 0; index -= 1) {
+    const message = input.messages[index];
+    if (message.role === 'tool' || (message.role === 'assistant' && message.toolCalls?.length)) break;
+    if (isActiveContextSummaryMessage(message)) startIndex = index;
+  }
   let endIndex = firstTurn.endIndex;
   const toolCallIds = [...firstTurn.toolCallIds];
+  const candidateFor = (end: number, ids: string[]): AgentActiveContextSummaryCandidate => {
+    const messages = input.messages.slice(startIndex, end + 1);
+    return { endIndex: end, messages, startIndex, toolCallIds: ids,
+      previousSummaryIndices: messages.flatMap((message, index) => isActiveContextSummaryMessage(message) ? [index] : []) };
+  };
+  if (startIndex < firstTurn.assistantIndex) {
+    const initial = candidateFor(endIndex, toolCallIds);
+    if (JSON.stringify(initial.messages).length > 800_000 || input.canSummarizeCandidate?.(initial) === false) {
+      startIndex = firstTurn.assistantIndex;
+    }
+  }
 
   for (let index = firstEligibleIndex + 1; index < turns.length; index += 1) {
     const turn = turns[index];
     if (!turn.eligible) break;
     const gap = input.messages.slice(endIndex + 1, turn.assistantIndex);
-    if (gap.some(message => !isActiveContextSummaryMessage(message))) break;
+    if (gap.some(message => message.role === 'tool'
+      || (message.role === 'assistant' && message.toolCalls?.length))) break;
+    const next = candidateFor(turn.endIndex, [...toolCallIds, ...turn.toolCallIds]);
+    // Batch only while the real summary request can fit; never truncate evidence.
+    if (JSON.stringify(next.messages).length > 800_000 || input.canSummarizeCandidate?.(next) === false) break;
     endIndex = turn.endIndex;
     toolCallIds.push(...turn.toolCallIds);
   }
-  return {
-    endIndex,
-    messages: input.messages.slice(startIndex, endIndex + 1),
-    startIndex,
-    toolCallIds,
-  };
+  return candidateFor(endIndex, toolCallIds);
 }
 
 export function replaceAgentActiveContextWithSummary(input: {
@@ -271,12 +291,21 @@ export function replaceAgentActiveContextWithSummary(input: {
   ) {
     throw new Error('Agent Active Context 摘要候选已经漂移');
   }
+  const compactedIds = new Set(input.candidate.toolCallIds);
+  const retainedMessages = currentSlice.filter(message => {
+    if (isActiveContextSummaryMessage(message)) return false;
+    if (message.role === 'tool') return !compactedIds.has(message.toolCallId);
+    if (message.role === 'assistant' && message.toolCalls?.length) {
+      return !message.toolCalls.every(call => compactedIds.has(call.id));
+    }
+    return true;
+  });
   input.messages.splice(
     input.candidate.startIndex,
     input.candidate.endIndex - input.candidate.startIndex + 1,
+    ...retainedMessages,
     createAgentActiveContextSummaryMessage(normalizedSummary),
   );
-  const compactedIds = new Set(input.candidate.toolCallIds);
   for (let index = input.toolResults.length - 1; index >= 0; index -= 1) {
     if (compactedIds.has(input.toolResults[index].message.toolCallId)) {
       input.toolResults.splice(index, 1);
@@ -296,8 +325,19 @@ export async function compactAgentActiveContextToFit(
     return { compactedToolCallIds, estimatedTokens, fits: true };
   }
 
+  const completedTurns = listAgentActiveContextToolTurns({
+    messages: stagedMessages, toolResults: stagedToolResults, preserveLatestToolResult: true,
+  }).filter(turn => turn.endIndex > turn.assistantIndex);
+  const eligibleCallIds = new Set(completedTurns.slice(0, -2)
+    .filter(turn => turn.eligible).flatMap(turn => turn.toolCallIds));
+  const prunedToolCallIds = input.pruneReadBodies === false ? [] : pruneAgentReadBodies({
+    messages: stagedMessages, toolResults: stagedToolResults, eligibleCallIds,
+  });
+  if (prunedToolCallIds.length) estimatedTokens = input.estimateTokens(stagedMessages);
+
   while (estimatedTokens > requestTokenLimit) {
     const candidate = selectAgentActiveContextSummaryCandidate({
+      canSummarizeCandidate: input.canSummarizeCandidate,
       messages: stagedMessages,
       preserveLatestToolResult: input.preserveLatestToolResult,
       toolResults: stagedToolResults,
@@ -314,14 +354,15 @@ export async function compactAgentActiveContextToFit(
     estimatedTokens = input.estimateTokens(stagedMessages);
   }
 
-  if (compactedToolCallIds.length > 0) {
+  if (compactedToolCallIds.length > 0 || prunedToolCallIds.length > 0) {
     input.messages.splice(0, input.messages.length, ...stagedMessages);
     input.toolResults.splice(0, input.toolResults.length, ...stagedToolResults);
-    input.onCompacted?.(compactedToolCallIds);
+    input.onCompacted?.([...new Set([...prunedToolCallIds, ...compactedToolCallIds])]);
   }
 
   return {
     compactedToolCallIds,
+    ...(prunedToolCallIds.length ? { prunedToolCallIds } : {}),
     estimatedTokens,
     fits: estimatedTokens <= requestTokenLimit,
   };

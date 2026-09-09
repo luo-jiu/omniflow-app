@@ -2,9 +2,9 @@
 
 上下文计量与 Run.contextUsage 持久化继续保留，但 Composer 暂不挂载统计展示，也不占位。最终展示留到 UI 收尾阶段，只保留一个必要数字，不恢复多项统计行或预算编辑入口。详细口径见 [上下文计量](agent-context-accounting.md)。
 
-`file.grep` 沿用无框工具行，hasMore 显示“可继续”，扫描结束但 complete=false 显示“结果不完整”。skipped 与续搜信息保留在规范结果中，不能把空匹配页画成完整无结果。正文搜索不新增目录树状态或宿主路径跳转能力。
+`file.grep` 沿用无框工具行，不将 hasMore 显示为“可继续”；扫描结束但 complete=false 仍显示“结果不完整”。skipped 与续搜信息保留在规范结果中，不能把空匹配页画成完整无结果。正文搜索不新增目录树状态或宿主路径跳转能力。
 
-文件工具支持显式 host 范围及 `file.read` 正文读取，继续使用无框紧凑行。正文未读完显示“可继续”；本机结果只显示路径，不生成 `tree.revealNode`。现有审批仍绑定 main ToolRun，不由 renderer 推断 host 是否已授权。契约见 [Agent 统一文件读取](agent-unified-file-reading.md)。
+文件工具支持显式 host 范围及 `file.read` 正文读取。成功的正文读取只显示“已读取 文件名.后缀”，包括历史记录；不显示完整路径或“可继续”，不提供单条展开、详情区或路径跳转。失败原因、审批仍保留，不由 renderer 推断 host 是否已授权。契约见 [Agent 统一文件读取](agent-unified-file-reading.md)。
 
 目录发现 Tool 沿用无框紧凑行，`file.search` / `file.resolve` 不新增目录树卡片或状态 owner；路径定位结果可显示规范路径。跨目录输出不切换 UI 当前目录，详见 [Agent 资料库目录发现](agent-library-discovery.md)。
 
@@ -64,6 +64,19 @@ Agent 工作区内部有四种展示形态：
 - 从管理页返回时回到当前会话，不创建、恢复或切换另一个工作区实例。
 - 当前待确认或待输入任务不能被默认折叠到无法发现的位置；用户必须能恢复并完成或停止它。
 - 新增页面分区时，优先拆展示组件，不新增平行的 Session、Run、ToolRun 或 Workflow store。
+
+## 运行状态文字
+
+- 时间线末尾可出现一条无框 `icon + 一句话` 的临时状态，直接从规范 Run、ToolActivity 和 assistant item 派生，不创建消息、SQLite 记录或第二份执行状态。
+- main `currentStep` 为整理上下文时显示“正在压缩上下文”；没有当前工具或可见流式文本时，显示“正在准备/正在处理”。待决审批/交互优先，终态 Run 不显示活动行；不复制已展示的 commentary 或 Tool 状态。
+- main 报告“正在重新连接 n/2”时直接显示该状态，不自行计时或从错误文本推断重试。只读部分流中断的旧片段附明确未完成说明，之后继续同 Run；长任务结尾的一次性核对仍以 commentary/final 正常投影。边界见 [运行恢复](agent-run-reliability.md)。
+- `AgentActivityText` 仅在真实 preparing/running 状态上绘制灰色文字与从左到右的亮色扫光。动画只改变文字背景位置，不使用计时器修改文字、不改变布局尺寸；亮暗主题使用既有文字 token，reduced-motion 与 forced-colors 下禁用扫光、恢复普通文字。
+- 活跃 `file.read` 仅显示图标和“正在读取/准备读取 文件名”，不重复“执行中”、不展开正文。成功继续只显示“已读取 文件名”；失败和待决交互沿用原路径，不被扫光遮盖。Shell 仅状态短语扫光，命令仍来自可信 prepared action，错误色不变。
+- 这是实时状态投影，当前不额外持久化“上下文已压缩”时间线事件，也不从压缩次数倒推历史事件。没有 Provider reasoning summary 时不编造英文思考标题或隐藏推理。
+
+2026-09-09 自动化验证覆盖活动/终态切换、审批优先、跨 Run 隔离、流式文本去重、读取文件名与停用动画、CSS 动态效果降级。解锁后在 win（ID 3）真实界面验证了过程说明、紧凑读取记录、等待/终态切换，并在正式预算长任务第24个文件后捕获“正在压缩上下文”。连续截图发现旧扫光在背景移出后文字会消失，现已增加固定灰色背景底层并补回归，底层也裁剪到字形而不是矩形背景。修复后全周期视觉复验、亮色、长文件名窄窗及 reduced-motion 真机验收仍未完成；上游连接关闭阻塞了后续完整长任务，不能将失败运行记为压缩成功。
+
+同日后续已在真实32文件任务中复验暗色压缩提示的连续扫光画面，字形全程保留，完成后活动行消失；任务经历重连和一次压缩后正常结束，详情见 [运行恢复](agent-run-reliability.md)。亮色、长文件名窄窗及系统 reduced-motion 真机检查仍待补。
 
 ## 3. 状态所有权
 
@@ -142,7 +155,7 @@ main 事件 / Session 规范快照
 
 ## 5. 状态展示契约
 
-2026-09-07 起，ToolActivity、读取分组、审批和交互统一使用无框紧凑行或内联表单，不再绘制浮动卡片。文件名经受控 `tree.revealNode` 操作定位，成功详情按需展开；失败和待决输入不能默认隐藏。完整规则见 `agent-media-availability-and-permissions.md`。
+2026-09-08 起，commentary 作为 Agent 过程回复使用与 final 接近的无框正文排版，不显示前置图标，也不承担 Tool 执行状态。ToolActivity、读取分组、审批和交互继续使用无框紧凑行或内联表单；命令、查询和读取记录的图标、动作文字与路径统一使用路径级弱文本色并默认折叠，悬停时不恢复正文亮度。连续读取组收起时只显示“读取了 N 项”，不重复列出搜索、读取等机械计数；展开清单与汇总行左侧对齐，不增加层级缩进。汇总行的左侧图标、文字和右侧 Chevron 使用同一视觉中线；展开与收起使用克制的高度、透明度和轻微位移过渡，复用同一个细线 Chevron 旋转表示方向，不在两枚图标间瞬时切换。可展开行本身可以点击，Chevron 默认不占用末尾固定列，只在行悬停或键盘聚焦时紧跟摘要显示；展开的详情或连续读取清单最高约 `156px`，超出后使用工作区滚动条。文件名经受控 `tree.revealNode` 操作定位；失败和待决输入不能默认隐藏。完整规则见 `agent-media-availability-and-permissions.md`。
 
 Run 和 ToolActivity 当前共享八种状态 ID：
 
@@ -204,7 +217,7 @@ agent.interaction.submit
 
 ### 7.1 内容安全
 
-- completed final 使用 `AgentMessageContent` 的受限 Markdown，支持标题、列表、表格、代码与复制；HTML / MDX 不执行，链接只渲染文本，图片只渲染 alt，不产生导航或外部资源请求。过程说明继续按纯文本展示。
+- completed final 与 commentary 使用 `AgentMessageContent` 的受限 Markdown，支持标题、列表、表格与代码；final 保留复制回答，commentary 不显示整段复制按钮。HTML / MDX 不执行，链接只渲染文本，图片只渲染 alt，不产生导航或外部资源请求。过程说明使用普通正文颜色，不对整段应用扫光，不要求模型每次读文件都额外播报。
 - 不得直接渲染模型或 Tool `call.input` 提供的 HTML、JSX、CSS、React props、回调、IPC channel、任意 URL、本地路径或可执行行为。用户当前请求明确给出的 `file.stage` / `file.upload` 来源显示路径只能经 main strict normalizer 和 public prepared action 回显在审批卡；canonical 路径、其他本机路径和任意目标路径仍禁止展示。
 - 受限 Markdown 以 `react-markdown` 的 `skipHtml` 和元素白名单解析，不使用会求值 MDX 的组件。代码高亮、可点击链接、媒体内嵌或文件打开仍需先定义独立的安全和导航协议，不能因为 Markdown 支持而顺带放开。
 - UI 文案不能暴露 API Key、Cookie、签名 URL、完整环境变量、进程参数、stderr 或本地隐私路径。
@@ -243,7 +256,8 @@ agent.interaction.submit
 | `agent-workflow-projection.ts` | Run + Plan + ToolRun + assistant item 到主状态、当前/下一步和 Workflow 的纯投影 |
 | `agent-tool-presentation.ts` | 受控展示块和 Tool presenter 白名单 |
 | `AgentTimeline.tsx` | 时间线 item 分发、纯文本消息展示，以及 pending ToolActivity 的唯一可编辑实例 |
-| `AgentMessageContent.tsx` | completed final 的受限 Markdown 与复制，按稳定 content 复用，避免流式增量重解析历史 |
+| `AgentMessageContent.tsx` | final/commentary 的受限 Markdown；final 默认有复制，commentary 关闭整段复制 |
+| `agent-live-status.ts` / `AgentActivityText.tsx` | 规范快照到临时单行状态的纯投影，以及可停用的文字扫光 |
 | `AgentSubmitButton.tsx` | 发送 / 停止命令语义；停止点击禁止触发表单默认提交 |
 | `AgentWorkflowCard.tsx` | 保留的派生任务现场组件；当前工作区不挂载 |
 | `AgentToolActivityCard.tsx` | Tool 状态、进度、结果和受控 action 展示 |
@@ -285,8 +299,10 @@ agent.interaction.submit
 - 以 `100%` 页面缩放验证，不用旧缩放掩盖尺寸问题。
 - 亮色、暗色和跟随系统主题都使用现有 `--app-*` / Semi token，不引入只适配单主题的硬编码背景。
 - 消息列与 Composer 当前共享 `clamp(560px, 72%, 900px)`；窄于最小宽度时保留左右 `16px` 安全间距并继续收缩，不能产生横向溢出。
+- 会话管理页可以使用更宽的 `min(1120px, 100%)` 内容面；搜索框填满该内容面。会话标题保持单行省略，最近消息最多显示两行，长路径或无空格文本必须在卡片内部截断，时间、消息数和行内操作不能被横向挤出。
 - Composer 高度范围是 `78px～260px`，初始 `96px`；向上拖动增高、向下拖动缩小，键盘方向键也必须可调。
-- 时间线只在用户仍接近底部时自动跟随；用户向上阅读后，新 delta、进度或卡片展开不能强行拉回底部。
+- 时间线与 Composer 使用同一个纵向滚动容器，滚动条覆盖完整 Agent 工作区；短内容下 Composer 仍靠近窗口底部，长内容滚到底时 Composer 与底部安全间距完整出现，不在 Composer 上方提前结束滚动轨道。
+- 时间线只在用户仍接近底部时自动跟随；用户向上阅读后，新 delta、进度或卡片展开不能强行拉回底部。用户主动展开 Tool、读取分组或 Shell 详情时立即暂停自动跟随，并关闭相关容器的浏览器 scroll anchoring，异步加载详情或后续状态更新不能在动画结束后再次把内容向上拉动；用户重新滚到底部后才恢复跟随。
 - 管理模式隐藏 Composer，返回后恢复当前会话和合理的滚动跟随，不制造布局双层滚动。
 - 工作区滚动条复用 `workspaceScrollbarStyles`，不能退回浏览器粗滚动条。
 - 圆角、点击热区、字号和控件密度遵守 `docs/ui-display-readability-baseline.md` 与现有 `--app-radius-small / medium / large` 语义；菜单选项保持小圆角，普通可点击按钮优先中圆角，常驻强调动作和正方形强调态可使用大圆角或正圆。

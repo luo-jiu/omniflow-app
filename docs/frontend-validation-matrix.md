@@ -2,6 +2,21 @@
 
 ## Agent 目录发现补充验收
 
+- 运行恢复：注入真实 Electron `Error('net::ERR_CONNECTION_CLOSED')`，验证首字前有界重试与取消；已显示文本不原样重放，未尝试非只读工具时至多2次新轮次续接，取消/非只读/超限均停止。长任务候选结尾核对仅一次，不重复成功工具或将片段误存为 final；见 [运行恢复](agent-run-reliability.md)。
+- 正式窗口真实回归已完成：32个本机合成文件，33次只读调用（含1次按列续读），逐文件前250行覆盖无缺口；发生重连并成功压缩1次，最终范围与总额正确，候选总额错误被完成核对纠正。该验收不覆盖MinIO长任务或写操作中断。
+
+- 活动状态行：文件读取 preparing/running 时“图标 + 准备读取/正在读取 文件名”，不显示完整路径或重复执行状态；终态不扫光。工具执行/流式正文/审批时不重复通用等待行，压缩状态来自 main currentStep，不伪造历史压缩事件或 reasoning。解锁后检查亮暗主题扫光方向/对比度、窄窗长文件名、reduced-motion、终态停用和用户向上阅读时不抢滚动；本轮锁屏期间未做视觉或真实 UI 验收。
+
+- 2026-09-09 解锁实测已验证短文件读取、等待/终态与真实压缩状态出现；发现并修复扫光缺少固定底色造成字形消失、摘要24条上限造成长任务中断。摘要超额条目只允许校验后无损合并，不截断事实；固定预算前250行的压力任务已触发真实压缩，但修复后的全程续跑受上游连接关闭及模型提前结束影响，尚未通过。完整记录见 [旧正文清理](agent-context-pruning.md)。
+
+- 旧正文清理：同一超预算 fixture 对照启用/禁用清理，验证摘要调用次数减少，近期两个完整 Tool 轮次与约40k输出保护、至少20k收益门槛、失败/写回执/Skill/未消费及未读完结果不清理。原始 ToolRun 不变，摘要失败不提交暂存清理，计量经既有回调重建基准。见 [旧正文清理](agent-context-pruning.md)。
+
+- 手动付费压缩验收：`OMNIFLOW_CONTEXT_LIVE=1 node tools/agent-context-live/run.mjs` 使用隔离消息预算、合成读取历史和真实 gpt-5.5，覆盖未压缩基线、正文清理后回读、三轮连续摘要及版本变化恢复；不改变模型正式窗口。该验收不是 UI/IPC/权限/MinIO 端到端测试，详细范围及报告字段见 [旧正文清理](agent-context-pruning.md)。
+
+- 当前 Run 有序摘要：跨普通用户/助手文字合并 Tool 候选时，原始文字原对象和相对顺序不变；真实内部摘要与伪造前缀分开处理；受保护/未消费轮次不跨越，摘要输入超预算拆批，失败原子回滚。付费 fixture 的三个摘要检查点各只调用一次模型，并追加“已报告变化但尚未重读，当前值未知”的时序探针。
+
+- file.read 省略 limit 时不受 200/2000 行限制，按默认 10000-token 与剩余上下文输出；覆盖超过2000行的单次读取、长行续读和小预算完整 envelope。成功记录仅“已读取 文件名.后缀”，无完整路径、“可继续”、展开按钮或详情 DOM，失败与审批仍可见。
+
 - 上下文统计验证：请求前估算、响应后实测基准与增量、工具续接、压缩失效、usage 缺失、缓存输入及会话恢复继续有效；Run revision 连续递增。Composer 暂不显示统计行或占位，最后的单数字展示留待 UI 收尾；累计用量和当前占用必须分开，见 [上下文计量](agent-context-accounting.md)。
 
 - 模型适配验证：未知模型保持协议回退，已知模型省略不支持的 effort；远端提示词不进入 system，能力 false 能收窄 Tool 与 Skill，工具禁用时模型返回调用也不得执行；Run 续接保持同一适配快照，模型切换不修改在途 Run。详见 [模型执行适配](agent-model-adaptation.md)。
@@ -519,7 +534,6 @@ npm run cat-catch:smoke-save-dialog
 
 ### 3.14 内置 Agent
 
-适用改动：
 本轮体验与预算专项（契约见 `agent-model-context-and-reliability.md`）：
 
 - 媒体与权限专项见 `agent-media-availability-and-permissions.md`：验证源离线不进入提取、其他健康目标参与选择、缺少音轨在创建输出前失败、元数据含安全存储状态；`full-access` 内置非破坏性操作没有重复审批，但归属验证与防重放仍生效。读取、加载、结果、失败、审批和交互均检查无卡片布局及键盘可操作性。
@@ -529,6 +543,7 @@ npm run cat-catch:smoke-save-dialog
 - 验证超过 200 项目录明确显示不完整、空失败回答重开后仍有错误原因、中文 composition 回车不发送、运行中草稿保留。
 - 验证最终回答的 Markdown、代码 / 回答复制、宽表格内部滚动；HTML、图片 URL 和模型链接不得执行或加载。使用隔离模拟会话检查亮暗主题和窄宽窗口，真实输入法与 Provider 仍需独立验证。
 
+适用改动：
 
 - `features/agent/`
 - `shared/agent/`
@@ -539,7 +554,7 @@ npm run cat-catch:smoke-save-dialog
 至少验证：
 
 - 使用非第一个资料库进入 Agent 首页；无历史时显示居中空态，有历史时自动恢复该资料库最近会话，消息顺序和 Tool 结果正确
-- 新建会话后旧会话仍在会话管理页；历史列表可以搜索、打开、内联重命名和删除，超过 50 条后可按游标继续加载且总数准确，当前会话删除后回到空态
+- 新建会话后旧会话仍在会话管理页；历史列表可以搜索、打开、内联重命名和删除，超过 50 条后可按游标继续加载且总数准确，当前会话删除后回到空态。宽窗口下搜索框使用完整管理内容面；窄窗口、超长中文标题、无空格英文或路径摘要下不产生横向溢出，标题单行省略、摘要最多两行，时间、消息数和重命名 / 删除操作仍可见
 - 同一会话连续提交两轮时保持同一个 `sessionId`、生成不同 `runId`，第二轮能获得前一轮的 user / assistant 上下文
 - 用户明确说“请记住，以后都这样”时，模型只能生成 `memory.propose` 待确认 ToolRun；确认卡完整显示类型、范围、标题、规则、原因和适用场景。批准前、拒绝后、停止、超时和应用重启后 `agent_memories` 均没有新行；批准后先持久化稳定 memory ID / revision，再继续模型回答
 - 长期记忆管理页能查看 global 与当前资料库记录、搜索、内联编辑和删除；超过 50 条后按 `updatedAt + memoryId` 游标继续加载，搜索结果的 `total` 准确且不受已加载页限制。首屏或搜索读取失败时显示可重试错误，下一页失败保留已有列表、total 和游标；编辑期间搜索与继续分页不可把编辑行卸载成隐藏锁定态。编辑 / 删除携带 revision，冲突不覆盖较新内容；成功更新采用 main 返回 row，成功删除采用 main 确认结果，二者都更新当前查询并保留已加载分页，不依赖写后全量重载。mutation 期间切换搜索词时只刷新最新查询，旧查询结果不能覆盖；切换用户、API 基址或资料库时旧 owner / 资料库记录不闪现，A -> B -> A 的首个迟到响应也不能被重新接纳。global 记录可跨资料库读取，`project` 记录只能在所属资料库读取；同一 owner 的 global + 当前资料库可见集合写入第 201 条时明确失败，但其他资料库仍可独立保存。原地初始化必须替换旧 quota trigger；开发期遗留超限数据可以在管理页清理，但召回不能静默截取前 200 条，清理到上限后才恢复完整候选召回
@@ -562,18 +577,19 @@ npm run cat-catch:smoke-save-dialog
 - assistant 单 turn / Run 分别超过 64,000 字符、Agent SSE pending 超过 128,000、Tool 参数单次超过 64,000 或单轮超过 128,000、摘要输出超过 20,000 字符时均取消读取且不执行后续 Tool；通用 AI SSE 256,000、HTTP 成功 JSON 2 MiB与错误 body 64 KiB 上限同样生效
 - 调整 Agent `outputReserveTokens` 后，常规 Tool turn、无 Tool fallback 和无 Tool 摘要请求均携带同一个正整数 provider 输出上限；`providerType = openai` 只发送 `max_completion_tokens`，DeepSeek / Local 与 Claude 只发送 `max_tokens`。未显式传 Agent 预算的普通 AI 调用保持原行为，字符硬上限仍独立生效
 - 初始没有感知快照、Renderer Tool 执行后可能首次返回感知时，极限上下文预算按执行前后两种 system prompt 的较大值预检；预算不足必须在确认卡、ToolRun 和任何写入副作用之前失败
-- 流式回复、停止、provider 错误、只读 Tool 开始 / 进度 / 完成均只更新当前会话；Tool 进度先持久化再展示，完成、取消或失败后以规范 ToolActivity 收口。新会话创建或已有会话续写时 `start` 返回前，以及恢复仍在运行的会话读取快照期间，抢跑事件均不丢失；提前到达的 `started` 会立即把本轮乐观 user 消息绑定到规范 Run，任务卡不短暂跳位。Tool 前后分段的 assistant 内容在完成、取消或失败时不重复，离开页面期间漏掉的部分在失败事件后也能立即补齐
+- 流式回复、停止、provider 错误、只读 Tool 开始 / 进度 / 完成均只更新当前会话；Tool 进度先持久化再展示，完成、取消或失败后以规范 ToolActivity 收口。新会话创建或已有会话续写时 `start` 返回前，以及恢复仍在运行的会话读取快照期间，抢跑事件均不丢失；提前到达的 `started` 会立即把本轮乐观 user 消息绑定到规范 Run，后续 ToolActivity 锚点不短暂跳位。Tool 前后分段的 assistant 内容在完成、取消或失败时不重复，离开页面期间漏掉的部分在失败事件后也能立即补齐
 - Run / ToolActivity 按持久化 `revision` 单调合并；构造同毫秒更新、系统时钟回拨、确认 / 交互 / 进度乱序和终态后的迟到 active 事件，均以较高 revision 的规范快照为准，墙钟只影响展示。终态 Run 后新增 Tool 或把已完成 Tool 改回 active 必须在 SQLite 层被拒绝
 - 消息与 ToolActivity 按真实调用位置组成同一时间线；实时 Tool 锚点、同毫秒 Tool 前后 assistant item、历史规范 tool message 和恢复中的未完成 Tool 均不跳位。有匹配活动的历史 Tool 文本不重复显示；预发布阶段无法匹配的旧 Tool / system 文本不渲染为对话。应用重启后进度、确认、完成、失败、取消和中断卡片可由 SQLite 恢复，终态不被迟到事件退回执行中
-- user 与 completed final 保持正常对话层，commentary / incomplete assistant item 使用稳定 `message:${id}` 的轻量工作过程行，空 commentary 以及空 failed / cancelled / interrupted item 不产生空白气泡；commentary、Tool 和 final 的先后顺序在流式、刷新和恢复后保持一致
+- user 与 completed final 保持正常对话层；commentary / incomplete assistant item 使用稳定 `message:${id}` 的无图标正文行，字号、行高和左侧对齐与 final 接近，不被画成浅色 Tool 日志。空 commentary 以及空 failed / cancelled / interrupted item 不产生空白气泡；commentary、Tool 和 final 的先后顺序在流式、刷新和恢复后保持一致
 - 每轮聊天开始、运行和结束时都不在 user 消息后或 Composer 上方显示独立 Workflow / Active Run 状态卡；pending approval / interaction 只在时间线对应 ToolActivity 中保留一个可编辑实例，批准、拒绝或提交回答后按规范 revision 收口
-- 连续成功的 `file.list / file.stat / media.inspect` 只有收到 Registry renderer metadata 后才可按同 Run 和同阶段分组；commentary、审批、交互、失败、取消、中断、未知 Tool、写 Tool 和 Shell 均断组，展开后每个 ToolRun 的状态与详情仍可检查
+- 连续成功的 `file.list / file.stat / media.inspect` 只有收到 Registry renderer metadata 后才可按同 Run 和同阶段分组；commentary、审批、交互、失败、取消、中断、未知 Tool、写 Tool 和 Shell 均断组。收起态的图标与“读取了 N 项”、展开后的图标、动作文字和路径使用路径级弱文本色，悬停不恢复正文亮度，也不追加“搜索 N”等机械分类；汇总行的左侧图标、文字与右侧 Chevron 视觉中线一致，行或键盘入口可以展开，细线 Chevron 只在悬停或聚焦时紧跟摘要出现。展开与收起使用克制的高度、透明度和轻微位移动画，同一个 Chevron 平滑旋转而不是瞬时替换图标，并在 `prefers-reduced-motion` 下取消非必要过渡。展开清单与汇总行左侧对齐、不增加层级缩进，汇总行到第一条记录的间距与内部记录行距保持同一紧凑节奏，并保持原 ToolRun 顺序；超过约 `156px` 后内部滚动，每个 ToolRun 的状态与详情仍可检查。用户主动展开后，即使 Shell 日志或 Tool 状态在 1～2 秒后异步更新，外层时间线也不发生延迟上跳；重新手动滚到底部后才恢复自动跟随
+- Agent 时间线与 Composer 共用单一纵向滚动面：滚动条轨道延伸到窗口底部，短会话下 Composer 保持靠底，长会话滚到底时消息、Composer 和底部安全间距正好完整显示，不在 Composer 下方留下由双层布局造成的异常空白；会话与记忆管理模式仍只有一个滚动容器且不显示 Composer
 - Run 开始和结束后都不残留“任务进度 / 进行中 / 已完成 / 已取消”等独立摘要条；真实 Tool 步骤按持久化 `ordinal` 排序，同一毫秒创建也不乱序，恢复会话后 Tool 状态和实时执行一致
 - 预期包含 2 至 8 个计划步骤的复杂任务仍可持久化一次性计划；`agent.plan.set` 本身不生成 ToolRun，也不显示计划或重复 Tool 卡。计划步骤与后续精确 Tool 名称按顺序单调关联，步骤状态只跟随真实 ToolRun；实际 ToolRun 可因计划外操作或重试超过计划步骤数，未绑定的 business Tool 继续作为独立执行事实展示。刷新或重开应用后计划与关联保持一致且不自动重放
 - 普通问答和单 Tool 任务不创建计划；模型提交状态、进度、结果、权限、UI 字段、未知 Tool、超限步骤或在首个真实 Tool 后改写计划时，main / SQLite 拒绝计划但不伪造执行事实。计划中的 Tool 名称不构成预授权，写操作仍完整经过参数校验、确认和一次性执行能力
 - 在当前目录请求“创建一个叫测试的文件夹”时显示精确确认卡片；允许后只创建一次，后端返回节点后先提交 authoritative result，再刷新目标目录树并通过 `file.list` 感知到同一个 `createdNodeId` 后继续回答；取消后不创建，模型能依据拒绝结果结束本轮
-- 选中单个普通音频或视频后请求“检查这个媒体文件”，`media.inspect` 不弹写操作确认，能返回真实容器、时长和媒体流元数据；未安装 ffprobe 时明确提示环境缺失且不显示模拟结果。真实媒体由用户手工验证，自动化只使用 JSON fixture，不播放媒体
 - 使用真实支持 Tool Calling 的 provider 做文件资源路由语义验收：本机绝对 / `~/` 来源与已存在资料库目录均明确，且未要求加工时，“上传到、放进、存入、传到”等不同自然表达都应选择 Provider 可见的 `file_upload` 并直接显示内联审批，不弹系统 picker，也不要求用户点名 Tool；查看、读取、概括或分析用户明确给出的宿主绝对 / `~/` 路径时，应直接选择 `executionContext = host` 的 `shell_run` 受支持只读命令，不创建 `file_stage` ToolRun；需要工作副本、修改、转码或生成新文件后再保存时才选择 `file_stage -> shell_run -> file_publish`。`run-workspace` 的 `~` 是虚拟 home，`host` 的 `~` 是 main 冻结的宿主 home，不能省略执行上下文让同一路径文字隐式切换语义。缺少关键来源或目标时可以询问，目录不存在或重名时明确失败，不能模糊匹配或自动创建。该清单是模型行为回归样本，不得实现成生产关键词分支
+- 选中单个普通音频或视频后请求“检查这个媒体文件”，`media.inspect` 不弹写操作确认，能返回真实容器、时长和媒体流元数据；未安装 ffprobe 时明确提示环境缺失且不显示模拟结果。真实媒体由用户手工验证，自动化只使用 JSON fixture，不播放媒体
 - 在 macOS 本地 MinIO 的非第一个资料库中选中单个视频后请求“提取音频”，ToolRun 先显示 `preparing` 而不是失败；健康源 provider 优先继承，源不可用时能按输出格式路由到其他健康 provider。确认卡准确显示源文件、目标类型、目标目录、输出名、格式和提交前失败兜底；public action 明确携带 `kind = 'media.extractAudio', version = 1`，可改为资料库其他目录或本机，也可修改文件名和 M4A / MP3 / WAV，修改后保留判别字段、生成新的 prepared action ID / hash 并使用该格式对应的冻结 provider。篡改 kind / version、错误原始类型、额外或重复字段、Tool / action 串型均 fail-closed，原确认仍可重试；未知或损坏 preparation 的确认卡只允许取消。拒绝时不生成文件，允许后只写入批准的精确目标，默认生成 `*-audio.m4a`，长名称仍保留 `-audio.<格式>` 且不超过 240 UTF-8 bytes，同名时 Tool 结果使用后端实际自动改名后的名称。真实媒体内容与格式由用户手工验证，自动化不得播放媒体
 - `directory.create` 与 `media.extractAudio` 完成后显示资料库产物卡片，点击“在目录树中定位”只分发 `tree.revealNode` 并定位到同一资料库节点；`media.inspect` 只展示白名单容器、时长、大小、码率和媒体流数量，不展示签名 URL、原始 tags 或未知结果字段
 - `media.extractAudio` 分别手工验证停止 ffmpeg、prepare 超时、上传中停止、上传失败、无音轨、未安装 ffmpeg、目录刷新失败、Save As 取消和应用窗口关闭。资料库产物只通过单一 `agent:media:artifact:upload` IPC 提交；Renderer 请求不含目录、Provider、文件名、格式、冲突策略、签名 URL 或分片信息，main 从冻结动作取得目标并复验当前账号。commit 前取消会中止同批全部 PUT，等待请求收口后再 best-effort abort 后端 session；本机复制收口前不得提前删除 artifact。上传创建节点成功后立即 commit，此后停止、页面卸载、刷新失败或最终回执超时均保留该实际文件并使用 committed fallback，不得再次提取造成重复文件
@@ -592,7 +608,7 @@ npm run cat-catch:smoke-save-dialog
 - 相同 `libraryId` 下切换用户或 API 基址时不能看到、续接、重命名或删除其他 owner 的会话；v1 数据升级后不能被新 owner 自动认领。任何验证场景禁止使用第一个资料库，`Win` 可用时优先使用 `Win`
 - Session ID 不属于当前 owner scope 或 `libraryId` 时读取、续接、重命名和删除均被拒绝；注销或 401 清理会取消当前主窗口全部 Agent Run。普通工作区切换允许纯 main Run 在后台完成；`media.extractAudio` 虽由 main 持有上传事务，当前 Tool executor 与最终再感知仍绑定发起 Renderer，页面卸载或 scope 切换会经 Broker signal 中止 commit 前事务并停止 Run，不能悬挂到超时或在页面回来后自动续跑
 - 同一 Session 正在启动或运行时拒绝第二个 Run 和删除；停止只能由发起该 Run 的主窗口执行
-- 迟到或乱序的 `run-updated` 不能覆盖更新快照，任何已完成、失败、取消或中断 Run 都不能退回 `running / awaiting_*`；任务投影只读 Run / ToolRun，不触发 Tool、不消耗调用上限，也不把未执行计划项写成 ToolRun
+- 迟到或乱序的 `run-updated` 不能覆盖更新快照，任何已完成、失败、取消或中断 Run 都不能退回 `running / awaiting_*`；任务投影只读 Run / ToolRun，不触发 Tool、不推进上下文驱动循环或重复调用门禁，也不把未执行计划项写成 ToolRun
 - Run 开始后编辑或删除来源 AI 服务配置会被拒绝；切换 active 配置不改变本轮连接，后续 Tool 轮次与 fallback 仍使用启动时固定的 provider、Base URL 和 Key，终止后配置锁释放
 - overlay、独立媒体窗口和非主 frame 调用 Agent IPC 时被拒绝
 - prepare、确认、Renderer 内部能力、写入 commit 或执行完成请求只要窗口、owner scope、资料库、Session、Run、ToolRun、call、输入 hash 或一次性 ID 中的适用字段任一不匹配就被拒绝；同一 prepare、媒体来源能力、Agent artifact upload、Save As、fallback grant、commit 和执行结果均不能重复提交，并发提交同一确认只能有一个进入处理
@@ -603,21 +619,21 @@ npm run cat-catch:smoke-save-dialog
 - `media.extractAudio` 的 6 小时签名 URL、loopback token、ffmpeg stderr、本地路径和 artifact ID 不进入 Agent 消息、Tool 结果或普通日志；提取 IPC 只返回 artifact ID、文件名、MIME 与大小，renderer outcome 不含 `/tmp` 或 `userData` 物理路径。SQLite 只保存不含路径的 opaque resource ref 与配额事实。来源 capability 不能重放；Save As 与资料库上传都从同一个 `O_NOFOLLOW` 已验证 FileHandle 读取并在提交前复验 `dev / ino / ctimeNs / size / allocated bytes`。Save As 从 offset 0 写同目录临时文件，源复验失败时不得替换最终目标。消费中 release 必须等待，不能删除仍在读取的源
 - Agent 资料库上传由 main 全程持有账号复验、init、sign、PUT、complete、reconcile 和 abort，Renderer 不能协调 control plane。每批最多 4 个分片；分片失败在 abort session 前先等待同批请求收口。complete 或 reconcile 返回缺失有效 `node.id / node.name` 的 committed 响应仍不能宣告成功；complete 结果不明确时使用同一 operation 和独立短时 signal 核对，核对仍未知则返回 `commit_unknown` 并禁止 abort、重传或本机兜底。`committed` 或 `commit_unknown` 形成后的 owned-file 退出复验或 lease 清理失败不得覆盖该结算；本地产物进入隔离 / 清理流程。critical settlement 只从 complete 前一刻开始。显式 `uncommitted` 才登记绑定 artifact、execution、窗口、Session 和 Run 的一次性 fallback grant，使用、artifact release、Run 或 owner release 后失效
 - Agent 媒体产物的单文件 2 GiB、4 个当前进程活跃产物、与 Shell workspace 共享的默认 8 GiB 总额度、4,096 条资源记录上限和 1 小时无活动 TTL 均生效。生产媒体根与 workspace 同在 `userData` 文件系统；零字节 reservation 在聚合额度已满、资源数已满或该卷扣除全部未兑现 headroom 后不足以保留 1 GiB 时同样拒绝，磁盘探针失败也必须 fail-closed。并发预留不能重复使用同一份磁盘空间，写后 `commit / adjust` 不能重复扣减已经反映在 `statfs` 中的已观测字节。文件身份替换、消费期间路径替换 / 原地改写、同 artifact finalize / release 并发、resource fork allocated blocks 和 residue 根不可读均有定向回归。unmanaged residue 扫描期间共享 quota admission 必须保持关闭，只有枚举、删除和根身份复验全部成功后才能解除。当前计费口径仅为 `max(data fork 长度, st_blocks * 512)`；APFS generic xattr 可能不增加 `st_blocks`，不得把它表述成精确物理总量。生成与消费期间 live lease 阻止 sweep；重启不恢复未完成媒体任务，但持久 quota ledger 能在 TTL 后经 adapter 清理实际目录，升级时旧系统临时根中的同 ID 目录和两个根内无 ledger 的过期目录也会回收
-- 不支持 Tool Calling 的本地模型退回有界感知快照；未注册 Tool、未配置权限策略的非 `read` Tool、没有显式只读授权的 Renderer Tool 和绕过确认的 Renderer 写 Tool 不执行；达到 10 个 provider turn / 8 次业务 Tool 上限后明确失败
+- 不支持 Tool Calling 的本地模型退回有界感知快照；未注册 Tool、未配置权限策略的非 `read` Tool、没有显式只读授权的 Renderer Tool 和绕过确认的 Renderer 写 Tool 不执行。支持 Tool Calling 时不以固定 provider turn / 业务 Tool 次数停止，只有最终回答、用户停止、规范终态错误、上下文不足或命中有界历史内同一稳定调用 / 结果周期连续重复 3 次的无进展门禁才收口；任一周期内容变化即不匹配
 - 内部 `AgentLocalProcessRunner` 只接受绝对可执行文件路径和参数数组，不启用 shell、不继承完整环境；并发、输出、超时和取消均命中上限，取消后清理 macOS / Linux 进程组或 Windows 进程树。该基座没有注册为模型 Tool 时，Agent 不能通过它执行任意命令
 - 新建与开发期已有 Agent SQLite 都保持 schema 2：唯一 Schema Coordinator 完成 reconcile 并发布 barrier 后，Session / Memory / Quota / Workspace / Shell Log Store 才能打开业务连接；`media.extractAudio@1`、`shell.run@1`、`file.stage@1`、`file.publish@1` 与 `file.upload@1` prepared action 分别按 `kind / version` 进入独立 strict branch，Shell command hash 必须对应精确 command bytes，文件桥的逻辑路径、本机来源路径、大小和 SHA-256 也在 trigger 中复验。`prepared_action_id / prepared_action_json / prepared_snapshot_hash / approval_input_hash` 保持 `text`，审批 hash 与冻结快照 hash 必须一致。直接 Store 写入禁用环境变量、SQL 单列篡改、command/hash 漂移、文件桥额外 / 重复字段、路径穿越或把 ASCII JSON / ID / hash 写成 BLOB 都会在 trigger 或 bootstrap main normalizer 边界被拒绝；旧媒体 action 原地回填且损坏行使 bootstrap 整体回滚。workspace / quota / log ledger 幂等补齐，quota ledger 原地增加 unknown occupancy 标志并重建受影响 trigger，不新增 schema 3 / 4
 
 #### Agent Shell macOS 开发预览与剩余门禁
 
-macOS 系统 Zsh 探测成功后，生产 Service Runtime 会动态注册 `shell.run@1`，Orchestrator 把 Provider 快照与 main-owned 本机设置中的权限模式冻结进 Run。自动化已覆盖 main prepare、动态 prepared risk、三权限策略、execution lease、binding resolver、spawn preflight、Process Supervisor、Runtime、日志、执行期配额与退出 settlement；Process Supervisor 测试继续使用 fake child，不以自动化冒充真实用户 Shell 或安装包验收。
 长历史投影还需构造两类边界：保守 `16,384` token fallback 下，最新长 Shell 事实应按当前对话和 envelope 后的真实余量缩成带截断标记的 head + tail，不能整条消失；大窗口下放入数百条长 Shell ToolRun 时，达到约 `48,000 tokens` 事实预算后必须停止读取更旧结果，不能在 Electron main 同步重投影全部历史。超长 prepared command 的历史关联应先有界并明确标记省略，再为同一事实的结果保留预算。
 
+macOS 系统 Zsh 探测成功后，生产 Service Runtime 会动态注册 `shell.run@1`，Orchestrator 把 Provider 快照与 main-owned 本机设置中的权限模式冻结进 Run。自动化已覆盖 main prepare、动态 prepared risk、三权限策略、execution lease、binding resolver、spawn preflight、Process Supervisor、Runtime、日志、执行期配额与退出 settlement；Process Supervisor 测试继续使用 fake child，不以自动化冒充真实用户 Shell 或安装包验收。
 
 当前 macOS 单次执行必须验证：exact command bytes / hash、path-free Provider public identity、冻结 Run snapshot、AI destination、受控环境，以及 PreparationService 在 Quota live lease 下对五个逻辑根运行 25 秒有界 scanner v3；任一 owner、workspace generation / content、cwd realpath、Provider、AI destination、analyzer / policy revision 或批准后的重新 prepare 发生漂移时拒绝。执行前必须建立默认 512 MiB growth reservation 与 workspace live lease，TTL 至少覆盖命令 timeout 加 60 秒；默认每 500 ms 的轻量扫描按 `max(logical size, st_blocks * 512)` 计量，拒绝链接、硬链接、特殊文件、超深、超条目、超单文件和超额度，结束后完整重扫并原子结算 reservation。超限或无法可信计量时取消进程、隔离 workspace 并返回 `quota_exceeded`。应用退出必须等待受管进程、日志 flush、最终扫描和配额 settlement 后再释放 workspace。generic xattr、ACL、file flags 与 path-based root guard 的同用户 TOCTOU 是明确残余风险，`persistentRuleEligible` 必须保持 `false`。Windows content identity 与 Job Object 尚未验收，Provider 发现不能解除 fail-closed。下面是稳定发布前的剩余门禁：
 
 - 已有自动化持续保证 dispose 与尚未进入 mutation queue 的 create / prepare / cleanup 并发时，先关闭新准入并等待已接纳操作完整收口，再关闭 adapter 和 persistence；迟到 adapter 回调被拒绝。重复 dispose 返回同一 Promise，closing 后公开异步方法稳定拒绝、同步 `get()` 返回 `null`
 - 当前确定性 Analyzer 使用 `@vscode/tree-sitter-wasm` 的 runtime、Bash grammar 与 PowerShell grammar；静态已知子集必须生成稳定 `analysisIdentity / authorizationIdentity`，动态语法、未知命令或参数、link-producing copy、交互参数、Zsh `=command`、named-home 展开和 Parser / WASM 故障均 fail-closed。Vite 必须把该依赖保留为 Electron main 的外部 CommonJS 包，electron-builder 只打入许可证、包元数据、`wasm/tree-sitter.js` 和三份 WASM；unpacked macOS 包必须能够正常启动，并由打包 Electron runtime 从 ASAR 实际加载两种 grammar、分别解析无错误 Bash / PowerShell fixture。普通 `npm run build` 或源码目录 Vitest 不能替代该检查
-- 已落地的 `ask / auto / full-access` 三态 Policy、main-owned 本机设置、模式 UI 与 Run capability identity 继续保持：`auto` 只对完整分析且 main 已证明全部路径位于 Run workspace 的普通操作自动放行，`full-access` 只能跳过已完整分析的外部路径、网络和系统修改询问，分析未完成时拒绝，interactive、detached 和 privilege escalation 仍不可执行。模式切换只创建新 Run snapshot，不修改活跃 Run，`auto` 不调用第二个模型
+- 已落地的 `ask / auto / full-access` 三态 Policy、main-owned 本机设置、模式 UI 与 Run capability identity 继续保持：对 `cat / du / file / head / ls / stat / tail / wc` 等 Analyzer 已支持的宿主绝对路径只读命令，`ask / auto` 都进入确认，`full-access` 直接执行；`auto` 仍只对完整分析且 main 已证明全部路径位于 Run workspace 的普通操作自动放行，分析未完成时三种模式都拒绝，interactive、detached 和 privilege escalation 仍不可执行。模式切换只创建新 Run snapshot，不修改活跃 Run，`auto` 不调用第二个模型
 
 - macOS Zsh、Linux Bash 和 Windows PowerShell 分别覆盖 Unicode、空格路径、多行、管道、重定向、条件、替换、解析失败和非零退出；Provider、cwd、env、timeout 或 workspace generation 在批准后漂移时拒绝旧动作。外部进程在批准后直接改写 cwd 时，spawn 前 rehash / execution generation 必须失效，不能只信任 generation 计数
 - 权限规则按带版本的 canonical matcher 绑定 AST token、原子操作、重定向、网络目的地、cwd、Provider、风险分面及 analyzer / policy / env policy revision；`npm test` 不匹配 `npm test && rm ...`，也不能跨另一个项目内容身份复用。动态 head、嵌套解释器、encoded PowerShell、外部路径、未知语法和无法证明 read set 的工作区不能生成 Session / 长期规则，deny 始终优先

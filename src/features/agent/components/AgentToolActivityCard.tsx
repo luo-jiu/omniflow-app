@@ -1,8 +1,7 @@
 import React from 'react';
 import {
   IconAlertCircle,
-  IconChevronDown,
-  IconChevronRight,
+  IconChevronRightStroked,
   IconFile,
   IconFolder,
   IconSpin,
@@ -28,9 +27,16 @@ import {
 import { formatAgentShellCommandForDisplay } from '../agent-shell-command-display';
 import AgentConfirmationCard from './AgentConfirmationCard';
 import AgentInteractionBlock from './AgentInteractionBlock';
+import AgentActivityText from './AgentActivityText';
 import { readAgentShellLogPage } from '../services/agent.api';
 
 const ActivityCard = styled.article`
+  --agent-tool-record-color: color-mix(
+    in srgb,
+    var(--app-text-muted) 88%,
+    var(--app-text-secondary)
+  );
+
   width: min(620px, 100%);
   align-self: flex-start;
   min-width: 0;
@@ -46,6 +52,10 @@ const ActivityCard = styled.article`
     min-height: 28px;
   }
 
+  &[data-expandable='true'] .agent-activity-header {
+    cursor: pointer;
+  }
+
   .agent-activity-status-icon {
     width: 20px;
     height: 20px;
@@ -53,11 +63,17 @@ const ActivityCard = styled.article`
     align-items: center;
     justify-content: center;
     flex: none;
-    color: var(--app-text-muted);
+    color: var(--agent-tool-record-color);
   }
 
   &[data-status='completed'] .agent-activity-status-icon {
-    color: var(--app-text-muted);
+    color: var(--agent-tool-record-color);
+  }
+
+  &[data-status='completed'] .agent-activity-status-icon .semi-icon,
+  &[data-status='completed'] .agent-activity-status-icon svg,
+  &[data-status='completed'] .agent-activity-status-icon svg * {
+    color: var(--agent-tool-record-color);
   }
 
   &[data-status='failed'] .agent-activity-status-icon {
@@ -70,16 +86,16 @@ const ActivityCard = styled.article`
   }
 
   &[data-status='running'] .agent-activity-status-icon {
-    color: var(--semi-color-primary);
+    color: var(--agent-tool-record-color);
   }
 
   &[data-status='preparing'] .agent-activity-status-icon {
-    color: var(--semi-color-primary);
+    color: var(--agent-tool-record-color);
   }
 
   &[data-status='preparing'] .agent-activity-status-icon svg,
   &[data-status='running'] .agent-activity-status-icon svg {
-    animation: agent-activity-spin 900ms linear infinite;
+    animation: none;
   }
 
   .agent-activity-title {
@@ -89,21 +105,50 @@ const ActivityCard = styled.article`
     font-size: 13px;
     line-height: 1.4;
     font-weight: 400;
-    color: var(--app-text-muted);
+    color: var(--agent-tool-record-color);
     display: flex;
     align-items: baseline;
     gap: 5px;
   }
 
-  .agent-activity-title > span:first-child { flex: none; }
+  &[data-expandable='true'] .agent-activity-title {
+    flex: 0 1 auto;
+  }
+
+  .agent-activity-title > span:first-child {
+    flex: none;
+    color: var(--agent-tool-record-color);
+    -webkit-text-fill-color: var(--agent-tool-record-color);
+  }
+  .agent-activity-title > .agent-activity-live-label {
+    flex: 1;
+    min-width: 0;
+    max-width: 100%;
+  }
   .agent-activity-subject {
     min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-    background: transparent; border: 0; padding: 0; color: inherit; font: inherit;
+    background: transparent; border: 0; padding: 0;
+    color: var(--agent-tool-record-color);
+    -webkit-text-fill-color: var(--agent-tool-record-color);
+    font: inherit;
   }
   button.agent-activity-subject { text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
-  .agent-activity-expand { width: 24px; height: 24px; flex: none; padding: 0; border: 0;
+  .agent-activity-expand { width: 20px; height: 20px; flex: none; padding: 0; border: 0;
     display: inline-flex; align-items: center; justify-content: center;
-    background: transparent; color: var(--app-text-muted); cursor: pointer; }
+    margin-left: -5px; margin-right: -22px; opacity: 0; pointer-events: none;
+    background: transparent; color: var(--agent-tool-record-color); cursor: pointer;
+    transition: opacity 120ms ease; }
+  .agent-activity-expand .semi-icon,
+  .agent-activity-expand svg,
+  .agent-activity-expand svg * { color: var(--agent-tool-record-color); }
+  .agent-activity-expand .semi-icon {
+    transform: rotate(0deg);
+    transform-origin: center;
+    transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .agent-activity-expand[aria-expanded='true'] .semi-icon { transform: rotate(90deg); }
+  .agent-activity-header:hover .agent-activity-expand,
+  .agent-activity-expand:focus-visible { opacity: 1; pointer-events: auto; }
   button:focus-visible { outline: 2px solid var(--semi-color-primary); outline-offset: 2px; }
 
   .agent-activity-state {
@@ -112,10 +157,50 @@ const ActivityCard = styled.article`
     font-size: 12px;
   }
 
+  .agent-activity-collapse {
+    display: grid;
+    grid-template-rows: 0fr;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition:
+      grid-template-rows 220ms cubic-bezier(0.22, 1, 0.36, 1),
+      opacity 150ms ease,
+      visibility 0s linear 220ms;
+  }
+
+  .agent-activity-collapse[data-open='true'] {
+    grid-template-rows: 1fr;
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    transition-delay: 0s;
+  }
+
+  .agent-activity-collapse-inner {
+    min-height: 0;
+    overflow: hidden;
+    transform: translateY(-2px);
+    transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .agent-activity-collapse[data-open='true'] .agent-activity-collapse-inner {
+    transform: translateY(0);
+  }
+
   .agent-activity-body {
     display: grid;
     gap: 6px;
     margin: 4px 0 4px 27px;
+  }
+
+  .agent-activity-body[data-scrollable='true'] {
+    ${workspaceScrollbarStyles}
+
+    max-height: 156px;
+    padding-right: 4px;
+    overflow: auto;
+    overflow-anchor: none;
   }
 
   .agent-activity-message {
@@ -222,6 +307,16 @@ const ActivityCard = styled.article`
     .agent-activity-status-icon svg {
       animation: none !important;
     }
+
+    .agent-activity-expand {
+      transition: none;
+    }
+
+    .agent-activity-expand .semi-icon,
+    .agent-activity-collapse,
+    .agent-activity-collapse-inner {
+      transition: none;
+    }
   }
 
   @keyframes agent-activity-spin {
@@ -230,6 +325,13 @@ const ActivityCard = styled.article`
 `;
 
 const ShellActivity = styled.section`
+  --agent-tool-record-color: color-mix(
+    in srgb,
+    var(--app-text-muted) 88%,
+    var(--app-text-secondary)
+  );
+  --agent-tool-record-hover-color: var(--agent-tool-record-color);
+
   width: min(620px, 100%);
   min-width: 0;
   align-self: flex-start;
@@ -245,7 +347,7 @@ const ShellActivity = styled.section`
     border: 0;
     border-radius: var(--app-radius-medium);
     background: transparent;
-    color: var(--app-text);
+    color: var(--agent-tool-record-color);
     font: inherit;
     text-align: left;
   }
@@ -254,8 +356,11 @@ const ShellActivity = styled.section`
     cursor: pointer;
   }
 
-  button.agent-shell-summary:hover .agent-shell-summary-command {
-    color: var(--app-text);
+  button.agent-shell-summary:hover .agent-shell-summary-label,
+  button.agent-shell-summary:hover .agent-shell-summary-command,
+  button.agent-shell-summary:focus-visible .agent-shell-summary-label,
+  button.agent-shell-summary:focus-visible .agent-shell-summary-command {
+    color: var(--agent-tool-record-hover-color);
   }
 
   button.agent-shell-summary:focus-visible {
@@ -274,16 +379,16 @@ const ShellActivity = styled.section`
 
   .agent-shell-summary-label {
     flex: none;
-    color: var(--app-text-secondary);
+    color: var(--agent-tool-record-color);
     font-size: 13px;
     line-height: 1.4;
   }
 
   .agent-shell-summary-command {
     min-width: 0;
-    flex: 1;
+    flex: 0 1 auto;
     overflow: hidden;
-    color: var(--app-text);
+    color: var(--agent-tool-record-color);
     font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Consolas, monospace;
     font-size: 13px;
     line-height: 1.5;
@@ -293,6 +398,73 @@ const ShellActivity = styled.section`
     unicode-bidi: isolate;
   }
 
+  .agent-shell-summary-chevron {
+    width: 20px;
+    height: 20px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: none;
+    margin-left: -5px;
+    margin-right: -22px;
+    opacity: 0;
+    color: var(--agent-tool-record-color);
+    pointer-events: none;
+    transition: opacity 120ms ease;
+  }
+
+  .agent-shell-summary-chevron .semi-icon,
+  .agent-shell-summary-chevron svg,
+  .agent-shell-summary-chevron svg * {
+    color: var(--agent-tool-record-color);
+  }
+
+  .agent-shell-summary-chevron .semi-icon {
+    transform: rotate(0deg);
+    transform-origin: center;
+    transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  button.agent-shell-summary[aria-expanded='true'] .agent-shell-summary-chevron .semi-icon {
+    transform: rotate(90deg);
+  }
+
+  button.agent-shell-summary:hover .agent-shell-summary-chevron,
+  button.agent-shell-summary:focus-visible .agent-shell-summary-chevron {
+    opacity: 1;
+  }
+
+  .agent-shell-collapse {
+    display: grid;
+    grid-template-rows: 0fr;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition:
+      grid-template-rows 220ms cubic-bezier(0.22, 1, 0.36, 1),
+      opacity 150ms ease,
+      visibility 0s linear 220ms;
+  }
+
+  .agent-shell-collapse[data-open='true'] {
+    grid-template-rows: 1fr;
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    transition-delay: 0s;
+  }
+
+  .agent-shell-collapse-inner {
+    min-height: 0;
+    overflow: hidden;
+    transform: translateY(-2px);
+    transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .agent-shell-collapse[data-open='true'] .agent-shell-collapse-inner {
+    transform: translateY(0);
+  }
+
   .agent-shell-terminal {
     ${workspaceScrollbarStyles}
 
@@ -300,6 +472,7 @@ const ShellActivity = styled.section`
     margin-top: 4px;
     padding: 8px 10px;
     overflow: auto;
+    overflow-anchor: none;
     border: 1px solid var(--app-border);
     border-radius: var(--app-radius-small);
     background: color-mix(in srgb, var(--app-text) 5%, var(--app-bg));
@@ -365,6 +538,15 @@ const ShellActivity = styled.section`
     outline: 0;
     background: var(--app-hover-bg);
     color: var(--app-text);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .agent-shell-summary-chevron,
+    .agent-shell-summary-chevron .semi-icon,
+    .agent-shell-collapse,
+    .agent-shell-collapse-inner {
+      transition: none;
+    }
   }
 `;
 
@@ -490,6 +672,7 @@ interface AgentToolActivityCardProps {
   interactionBusy: boolean;
   libraryId: number;
   onAction?: (action: AgentPresentationAction) => void;
+  onExpand?: () => void;
   ownerScope: AgentOwnerScope | null;
   onResolveApproval: (
     approval: AgentToolApprovalSnapshot,
@@ -501,6 +684,7 @@ interface AgentToolActivityCardProps {
 interface AgentShellActivityProps {
   activity: AgentToolActivitySnapshot;
   libraryId: number;
+  onExpand?: () => void;
   ownerScope: AgentOwnerScope | null;
 }
 
@@ -524,7 +708,7 @@ function shellCommand(activity: AgentToolActivitySnapshot): string {
   }
 }
 
-function AgentShellActivity({ activity, libraryId, ownerScope }: AgentShellActivityProps) {
+function AgentShellActivity({ activity, libraryId, onExpand, ownerScope }: AgentShellActivityProps) {
   const [open, setOpen] = React.useState(false);
   const [loaded, setLoaded] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
@@ -609,13 +793,16 @@ function AgentShellActivity({ activity, libraryId, ownerScope }: AgentShellActiv
   const toggle = () => {
     if (!canExpand) return;
     const nextOpen = !open;
+    if (nextOpen) onExpand?.();
     setOpen(nextOpen);
     if (nextOpen && !loaded && !loading) void loadPage();
   };
 
   const summaryContent = (
     <>
-      <span className="agent-shell-summary-label">{SHELL_ACTIVITY_LABELS[activity.status]}</span>
+      <span className="agent-shell-summary-label">{activity.status === 'running' || activity.status === 'preparing'
+        ? <AgentActivityText $active>{SHELL_ACTIVITY_LABELS[activity.status]}</AgentActivityText>
+        : SHELL_ACTIVITY_LABELS[activity.status]}</span>
       <code className="agent-shell-summary-command" title={commandSummary}>
         {commandSummary}
       </code>
@@ -633,41 +820,52 @@ function AgentShellActivity({ activity, libraryId, ownerScope }: AgentShellActiv
           type="button"
         >
           {summaryContent}
+          <span className="agent-shell-summary-chevron">
+            <IconChevronRightStroked aria-hidden="true" />
+          </span>
         </button>
       ) : (
         <div className="agent-shell-summary">{summaryContent}</div>
       )}
-      {open ? (
-        <div aria-label="Shell 输出" className="agent-shell-terminal" role="region">
-          <pre className="agent-shell-terminal-command">
-            <span aria-hidden="true" className="agent-shell-terminal-prompt">$ </span>
-            {displayCommand || '命令内容不可用'}
-          </pre>
-          {expired ? (
-            <p className="agent-shell-log-notice">详细输出已清理</p>
-          ) : unavailableThrough !== null ? (
-            <p className="agent-shell-log-notice">部分早期输出不可用</p>
-          ) : null}
-          {frames.length > 0 ? (
-            <pre className="agent-shell-terminal-output">
-              {frames.map(frame => (
-                <span data-stream={frame.stream} key={frame.sequence}>{frame.text}</span>
-              ))}
-            </pre>
-          ) : loaded && !loading && !error && !expired ? (
-            <p className="agent-shell-log-empty">命令没有产生输出</p>
-          ) : null}
-          {error ? <p className="agent-shell-log-notice" role="alert">{error}</p> : null}
-          {loading ? <p className="agent-shell-log-notice" role="status">正在读取输出...</p> : null}
-          {!loading && nextCursor ? (
-            <button
-              className="agent-shell-log-more"
-              onClick={() => { void loadPage(nextCursor); }}
-              type="button"
-            >
-              继续读取
-            </button>
-          ) : null}
+      {canExpand ? (
+        <div
+          aria-hidden={!open}
+          className="agent-shell-collapse"
+          data-open={open ? true : undefined}
+        >
+          <div className="agent-shell-collapse-inner">
+            <div aria-label="Shell 输出" className="agent-shell-terminal" role="region">
+              <pre className="agent-shell-terminal-command">
+                <span aria-hidden="true" className="agent-shell-terminal-prompt">$ </span>
+                {displayCommand || '命令内容不可用'}
+              </pre>
+              {expired ? (
+                <p className="agent-shell-log-notice">详细输出已清理</p>
+              ) : unavailableThrough !== null ? (
+                <p className="agent-shell-log-notice">部分早期输出不可用</p>
+              ) : null}
+              {frames.length > 0 ? (
+                <pre className="agent-shell-terminal-output">
+                  {frames.map(frame => (
+                    <span data-stream={frame.stream} key={frame.sequence}>{frame.text}</span>
+                  ))}
+                </pre>
+              ) : loaded && !loading && !error && !expired ? (
+                <p className="agent-shell-log-empty">命令没有产生输出</p>
+              ) : null}
+              {error ? <p className="agent-shell-log-notice" role="alert">{error}</p> : null}
+              {loading ? <p className="agent-shell-log-notice" role="status">正在读取输出...</p> : null}
+              {!loading && nextCursor ? (
+                <button
+                  className="agent-shell-log-more"
+                  onClick={() => { void loadPage(nextCursor); }}
+                  type="button"
+                >
+                  继续读取
+                </button>
+              ) : null}
+            </div>
+          </div>
         </div>
       ) : null}
     </ShellActivity>
@@ -681,6 +879,7 @@ export default function AgentToolActivityCard({
   interactionBusy,
   libraryId,
   onAction,
+  onExpand,
   onResolveApproval,
   ownerScope,
 }: AgentToolActivityCardProps) {
@@ -715,47 +914,80 @@ export default function AgentToolActivityCard({
       <AgentShellActivity
         activity={activity}
         libraryId={libraryId}
+        onExpand={onExpand}
         ownerScope={ownerScope}
       />
     );
   }
 
-  const blocks = buildAgentToolPresentation(activity, libraryId);
+  const active = activity.status === 'running' || activity.status === 'preparing';
+  const nameOnlyRead = activity.call.name === 'file.read' && (activity.status === 'completed' || active);
+  const blocks = nameOnlyRead ? [] : buildAgentToolPresentation(activity, libraryId);
   const summary = buildAgentToolSummary(activity, libraryId);
   const forcedBody = activity.status === 'failed' || activity.status === 'interrupted'
     || activity.status === 'cancelled' || Boolean(activity.interaction)
     || (activity.status === 'running' && Boolean(activity.progress));
+  const expandable = blocks.length > 0 && !forcedBody;
   const showBody = expanded || forcedBody;
+  const toggleExpanded = () => {
+    if (!expanded) onExpand?.();
+    setExpanded(value => !value);
+  };
   return (
-    <ActivityCard data-status={activity.status}>
-      <div className="agent-activity-header">
+    <ActivityCard
+      data-expandable={expandable ? true : undefined}
+      data-status={activity.status}
+    >
+      <div
+        className="agent-activity-header"
+        onClick={expandable ? toggleExpanded : undefined}
+      >
         <span className="agent-activity-status-icon">
-          {activity.status === 'completed' && activity.toolMetadata?.risk === 'read'
+          {(activity.status === 'completed' || active) && (activity.toolMetadata?.risk === 'read' || activity.call.name === 'file.read')
             ? <IconFile aria-hidden="true" /> : <ActivityStatusIcon status={activity.status} />}
         </span>
         <div className="agent-activity-title">
+          {active ? <span className="agent-activity-live-label"><AgentActivityText $active>{summary.label}{summary.subject ? ` ${summary.subject}` : ''}</AgentActivityText></span> : <>
           <span>{summary.label}</span>
           {summary.subject ? summary.action && onAction ? (
             <button className="agent-activity-subject" type="button" title={summary.subject}
-              onClick={() => onAction(summary.action!)}>{summary.subject}</button>
+              onClick={(event?: React.MouseEvent) => {
+                event?.stopPropagation();
+                onAction(summary.action!);
+              }}>{summary.subject}</button>
           ) : <span className="agent-activity-subject" title={summary.subject}>{summary.subject}</span> : null}
+          </>}
         </div>
-        {activity.status !== 'completed' ? <span className="agent-activity-state">{STATUS_LABELS[activity.status]}</span> : null}
-        {blocks.length > 0 && !forcedBody ? <button type="button" className="agent-activity-expand"
+        {activity.status !== 'completed' && !active ? <span className="agent-activity-state">{STATUS_LABELS[activity.status]}</span> : null}
+        {expandable ? <button type="button" className="agent-activity-expand"
           aria-label={expanded ? '收起工具详情' : '展开工具详情'} title={expanded ? '收起工具详情' : '展开工具详情'}
-          aria-expanded={showBody} onClick={() => setExpanded(value => !value)}>
-          {showBody ? <IconChevronDown aria-hidden="true" /> : <IconChevronRight aria-hidden="true" />}
+          aria-expanded={showBody} onClick={(event?: React.MouseEvent) => {
+            event?.stopPropagation();
+            toggleExpanded();
+          }}>
+          <IconChevronRightStroked aria-hidden="true" />
         </button> : null}
       </div>
-      {blocks.length > 0 && showBody ? (
-        <div className="agent-activity-body">
-          {blocks.map((block, index) => renderBlock(
-            block,
-            index,
-            interactive,
-            interactionBusy,
-            onAction,
-          ))}
+      {blocks.length > 0 ? (
+        <div
+          aria-hidden={!showBody}
+          className="agent-activity-collapse"
+          data-open={showBody ? true : undefined}
+        >
+          <div className="agent-activity-collapse-inner">
+            <div
+              className="agent-activity-body"
+              data-scrollable={expandable ? true : undefined}
+            >
+              {blocks.map((block, index) => renderBlock(
+                block,
+                index,
+                interactive,
+                interactionBusy,
+                onAction,
+              ))}
+            </div>
+          </div>
         </div>
       ) : null}
     </ActivityCard>

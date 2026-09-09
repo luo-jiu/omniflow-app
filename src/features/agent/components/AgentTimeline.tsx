@@ -1,5 +1,5 @@
 import React from 'react';
-import { IconAlertCircle, IconCommentStroked, IconSpin } from '@douyinfe/semi-icons';
+import { IconAlertCircle, IconShrink, IconMore } from '@douyinfe/semi-icons';
 import styled from 'styled-components';
 
 import type {
@@ -18,6 +18,21 @@ import {
 import AgentToolActivityCard from './AgentToolActivityCard';
 import AgentToolActivityGroup from './AgentToolActivityGroup';
 import AgentMessageContent from './AgentMessageContent';
+import AgentActivityText from './AgentActivityText';
+import { selectAgentLiveStatus } from '../agent-live-status';
+
+const LiveStatus = styled.div`
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  min-height: 24px;
+  max-width: 100%;
+  padding: 2px 3px;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--app-text-muted);
+  > .semi-icon { flex: none; width: 20px; height: 20px; }
+`;
 
 const UserMessageBubble = styled.article`
   align-self: flex-end;
@@ -72,6 +87,18 @@ const AssistantItemSurface = styled.article`
     line-height: 1.55;
   }
 
+  &[data-work-kind='commentary'] {
+    width: 100%;
+    max-width: 100%;
+    min-height: 0;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    padding: 4px 0;
+    color: var(--app-text);
+    font-size: 14px;
+    line-height: 1.6;
+  }
+
   .agent-work-item-icon {
     width: 18px;
     height: 18px;
@@ -80,10 +107,6 @@ const AssistantItemSurface = styled.article`
     justify-content: center;
     margin-top: 1px;
     color: var(--semi-color-primary);
-  }
-
-  &[data-status='streaming'] .agent-work-item-icon svg {
-    animation: agent-work-item-spin 900ms linear infinite;
   }
 
   &[data-status='failed'] .agent-work-item-icon,
@@ -100,16 +123,9 @@ const AssistantItemSurface = styled.article`
 
   .agent-work-item-state {
     padding-top: 1px;
+    color: var(--app-text-muted);
     font-size: 11px;
     white-space: nowrap;
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .agent-work-item-icon svg { animation: none !important; }
-  }
-
-  @keyframes agent-work-item-spin {
-    to { transform: rotate(360deg); }
   }
 `;
 
@@ -125,6 +141,7 @@ interface AgentTimelineProps {
   libraryId: number;
   messages: AgentMessage[];
   onAction?: (action: AgentPresentationAction) => void;
+  onToolExpand?: () => void;
   ownerScope: AgentOwnerScope | null;
   onResolveApproval: (
     approval: AgentToolApprovalSnapshot,
@@ -141,6 +158,7 @@ export default function AgentTimeline({
   libraryId,
   messages,
   onAction,
+  onToolExpand,
   onResolveApproval,
   ownerScope,
   runs,
@@ -154,6 +172,7 @@ export default function AgentTimeline({
     () => buildAgentTimelineItemsFromProjection(messages, prepared),
     [messages, prepared],
   );
+  const liveStatus = selectAgentLiveStatus(runs, messages, toolActivities);
 
   return (
     <>
@@ -181,6 +200,7 @@ export default function AgentTimeline({
               key={item.key}
               libraryId={libraryId}
               onAction={onAction}
+              onExpand={onToolExpand}
               onResolveApproval={onResolveApproval}
               ownerScope={ownerScope}
             />
@@ -201,6 +221,7 @@ export default function AgentTimeline({
               key={item.key}
               libraryId={libraryId}
               onAction={onAction}
+              onExpand={onToolExpand}
               ownerScope={ownerScope}
               onResolveApproval={onResolveApproval}
             />
@@ -210,15 +231,13 @@ export default function AgentTimeline({
           const status = item.item.assistantItem.status;
           const failed = status === 'failed' || status === 'cancelled' || status === 'interrupted';
           return (
-            <AssistantItemSurface data-status={status} data-variant="work" key={item.key}>
-              <span className="agent-work-item-icon">
-                {failed
-                  ? <IconAlertCircle aria-hidden="true" />
-                  : status === 'streaming'
-                    ? <IconSpin aria-hidden="true" />
-                    : <IconCommentStroked aria-hidden="true" />}
-              </span>
-              <span className="agent-work-item-content">{item.item.content || '正在思考'}</span>
+            <AssistantItemSurface
+              data-status={status}
+              data-variant="work"
+              data-work-kind="commentary"
+              key={item.key}
+            >
+              <div className="agent-work-item-content"><AgentMessageContent content={item.item.content} showCopy={false} /></div>
               {failed ? (
                 <span className="agent-work-item-state">{WORK_ITEM_STATUS_LABELS[status]}</span>
               ) : null}
@@ -236,6 +255,12 @@ export default function AgentTimeline({
           </AssistantItemSurface>
         );
       })}
+      {liveStatus ? (
+        <LiveStatus role="status" aria-live="polite" data-agent-live-status={liveStatus.kind} key={`live:${liveStatus.runId}`}>
+          {liveStatus.kind === 'compaction' ? <IconShrink aria-hidden="true" /> : <IconMore aria-hidden="true" />}
+          <AgentActivityText $active>{liveStatus.label}</AgentActivityText>
+        </LiveStatus>
+      ) : null}
     </>
   );
 }

@@ -1,5 +1,9 @@
 # 内置 Agent 架构
 
+瞬态网络错误重试、只读部分响应续接与长工具任务一次性完成核对见 [运行恢复与完成核对](agent-run-reliability.md)。这些规则继续使用 main Run/assistant item 的规范生命周期，不扩大工具权限或新增 renderer 执行状态。
+
+Active Context 超预算时先尝试 OpenCode 式旧正文清理，再对符合条件的早期 Tool 轮次进行有序合并摘要；普通对话间隔不再强制拆成多次摘要请求，但原始用户/助手文字保留，受保护 Tool、配对校验和原始 ToolRun 不变。摘要区分历史观察与当前任务要求，合并受真实摘要输入预算限制。范围、阈值和对照测试见 [旧正文清理](agent-context-pruning.md)。
+
 上下文计量由 Run 内 main ledger 持有，既有调度预算与 UI 使用同一低估校正；快照持久化到 agent_runs.context_usage_json，经既有 revision-aware Run 更新恢复。缺失 usage 不作 0，压缩后重新建立输入基准，详见 [上下文计量](agent-context-accounting.md)。
 
 模型提示词、请求参数、负向能力收窄与 Run 冻结策略见 [模型执行适配](agent-model-adaptation.md)。远端模型目录不会提供应用系统指令或扩大工具权限，适配提示词计入所有续接与副作用前预算。

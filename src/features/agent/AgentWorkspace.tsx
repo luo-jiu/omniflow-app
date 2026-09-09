@@ -73,8 +73,9 @@ const AgentScroll = styled.div`
   flex: 1;
   min-height: 0;
   overflow: auto;
+  overflow-anchor: none;
   ${workspaceScrollbarStyles}
-  padding: 24px 16px 12px;
+  padding: 24px 16px 18px;
   display: flex;
   flex-direction: column;
 `;
@@ -119,7 +120,8 @@ const AgentEmpty = styled.div`
 const ComposerFrame = styled.div`
   flex: none;
   min-width: 0;
-  padding: 0 16px 18px;
+  margin-top: auto;
+  padding-top: 18px;
 `;
 
 const Composer = styled.form`
@@ -532,7 +534,14 @@ export default function AgentWorkspace({
         scrollFrameRef.current = null;
       }
     };
-  }, [managerMode, session.messages, session.runs, session.toolActivities, session.isStreaming]);
+  }, [
+    composerHeight,
+    managerMode,
+    session.isStreaming,
+    session.messages,
+    session.runs,
+    session.toolActivities,
+  ]);
 
   const persistModelPreferences = React.useCallback((nextPreferences: AgentModelPreferences) => {
     setModelPreferences(nextPreferences);
@@ -648,6 +657,10 @@ export default function AgentWorkspace({
     }
     Toast.info('该 Agent 结果操作尚未接入当前工作区');
   }, [libraryId, submitInteraction, toolActivities]);
+
+  const handleToolExpand = React.useCallback(() => {
+    shouldFollowScrollRef.current = false;
+  }, []);
 
   const handleOpenSession = React.useCallback(async (target: AgentSessionSummary) => {
     if (await restoreSession(target.id)) {
@@ -804,6 +817,7 @@ export default function AgentWorkspace({
               libraryId={libraryId}
               messages={session.messages}
               onAction={handlePresentationAction}
+              onToolExpand={handleToolExpand}
               ownerScope={ownerScope}
               onResolveApproval={(approval, approved, preparedAction) => {
                 void session.resolveApproval(approval, approved, preparedAction);
@@ -825,14 +839,12 @@ export default function AgentWorkspace({
         {!managerMode && !hasTimelineContent && session.error ? (
           <div role="alert">{session.error}</div>
         ) : null}
-      </AgentScroll>
-
-      {!managerMode ? <ComposerFrame>
-        <Composer onSubmit={(event) => {
-          event.preventDefault();
-          shouldFollowScrollRef.current = true;
-          void session.submit();
-        }}>
+        {!managerMode ? <ComposerFrame>
+          <Composer onSubmit={(event) => {
+            event.preventDefault();
+            shouldFollowScrollRef.current = true;
+            void session.submit();
+          }}>
           <ComposerResizeHandle
             aria-label="调整 Agent 输入框高度"
             onKeyDown={(event) => {
@@ -952,8 +964,9 @@ export default function AgentWorkspace({
             <AgentSubmitButton streaming={session.isStreaming} busy={session.isBusy}
               canSubmit={canSubmit} onStop={() => { void session.stop(); }} />
           </div>
-        </Composer>
-      </ComposerFrame> : null}
+          </Composer>
+        </ComposerFrame> : null}
+      </AgentScroll>
     </AgentRoot>
   );
 }

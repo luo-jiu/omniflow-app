@@ -17,11 +17,11 @@
 
 ## 正文契约
 
-输入：`scope`、`path`、`offset`、`column`、`limit`、`revision`。
+输入：`scope`、`path`、`offset`、`column`、`limit`、`revision`、`maxOutputTokens`。
 
-offset 为一基行号，默认 1；column 为一基 Unicode 字符位置，默认 1，不是 UTF-16 下标或字节位置。limit 默认 200 行、最多 2,000 行，实际返回量同时受约 6,000 字节正文页预算约束。
+offset 为一基行号，默认 1；column 为一基 Unicode 字符位置，默认 1，不是 UTF-16 下标或字节位置。省略 limit 时从指定位置尽量读到末尾；提供 limit 时按模型主动指定的行数读取，不再有默认 200 行或最多 2,000 行的限制。
 
-输出包含 `scope/path/revision/offset/column/lines/totalLines/hasMore`。lines 的每项为 `{line,column,text}`；存在剩余内容时附带 `nextOffset/nextColumn`。下一次读取相同路径并传这两个位置及 revision。内容 hash 变化时拒绝续读，不能把新版文件接在旧版片段后。CRLF/LF/CR 统一为逻辑行，文件末尾换行不产生多余空行。
+输出包含 `scope/path/fileName/revision/offset/column/content/totalLines/endLine/hasMore`。content 使用 `L行号: 文本` 的紧凑格式；长行续读使用 `L行号:列号: 文本`，不再把逐行 JSON 数组传给模型。存在剩余内容时附带 `nextOffset/nextColumn`，这些字段仅用于模型续读，不显示成 UI 的“可继续”。内容 hash 变化时拒绝续读，不能拼接不同版本。CRLF/LF/CR 统一为逻辑行，文件末尾换行不产生多余空行。
 
 长行只交付可容纳的字符，下一页从该行剩余 column 开始，不跳过中段。最终模型上下文不足以完整交付正文页时终止本轮并说明未交付，不能使用截断后的 nextOffset；这不同于 Shell 日志保留头尾的显示策略。
 
@@ -42,11 +42,17 @@ offset 为一基行号，默认 1；column 为一基 Unicode 字符位置，默�
 
 正文与文件元数据的单次模型投影上限为 10,000 tokens，仍受当前上下文剩余量限制。本机目录按约 20,000 字节条目预算打包续页。
 
+正文采用 Codex unified_exec 的默认 10,000-token 输出预算与 1 MiB 输出硬边界，不保留独立 6 KB 分页。main 在执行前传入可用的续接预算；读取后将真实结果 envelope 按现有模型投影计数打包，超限时在内存中寻找可交付范围，不重新下载文件或让模型猜 limit。maxOutputTokens 可请求更大值，但当前运行时单次模型策略仍封顶 10,000，且受真实剩余预算约束。输出 tokens 是预算估算，不是精确 tokenizer 计数；源文件 8 MiB 下载/解码边界与正文输出预算是两件事，本轮未修改前者。
+
+成功的 file.read 时间线只显示“已读取 文件名.后缀”，无完整路径、无“可继续”、无单条展开箭头或详情 DOM；旧记录同样如此。失败原因和必要审批继续显示，搜索及元数据检查的详情不受影响。读取分组仍可展开查看文件名列表。
+
 ## 尚未实现
 
 这不是资料库 FUSE 挂载或 Shell 管道解释器。本机复杂 `rg/sed`、正则和管道继续使用现有 Shell；内部正文搜索是有界逐文件读取，没有全文索引。首次读取、缓存失效或没有强 ETag 时完整读取最多 8 MiB，再切片；缓存有效且源返回 304 时无需再次传输正文。尚未实现 Range 续读或行索引，续读仍有权限、元数据与条件请求开销。后续优化必须保留版本检查、取消、字节与对象数量上限。
 
 ## 验证
+
+读取预算与精简展示调整后：1,973 项测试通过、7 项跳过，lint、TypeScript 和完整构建通过。自动化确认 3,000 行可在默认预算下一次交付，显式行数可超过 2,000，小上下文仍能打包完整 envelope。真实 gpt-5.5 在非第一个 win 资料库的隔离测试中仅调用一次 file.read，不传 limit/offset/maxOutputTokens，读完 2,400 行，content 20,504 字符，hasMore=false，首尾标记正确；成功行只显示文件名且没有详情展开。首次模型请求遇到供应商过载，重试后成功，未把该过载当作读取失败。
 
 单测覆盖内外相同行契约、长 Unicode 行无损续读、文件变化、空文件、非法范围、二进制与超限、取消、内部读取后重新授权、节点身份漂移、主进程 owner 绑定、host 权限模式及目录游标漂移；内部超大页自动缩页使用原游标重试。UI 沿用紧凑工具行，本机路径不生成资料库定位动作。
 

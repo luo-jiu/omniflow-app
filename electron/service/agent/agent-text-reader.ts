@@ -1,7 +1,8 @@
 import crypto from 'node:crypto';
 
 export const AGENT_TEXT_MAX_BYTES = 8 * 1024 * 1024;
-const PAGE_BYTES = 6_000;
+export const AGENT_READ_DEFAULT_OUTPUT_TOKENS = 10_000;
+export const AGENT_READ_OUTPUT_MAX_BYTES = 1024 * 1024;
 
 export interface AgentTextReadQuery {
   scope?: 'library' | 'host';
@@ -10,6 +11,7 @@ export interface AgentTextReadQuery {
   column?: number;
   limit?: number;
   revision?: string;
+  maxOutputTokens?: number;
 }
 
 export function decodeAgentText(bytes: Uint8Array) {
@@ -28,37 +30,53 @@ export function decodeAgentText(bytes: Uint8Array) {
   return { revision, lines };
 }
 
-export function sliceAgentText(bytes: Uint8Array, query: AgentTextReadQuery) {
-  const { revision, lines } = decodeAgentText(bytes);
+export function sliceAgentText(bytes: Uint8Array, query: AgentTextReadQuery, outputBytes = AGENT_READ_DEFAULT_OUTPUT_TOKENS * 4) {
+  return sliceDecodedAgentText(decodeAgentText(bytes), query, outputBytes);
+}
+
+export function sliceDecodedAgentText(
+  decoded: ReturnType<typeof decodeAgentText>, query: AgentTextReadQuery,
+  outputBytes = AGENT_READ_DEFAULT_OUTPUT_TOKENS * 4,
+) {
+  const { revision, lines } = decoded;
   if (query.revision && query.revision !== revision) throw new Error('文件内容已变化，请从头重新读取');
   const offset = query.offset ?? 1;
   const column = query.column ?? 1;
-  const limit = query.limit ?? 200;
+  const limit = query.limit ?? Number.MAX_SAFE_INTEGER;
   if (!Number.isSafeInteger(offset) || offset < 1 || !Number.isSafeInteger(column) || column < 1
-    || !Number.isSafeInteger(limit) || limit < 1 || limit > 2_000) throw new Error('读取范围无效');
+    || !Number.isSafeInteger(limit) || limit < 1) throw new Error('读取范围无效');
   if (offset > lines.length && !(offset === 1 && lines.length === 0)) throw new Error('offset 超出文件行数');
-  let remaining = PAGE_BYTES;
+  let remaining = Math.max(0, Math.min(outputBytes, AGENT_READ_OUTPUT_MAX_BYTES));
   const entries: { line: number; column: number; text: string }[] = [];
   let nextOffset = offset;
   let nextColumn = column;
   for (let i = offset - 1; i < lines.length && entries.length < limit; i += 1) {
-    const chars = Array.from(lines[i]);
     const start = i === offset - 1 ? column - 1 : 0;
-    if (start > chars.length) throw new Error('column 超出行长度');
-    let end = start;
-    while (end < chars.length && Buffer.byteLength(chars[end]) <= remaining) {
-      remaining -= Buffer.byteLength(chars[end]); end += 1;
+    const prefix = `L${i + 1}${start ? `:${start + 1}` : ''}: `;
+    const overhead = Buffer.byteLength(prefix) + 1;
+    if (remaining < overhead) break;
+    remaining -= overhead;
+    let end = 0;
+    let partial = false;
+    const selected: string[] = [];
+    for (const character of lines[i]) {
+      if (end < start) { end += 1; continue; }
+      const size = Buffer.byteLength(character);
+      if (size > remaining) { partial = true; break; }
+      remaining -= size; selected.push(character); end += 1;
     }
-    if (end === start && chars.length > start) break;
-    entries.push({ line: i + 1, column: start + 1, text: chars.slice(start, end).join('') });
-    remaining -= 32;
-    nextOffset = end < chars.length ? i + 1 : i + 2;
-    nextColumn = end < chars.length ? end + 1 : 1;
-    if (end < chars.length || remaining <= 0) break;
+    if (start > end) throw new Error('column 超出行长度');
+    if (partial && !selected.length) break;
+    entries.push({ line: i + 1, column: start + 1, text: selected.join('') });
+    nextOffset = partial ? i + 1 : i + 2;
+    nextColumn = partial ? end + 1 : 1;
+    if (partial || remaining <= 0) break;
   }
   const hasMore = nextOffset <= lines.length;
   return { scope: query.scope ?? 'library', path: query.path, revision, offset, column,
     lines: entries, totalLines: lines.length, hasMore,
+    content: entries.map(entry => `L${entry.line}${entry.column > 1 ? `:${entry.column}` : ''}: ${entry.text}`).join('\n'),
+    ...(entries.length ? { endLine: entries[entries.length - 1].line } : {}),
     ...(hasMore ? { nextOffset, nextColumn } : {}) };
 }
 

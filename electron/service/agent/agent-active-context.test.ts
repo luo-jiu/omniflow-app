@@ -43,6 +43,76 @@ function containsToolResult(
 }
 
 describe('Agent active context', () => {
+  it('batches ordered Tool turns across dialogue without deleting user or assistant text', async () => {
+    const user = { role: 'user' as const, content: '目标 B；禁止覆盖文件' };
+    const changed = { role: 'user' as const, content: `${AGENT_ACTIVE_CONTEXT_SUMMARY_PREFIX}\nB 已变化，请重新读取` };
+    const commentary = { role: 'assistant' as const, content: '将检查新版本' };
+    const messages: AgentProviderMessage[] = [user];
+    const toolResults: AgentActiveToolResultRecord[] = [];
+    for (const id of ['old', 'new', 'latest']) {
+      messages.push({ role: 'assistant', content: '', toolCalls: [{ id, name: 'file.read', input: { path: 'B' } }] });
+      appendResult({ messages, toolResults, callId: id, toolName: 'file.read', result: { ok: true, message: id } });
+      if (id === 'old') messages.push(changed, commentary);
+    }
+    markAgentActiveToolResultsConsumed(toolResults);
+    const originals = toolResults.map(record => record.message.content);
+    const summarize = vi.fn(async candidate => {
+      expect(candidate.toolCallIds).toEqual(['old', 'new']);
+      expect(candidate.messages.indexOf(changed)).toBeGreaterThan(1);
+      expect(candidate.messages.indexOf(commentary)).toBe(candidate.messages.indexOf(changed) + 1);
+      expect(candidate.previousSummaryIndices).toEqual([]);
+      return '{"version":1,"objective":[],"verifiedFacts":["新版覆盖旧版"],"completedActions":[],"decisions":[],"failures":[],"pendingWork":[]}';
+    });
+    const records = [...toolResults];
+    await compactAgentActiveContextToFit({ messages, toolResults, summarize, requestTokenLimit: 1,
+      estimateTokens: value => containsToolResult(value, 'new') ? 100 : 1 });
+    expect(summarize).toHaveBeenCalledOnce();
+    expect(messages.slice(0, 3)).toEqual([user, changed, commentary]);
+    expect(messages[1]).toBe(changed);
+    expect(messages[2]).toBe(commentary);
+    expect(toolResults).toEqual([records[2]]);
+    expect(records.map(record => record.message.content)).toEqual(originals);
+  });
+
+  it('splits batches at the summary request budget without truncating results', async () => {
+    const messages: AgentProviderMessage[] = [];
+    const toolResults: AgentActiveToolResultRecord[] = [];
+    for (const id of ['a', 'b']) {
+      messages.push({ role: 'assistant', content: '', toolCalls: [{ id, name: 'file.read', input: {} }] });
+      appendResult({ messages, toolResults, callId: id, toolName: 'file.read', result: { ok: true, message: `complete-${id}` } });
+    }
+    markAgentActiveToolResultsConsumed(toolResults);
+    const summarize = vi.fn(async candidate => {
+      expect(candidate.toolCallIds).toHaveLength(1);
+      expect(JSON.stringify(candidate.messages)).toContain(`complete-${candidate.toolCallIds[0]}`);
+      return '{"version":1,"objective":[],"verifiedFacts":["保留完整事实"],"completedActions":[],"decisions":[],"failures":[],"pendingWork":[]}';
+    });
+    await compactAgentActiveContextToFit({ messages, toolResults, summarize, requestTokenLimit: 1,
+      canSummarizeCandidate: candidate => candidate.toolCallIds.length <= 1,
+      preserveLatestToolResult: false, estimateTokens: estimateUntilToolResultsAreRemoved });
+    expect(summarize).toHaveBeenCalledTimes(2);
+    expect(summarize.mock.calls[1][0].previousSummaryIndices).toEqual([0]);
+  });
+
+  it('leaves dialogue and tool records untouched when a merged summary fails', async () => {
+    const messages: AgentProviderMessage[] = [];
+    const toolResults: AgentActiveToolResultRecord[] = [];
+    for (const id of ['a', 'b']) {
+      messages.push({ role: 'user', content: `request-${id}` });
+      messages.push({ role: 'assistant', content: '', toolCalls: [{ id, name: 'file.read', input: {} }] });
+      appendResult({ messages, toolResults, callId: id, toolName: 'file.read', result: { ok: true } });
+    }
+    markAgentActiveToolResultsConsumed(toolResults);
+    const before = [...messages];
+    const records = [...toolResults];
+    await expect(compactAgentActiveContextToFit({ messages, toolResults, requestTokenLimit: 1,
+      preserveLatestToolResult: false, estimateTokens: estimateUntilToolResultsAreRemoved,
+      summarize: async candidate => { expect(candidate.toolCallIds).toEqual(['a', 'b']); throw new Error('failed'); },
+    })).rejects.toThrow('failed');
+    expect(messages).toEqual(before);
+    expect(toolResults).toEqual(records);
+  });
+
   it('semantically merges unique facts from successive Tool turns into one summary', async () => {
     const messages: AgentProviderMessage[] = [
       { content: '读取 A 和 B，并保留两边的唯一事实', role: 'user' },

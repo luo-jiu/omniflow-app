@@ -35,6 +35,46 @@ function splitUtf8Inside(text: string, target: string): Uint8Array[] {
 }
 
 describe('Agent provider client', () => {
+  it.each(['net::ERR_CONNECTION_CLOSED', 'net::ERR_CONNECTION_RESET', 'net::ERR_NETWORK_CHANGED'])(
+    'retries Electron transport failure %s without changing the request', async message => {
+      const retry = vi.fn();
+      const success = `data: ${JSON.stringify({ choices: [{ delta: { content: 'ok' }, finish_reason: 'stop' }] })}\n\n`;
+      mocks.fetch.mockRejectedValueOnce(new Error(message)).mockResolvedValueOnce(new Response(success));
+      await expect(streamAgentProviderTurn({ apiKey: '', baseUrl: 'https://example.com', providerType: 'openai' },
+        providerTurnInput, vi.fn(), new AbortController().signal, undefined, { retryDelayMs: 0, onRetry: retry }))
+        .resolves.toMatchObject({ content: 'ok' });
+      expect(mocks.fetch).toHaveBeenCalledTimes(2);
+      expect(mocks.fetch.mock.calls[0][1].body).toBe(mocks.fetch.mock.calls[1][1].body);
+      expect(retry).toHaveBeenCalledWith(1, 2);
+    },
+  );
+  it('bounds transport retries and does not retry certificate or unknown errors', async () => {
+    const profile = { apiKey: '', baseUrl: 'https://example.com', providerType: 'openai' as const };
+    mocks.fetch.mockRejectedValue(new Error('net::ERR_CONNECTION_CLOSED'));
+    await expect(streamAgentProviderTurn(profile, providerTurnInput, vi.fn(), new AbortController().signal,
+      undefined, { retryDelayMs: 0 })).rejects.toThrow('net::ERR_CONNECTION_CLOSED');
+    expect(mocks.fetch).toHaveBeenCalledTimes(3);
+    for (const message of ['net::ERR_CERT_AUTHORITY_INVALID', 'unexpected parser failure']) {
+      mocks.fetch.mockReset().mockRejectedValue(new Error(message));
+      await expect(streamAgentProviderTurn(profile, providerTurnInput, vi.fn(), new AbortController().signal,
+        undefined, { retryDelayMs: 0 })).rejects.toThrow(message);
+      expect(mocks.fetch).toHaveBeenCalledOnce();
+    }
+  });
+  it('never replays a transport failure after visible text', async () => {
+    const delta = `data: ${JSON.stringify({ choices: [{ delta: { content: 'partial' } }] })}\n\n`;
+    let chunks = 0;
+    mocks.fetch.mockResolvedValue(new Response(new ReadableStream({ pull(controller) {
+      if (chunks++ === 0) controller.enqueue(new TextEncoder().encode(delta));
+      else controller.error(new Error('net::ERR_CONNECTION_CLOSED'));
+    } })));
+    const onDelta = vi.fn();
+    await expect(streamAgentProviderTurn({ apiKey: '', baseUrl: 'https://example.com', providerType: 'openai' },
+      providerTurnInput, onDelta, new AbortController().signal, undefined, { retryDelayMs: 0 }))
+      .rejects.toThrow('net::ERR_CONNECTION_CLOSED');
+    expect(onDelta).toHaveBeenCalledWith('partial');
+    expect(mocks.fetch).toHaveBeenCalledOnce();
+  });
   beforeEach(() => {
     mocks.fetch.mockReset();
   });

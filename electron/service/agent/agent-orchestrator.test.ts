@@ -29,6 +29,7 @@ vi.mock('./capabilities/agent-capability-runtime', () => ({
 
 import { createAgentOrchestrator } from './agent-orchestrator';
 import { AGENT_ACTIVE_CONTEXT_SUMMARY_PREFIX } from './agent-active-context';
+import { AGENT_COMPLETION_CHECK_PROMPT } from './agent-completion-check';
 import type { AgentProviderMessage } from './agent-provider-model';
 import {
   estimateAgentProviderTurnTokens,
@@ -323,6 +324,64 @@ describe('Agent orchestrator', () => {
     expect(readLibraryText).toHaveBeenCalledWith(expect.objectContaining({ libraryId: 3, ownerScope: OWNER_SCOPE,
       operation: { operation: 'stage-library-node', nodeId: 88, includeDownloadUrl: true } }));
     expect(webContents.send.mock.calls.map(call => call[1]).some(event => event.type === 'tool-execution-requested')).toBe(false);
+  });
+
+  it('continues unfinished long tool work after one completion checkpoint without replaying reads', async () => {
+    const node = { id: 88, libraryId: 3, parentId: 20, name: 'read.txt', type: 'file' as const, path: '/docs/read.txt' };
+    const readLibraryMetadata = vi.fn(async () => ({ libraryId: 3, node }));
+    const readLibraryText = vi.fn(async () => Buffer.from(Array.from({ length: 10 }, (_, i) => `line-${i}`).join('\n')));
+    const read = (offset: number) => ({ id: `read-${offset}`, name: 'file.read', input: { path: '/docs/read.txt', offset, limit: 1 } });
+    mocks.streamAgentProviderTurn
+      .mockResolvedValueOnce({ content: '', toolCalls: Array.from({ length: 8 }, (_, i) => read(i + 1)) })
+      .mockImplementationOnce(async (_connection, _input, delta) => {
+        delta('尚未完成，但连接被打断。'); return { content: '尚未完成，但连接被打断。', toolCalls: [] };
+      })
+      .mockImplementationOnce(async (_connection, input) => {
+        expect(input.messages.some((item: AgentProviderMessage) => item.content === AGENT_COMPLETION_CHECK_PROMPT)).toBe(true);
+        return { content: '', toolCalls: [read(9)] };
+      })
+      .mockImplementationOnce(async (_connection, _input, delta) => {
+        delta('核对后完成。'); return { content: '核对后完成。', toolCalls: [] };
+      });
+    const webContents = sender();
+    const orchestrator = createOrchestrator({ readLibraryMetadata, readLibraryText, contextBudget: { contextWindowTokens: 32_000 } });
+    const started = await orchestrator.start(webContents as never, request());
+    await waitForCompletedFinal(webContents, '核对后完成。', started);
+    expect(mocks.streamAgentProviderTurn).toHaveBeenCalledTimes(4);
+    expect(readLibraryText).toHaveBeenCalledTimes(9);
+  });
+
+  it('continues a partially streamed read-only response as a new item without replaying the read', async () => {
+    const node = { id: 88, libraryId: 3, parentId: 20, name: 'read.txt', type: 'file' as const, path: '/docs/read.txt' };
+    const readLibraryMetadata = vi.fn(async () => ({ libraryId: 3, node }));
+    const readLibraryText = vi.fn(async () => Buffer.from('observed evidence'));
+    mocks.streamAgentProviderTurn
+      .mockResolvedValueOnce({ content: '', toolCalls: [{ id: 'read-once', name: 'file.read', input: { path: '/docs/read.txt' } }] })
+      .mockImplementationOnce(async (_connection, _input, delta) => { delta('部分说明'); throw new Error('net::ERR_CONNECTION_CLOSED'); })
+      .mockImplementationOnce(async (_connection, input, delta) => {
+        expect(input.messages.at(-1).content).toContain('[OmniFlow runtime recovery]');
+        delta('续接完成。'); return { content: '续接完成。', toolCalls: [] };
+      });
+    const webContents = sender();
+    const orchestrator = createOrchestrator({ readLibraryMetadata, readLibraryText, contextBudget: { contextWindowTokens: 32_000 } });
+    const started = await orchestrator.start(webContents as never, request());
+    await waitForCompletedFinal(webContents, '续接完成。', started);
+    expect(readLibraryText).toHaveBeenCalledOnce();
+    const snapshot = await store.getSession(started.sessionId, OWNER_SCOPE, 3);
+    expect(snapshot?.messages.some(message => message.content.includes('本段模型响应因连接中断而未完成'))).toBe(true);
+  });
+
+  it('bounds repeated partial-response continuations', async () => {
+    mocks.streamAgentProviderTurn.mockImplementation(async (_connection, _input, delta) => {
+      delta('partial'); throw new Error('net::ERR_CONNECTION_CLOSED');
+    });
+    const webContents = sender();
+    const orchestrator = createOrchestrator({ contextBudget: { contextWindowTokens: 32_000 } });
+    const started = await orchestrator.start(webContents as never, request());
+    await vi.waitFor(async () => {
+      expect((await store.getSession(started.sessionId, OWNER_SCOPE, 3))?.runs[0].status).toBe('failed');
+    });
+    expect(mocks.streamAgentProviderTurn).toHaveBeenCalledTimes(3);
   });
 
   it('dispatches library grep through the existing owner-bound text authority', async () => {
@@ -1072,7 +1131,7 @@ describe('Agent orchestrator', () => {
           })),
         ],
       })
-      .mockImplementationOnce(async (_connection, input, onDelta) => {
+      .mockImplementation(async (_connection, input, onDelta) => {
         const toolResults = input.messages.filter(
           (message: { role: string }) => message.role === 'tool',
         );
@@ -1901,7 +1960,7 @@ describe('Agent orchestrator', () => {
           })),
         ],
       })
-      .mockImplementationOnce(async (_connection, input, onDelta) => {
+      .mockImplementation(async (_connection, input, onDelta) => {
         const toolResults = (input.messages as Array<{ name?: string; role: string }>)
           .filter(message => message.role === 'tool');
         expect(toolResults).toHaveLength(9);
@@ -1937,7 +1996,7 @@ describe('Agent orchestrator', () => {
           name: 'file.list',
         })),
       })
-      .mockImplementationOnce(async (_connection, input, onDelta) => {
+      .mockImplementation(async (_connection, input, onDelta) => {
         expect(input.messages.filter((message: { role: string }) => message.role === 'tool'))
           .toHaveLength(9);
         onDelta('九次目录读取均已完成。');
