@@ -382,6 +382,7 @@ const ToolWorkspace: React.FC<ToolWorkspaceProps> = ({
 
         {activeToolId === 'subtitle-translation' ? (
           <ToolWorkspaceSubtitle
+            activeServiceId={subtitleTranslation.activeServiceId}
             activeRowId={subtitleTranslation.activeRowId}
             availableModels={subtitleTranslation.availableModels}
             config={subtitleTranslation.config}

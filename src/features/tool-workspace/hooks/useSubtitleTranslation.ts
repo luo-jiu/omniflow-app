@@ -479,6 +479,7 @@ export function useSubtitleTranslation(input: UseSubtitleTranslationInput) {
   }, [draft.fileFormat, draft.fileName, draft.rows, libraryId, librarySaveTarget]);
 
   return {
+    activeServiceId: activeService?.id || '',
     activeRowId,
     availableModels,
     config,

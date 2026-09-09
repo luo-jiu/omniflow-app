@@ -24,12 +24,13 @@
 
 ## 2. 工作区层级
 
-当前 `library detail` 的 `workspaceDisplayMode` 有 4 种：
+当前 `library detail` 的 `workspaceDisplayMode` 有 5 种：
 
 - `search-home`
 - `file-viewer`
 - `browser`
 - `tools`
+- `system`
 
 其中：
 
@@ -127,6 +128,8 @@
 - 另存到库内文件系统
 
 ### 6.2 模型协议
+
+字幕Composer复用 `AIModelSettingsControl`，模型、推理强度及上下文参数仍由字幕config持有；当前AI服务ID作为modelSourceKey，使切换服务后的菜单加载状态重置，不在字幕组件维护第二套菜单状态。开始/停止翻译继续进入既有runner，未改变正在运行任务的冻结配置。
 
 字幕工具通过当前启用的 `AI 服务配置` 请求模型，不再单独填写 Base URL 或 API Key。模型列表路径统一使用当前服务的 `Base URL + /models`，具体鉴权与补全协议由主进程按 provider 适配：
 

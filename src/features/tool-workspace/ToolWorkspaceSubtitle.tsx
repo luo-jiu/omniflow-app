@@ -745,6 +745,7 @@ const VirtualSubtitleTable: React.FC<VirtualSubtitleTableProps> = React.memo(({
 });
 
 type ToolWorkspaceSubtitleProps = {
+  activeServiceId: string;
   activeRowId: string | null;
   availableModels: string[];
   config: SubtitleTranslationConfig;
@@ -779,6 +780,7 @@ type ToolWorkspaceSubtitleProps = {
 };
 
 const ToolWorkspaceSubtitle: React.FC<ToolWorkspaceSubtitleProps> = ({
+  activeServiceId,
   activeRowId,
   availableModels,
   config,
@@ -973,6 +975,7 @@ const ToolWorkspaceSubtitle: React.FC<ToolWorkspaceSubtitleProps> = ({
           retranslateDisabled={draft.rows.length === 0}
           isRunnerActive={isRunnerActive}
           loadingModels={loadingModels}
+          modelSourceKey={activeServiceId}
           runnerSnapshot={runnerSnapshot}
           onConfigChange={onConfigChange}
           onLoadModels={onLoadModels}
