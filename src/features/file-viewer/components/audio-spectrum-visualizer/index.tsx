@@ -8,6 +8,7 @@ import {
   resolveSpectrumOpacity,
   resolveSpectrumWaveHeight,
 } from './audio-spectrum-mirror';
+import { resolveSpectrumBarHeightRatio } from './audio-spectrum-level';
 
 interface AudioSpectrumVisualizerProps {
   colors: SpectrumColors;
@@ -99,7 +100,6 @@ export const AudioSpectrumVisualizer: React.FC<AudioSpectrumVisualizerProps> = (
       const spectrumWidth = barWidth * barCount + gap * (barCount - 1);
       const spectrumStartX = Math.floor((width - spectrumWidth) / 2);
       const minimumHeight = 1.5 * pixelRatio;
-      const maximumHeight = height * 0.64;
       let hasVisibleBar = false;
       const hasLiveSpectrum = isPlayingRef.current
         && playerState.src === url
@@ -109,8 +109,9 @@ export const AudioSpectrumVisualizer: React.FC<AudioSpectrumVisualizerProps> = (
         const level = isPlayingRef.current && hasLiveSpectrum
           ? readSmoothedLiveLevel(liveLevelsRef.current, sourceIndex, sourceBarCount)
           : 0;
-        const target = level > 0
-          ? Math.max(minimumHeight, Math.pow(level, 1.08) * maximumHeight)
+        const targetHeightRatio = resolveSpectrumBarHeightRatio(level);
+        const target = targetHeightRatio > 0
+          ? Math.max(minimumHeight, targetHeightRatio * height)
           : 0;
         const previous = displayedHeights[sourceIndex];
         const smoothing = target > previous ? 0.48 : 0.16;

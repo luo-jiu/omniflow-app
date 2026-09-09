@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Modal, Spin, Toast, Tooltip } from '@douyinfe/semi-ui';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { Button, Input, Modal, Spin, Toast } from '@douyinfe/semi-ui';
 import { IconCopyAdd, IconDownload, IconSave } from '@douyinfe/semi-icons';
 import CodeMirror from '@uiw/react-codemirror';
 import { keymap, EditorView, type ViewUpdate } from '@codemirror/view';
@@ -14,6 +14,7 @@ import {
 import { useFileViewer } from '@/hooks/useFileViewer';
 import { refreshDirectoryInTree } from '@/features/file-explorer/services/tree-locate';
 import { runtimeLogger } from '@/utils/runtimeLogger';
+import { validateWindowsLikeFileName } from '@/utils/windowsFileName';
 import {
   createViewerDraftKey,
   createViewerResourceKey,
@@ -25,8 +26,13 @@ import {
   type ViewerResourceKey,
   type ViewerSessionAdapter,
 } from '@/features/file-viewer/session';
-import { TextViewerWrapper } from './style';
+import {
+  TextViewerSaveAsContent,
+  TextViewerSaveAsModalStyle,
+  TextViewerWrapper,
+} from './style';
 import { resolveTextEditorLanguage } from './language';
+import { saveTextContentToDesktop } from './text-viewer-local-save';
 import {
   createTextContentRevision,
   parseTextViewerSessionSnapshot,
@@ -84,6 +90,11 @@ const HIGHLIGHT_SOURCE_LABEL = {
   plain: '纯文本',
 } as const;
 
+interface CursorPosition {
+  column: number;
+  line: number;
+}
+
 function clampFontSize(size: number): number {
   return Math.min(Math.max(Math.round(size), MIN_FONT_SIZE), MAX_FONT_SIZE);
 }
@@ -97,6 +108,21 @@ function readTextResponseBody(body: unknown): string {
 function normalizeProvidedRevision(value: string | null): string | null {
   const normalized = String(value || '').trim();
   return normalized && normalized.length <= 512 ? normalized : null;
+}
+
+function resolveLineEnding(content: string): 'CRLF' | 'CR' | 'LF' {
+  if (content.includes('\r\n')) return 'CRLF';
+  if (content.includes('\r')) return 'CR';
+  return 'LF';
+}
+
+function readCursorPosition(view: EditorView): CursorPosition {
+  const head = view.state.selection.main.head;
+  const line = view.state.doc.lineAt(head);
+  return {
+    column: head - line.from + 1,
+    line: line.number,
+  };
 }
 
 const TextViewer: React.FC<TextViewerProps> = ({
@@ -113,12 +139,20 @@ const TextViewer: React.FC<TextViewerProps> = ({
   const { resolvedTheme } = useTheme();
   const { updateFileTabResource } = useFileViewer();
   const [content, setContent] = useState<string | null>(null);
+  const [cursorPosition, setCursorPosition] = useState<CursorPosition>({ column: 1, line: 1 });
   const [draftRecovery, setDraftRecovery] = useState<DraftRecoveryState | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [fontSize, setFontSize] = useState(DEFAULT_FONT_SIZE);
   const [isDirty, setIsDirty] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [isDownloading, setIsDownloading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [lineEnding, setLineEnding] = useState<'CRLF' | 'CR' | 'LF'>('LF');
+  const [saveAsDraftName, setSaveAsDraftName] = useState('');
+  const [saveAsVisible, setSaveAsVisible] = useState(false);
+  const saveAsInputId = useId();
+  const saveInFlightRef = useRef(false);
+  const downloadInFlightRef = useRef(false);
   const [wordWrap, setWordWrap] = useState(false);
   const contentRef = useRef('');
   const draftErrorShownRef = useRef(false);
@@ -155,6 +189,8 @@ const TextViewer: React.FC<TextViewerProps> = ({
   }, [accountScope, libraryId, nodeId]);
   const resourceIdentityRef = useRef(resourceIdentity);
   resourceIdentityRef.current = resourceIdentity;
+  const canUseEditorContent = active && content !== null && !isLoading && !errorMessage && draftRecovery === null;
+  useEffect(() => { setSaveAsVisible(false); }, [active, resourceIdentity]);
 
   const syncRetentionPin = useCallback(() => {
     const nextPinned = isDirtyRef.current && !draftPersistedRef.current;
@@ -177,6 +213,7 @@ const TextViewer: React.FC<TextViewerProps> = ({
   const setEditorContent = useCallback((value: string, dirty: boolean) => {
     pendingContentRef.current = value;
     contentRef.current = value;
+    setLineEnding(resolveLineEnding(value));
     setContent(value);
     setDirtyState(dirty);
   }, [setDirtyState]);
@@ -364,9 +401,18 @@ const TextViewer: React.FC<TextViewerProps> = ({
     editorViewRef.current = view;
     const snapshot = pendingSessionSnapshotRef.current;
     if (snapshot) applySessionSnapshotToEditor(snapshot);
+    setCursorPosition(readCursorPosition(view));
   }, [applySessionSnapshotToEditor]);
 
   const handleEditorUpdate = useCallback((update: ViewUpdate) => {
+    if (update.selectionSet || update.docChanged) {
+      const nextPosition = readCursorPosition(update.view);
+      setCursorPosition((previous) => (
+        previous.line === nextPosition.line && previous.column === nextPosition.column
+          ? previous
+          : nextPosition
+      ));
+    }
     if (update.selectionSet || update.viewportChanged || update.geometryChanged) {
       scheduleSessionCapture();
     }
@@ -490,13 +536,9 @@ const TextViewer: React.FC<TextViewerProps> = ({
     };
   }, [clearDraftTimer, flushDraft]);
 
-  const buildFullFileName = useCallback((detail: { name: string; ext?: string }) => {
-    const ext = detail.ext?.trim().replace(/^\./, '');
-    return ext ? `${detail.name}.${ext}` : detail.name;
-  }, []);
-
   const handleSave = useCallback(async () => {
-    if (!nodeId || isSaving) return;
+    if (!nodeId || !canUseEditorContent || isSaving || saveInFlightRef.current) return;
+    saveInFlightRef.current = true;
     setIsSaving(true);
     clearDraftTimer();
     const savedContent = contentRef.current;
@@ -517,6 +559,10 @@ const TextViewer: React.FC<TextViewerProps> = ({
         contentType: detail.mimeType || 'text/plain; charset=utf-8',
       });
       const savedNodeId = Number(savedNode?.id || nodeId);
+      if (!isAliveRef.current || resourceIdentityRef.current !== saveIdentity) {
+        refreshDirectoryInTree(detail.parentId);
+        return;
+      }
       const identity = saveIdentity;
       let draftCleanupFailed = false;
       if (identity) {
@@ -525,6 +571,10 @@ const TextViewer: React.FC<TextViewerProps> = ({
         } catch (error) {
           draftCleanupFailed = true;
           runtimeLogger.error('清理已保存文本草稿失败:', error);
+        }
+        if (!isAliveRef.current || resourceIdentityRef.current !== saveIdentity) {
+          refreshDirectoryInTree(detail.parentId);
+          return;
         }
         draftKeyRef.current = savedRevision
           ? createViewerDraftKey(identity, savedRevision)
@@ -570,14 +620,16 @@ const TextViewer: React.FC<TextViewerProps> = ({
       }
     } catch (error: any) {
       runtimeLogger.error('文本保存失败:', error);
-      if (isAliveRef.current) {
+      if (isAliveRef.current && resourceIdentityRef.current === saveIdentity) {
         Toast.error(error?.message || '保存失败');
         scheduleDraftFlush();
       }
     } finally {
+      saveInFlightRef.current = false;
       if (isAliveRef.current) setIsSaving(false);
     }
   }, [
+    canUseEditorContent,
     clearDraftTimer,
     flushDraft,
     isSaving,
@@ -590,19 +642,34 @@ const TextViewer: React.FC<TextViewerProps> = ({
     updateFileTabResource,
   ]);
 
+  const handleOpenSaveAs = useCallback(() => {
+    if (!nodeId || !canUseEditorContent || isSaving) return;
+    setSaveAsDraftName(String(fileName || '').trim() || '未命名.txt');
+    setSaveAsVisible(true);
+  }, [canUseEditorContent, fileName, isSaving, nodeId]);
+
   const handleSaveAs = useCallback(async () => {
-    if (!nodeId || isSaving) return;
+    if (!nodeId || !canUseEditorContent || isSaving || saveInFlightRef.current) return;
+    const normalizedName = saveAsDraftName.trim();
+    const validation = validateWindowsLikeFileName(normalizedName);
+    if (!validation.valid) {
+      Toast.warning(validation.message);
+      return;
+    }
+    saveInFlightRef.current = true;
     setIsSaving(true);
+    const savedContent = contentRef.current;
+    const saveIdentity = resourceIdentityRef.current;
     try {
       const detail = await fetchNodeDetailById(nodeId);
-      const saveName = buildFullFileName(detail);
-      const staged = await window.electronAPI.createStagedTextFile(saveName, contentRef.current);
+      const staged = await window.electronAPI.createStagedTextFile(normalizedName, savedContent);
       try {
         await uploadLocalPathAndCreateNode(staged.filePath, detail.parentId, detail.libraryId, {
           conflictPolicy: 'auto_rename',
         });
         Toast.success('已另存为新文件');
         refreshDirectoryInTree(detail.parentId);
+        if (isAliveRef.current && resourceIdentityRef.current === saveIdentity) setSaveAsVisible(false);
       } finally {
         await window.electronAPI.cleanupStagedTextFile(staged.filePath).catch(() => false);
       }
@@ -610,9 +677,30 @@ const TextViewer: React.FC<TextViewerProps> = ({
       runtimeLogger.error('另存为失败:', error);
       Toast.error(error?.message || '另存为失败');
     } finally {
-      setIsSaving(false);
+      saveInFlightRef.current = false;
+      if (isAliveRef.current) setIsSaving(false);
     }
-  }, [buildFullFileName, isSaving, nodeId]);
+  }, [canUseEditorContent, isSaving, nodeId, saveAsDraftName]);
+
+  const handleDownload = useCallback(async () => {
+    if (!canUseEditorContent || isDownloading || downloadInFlightRef.current) return;
+    downloadInFlightRef.current = true;
+    setIsDownloading(true);
+    try {
+      const savedPath = await saveTextContentToDesktop(
+        window.electronAPI,
+        String(fileName || '').trim() || '未命名.txt',
+        contentRef.current,
+      );
+      if (savedPath) Toast.success('已保存到本地');
+    } catch (error: any) {
+      runtimeLogger.error('文本下载失败:', error);
+      Toast.error(error?.message || '下载失败');
+    } finally {
+      downloadInFlightRef.current = false;
+      if (isAliveRef.current) setIsDownloading(false);
+    }
+  }, [canUseEditorContent, fileName, isDownloading]);
 
   const handleRestoreDraft = useCallback(() => {
     if (!draftRecovery) return;
@@ -641,8 +729,8 @@ const TextViewer: React.FC<TextViewerProps> = ({
 
   const handleSaveRef = useRef(handleSave);
   handleSaveRef.current = handleSave;
-  const handleSaveAsRef = useRef(handleSaveAs);
-  handleSaveAsRef.current = handleSaveAs;
+  const handleSaveAsRef = useRef(handleOpenSaveAs);
+  handleSaveAsRef.current = handleOpenSaveAs;
 
   const applyViewerZoomShortcut = useCallback((action: ViewerZoomShortcutAction) => {
     if (!active) return;
@@ -751,6 +839,7 @@ const TextViewer: React.FC<TextViewerProps> = ({
       }
     }
     contentRef.current = value;
+    setLineEnding('LF');
     setContent(value);
     editGenerationRef.current += 1;
     setDirtyState(true);
@@ -761,7 +850,9 @@ const TextViewer: React.FC<TextViewerProps> = ({
   if (!active && content === null) return null;
 
   return (
-    <TextViewerWrapper>
+    <>
+      <TextViewerSaveAsModalStyle />
+      <TextViewerWrapper>
       {isLoading ? (
         <div className="loading-mask">
           <Spin size="large" tip="正在加载文件..." />
@@ -794,64 +885,61 @@ const TextViewer: React.FC<TextViewerProps> = ({
           {isDirty ? <span className="dirty-dot" title="未保存的更改" /> : null}
         </div>
 
-        <div className="footer-controls">
+        <div className="footer-controls" aria-label="文档状态">
           <span
-            className="meta-text zoom-text"
+            className="status-item cursor-position"
+            title={`第 ${cursorPosition.line} 行，第 ${cursorPosition.column} 列`}
+          >
+            {cursorPosition.line}:{cursorPosition.column}
+          </span>
+          <span className="status-item" title="换行符">
+            {lineEnding}
+          </span>
+          <span className="status-item" title="文件编码">
+            UTF-8
+          </span>
+          <span
+            className="status-item"
             title={`当前字号 ${fontSize}px`}
             aria-label={`当前字号 ${fontSize}px`}
           >
             {fontSize}
           </span>
-          <button
-            type="button"
-            className={`wrap-toggle ${wordWrap ? 'is-active' : ''}`}
-            onClick={() => setWordWrap((previous) => !previous)}
-            title={wordWrap ? '关闭自动换行' : '开启自动换行'}
-          >
-            换行
-          </button>
         </div>
 
         <div className="footer-actions">
-          <Tooltip content="保存">
-            <span className="action-tooltip-anchor">
-              <Button
-                size="small"
-                theme="solid"
-                icon={<IconSave />}
-                className="icon-action-btn"
-                aria-label="保存"
-                disabled={!isDirty || isSaving || draftRecovery !== null}
-                loading={isSaving}
-                onClick={handleSave}
-              />
-            </span>
-          </Tooltip>
-          <Tooltip content="另存为">
-            <span className="action-tooltip-anchor">
-              <Button
-                size="small"
-                theme="light"
-                icon={<IconCopyAdd />}
-                className="icon-action-btn"
-                aria-label="另存为"
-                disabled={isSaving || draftRecovery !== null}
-                onClick={handleSaveAs}
-              />
-            </span>
-          </Tooltip>
-          <Tooltip content="下载">
-            <a
-              href={url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="icon-action-link"
-              download={fileName || undefined}
-              aria-label="下载"
-            >
-              <IconDownload />
-            </a>
-          </Tooltip>
+          <Button
+            aria-label="保存"
+            className="icon-action-btn"
+            disabled={!canUseEditorContent || !isDirty || isSaving}
+            icon={<IconSave />}
+            loading={isSaving && !saveAsVisible}
+            size="small"
+            theme="borderless"
+            title="保存"
+            onClick={handleSave}
+          />
+          <Button
+            aria-label="另存为"
+            className="icon-action-btn"
+            disabled={!canUseEditorContent || isSaving}
+            icon={<IconCopyAdd />}
+            size="small"
+            theme="borderless"
+            title="另存为"
+            onClick={handleOpenSaveAs}
+          />
+          <Button
+            aria-label="下载"
+            className="icon-action-btn"
+            disabled={!canUseEditorContent || isDownloading}
+            icon={<IconDownload />}
+            loading={isDownloading}
+            size="small"
+            theme="borderless"
+            title="下载"
+            onClick={() => void handleDownload()}
+          />
         </div>
       </div>
 
@@ -871,7 +959,39 @@ const TextViewer: React.FC<TextViewerProps> = ({
             : '上次编辑的内容尚未保存到文件。请选择恢复草稿或使用当前文件内容。'}
         </div>
       </Modal>
-    </TextViewerWrapper>
+      </TextViewerWrapper>
+
+      <Modal
+        cancelButtonProps={{ disabled: isSaving }}
+        cancelText="取消"
+        centered
+        className="text-viewer-save-as-modal"
+        closable={!isSaving}
+        confirmLoading={isSaving}
+        maskClosable={false}
+        okButtonProps={{ disabled: !canUseEditorContent || !saveAsDraftName.trim() }}
+        okText="保存副本"
+        title="另存为"
+        visible={saveAsVisible && active}
+        width={380}
+        onCancel={() => {
+          if (!isSaving) setSaveAsVisible(false);
+        }}
+        onOk={() => void handleSaveAs()}
+      >
+        <TextViewerSaveAsContent htmlFor={saveAsInputId}>
+          <span className="save-as-label">文件名称</span>
+          <Input
+            autoFocus
+            disabled={isSaving}
+            id={saveAsInputId}
+            value={saveAsDraftName}
+            onChange={setSaveAsDraftName}
+            onEnterPress={() => void handleSaveAs()}
+          />
+        </TextViewerSaveAsContent>
+      </Modal>
+    </>
   );
 };
 

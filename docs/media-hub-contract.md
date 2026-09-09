@@ -126,7 +126,7 @@ clear()                              // 同时取消 registry 注册
 
 每次实际调用原生 `audio.play()` 还必须生成独立的 attempt revision。失效请求只有在自己仍是最新 attempt 且音源 revision 未变化时才能执行兜底暂停，避免页面、MediaHub 或系统媒体键对同一音源的后发播放被旧 Promise 回调暂停。
 
-实时频谱同样归 `globalAudioPlayer` 管理。分析器通过单例 `<audio>` 的 `captureStream()` 读取已经解码的音轨，不按文件扩展名建立第二套播放或解码链；延迟出现的音轨由 `addtrack` 与有上限重试接入。`ensureSource()` 真正换源和 `clear()` 时必须释放旧分析 source、stream 引用与 `AudioContext`，避免跨歌曲复用结束音轨。分析暂不可用或频率桶为零时只返回无数据，由 UI 平滑归零，禁止伪造与真实声音无关的随机频谱；分析失败不得中断原生 `<audio>` 播放。
+实时频谱同样归 `globalAudioPlayer` 管理。分析器通过单例 `<audio>` 的 `captureStream()` 读取已经解码的音轨，不按文件扩展名建立第二套播放或解码链；由于对象存储链接通常与 renderer 不同源，`globalAudioPlayer` 必须在首次设置 `src` 前把 `<audio>.crossOrigin` 固定为 `anonymous`，对应存储节点必须允许当前 renderer origin，避免媒体能播放但捕获音轨因跨域保护只输出静音。延迟出现的音轨由 `addtrack` 与有上限重试接入。`ensureSource()` 真正换源和 `clear()` 时必须释放旧分析 source、stream 引用与 `AudioContext`，避免跨歌曲复用结束音轨。分析暂不可用或频率桶为零时只返回无数据，由 UI 平滑归零，禁止伪造与真实声音无关的随机频谱；分析失败不得中断原生 `<audio>` 播放。
 
 ### 2.3 `floatingVideoService`（视频服务）
 

@@ -632,7 +632,7 @@ export function registerFileIpc(ipcMain: Electron.IpcMain) {
     const subDir = path.join(stagingRoot, `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
     await fs.mkdir(subDir, { recursive: true });
 
-    const safeName = String(fileName || 'image.png').replace(/[/\\]/g, '_').trim() || 'image.png';
+    const safeName = normalizeStagedFileName(fileName, 'image.png');
     const stagedPath = path.join(subDir, safeName);
     const buffer = Buffer.from(String(base64 || ''), 'base64');
     if (buffer.length <= 0) {

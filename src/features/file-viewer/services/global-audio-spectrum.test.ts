@@ -31,6 +31,7 @@ class FakeMediaStream {
 }
 
 class SpectrumAudio {
+  crossOrigin: string | null = null;
   currentTime = 0;
   duration = 120;
   ended = false;
@@ -152,6 +153,17 @@ describe('GlobalAudioPlayer spectrum analysis', () => {
 
     expect(player.readSpectrumLevels(levels)).toBe(true);
     expect(Math.max(...levels)).toBeGreaterThan(0);
+    player.clear();
+  });
+
+  it('enables anonymous CORS before assigning a media source so captured tracks stay readable', async () => {
+    const audio = new SpectrumAudio([new FakeMediaStream(true)]);
+    const { GlobalAudioPlayer } = await import('./global-audio-player');
+    const player = new GlobalAudioPlayer(audio as unknown as HTMLAudioElement);
+
+    expect(audio.crossOrigin).toBe('anonymous');
+    player.ensureSource('https://storage.test/song.mp3');
+    expect(audio.crossOrigin).toBe('anonymous');
     player.clear();
   });
 

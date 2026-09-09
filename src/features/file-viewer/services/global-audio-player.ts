@@ -53,6 +53,9 @@ export class GlobalAudioPlayer {
   constructor(audio: HTMLAudioElement = new Audio()) {
     this.audio = audio;
     this.spectrumAnalyser = new GlobalAudioSpectrumAnalyser(audio);
+    // Cross-origin media can play without CORS, but captureStream() is muted unless
+    // the element fetched the source in CORS mode. Set this before any src assignment.
+    this.audio.crossOrigin = 'anonymous';
     this.audio.preload = 'metadata';
     const volumePreference = mediaVolumePreference.getState();
     this.audio.volume = volumePreference.volume;
