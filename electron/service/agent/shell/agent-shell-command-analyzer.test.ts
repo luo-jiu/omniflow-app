@@ -28,6 +28,34 @@ function analyze(
 }
 
 describe('Agent Shell command analyzer', () => {
+  it.each(['zsh', 'bash'] as const)('accepts quoted heredoc source writing in %s and binds the entire body', async dialect => {
+    const command = "mkdir -p output && cat > output/quick_sort_cn.cpp <<'EOF'\n#include <iostream>\n// 中文注释；$HOME $(touch /tmp/should-not-run) `id` 都是正文\nint main() { return 0; }\nEOF\nls -l output/quick_sort_cn.cpp";
+    const result = await analyze(command, dialect);
+    expect(result.assessment.unresolved).toEqual([]);
+    expect(result.assessment.risk).toBe('write');
+    expect(result.workspaceBoundaryVerified).toBe(true);
+    expect(result.analysisIdentity).toMatch(/^v1:[a-f0-9]{64}$/u);
+    expect(result.assessment.operations.map(item => item.executable)).toEqual(['mkdir', 'cat', 'ls']);
+    expect((await analyze(command.replace('return 0', 'return 1'), dialect)).analysisIdentity).not.toBe(result.analysisIdentity);
+  });
+  it('accepts double-quoted delimiters without permitting executable expansion', async () => {
+    const result = await analyze('cat > ../output/test.cpp <<"EOF"\n$HOME $(id)\nEOF\n');
+    expect(result.assessment.unresolved).toEqual([]);
+    expect(result.assessment.operations.map(item => item.executable)).toEqual(['cat']);
+  });
+  it.each([
+    'cat > ../output/a <<EOF\n$(id)\nEOF\n',
+    "cat > ../output/a <<'EOF'\ntext\nOTHER\n",
+  ])('rejects dynamic or incomplete heredocs: %s', async command => {
+    expect((await analyze(command)).analysisIdentity).toBeNull();
+  });
+  it('still checks destinations and commands after a heredoc', async () => {
+    const outside = await analyze("cat > /tmp/outside <<'EOF'\ntext\nEOF\n");
+    expect(outside.workspaceBoundaryVerified).toBe(false);
+    expect(outside.assessment.facets).toContain('external_path');
+    const after = await analyze("cat > ../output/a <<'EOF'\ntext\nEOF\nsudo id");
+    expect(after.assessment.facets).toContain('privilege_escalation');
+  });
   it('produces a complete, frozen assessment for a static pathless command', async () => {
     const result = await analyze('printf "hello\\n"');
 

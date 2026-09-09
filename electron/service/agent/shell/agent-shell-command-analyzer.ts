@@ -13,7 +13,7 @@ import type {
 } from '../../../../src/shared/agent/shell/agent-shell.types';
 
 export const AGENT_SHELL_COMMAND_ANALYZER_REVISION =
-  'tree-sitter-command-analyzer-v1+vscode-wasm-0.3.1';
+  'tree-sitter-command-analyzer-v2+vscode-wasm-0.3.1';
 
 const MAX_AST_NODES = 8_192;
 const MAX_OPERATIONS = 128;
@@ -46,6 +46,10 @@ const BASH_ALLOWED_NAMED_NODES = new Set([
   'comment',
   'file_descriptor',
   'file_redirect',
+  'heredoc_redirect',
+  'heredoc_start',
+  'heredoc_body',
+  'heredoc_end',
   'list',
   'negated_command',
   'number',
@@ -945,6 +949,21 @@ function analyzeRedirections(
   }
 }
 
+function analyzeLiteralHeredocs(nodes: readonly Node[], analysis: MutableAnalysis): void {
+  for (const redirect of nodes.filter(node => node.type === 'heredoc_redirect')) {
+    analysis.facets.add('redirection');
+    const start = redirect.namedChildren.find(node => node?.type === 'heredoc_start');
+    const end = redirect.namedChildren.find(node => node?.type === 'heredoc_end');
+    const body = redirect.namedChildren.find(node => node?.type === 'heredoc_body');
+    // Quoted delimiters make the body literal in Bash/Zsh; never interpret its source as commands.
+    const delimiter = start?.text.match(/^(?:'([A-Za-z0-9_.-]+)'|"([A-Za-z0-9_.-]+)")$/u);
+    if (!delimiter || !end || end.text !== (delimiter[1] || delimiter[2])
+      || !body || body.namedChildCount !== 0) {
+      addUnresolved(analysis, 'unsupported-heredoc');
+    }
+  }
+}
+
 function riskFor(
   facets: ReadonlySet<AgentShellRiskFacet>,
   unresolved: ReadonlySet<string>,
@@ -1070,6 +1089,7 @@ async function analyzeCommand(
       analysis.operations.push(operation(commandName, args, effects));
     }
     analyzeRedirections(nodes, analysis, input.dialect, input.logicalCwd);
+    if (input.dialect !== 'powershell') analyzeLiteralHeredocs(nodes, analysis);
 
     const unresolved = Object.freeze([...analysis.unresolved].sort());
     const facets = Object.freeze(FACET_ORDER.filter(facet => analysis.facets.has(facet)));

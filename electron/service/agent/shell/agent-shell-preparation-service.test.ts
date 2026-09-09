@@ -376,7 +376,7 @@ describe('Agent Shell PreparationService', () => {
       workspaceStore: workspace.store,
     }).prepare(prepareRequest(
       preparationContext(snapshot),
-      { input: { command: 'opaque-command "value"' } },
+      { input: { command: 'cat /etc/hosts' } },
     ));
 
     expect(result.decision.behavior).toBe(expectedBehavior);
@@ -384,6 +384,27 @@ describe('Agent Shell PreparationService', () => {
       analysis: { permissionMode: mode },
     });
     expect(result.snapshotMaterial).toMatchObject({ permissionMode: mode });
+  });
+
+  it.each(['ask', 'auto', 'full-access'] as const)('rejects unresolved workspace syntax before issuing an executable binding in %s', async mode => {
+    const result = await createAgentShellPreparationService({ workspaceStore: workspaceFixture().store }).prepare(
+      prepareRequest(preparationContext(runCapabilitySnapshot(providerFixture(), mode)),
+        { input: { command: 'opaque-command "value"' } }),
+    );
+    expect(result.decision).toMatchObject({ behavior: 'deny', message: expect.stringContaining('无法完整分析') });
+    expect(result.snapshotMaterial).toMatchObject({ policyReasonCodes: ['unresolved-analysis'] });
+  });
+
+  it('prepares a quoted heredoc write with both identities in full-access mode', async () => {
+    const result = await createAgentShellPreparationService({ workspaceStore: workspaceFixture().store }).prepare(
+      prepareRequest(preparationContext(runCapabilitySnapshot(providerFixture(), 'full-access')),
+        { input: { command: "mkdir -p output && cat > output/test.cpp <<'EOF'\n// 中文\nint main() { return 0; }\nEOF\nls -l output/test.cpp" } }),
+    );
+    expect(result.decision).toMatchObject({ behavior: 'allow', risk: 'write' });
+    expect(result.binding).toMatchObject({ analysis: {
+      analysisIdentity: expect.stringMatching(/^v1:[a-f0-9]{64}$/u),
+      authorizationIdentity: expect.stringMatching(/^v1:[a-f0-9]{64}$/u),
+    } });
   });
 
   it('lets deterministic auto mode approve a fully analyzed workspace command', async () => {
@@ -444,7 +465,7 @@ describe('Agent Shell PreparationService', () => {
       risk: 'destructive',
       unresolved: ['ast-analysis-unavailable'],
     });
-    expect(result.decision.behavior).toBe('ask');
+    expect(result.decision.behavior).toBe('deny');
     expect(result.snapshotMaterial).toMatchObject({
       analysisIdentity: null,
       analyzerRevision: 'shell-analysis-unavailable-v1',

@@ -539,7 +539,9 @@ function createPreparationDecision(
   if (policyDecision.behavior === 'deny') {
     return Object.freeze({
       behavior: 'deny' as const,
-      message: 'Agent Shell 当前策略不允许执行此命令',
+      message: policyDecision.reasonCodes.includes('unresolved-analysis')
+        ? 'Agent Shell 无法完整分析此工作区命令，已在执行前停止；请拆分命令或使用受支持的静态语法。'
+        : 'Agent Shell 当前策略不允许执行此命令',
       risk: policyDecision.risk,
     });
   }
@@ -797,12 +799,17 @@ export function createAgentShellPreparationService(
       timeoutMs: normalizedInput.timeoutMs,
       version: 1,
     });
-    const policyDecision = policyEngine.evaluate({
+    let policyDecision = policyEngine.evaluate({
       assessment,
       authorizationIdentity,
       mode: context.runCapabilitySnapshot.shellPermissionMode,
       workspaceBoundaryVerified: commandAnalysis.workspaceBoundaryVerified,
     });
+    if (executionContext === 'run-workspace' && (!commandAnalysis.analysisIdentity || !authorizationIdentity)
+      && policyDecision.behavior !== 'deny') {
+      policyDecision = Object.freeze({ behavior: 'deny', risk: assessment.risk,
+        reasonCodes: Object.freeze(['unresolved-analysis'] as const) });
+    }
     abortIfNeeded(context.signal);
     return Object.freeze({
       binding: Object.freeze({

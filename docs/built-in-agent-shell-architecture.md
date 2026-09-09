@@ -1,6 +1,14 @@
 # 内置 Agent Shell 架构
 
-更新时间：2026-09-02
+更新时间：2026-09-09
+
+静态 heredoc 写入补充：
+
+2026-09-09：Bash/Zsh 命令分析器支持单/双引号包围的静态 heredoc 标记（字母、数字、下划线、点和短横线），例如 `cat > output/main.cpp <<'EOF'`。正文按字面量处理，中文、C++ 符号以及正文中的 `$()`/反引号不会被当作可执行操作；完整命令（含正文）仍参与 analysis identity 和 command hash。输出重定向路径、结束标记之后的命令继续正常分析。分析器 revision 升为 v2，旧准备身份不能冒充新分析结果。
+
+未加引号的 heredoc、动态展开、缺失结束标记及其他未能完整分析的工作区命令，不生成可执行许可：PreparationService 在 ask/auto/full-access 下均提前返回明确拒绝，避免之前由 ExecutionLease 才报“workspace analysis identity 缺失”。完整分析且策略允许的静态写入仍走原准备、一次性租约、spawn preflight 和配额链，不放宽身份校验，也不改变 host 执行契约。
+
+回归：真实 gpt-5.5 / macOS / win 资料库（ID 3）的 Run `17326958-41cc-47a6-9ebd-cb257285debf`，仅执行一次工作区 shell.run，以 quoted heredoc 创建并读回中文 C++ 测试文件，退出码0、unresolved为空、风险write；未编译、发布或上传。自动化覆盖单双引号、正文不执行展开、命令正文变更使身份变化、动态/不完整 heredoc 拒绝、外部目的地和后续危险命令继续检查。完整测试2,047项通过、7项跳过，lint、完整构建和源码diff检查通过；这是写入回归，不是资料库发布验收。
 
 状态：**macOS Zsh 的三权限模式、终态日志分页、本机与资料库文件桥已接入生产 Registry、Orchestrator、Runtime、日志与配额，作为开发预览；Linux / Windows 与持久规则仍 fail-closed，尚未达到稳定发布标准**。
 
