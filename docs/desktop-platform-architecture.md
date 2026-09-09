@@ -1,6 +1,6 @@
 # 桌面平台适配架构
 
-更新时间：2026-08-23
+更新时间：2026-08-31
 
 适用范围：`omniflow-app` 的 macOS、Windows 和 Linux 宿主差异，包含主窗口配置、renderer 平台识别、标题栏安全区、平台专属系统能力及分平台构建验证。
 
@@ -91,6 +91,18 @@ Windows 不模拟 macOS vibrancy：目录树侧栏和主内容圆角背板通过
 macOS 开发预览中，`cwd` 仍只能是 Run 工作区逻辑路径，但受支持只读命令可以直接引用用户明确给出的宿主绝对路径。`ask / auto` 对这类外部路径读取进入确认，`full-access` 在 Analyzer 完整理解命令时直接执行；Shell 的 `~` 固定指向 Run 虚拟 home，不是宿主 Home。只读查看不先 `file.stage`，需要工作副本、修改或转码时才暂存，原样上传仍使用 `file.upload`。
 
 Windows 的 `taskkill.exe /T` 失败后直接终止子进程，足以作为当前固定媒体子进程的保守兜底，但不足以证明 raw Shell 的任意孙进程已经清理。Shell V1 在 Windows 上必须使用 Job Object 或等价可验证 supervisor；否则取消只能报告 `termination_incomplete`，不能宣称双平台完成。当前 Shell 实现事实见 `docs/built-in-agent-shell-architecture.md`，宿主机迁移目标见 `docs/built-in-agent-host-execution-contract.md`。
+
+### 4.2 QQMusicMac 本地歌词
+
+QQ 音乐歌词缓存是明确的 macOS 专属宿主能力，但共享业务页面不复制成 macOS 版本：
+
+- Electron main 使用 `process.platform === 'darwin'` 作为能力授权，并只读打开 QQMusicMac 的曲库/cache SQLite。
+- `window.electronQQMusicLyrics.status()` 向共享 renderer 返回 `supported` 和数据库存在性；Windows / Linux 页面使用同一组件显示不支持状态。
+- 系统路径只在 `electron/service/qqMusicLyricsService.ts` 中解析，renderer 不读取 `process.platform`、user agent 或硬编码 `~/Library/Containers`。
+- `search/preview` IPC 仅允许主窗口 main frame。数据库缺失、缓存缺失、plist/QRC 解码失败使用稳定错误码，不以空数组或空 XML 伪装成功。
+- 解密和预览是本机只读流程；最终 `.qrc.xml` 保存仍属于共享资料库上传能力，不是平台层或 Go 后端的本地访问职责。
+
+完整契约见 `docs/qqmusic-lyrics-tool.md`。
 
 ## 5. Renderer 演进准则
 

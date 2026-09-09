@@ -52,6 +52,8 @@ npm run build:win
 
 macOS 交叉生成的 Windows 安装包仍需在 Windows 10/11 或 Windows 11 ARM 虚拟机中运行验证。
 
+`dist/` 和 `dist-electron/` 是本机构建产物，不纳入版本控制。`npm run dev` 或 `npm run build` 会重新生成 Electron 入口；首次使用源码或切换版本后，先构建再运行打包/稳定模式。
+
 开发模式会通过受版本控制的 `.env.development` 默认连接本机 `http://127.0.0.1:8850/api`，不依赖云端 Tailscale。生产构建继续读取未提交的 `.env.local`，其中可以配置云端 Go；使用 Tailscale Serve 时填写 `https://<machine>.<tailnet>.ts.net/api`，宿主系统需要登录对应 tailnet。未配置任何环境变量时，后端地址也回退为本机地址。
 
 多 MinIO 节点的 renderer CSP 允许列表由 `VITE_STORAGE_ORIGINS` 提供，支持空格或逗号分隔，例如：

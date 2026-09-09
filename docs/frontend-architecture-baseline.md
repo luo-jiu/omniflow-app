@@ -1,6 +1,6 @@
 # OmniFlow App 前端架构基线
 
-更新时间：2026-08-23
+更新时间：2026-08-26
 
 适用范围：`omniflow-app` 的 React renderer、Electron preload/main、页面分层、状态所有权、IPC 边界和前端文档维护。
 
@@ -125,7 +125,7 @@ views -> features -> components / hooks -> service / preload bridge -> electron 
 
 ### 4.1 Library 工作区
 
-`src/views/library/detail/` 是当前最复杂的页面工作区。当前至少包含 3 种显示模式：
+`src/views/library/detail/` 是当前最复杂的页面工作区。当前包含 5 种显示模式：
 
 - `search-home`
 - `file-viewer`
@@ -185,19 +185,21 @@ views -> features -> components / hooks -> service / preload bridge -> electron 
 
 ### 4.4 Tools Workspace
 
-`features/tool-workspace` 是工具域壳层，当前承载 `AI 服务配置`、`AI 字幕翻译` 和媒体处理工具。
+`features/tool-workspace` 是工具域壳层，当前承载 `AI 服务配置`、`QQ 音乐歌词`、`AI 字幕翻译` 和媒体处理工具。
 
 当前边界：
 
 - `library detail` 页面只拥有“是否进入 tools 模式”的状态。
 - 工具内部草稿、任务模型选择和字幕工作台状态由 `features/tool-workspace` 持有。
 - 本机 AI 服务档案、provider 协议适配和加密 API Key 由 Electron main 持有；`features/ai-services` 常态只持有安全投影，进入单个已有档案的编辑页后才短暂持有该档案的明文编辑草稿。
+- QQMusicMac 曲库/cache 的只读 SQLite 访问、binary plist 解包和 QRC 解密由 Electron main 持有；renderer 只持有搜索结果、解密 XML 和时间轴预览状态，保存时复用现有 MinIO 上传服务。
 - 目录树当前选中节点只做只读透传，不在页面层复制一份树结构事实。
 
 专题说明见：
 
 - `docs/tools-workspace.md`
 - `docs/ai-service-architecture.md`
+- `docs/qqmusic-lyrics-tool.md`
 
 ### 4.4 Upload Center
 
@@ -265,6 +267,7 @@ views -> features -> components / hooks -> service / preload bridge -> electron 
 - 本地文件打开和保存对话框
 - 本机 AI 服务档案和加密 API Key
 - 资源捕捉 probe 安装状态
+- QQMusicMac 本地数据库句柄和 QRC 解密过程
 
 Renderer 只能持有这些状态的投影，不要把 main 的内部结构当成 renderer 可直接依赖的数据模型。
 
@@ -323,6 +326,7 @@ AI 服务使用独立的 `window.electronAIService` bridge，且 main 只接受�
 
 Agent 长期记忆继续复用同一个 bridge，但由独立 `AgentMemoryStore` 持有 `agent_memories` 事实，renderer 不能接触 SQLite。用户明确要求记住时，`memory.propose` 必须先走现有 Tool 审批；批准后才保存，管理页的编辑 / 删除使用 `revision` 乐观锁。管理页临时投影只由 `useAgentMemories` 持有，按 owner、资料库和查询代次拒绝迟到结果；更新直接采用 main 返回的 authoritative row，删除只应用 main 已确认的成功结果，不通过写后全量重载维持第二份状态。管理列表通过 `AgentMemoryPage` 按 `updatedAt + memoryId` 每页 50 条游标读取，并返回当前搜索的真实 `total`；任一 owner 的“global + 当前资料库”可见集合最多 200 条，第 201 条由 SQLite trigger 拒绝，不同资料库不会互相占满配额。原地 schema 每次初始化都重建当前 quota trigger；开发期遗留超限数据保留管理和删除能力，但在清理到 200 条前不允许 Retriever 静默截取其中一部分。main 按 owner 与 global / 当前资料库 scope 召回最多 5 条、6,000 字符的候选，先完成规范近期历史投影，再只用剩余 token 预算注入低权限消息；记忆不进入 system role、不持久化回会话，也不形成 Tool 授权。当前结构化 Retriever 可被后续 FTS / 向量派生索引替换，SQLite row 仍是唯一事实源。
 
+QQ 音乐歌词使用独立的 `window.electronQQMusicLyrics` bridge，提供 `status/search/preview` 三个只读宿主操作。main 只接受主窗口 main frame 调用，返回稳定错误码；renderer 页面经 `qqmusic-lyrics.service.ts` 消费，不接触 SQLite、binary plist 或解密依赖。保存不进入该 bridge，而是复用通用文本 staging 和 `/v1/directory/upload`。
 
 ### 6.3 Electron Main
 
@@ -338,11 +342,11 @@ Agent 长期记忆继续复用同一个 bridge，但由独立 `AgentMemoryStore`
 - renderer 负责业务编排和显示反馈。
 - 不要因为赶功能，把业务状态机直接搬到 main 里“顺手做掉”。
 
+内置 Agent 是这里的明确例外：Agent loop、Run 生命周期、Tool 调度、审批决策和任务状态机由 Electron main 持有，renderer 只负责编排展示、用户草稿和 main 明确请求的一次性业务 executor 分发。具体边界见 `docs/built-in-agent-architecture.md` 与 `docs/built-in-agent-ui-contract.md`。
+
 ## 7. 文档地图
 
 当前前端值得长期维护的文档：
-
-内置 Agent 是这里的明确例外：Agent loop、Run 生命周期、Tool 调度、审批决策和任务状态机由 Electron main 持有，renderer 只负责编排展示、用户草稿和 main 明确请求的一次性业务 executor 分发。具体边界见 `docs/built-in-agent-architecture.md` 与 `docs/built-in-agent-ui-contract.md`。
 
 - `.agent-docs/frontend-review-standard.md`
 - `.agent-docs/frontend-handoff.md`
@@ -352,14 +356,15 @@ Agent 长期记忆继续复用同一个 bridge，但由独立 `AgentMemoryStore`
 - `docs/embedded-browser-architecture.md`
 - `docs/library-detail-workspace.md`
 - `docs/file-explorer-file-viewer-boundary.md`
-- `docs/frontend-validation-matrix.md`
-- `docs/cat-catch-migration-audit.md`
-- `src/modules/upload-center/README.md`
-
 - `docs/built-in-agent-architecture.md`
 - `docs/built-in-agent-shell-architecture.md`
 - `docs/built-in-agent-host-execution-contract.md`
 - `docs/built-in-agent-ui-contract.md`
+- `docs/frontend-validation-matrix.md`
+- `docs/qqmusic-lyrics-tool.md`
+- `docs/cat-catch-migration-audit.md`
+- `src/modules/upload-center/README.md`
+
 建议后续继续补的方向：
 
 - `embedded-browser` 的 IPC / 生命周期文档
