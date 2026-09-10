@@ -121,6 +121,12 @@ describe('resolveAgentModelContextBudget', () => {
     });
   });
 
+  it('does not let a gateway 16K listing shrink a known gpt-5.5 window', () => {
+    const metadata = parseAgentModelMetadata({ data: [{ id: 'gpt-5.5', context_window: 16_384, max_context_window: 16_384 }] }).get('gpt-5.5');
+    expect(resolveAgentModelContextBudget({ baseUrl: 'https://proxy.example/v1', model: 'gpt-5.5', providerType: 'openai', metadata }))
+      .toMatchObject({ contextWindowTokens: 272_000, source: 'catalog' });
+  });
+
   it('allows configuring unknown model budgets and reducing catalog budgets', () => {
     const input = { baseUrl: 'https://proxy.example/v1', model: 'custom', providerType: 'openai' as const };
     expect(resolveAgentModelContextBudget({ ...input, override: { contextWindowTokens: 200_000, outputReserveTokens: 8_000 } }))

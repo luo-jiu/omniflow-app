@@ -83,9 +83,14 @@ export function resolveAgentModelContextBudget(
   const metadata = validEndpoint ? input.metadata : undefined;
   const remoteWindow = positiveLimit(metadata?.contextWindowTokens)
     ?? positiveLimit(metadata?.maxContextWindowTokens);
-  const maxContextWindowTokens = positiveLimit(metadata?.maxContextWindowTokens) ?? remoteWindow ?? catalog?.[1];
+  // A gateway may report its own request cap instead of the underlying model window.
+  // For known first-party models, keep the bundled catalog as the authoritative identity.
+  const knownCatalogWindow = catalog?.[0];
+  const maxContextWindowTokens = knownCatalogWindow
+    ? Math.max(catalog?.[1] ?? knownCatalogWindow, positiveLimit(metadata?.maxContextWindowTokens) ?? 0)
+    : positiveLimit(metadata?.maxContextWindowTokens) ?? remoteWindow ?? catalog?.[1];
   const contextWindowTokens = Math.min(
-    override.contextWindowTokens ?? remoteWindow ?? catalog?.[0] ?? 16_384,
+    override.contextWindowTokens ?? knownCatalogWindow ?? remoteWindow ?? 16_384,
     maxContextWindowTokens ?? MAX_AGENT_CONTEXT_TOKENS,
   );
   const remoteOutput = positiveLimit(metadata?.outputReserveTokens, 1_000_000);
@@ -100,6 +105,6 @@ export function resolveAgentModelContextBudget(
     effectiveContextWindowPercent: 95,
     ...(maxContextWindowTokens ? { maxContextWindowTokens } : {}),
     outputReserveTokens,
-    source: remoteWindow ? 'provider' : catalog ? 'catalog' : 'fallback',
+    source: catalog ? 'catalog' : remoteWindow ? 'provider' : 'fallback',
   };
 }
