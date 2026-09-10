@@ -37,6 +37,9 @@ import { isDisposingLibraryWorkspace } from '@/features/workspace-resource-relea
 import type { FileViewerFileType } from '@/shared/file-viewer-types';
 import type { FileViewerOpenOptions } from '@/contexts/file-viewer.context';
 import { resolvePendingTreeExpandDecision } from '../utils/tree-expand-behavior';
+import { useViewerAccountScope } from '@/features/file-viewer/session';
+import { API_CONFIG } from '@/config/api';
+import { consumeLibraryNodeMutationDirty, matchesLibraryMutationScope, subscribeLibraryNodesMutated } from '../services/node-mutation-events';
 
 const PENDING_APPEND_RETRY_INTERVAL_MS = 420;
 const PENDING_APPEND_MAX_RETRY = 40;
@@ -73,6 +76,14 @@ export function useRepositoryTree(
     options?: FileViewerOpenOptions,
   ) => void,
 ) {
+  const accountScope = useViewerAccountScope();
+  const refreshOwner = JSON.stringify([accountScope, API_CONFIG.BASE_URL, libraryId]);
+  const refreshOwnerRef = useRef(refreshOwner);
+  refreshOwnerRef.current = refreshOwner;
+  const refreshRequestsRef = useRef(new Map<number, number>());
+  if (consumeLibraryNodeMutationDirty(accountScope, API_CONFIG.BASE_URL, libraryId)) {
+    markRepositoryTreeSnapshotDirtyStore(libraryId);
+  }
   const cachedSnapshot = getRepositoryTreeSnapshot(libraryId);
   const defaultRepositoryId = String(libraryId);
 
@@ -640,8 +651,12 @@ export function useRepositoryTree(
 
   // 刷新某个父节点下的直接子节点（用于移动后同步排序/归属）
   const refreshParentChildren = useCallback(async (parentId: number) => {
+    if (refreshOwnerRef.current !== refreshOwner) return;
+    const sequence = (refreshRequestsRef.current.get(parentId) || 0) + 1;
+    refreshRequestsRef.current.set(parentId, sequence);
     const children = (await getChildrenByNodeId(parentId, Number(selectedRepository))) as NodeRespDTO[];
-    if (disposedRef.current || selectedRepositoryRef.current !== selectedRepository) return;
+    if (disposedRef.current || selectedRepositoryRef.current !== selectedRepository || refreshOwnerRef.current !== refreshOwner
+      || refreshRequestsRef.current.get(parentId) !== sequence) return;
     const currentRootNodeId = rootNodeIdRef.current;
     const current = treesCacheRef.current[selectedRepository] || [];
     const parentNode = currentRootNodeId !== null && parentId === currentRootNodeId
@@ -673,7 +688,7 @@ export function useRepositoryTree(
         [selectedRepository]: updateNodeChildren(current, parentNode.key, mergedChildren),
       };
     });
-  }, [selectedRepository, updateNodeChildren]);
+  }, [selectedRepository, updateNodeChildren, refreshOwner]);
 
   const refreshAfterMove = useCallback(async (affectedParentIds: number[]) => {
     const normalizedParentIds = Array.from(
@@ -751,6 +766,18 @@ export function useRepositoryTree(
       await refreshParentChildren(targetId);
     }
   }, [collectRefreshSubtreeIds, refreshParentChildren, selectedRepository]);
+
+  useEffect(() => subscribeLibraryNodesMutated(event => {
+    if (!matchesLibraryMutationScope(event, accountScope, API_CONFIG.BASE_URL, libraryId)) return;
+    markRepositoryTreeSnapshotDirtyStore(libraryId);
+    const node = event.nodeId ? findNodeById(treesCacheRef.current[selectedRepository] || [], event.nodeId) : null;
+    if (node && event.name !== undefined) updateNodeName(node.key, { name: event.name, ext: event.ext ?? node.ext });
+    return Promise.allSettled([...new Set(event.affectedParentIds)].map(id => refreshNodeSubtree(id))).then(results => {
+      for (const result of results) {
+        if (result.status === 'rejected') runtimeLogger.warn('节点已变更，但目录刷新失败', result.reason);
+      }
+    });
+  }), [accountScope, libraryId, selectedRepository, refreshNodeSubtree, updateNodeName]);
 
   // 加载子节点；提交完成后由 useLayoutEffect 在下一帧展开。
   const loadChildren = useCallback(async (node: Node): Promise<void> => {

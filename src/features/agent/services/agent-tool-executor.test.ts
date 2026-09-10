@@ -91,27 +91,19 @@ describe('Agent renderer tool executor', () => {
     expect(outcome.result.message).toContain('目标目录已');
     expect(extractMediaAudio).not.toHaveBeenCalled();
   });
-  it('creates a directory, refreshes the tree and returns a fresh perception', async () => {
+  it('creates a directory through the shared mutation executor and returns its fresh node', async () => {
     const createDirectory = vi.fn(async () => ({ id: 22 }));
-    const onRefreshDirectory = vi.fn(async () => undefined);
-    const perception = {
-      collectedAt: '2026-08-23T00:00:00.000Z',
-      currentDirectory: {
-        entries: [{ id: 22, name: '测试', type: 'dir' as const }],
-        entryCount: 1,
-        id: 10,
-        name: '视频',
-      },
-      selectedNodes: [],
-    };
-    const readPerception = vi.fn(async () => perception);
+    const notifyMutation = vi.fn();
+    const readLibraryNode = vi.fn(async (_library: number, id: number) => ({ id, libraryId: 3, parentId: id === 22 ? 10 : 1,
+      name: id === 22 ? '测试' : '视频', type: 'dir' as const, path: id === 22 ? '/视频/测试' : '/视频' }));
     const onCommitted = vi.fn(async () => undefined);
 
     const outcome = await executeAgentRendererTool(request(), {
       createDirectory: createDirectory as never,
+      assertOwner: () => undefined, beforeCommit: async () => undefined,
       onCommitted,
-      onRefreshDirectory,
-      readPerception,
+      notifyMutation,
+      readLibraryNode,
     });
 
     expect(createDirectory).toHaveBeenCalledWith({
@@ -121,18 +113,17 @@ describe('Agent renderer tool executor', () => {
       parentId: 10,
       type: 'dir',
     });
-    expect(onRefreshDirectory).toHaveBeenCalledWith(10);
-    expect(readPerception).toHaveBeenCalledWith(request().appContext);
+    expect(notifyMutation).toHaveBeenCalledWith(expect.objectContaining({ affectedParentIds: [10], nodeId: 22 }));
     expect(onCommitted).toHaveBeenCalledWith(expect.objectContaining({
-      data: expect.objectContaining({ createdNodeId: 22, verified: false }),
+      data: expect.objectContaining({ nodeId: 22, mutationCommitState: 'committed' }),
       ok: true,
     }));
-    expect(outcome).toEqual({
+    expect(outcome).toMatchObject({
       committed: true,
-      perception,
+      perception: { knownNodes: [{ id: 22, parentId: 10, libraryId: 3 }] },
       result: {
-        data: { createdNodeId: 22, name: '测试', parentId: 10, verified: true },
-        message: '已创建文件夹“测试”',
+        data: { nodeId: 22, name: '测试', mutationCommitState: 'committed' },
+        message: '已创建文件夹 测试',
         ok: true,
       },
     });
@@ -141,30 +132,30 @@ describe('Agent renderer tool executor', () => {
   it('does not report a completed write as failed when refresh verification fails', async () => {
     const outcome = await executeAgentRendererTool(request(), {
       createDirectory: vi.fn(async () => ({ id: 22 })) as never,
-      onRefreshDirectory: vi.fn(async () => {
+      assertOwner: () => undefined, beforeCommit: async () => undefined,
+      readLibraryNode: vi.fn(async (_library, id) => ({ id, libraryId: 3, parentId: 1, type: 'dir' as const, name: '测试' })),
+      notifyMutation: vi.fn(() => {
         throw new Error('refresh failed');
-      }),
-      readPerception: vi.fn(async () => {
-        throw new Error('read failed');
       }),
     });
 
     expect(outcome).toMatchObject({
       result: {
-        data: { verified: false },
+        data: { mutationCommitState: 'committed' },
         message: expect.stringContaining('已创建文件夹'),
         ok: true,
       },
     });
   });
 
-  it('rejects a request whose target differs from its safe app context', async () => {
+  it('rejects a request outside its library scope', async () => {
     const createDirectory = vi.fn();
     const mismatched = request();
-    mismatched.input = { ...mismatched.input as object, parentId: 11 };
+    mismatched.input = { ...mismatched.input as object, libraryId: 4 };
 
     await expect(executeAgentRendererTool(mismatched, {
       createDirectory: createDirectory as never,
+      assertOwner: () => undefined,
     })).resolves.toMatchObject({ result: { ok: false } });
     expect(createDirectory).not.toHaveBeenCalled();
   });

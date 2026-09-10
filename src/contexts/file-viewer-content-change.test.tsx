@@ -14,6 +14,7 @@ import { notifyLibraryFilesDeleted } from '@/features/file-viewer/services/file-
 import { globalAudioPlayer } from '@/features/file-viewer/services/global-audio-player';
 import { floatingVideoService } from '@/features/file-viewer/services/floating-video.service';
 import { API_CONFIG } from '@/config/api';
+import { notifyLibraryNodesMutated } from '@/features/file-explorer/services/node-mutation-events';
 
 let renderer: TestRenderer.ReactTestRenderer | undefined;
 let viewer: NonNullable<React.ContextType<typeof FileViewerContext>>;
@@ -21,6 +22,26 @@ function Probe() { viewer = React.useContext(FileViewerContext)!; return null; }
 afterEach(() => { act(() => renderer?.unmount()); renderer = undefined; vi.resetAllMocks(); });
 
 describe('file viewer external content changes', () => {
+  it('renames matching tabs without reloading content, activating tabs or releasing media owners', async () => {
+    await act(async () => { renderer = TestRenderer.create(<FileViewerProvider libraryId={3}><Probe /></FileViewerProvider>); });
+    act(() => viewer.setFileUrl('audio-bytes', 'old.mp3', 'audio', 9));
+    act(() => viewer.setFileUrl('other', 'other.txt', 'text', 10));
+    const before = viewer.tabs[0];
+    const active = viewer.activeTabId;
+    const event = { accountScope: 'user:7', backendScope: API_CONFIG.BASE_URL, libraryId: 3, affectedParentIds: [1], nodeId: 9, name: 'renamed', ext: 'mp3', type: 'file' as const };
+    act(() => notifyLibraryNodesMutated({ ...event, backendScope: 'https://other.invalid/api' }));
+    act(() => notifyLibraryNodesMutated({ ...event, accountScope: 'user:8' }));
+    act(() => notifyLibraryNodesMutated({ ...event, libraryId: 4 }));
+    expect(viewer.tabs[0]).toEqual(before);
+    act(() => notifyLibraryNodesMutated(event));
+    expect(viewer.tabs[0]).toEqual({ ...before, fileName: 'renamed.mp3' });
+    expect(viewer.activeTabId).toBe(active);
+    expect(mocks.link).not.toHaveBeenCalled();
+    expect(globalAudioPlayer.releaseForTab).not.toHaveBeenCalled();
+    expect(floatingVideoService.releaseForTab).not.toHaveBeenCalled();
+    act(() => notifyLibraryNodesMutated({ ...event, nodeId: 10, name: 'current', ext: 'md' }));
+    expect(viewer.fileState.fileName).toBe('current.md');
+  });
   it('closes deleted tabs through the media release path only in their owner and library scope', async () => {
     await act(async () => { renderer = TestRenderer.create(<FileViewerProvider libraryId={3}><Probe /></FileViewerProvider>); });
     act(() => viewer.setFileUrl('audio', 'first.mp3', 'audio', 9));

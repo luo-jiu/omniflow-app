@@ -1,4 +1,16 @@
 import type { AgentToolActivitySnapshot } from '@/shared/agent/agent.types';
+import { AGENT_LIBRARY_MUTATION_TOOLS } from '@/shared/agent/agent-library-actions';
+
+export function committedAgentFileParents(activity: AgentToolActivitySnapshot): number[] {
+  if ([...AGENT_LIBRARY_MUTATION_TOOLS, 'tag.update'].includes(activity.call.name)) {
+    if (activity.status !== 'completed' || activity.result?.ok !== true) return [];
+    const data = activity.result.data as { mutationCommitState?: unknown; affectedParentIds?: unknown } | undefined;
+    if (data?.mutationCommitState !== 'committed' || !Array.isArray(data.affectedParentIds) || data.affectedParentIds.length > 128) return [];
+    return Array.from(new Set(data.affectedParentIds.filter((id): id is number => Number.isSafeInteger(id) && Number(id) > 0)));
+  }
+  const parent = committedAgentFileParent(activity);
+  return parent === null ? [] : [parent];
+}
 
 export function committedAgentFileParent(activity: AgentToolActivitySnapshot): number | null {
   if (!['file.publish', 'file.upload', 'file.write', 'file.delete'].includes(activity.call.name)

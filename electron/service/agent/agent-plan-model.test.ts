@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   AGENT_PLAN_CONTROL_TOOL_NAME,
   agentPlanControlTool,
+  createAgentPlanControlTool,
   normalizeAgentRunPlan,
   parseStoredAgentRunPlan,
 } from './agent-plan-model';
@@ -11,6 +12,13 @@ const AVAILABLE_TOOLS = new Set(['file.list', 'file.stat', 'media.inspect']);
 const CREATED_AT = '2026-08-23T01:02:03.000Z';
 
 describe('Agent plan model', () => {
+  it('enumerates the actual frozen business tools for plan selection', () => {
+    const tool = createAgentPlanControlTool(['file.rename', 'file.move', 'recycle.restore']);
+    expect(tool.inputSchema).toMatchObject({ properties: { steps: { items: { properties: {
+      toolName: { enum: ['file_rename', 'file_move', 'recycle_restore'] },
+    } } } } });
+    expect(createAgentPlanControlTool(['file.read']).inputSchema).not.toEqual(tool.inputSchema);
+  });
   it('resolves provider names to canonical names only within the available tools', () => {
     const steps = [
       { title: '浏览目录', toolName: 'file_list' },

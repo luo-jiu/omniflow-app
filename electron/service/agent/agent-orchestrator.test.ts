@@ -41,7 +41,7 @@ import {
   estimateAgentTextTokens,
 } from './agent-context-projection';
 import { buildAgentSystemPrompt } from './agent-prompt-assembler';
-import { agentPlanControlTool } from './agent-plan-model';
+import { createAgentPlanControlTool } from './agent-plan-model';
 import {
   createAgentRunCapabilitySnapshot,
   type AgentRunCapabilitySnapshot,
@@ -1829,7 +1829,7 @@ describe('Agent orchestrator', () => {
       activeSummary,
     ].join('\n');
     const registeredTools = agentToolRegistry.list();
-    const providerTools = [agentPlanControlTool, ...registeredTools];
+    const providerTools = [createAgentPlanControlTool(registeredTools.filter(tool => tool.kind === 'business').map(tool => tool.name)), ...registeredTools];
     const catalog = skillPromptCatalog();
     const systemPrompt = buildAgentSystemPrompt(
       currentRequest.appContext,
@@ -4637,7 +4637,7 @@ describe('Agent orchestrator', () => {
     });
     const webContents = sender();
     const orchestrator = createAgentOrchestrator({
-      contextBudget: { outputReserveTokens: 1_234 },
+      contextBudget: { outputReserveTokens: 1_234, contextWindowTokens: 32_000 },
       getRuntimeProfile: () => ({
         apiKey: 'test-key',
         baseUrl: 'https://ai.example.com/v1',
@@ -4793,7 +4793,7 @@ describe('Agent orchestrator', () => {
     });
     const webContents = sender();
     const orchestrator = createAgentOrchestrator({
-      contextBudget: { contextWindowTokens: 20_000 },
+      contextBudget: { contextWindowTokens: 28_000 },
       getRuntimeProfile: () => ({
         apiKey: 'test-key',
         baseUrl: 'https://ai.example.com/v1',
@@ -4820,7 +4820,7 @@ describe('Agent orchestrator', () => {
   it('preflights every minimum legal Tool result before executing the provider turn', async () => {
     const currentRequest = request();
     const registeredTools = agentToolRegistry.list();
-    const providerTools = [agentPlanControlTool, ...registeredTools];
+    const providerTools = [createAgentPlanControlTool(registeredTools.filter(tool => tool.kind === 'business').map(tool => tool.name)), ...registeredTools];
     const toolCalls = [
       { id: 'call-boundary-list', input: {}, name: 'file.list' },
       { id: 'call-boundary-stat', input: { nodeId: 8 }, name: 'file.stat' },
@@ -4901,7 +4901,7 @@ describe('Agent orchestrator', () => {
   it('uses observed provider input-token underestimation before executing a Tool', async () => {
     const currentRequest = request();
     const registeredTools = agentToolRegistry.list();
-    const providerTools = [agentPlanControlTool, ...registeredTools];
+    const providerTools = [createAgentPlanControlTool(registeredTools.filter(tool => tool.kind === 'business').map(tool => tool.name)), ...registeredTools];
     const toolCall = { id: 'call-usage-margin', input: {}, name: 'file.list' };
     const catalog = skillPromptCatalog();
     const systemPrompt = buildAgentSystemPrompt(
@@ -4977,7 +4977,7 @@ describe('Agent orchestrator', () => {
   it('reserves a possible post-Tool perception prompt before any side effect', async () => {
     const currentRequest = { ...request(), perception: undefined };
     const registeredTools = agentToolRegistry.list();
-    const providerTools = [agentPlanControlTool, ...registeredTools];
+    const providerTools = [createAgentPlanControlTool(registeredTools.filter(tool => tool.kind === 'business').map(tool => tool.name)), ...registeredTools];
     const capabilities = registeredTools.map(tool => tool.name);
     const catalog = skillPromptCatalog();
     const toolCalls = [{ id: 'call-create-boundary', input: { name: '测试' }, name: 'directory.create' }];
@@ -5052,7 +5052,7 @@ describe('Agent orchestrator', () => {
   it('reserves exact minimum result space for later Tool calls with asymmetric identities', async () => {
     const currentRequest = request();
     const registeredTools = agentToolRegistry.list();
-    const providerTools = [agentPlanControlTool, ...registeredTools];
+    const providerTools = [createAgentPlanControlTool(registeredTools.filter(tool => tool.kind === 'business').map(tool => tool.name)), ...registeredTools];
     const toolCalls = [
       { id: 'a', input: {}, name: 'file.list' },
       { id: `call-${'x'.repeat(123)}`, input: { nodeId: 8 }, name: 'file.stat' },
@@ -6003,7 +6003,7 @@ describe('Agent orchestrator', () => {
     const skillSummaries = capabilitySnapshot.skillSnapshot.listSummaries();
     const omittedSkillCount = capabilitySnapshot.skillSnapshot.omittedSkillCount;
     const initialVisibleTools = capabilitySnapshot.listTools();
-    const initialProviderTools = [agentPlanControlTool, ...initialVisibleTools];
+    const initialProviderTools = [createAgentPlanControlTool(initialVisibleTools.filter(tool => tool.kind === 'business').map(tool => tool.name)), ...initialVisibleTools];
     const initialSystemPrompt = buildAgentSystemPrompt(
       currentRequest.appContext,
       currentRequest.perception,
@@ -6029,7 +6029,7 @@ describe('Agent orchestrator', () => {
       },
     ];
     const activatedVisibleTools = capabilitySnapshot.listTools(skillId);
-    const activatedProviderTools = [agentPlanControlTool, ...activatedVisibleTools];
+    const activatedProviderTools = [createAgentPlanControlTool(activatedVisibleTools.filter(tool => tool.kind === 'business').map(tool => tool.name)), ...activatedVisibleTools];
     const activatedSystemPrompt = buildAgentSystemPrompt(
       currentRequest.appContext,
       currentRequest.perception,
@@ -6186,7 +6186,7 @@ describe('Agent orchestrator', () => {
     const skillSummaries = capabilitySnapshot.skillSnapshot.listSummaries();
     const omittedSkillCount = capabilitySnapshot.skillSnapshot.omittedSkillCount;
     const initialVisibleTools = capabilitySnapshot.listTools();
-    const initialProviderTools = [agentPlanControlTool, ...initialVisibleTools];
+    const initialProviderTools = [createAgentPlanControlTool(initialVisibleTools.filter(tool => tool.kind === 'business').map(tool => tool.name)), ...initialVisibleTools];
     const initialSystemPrompt = buildAgentSystemPrompt(
       currentRequest.appContext,
       currentRequest.perception,
@@ -6212,7 +6212,7 @@ describe('Agent orchestrator', () => {
       },
     ];
     const activatedVisibleTools = capabilitySnapshot.listTools(skillId);
-    const activatedProviderTools = [agentPlanControlTool, ...activatedVisibleTools];
+    const activatedProviderTools = [createAgentPlanControlTool(activatedVisibleTools.filter(tool => tool.kind === 'business').map(tool => tool.name)), ...activatedVisibleTools];
     const activatedSystemPrompt = buildAgentSystemPrompt(
       currentRequest.appContext,
       currentRequest.perception,

@@ -28,6 +28,8 @@ import { subscribeLibraryFilesDeleted } from '@/features/file-viewer/services/fi
 import { getFileLink } from '@/features/file-explorer/services/file.api';
 import { API_CONFIG } from '@/config/api';
 import { runtimeLogger } from '@/utils/runtimeLogger';
+import { matchesLibraryMutationScope, subscribeLibraryNodesMutated } from '@/features/file-explorer/services/node-mutation-events';
+import { buildFileFullName, splitFileBaseNameAndExt } from '@/utils/fileTreeSettings';
 import {
   disposeViewerSessionOnClose,
   useViewerAccountScope,
@@ -262,6 +264,18 @@ export const FileViewerProvider: React.FC<{
   const skipPersistRef = React.useRef(false);
   const tabsRef = React.useRef(viewerState.tabs);
   tabsRef.current = viewerState.tabs;
+  useEffect(() => subscribeLibraryNodesMutated(event => {
+    if (!matchesLibraryMutationScope(event, viewerAccountScope, API_CONFIG.BASE_URL, libraryId)
+      || !event.nodeId || event.name === undefined) return;
+    setViewerState(previous => {
+      const tabs = previous.tabs.map(tab => {
+        if (tab.nodeId !== event.nodeId || tab.libraryId !== event.libraryId) return tab;
+        const ext = event.ext ?? splitFileBaseNameAndExt(tab.fileName || '').ext;
+        return { ...tab, fileName: event.type === 'dir' ? event.name! : buildFileFullName(event.name!, ext) };
+      });
+      return { ...previous, tabs, fileState: toFileState(tabs.find(tab => tab.id === previous.activeTabId) || null) };
+    });
+  }), [libraryId, viewerAccountScope]);
   useEffect(() => {
     let disposed = false;
     const requests = new Map<number, number>();

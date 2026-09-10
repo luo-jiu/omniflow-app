@@ -18,6 +18,13 @@ function dependencies() {
   };
 }
 describe('agent internal deletion', () => {
+  it('resolves a full library path before applying the same deletion checks', async () => {
+    const deps = dependencies(), req = request(); req.input = { libraryId: 3, path: node.path, recursive: false };
+    const resolvePath = vi.fn(async () => node);
+    expect(await executeAgentFileDelete(req, { ...deps, resolvePath })).toMatchObject({ committed: true });
+    expect(resolvePath).toHaveBeenCalledWith(3, node.path);
+    expect(deps.readLibraryNode).toHaveBeenCalledTimes(2);
+  });
   it('rechecks the target and reports committed trash before refreshing', async () => {
     const deps = dependencies();
     const result = await executeAgentFileDelete(request(), deps);

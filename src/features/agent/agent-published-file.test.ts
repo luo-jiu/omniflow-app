@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AgentToolActivitySnapshot } from '@/shared/agent/agent.types';
-import { committedAgentFileParent } from './agent-published-file';
+import { committedAgentFileParent, committedAgentFileParents } from './agent-published-file';
 
 const activity: AgentToolActivitySnapshot = {
   id: 'publish', sessionId: 's', runId: 'r', createdAt: '2026-09-09', ordinal: 1, revision: 1,
@@ -8,6 +8,11 @@ const activity: AgentToolActivitySnapshot = {
   result: { ok: true, data: { uploadCommitState: 'committed', destination: { kind: 'library', nodeId: 32, parentId: 20 } } },
 };
 describe('committed publication refresh target', () => {
+  it('restores both affected directories for completed internal moves', () => {
+    const move = { ...activity, call: { ...activity.call, name: 'file.move' } };
+    expect(committedAgentFileParents({ ...move, result: { ok: true, data: { mutationCommitState: 'committed', affectedParentIds: [8, 20, 8] } } })).toEqual([8, 20]);
+    expect(committedAgentFileParents({ ...move, result: { ok: false, data: { mutationCommitState: 'commit_unknown', affectedParentIds: [8, 20] } } })).toEqual([]);
+  });
   it('refreshes a deleted node parent only after confirmed trash commit', () => {
     for (const state of ['committed', 'commit_unknown', 'uncommitted']) {
       expect(committedAgentFileParent({ ...activity, call: { ...activity.call, name: 'file.delete' }, result: { ok: true, data: {

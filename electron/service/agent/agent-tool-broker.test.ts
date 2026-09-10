@@ -502,6 +502,17 @@ describe('Agent tool broker', () => {
       vi.useRealTimers();
     }
   });
+  it.each(['directory.create', 'file.rename', 'file.move', 'file.copy', 'recycle.restore', 'tag.update'])('settles uncertain %s commits after cancellation', async toolName => {
+    const controller = new AbortController();
+    const broker = createAgentToolBroker({ createId: () => 'mutation' });
+    const prepared = broker.prepareRendererExecution({ ...prepareInput(controller.signal), toolName });
+    const identity = { executionId: 'mutation', libraryId: 3, ownerScope: OWNER_SCOPE, runId: 'run-1', sessionId: 'session-1' };
+    broker.reportRendererProgress(77, { ...identity, phase: 'committing', progress: { message: '正在提交' } });
+    controller.abort();
+    const result = { ok: false, data: { mutationCommitState: 'commit_unknown' }, message: '请核对目标' };
+    broker.completeRendererExecution(77, { ...identity, result });
+    await expect(prepared.outcome).resolves.toMatchObject({ result });
+  });
   it('preserves the authoritative deletion facts while reporting a late cleanup warning', async () => {
     const broker = createAgentToolBroker({ createId: () => 'delete-warning' });
     const prepared = broker.prepareRendererExecution({ ...prepareInput(new AbortController().signal), toolName: 'file.delete' });

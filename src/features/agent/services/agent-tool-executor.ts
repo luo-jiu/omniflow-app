@@ -26,13 +26,9 @@ import { normalizeAgentLibraryDirectoryPath } from '@/shared/agent/agent-library
 import { readAgentLibraryNode } from './agent-library.api';
 import { executeAgentFileWrite } from './agent-file-write';
 import { executeAgentFileDelete } from './agent-file-delete';
-
-interface DirectoryCreateExecutionInput {
-  conflictPolicy: 'error';
-  libraryId: number;
-  name: string;
-  parentId: number;
-}
+import { executeAgentLibraryAction, executeAgentRecycleList, type AgentLibraryActionDependencies } from './agent-library-actions';
+import { executeAgentTagTool } from './agent-tag-tools';
+import { AGENT_LIBRARY_MUTATION_TOOLS } from '@/shared/agent/agent-library-actions';
 
 interface MediaInspectExecutionInput {
   fileName: string;
@@ -82,7 +78,7 @@ export interface AgentRendererToolOutcome {
   result: AgentToolResult;
 }
 
-export interface AgentRendererToolExecutorDependencies {
+export interface AgentRendererToolExecutorDependencies extends AgentLibraryActionDependencies {
   readLibraryNode?: typeof readAgentLibraryNode;
   createDirectory?: typeof createNode;
   extractMediaAudio?: typeof extractAgentMediaAudio;
@@ -188,35 +184,6 @@ function normalizeMediaInspectInput(
   };
 }
 
-function normalizeDirectoryCreateInput(
-  request: AgentToolExecutionRequest,
-): DirectoryCreateExecutionInput {
-  if (!request.input || typeof request.input !== 'object' || Array.isArray(request.input)) {
-    throw new Error('创建文件夹的执行参数无效');
-  }
-  const source = request.input as Record<string, unknown>;
-  const libraryId = Number(source.libraryId);
-  const parentId = Number(source.parentId);
-  const name = String(source.name || '').trim();
-  if (
-    source.conflictPolicy !== 'error'
-    || !Number.isFinite(libraryId)
-    || libraryId <= 0
-    || !Number.isFinite(parentId)
-    || parentId <= 0
-    || !name
-  ) {
-    throw new Error('创建文件夹的执行参数无效');
-  }
-  if (
-    libraryId !== Number(request.appContext.libraryId)
-    || parentId !== Number(request.appContext.currentDirectory?.id)
-  ) {
-    throw new Error('创建文件夹的目标上下文已经变化');
-  }
-  return { conflictPolicy: 'error', libraryId, name, parentId };
-}
-
 function normalizeMediaExtractAudioInput(
   request: AgentToolExecutionRequest,
 ): MediaExtractAudioExecutionInput {
@@ -320,51 +287,16 @@ export async function executeAgentRendererTool(
   throwIfAborted(dependencies.signal);
   if (request.toolName === 'file.write') return executeAgentFileWrite(request, dependencies);
   if (request.toolName === 'file.delete') return executeAgentFileDelete(request, dependencies);
+  if ((AGENT_LIBRARY_MUTATION_TOOLS as readonly string[]).includes(request.toolName)) return executeAgentLibraryAction(request, dependencies);
+  if (request.toolName === 'recycle.list') return executeAgentRecycleList(request, dependencies);
+  if (['tag.list', 'tag.update'].includes(request.toolName)) return executeAgentTagTool(request, dependencies);
   if (request.toolName === 'media.inspect') {
     return executeMediaInspect(request, dependencies);
   }
   if (request.toolName === 'media.extractAudio') {
     return executeMediaExtractAudio(request, dependencies);
   }
-  if (request.toolName !== 'directory.create') {
-    return {
-      result: { message: `不支持的 Renderer Agent Tool：${request.toolName}`, ok: false },
-    };
-  }
-
-  let input: DirectoryCreateExecutionInput;
-  try {
-    input = normalizeDirectoryCreateInput(request);
-  } catch (error) {
-    if (isAbortError(error, dependencies.signal)) throw error;
-    return {
-      result: {
-        message: error instanceof Error ? error.message : '创建文件夹的执行参数无效',
-        ok: false,
-      },
-    };
-  }
-
-  const createDirectory = dependencies.createDirectory || createNode;
-  try {
-    const created = await createDirectory({
-      conflictPolicy: input.conflictPolicy,
-      libraryId: input.libraryId,
-      name: input.name,
-      parentId: input.parentId,
-      type: 'dir',
-    });
-    const committedResult = buildDirectoryCreateResult(created, input, false, false);
-    await submitAuthoritativeCommit(dependencies.onCommitted, committedResult);
-    return await finishDirectoryCreateExecution(created, input, request, dependencies);
-  } catch (error) {
-    return {
-      result: {
-        message: error instanceof Error ? error.message : '创建文件夹失败',
-        ok: false,
-      },
-    };
-  }
+  return { result: { message: `不支持的 Renderer Agent Tool：${request.toolName}`, ok: false } };
 }
 
 async function executeMediaInspect(
@@ -701,58 +633,6 @@ function buildMediaExtractAudioResult(
     message: verificationFailed
       ? `已提取并上传“${createdNode.name}”，但目录刷新或结果校验失败`
       : `已提取并上传“${createdNode.name}”`,
-    ok: true,
-  };
-}
-
-async function finishDirectoryCreateExecution(
-  created: Awaited<ReturnType<typeof createNode>>,
-  input: DirectoryCreateExecutionInput,
-  request: AgentToolExecutionRequest,
-  dependencies: AgentRendererToolExecutorDependencies,
-): Promise<AgentRendererToolOutcome> {
-  let refreshFailed = false;
-  try {
-    await dependencies.onRefreshDirectory?.(input.parentId);
-  } catch {
-    refreshFailed = true;
-  }
-
-  let perception: AgentRendererToolOutcome['perception'];
-  try {
-    const readPerception = dependencies.readPerception || readAgentPerception;
-    perception = await readPerception(request.appContext);
-  } catch {
-    refreshFailed = true;
-  }
-
-  const createdNode = resolveCreatedNode(created, input.name);
-  const verified = perceptionContainsNode(perception, input.parentId, createdNode.id);
-
-  return {
-    committed: true,
-    ...(perception ? { perception } : {}),
-    result: buildDirectoryCreateResult(created, input, verified, refreshFailed || !verified),
-  };
-}
-
-function buildDirectoryCreateResult(
-  created: Awaited<ReturnType<typeof createNode>>,
-  input: DirectoryCreateExecutionInput,
-  verified: boolean,
-  verificationFailed: boolean,
-): AgentToolResult {
-  const createdNode = resolveCreatedNode(created, input.name);
-  return {
-    data: {
-      ...(createdNode.id ? { createdNodeId: createdNode.id } : {}),
-      name: createdNode.name,
-      parentId: input.parentId,
-      verified,
-    },
-    message: verificationFailed
-      ? `已创建文件夹“${createdNode.name}”，但目录刷新或结果校验失败`
-      : `已创建文件夹“${createdNode.name}”`,
     ok: true,
   };
 }

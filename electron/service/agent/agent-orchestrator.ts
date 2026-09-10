@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { isAgentRendererMutationTool } from '../../../src/shared/agent/agent-library-actions';
 import { attachmentManifest } from '../../../src/shared/agent/agent-attachments';
 import { getAgentAttachmentStore, hydrateAgentAttachmentImages } from './agent-attachment-runtime';
 import { operateAgentAttachment } from './documents/attachment-documents';
@@ -136,7 +137,7 @@ import {
 } from './agent-memory-retriever';
 import {
   AGENT_PLAN_CONTROL_TOOL_NAME,
-  agentPlanControlTool,
+  createAgentPlanControlTool,
   normalizeAgentRunPlan,
 } from './agent-plan-model';
 import {
@@ -826,7 +827,7 @@ function resolveAgentProviderToolResultPolicy(
   if (canonicalToolName === AGENT_SKILL_ACTIVATE_TOOL_NAME) {
     return { maxTokens: SKILL_PROVIDER_TOOL_RESULT_TOKENS };
   }
-  if (['file.read', 'file.grep', 'attachment.read', 'attachment.query'].includes(canonicalToolName)) return { maxTokens: 10_000 };
+  if (['file.read', 'file.grep', 'attachment.read', 'attachment.query', 'recycle.list', 'tag.list'].includes(canonicalToolName)) return { maxTokens: 10_000 };
   if (['file.list', 'file.search', 'file.resolve', 'file.stat'].includes(canonicalToolName)) return { maxTokens: 10_000 };
   return { maxTokens: DEFAULT_PROVIDER_TOOL_RESULT_TOKENS };
 }
@@ -2689,7 +2690,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
             capabilitySnapshot.listBusinessTools(activeSkillId).map(tool => tool.name),
           ),
           capabilities: visibleTools.map(tool => tool.name),
-          providerTools: modelAdapter.toolCalling ? [agentPlanControlTool, ...visibleTools] : [],
+          providerTools: modelAdapter.toolCalling ? [createAgentPlanControlTool(visibleTools.filter(tool => tool.kind === 'business').map(tool => tool.name)), ...visibleTools] : [],
         };
       };
       const initialCapabilityView = getProviderCapabilityView();
@@ -3311,8 +3312,11 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
                 },
                 Math.min(10_000, Math.max(1, getProviderRequestLimit() - preExecutionMinimumTokens)),
               );
-          if (call.name === 'file.delete' && result.ok && currentPerception) {
-            currentPerception = { ...currentPerception, knownNodes: [], selectedNodes: [], currentDirectory: undefined };
+          if (isAgentRendererMutationTool(call.name) && !['directory.create', 'file.copy', 'file.write'].includes(call.name) && result.ok && currentPerception) {
+            const nodeId = (result.data as { nodeId?: number } | undefined)?.nodeId;
+            currentPerception = { ...currentPerception,
+              knownNodes: call.name === 'file.delete' ? [] : currentPerception.knownNodes?.filter(node => node.id === nodeId) || [],
+              selectedNodes: [], currentDirectory: undefined };
           }
           toolTurnProgress.push({
             input: call.input,
@@ -3648,7 +3652,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         query: userPrompt,
       }).catch(() => []);
       const preflightVisibleTools = capabilitySnapshot.listTools();
-      const preflightTools = modelAdapter.toolCalling ? [agentPlanControlTool, ...preflightVisibleTools] : [];
+      const preflightTools = modelAdapter.toolCalling ? [createAgentPlanControlTool(preflightVisibleTools.filter(tool => tool.kind === 'business').map(tool => tool.name)), ...preflightVisibleTools] : [];
       const preflightSkillSummaries = capabilitySnapshot.skillSnapshot.listSummaries();
       const preflightOmittedSkillCount = capabilitySnapshot.skillSnapshot.omittedSkillCount;
       const preflightFallbackContextMessages = buildAgentFallbackContextMessages(perception);

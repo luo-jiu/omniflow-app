@@ -8,12 +8,13 @@ import { softDeleteNodeSubtree } from '@/features/file-explorer/services/node-de
 import { notifyLibraryFilesDeleted } from '@/features/file-viewer/services/file-deletion-events';
 import { markRepositoryTreeSnapshotDirty } from '@/features/file-explorer/hooks/use-repository-tree/snapshot-store';
 import { refreshDirectoryInTree } from '@/features/file-explorer/services/tree-locate';
-import { readAgentLibraryNode } from './agent-library.api';
+import { readAgentLibraryNode, resolveAgentLibraryPath } from './agent-library.api';
 import { reportAgentToolExecutionProgress } from './agent.api';
 import type { AgentRendererToolOutcome } from './agent-tool-executor';
 
 export interface AgentFileDeleteDependencies {
   readLibraryNode?: typeof readAgentLibraryNode;
+  resolvePath?: typeof resolveAgentLibraryPath;
   deleteSubtree?: typeof softDeleteNodeSubtree;
   assertOwner?: () => void;
   beforeCommit?: () => Promise<void>;
@@ -36,7 +37,13 @@ export async function executeAgentFileDelete(request: AgentToolExecutionRequest,
   const check = () => { deps.signal?.throwIfAborted(); checkOwner(); };
   try {
     check();
-    const input = request.input as AgentLibraryNode & { nodeId: number; recursive: boolean };
+    let input = request.input as AgentLibraryNode & { nodeId: number; recursive: boolean };
+    if (input?.path && input.nodeId === undefined) {
+      if (input.libraryId !== request.appContext.libraryId || !Number.isSafeInteger(input.libraryId) || input.libraryId <= 0) throw new Error('删除范围无效');
+      const node = await (deps.resolvePath || resolveAgentLibraryPath)(input.libraryId, input.path);
+      check();
+      input = { ...node, nodeId: node.id, recursive: input.recursive };
+    }
     if (request.toolName !== 'file.delete' || !input || input.libraryId !== request.appContext.libraryId
       || !Number.isSafeInteger(input.libraryId) || input.libraryId <= 0
       || !Number.isSafeInteger(input.nodeId) || input.nodeId <= 0

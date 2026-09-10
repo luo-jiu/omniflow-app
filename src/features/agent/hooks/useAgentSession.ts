@@ -1,4 +1,5 @@
 import React from 'react';
+import { isAgentRendererMutationTool } from '@/shared/agent/agent-library-actions';
 import { useAgentAttachments } from './useAgentAttachments';
 import { useAgentDraftRecovery } from './useAgentDraftRecovery';
 
@@ -44,7 +45,7 @@ import {
   upsertAgentToolActivity,
 } from '../agent-tool-activities';
 import { upsertAgentRun } from '../agent-runs';
-import { committedAgentFileParent } from '../agent-published-file';
+import { committedAgentFileParents } from '../agent-published-file';
 import { markRepositoryTreeSnapshotDirty } from '@/features/file-explorer/hooks/use-repository-tree/snapshot-store';
 import { refreshDirectoryInTree } from '@/features/file-explorer/services/tree-locate';
 
@@ -148,10 +149,10 @@ export function useAgentSession({
     const parents = new Set<number>();
     for (const activity of toolActivities) {
       if (activity.sessionId !== sessionId || refreshedPublicationsRef.current.ids.has(activity.id)) continue;
-      const parent = committedAgentFileParent(activity);
-      if (parent === null) continue;
+      const affected = committedAgentFileParents(activity);
+      if (!affected.length) continue;
       refreshedPublicationsRef.current.ids.add(activity.id);
-      parents.add(parent);
+      affected.forEach(parent => parents.add(parent));
     }
     if (!parents.size) return;
     markRepositoryTreeSnapshotDirty(Number(appContext.libraryId));
@@ -215,7 +216,7 @@ export function useAgentSession({
         onRefreshDirectory,
         signal: controller.signal,
       });
-      if (controller.signal.aborted && !outcome.committed && !['file.write', 'file.delete'].includes(request.toolName)) return;
+      if (controller.signal.aborted && !outcome.committed && !isAgentRendererMutationTool(request.toolName)) return;
       await completeAgentToolExecution({
         executionId: request.executionId,
         libraryId: Number(request.appContext.libraryId),

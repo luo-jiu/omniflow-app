@@ -78,6 +78,7 @@ import {
   selectPreferredStorageProvider,
 } from '@/features/resource-monitor/services/storage-provider-health';
 import { resourceMonitorProbeRuntime } from '@/features/resource-monitor/services/resource-monitor-runtime';
+import { useLibraryTreeDeletionSelection } from '../../hooks/useLibraryTreeDeletionSelection';
 
 interface DirectoryTreeProps {
   treeData: any[];
@@ -490,7 +491,9 @@ export default function DirectoryTree({
       primaryNode,
       selectedNodeIds,
     });
-  }, [selectedNodeIds]);
+  }, [selectedNodeIds, treeData]);
+
+  useLibraryTreeDeletionSelection(viewerAccountScope, libraryId, setSelectedNodeIds, setSelectionAnchorKey);
 
   /** 基于当前已经渲染的所有节点，计算内容所需的最小宽度 */
   const recomputeRequiredWidth = useCallback(() => {

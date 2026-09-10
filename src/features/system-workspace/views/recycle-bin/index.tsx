@@ -4,7 +4,6 @@ import { Button, Empty, Tag, Toast } from '@douyinfe/semi-ui';
 import { IconDelete, IconRefresh } from '@douyinfe/semi-icons';
 import {
   fetchRecycleBinItems,
-  restoreNodeAndChildren,
   type RecycleBinItem,
   type RecycleStorageLocation,
 } from '@/features/file-explorer/services/file.api';
@@ -14,6 +13,7 @@ import {
 } from '@/features/file-explorer/services/node-deletion';
 import { useViewerAccountScope } from '@/features/file-viewer/session';
 import { markRepositoryTreeSnapshotDirty } from '@/features/file-explorer/hooks/useRepositoryTree';
+import { useRestoreRecycleBinNode } from '@/features/file-explorer/hooks/useRestoreRecycleBinNode';
 import { requestDesktopWindowActivation } from '@/utils/windowActivation';
 import { openCompactConfirm } from '@/components/ui/compact-confirm';
 import type { SystemWorkspaceViewProps } from '../../types';
@@ -289,16 +289,9 @@ const RecycleBinWorkspace: React.FC<SystemWorkspaceViewProps> = ({ libraryId }) 
     });
   }, []);
 
-  const handleRestore = async (item: RecycleBinItem) => {
-    try {
-      await restoreNodeAndChildren(item.id, libraryId);
-      setItems(prev => prev.filter(x => x.id !== item.id));
-      markRepositoryTreeSnapshotDirty(libraryId);
-      Toast.success('已恢复');
-    } catch (error: any) {
-      Toast.error(error?.message || '恢复失败');
-    }
-  };
+  const handleRestore = useRestoreRecycleBinNode(libraryId, useCallback((nodeId: number) => {
+    setItems(prev => prev.filter(item => item.id !== nodeId));
+  }, []));
 
   const handleHardDelete = async (item: RecycleBinItem) => {
     try {

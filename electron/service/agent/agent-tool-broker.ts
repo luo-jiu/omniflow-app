@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { isAgentRendererMutationTool } from '../../../src/shared/agent/agent-library-actions';
 
 import type {
   AgentAppContext,
@@ -381,7 +382,7 @@ export function createAgentToolBroker(options: AgentToolBrokerOptions = {}) {
     const message = String(input.progress?.message || '').trim().slice(0, 500);
     if (!message) throw new Error('Agent Tool 进度消息不能为空');
     if (input.phase !== undefined) {
-      if (input.phase !== 'committing' || !['file.write', 'file.delete'].includes(pending.toolName)) {
+      if (input.phase !== 'committing' || !isAgentRendererMutationTool(pending.toolName)) {
         throw new Error('该工具不支持提交阶段通知');
       }
       pending.beginCriticalSettlement();
@@ -414,12 +415,12 @@ export function createAgentToolBroker(options: AgentToolBrokerOptions = {}) {
       throw new Error('当前窗口无权提交该 Agent Tool 结果');
     }
     const result = normalizeAgentToolResult(input.result);
-    const data = result.data as { writeCommitState?: string; deleteCommitState?: string } | undefined;
-    const state = pending.toolName === 'file.delete' ? data?.deleteCommitState : data?.writeCommitState;
-    const writeSettled = ['file.write', 'file.delete'].includes(pending.toolName) && !result.ok
+    const data = result.data as { writeCommitState?: string; deleteCommitState?: string; mutationCommitState?: string } | undefined;
+    const state = pending.toolName === 'file.delete' ? data?.deleteCommitState : pending.toolName === 'file.write' ? data?.writeCommitState : data?.mutationCommitState;
+    const writeSettled = isAgentRendererMutationTool(pending.toolName) && !result.ok
       && (state === 'uncommitted' || state === 'commit_unknown');
     if (pending.signal.aborted && !pending.committedResult && !writeSettled) throw abortError();
-    const committedResult = pending.committedResult && pending.toolName === 'file.delete' && result.ok && result.message
+    const committedResult = pending.committedResult && isAgentRendererMutationTool(pending.toolName) && result.ok && result.message
       ? { ...pending.committedResult, message: result.message } : pending.committedResult;
     pending.resolve({
       perception: options.normalizePerception?.(input.perception),

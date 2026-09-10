@@ -113,6 +113,18 @@ function agentFileRoutingPrompt(capabilities: readonly string[]): string {
   if (available.has('file.delete')) {
     rules.push(`删除资料库文件使用 ${providerToolName('file.delete')} 移入系统回收站，不使用本机 rm 或存储对象删除接口。先定位并核对节点；用户明确要求删除整个文件夹时才传 recursive=true，不因为文件不可达就删除。运行时负责权限确认，不重复询问已明确的删除要求。deleteCommitState=commit_unknown 时先检查原目录及回收站，不盲目重试。`);
   }
+  if (available.has('file.rename') && available.has('file.move')) {
+    rules.push(`整理内部文件优先使用已提供的 ${providerToolName('file.rename')}、${providerToolName('file.move')} 等专用工具。源path/nodeId二选一，目标目录parentPath/parentId二选一，名称包含完整后缀。无需用户先切换界面目录。操作返回mutationCommitState=commit_unknown时先核对目标，不能盲目重做或改用另一写入路径。`);
+  }
+  if (available.has('directory.create')) {
+    rules.push(`${providerToolName('directory.create')} 支持完整的新目录path或name加父目录；父目录必须存在，多级目录依次创建。默认冲突报错，不覆盖同名文件。`);
+  }
+  if (available.has('recycle.list') && available.has('recycle.restore')) {
+    rules.push(`恢复删除内容时先 ${providerToolName('recycle.list')} 搜索回收站，再 ${providerToolName('recycle.restore')} 使用实际nodeId恢复。回收站条目和活跃目录节点不能混用；恢复后重新定位原路径，冲突时解释原因，不替用户永久删除冲突文件。`);
+  }
+  if (available.has('tag.update')) {
+    rules.push(`标签操作先 ${providerToolName('tag.list')} 取得可见标签及适用范围，再 ${providerToolName('tag.update')} 只增删明确标签ID；保留其他标签，不把看不到的标签推断为不存在。`);
+  }
   if (available.has('file.list')) {
     rules.push(`${providerToolName('file.list')} 可以按目录 ID 或资料库绝对路径分页浏览其他目录，不需要用户先展开目录树；hasMore=true 时保持查询条件并使用 nextCursor 续页。`);
   }

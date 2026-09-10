@@ -65,6 +65,19 @@ export const agentPlanControlTool: AgentProviderToolDefinition = {
   name: AGENT_PLAN_CONTROL_TOOL_NAME,
 };
 
+export function createAgentPlanControlTool(availableToolNames: readonly string[]): AgentProviderToolDefinition {
+  const schema = agentPlanControlTool.inputSchema as { properties: { steps: { items: { properties: Record<string, unknown> } } } };
+  const names = Array.from(new Set(availableToolNames.map(toAgentProviderToolName)));
+  if (!names.length) return agentPlanControlTool;
+  return { ...agentPlanControlTool, inputSchema: { ...schema, properties: { ...schema.properties,
+    steps: { ...schema.properties.steps, items: { ...schema.properties.steps.items,
+      properties: { ...schema.properties.steps.items.properties,
+        toolName: { type: 'string', enum: names, description: '必须从本轮已开放的业务工具名称中选择。' },
+      },
+    } },
+  } } };
+}
+
 function normalizeText(value: unknown, label: string, maximumLength: number): string {
   if (typeof value !== 'string') throw new Error(`${label}必须是文本`);
   const normalized = value.replace(/\s+/g, ' ').trim();

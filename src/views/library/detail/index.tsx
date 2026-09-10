@@ -76,6 +76,8 @@ import { getDesktopPlatform } from '@/platform';
 import { useAuth } from '@/hooks/useAuth';
 import AgentWorkspace from '@/features/agent/AgentWorkspace';
 import { createAgentOwnerScope } from '@/shared/agent/agent-owner-scope';
+import { subscribeLibraryFilesDeleted } from '@/features/file-viewer/services/file-deletion-events';
+import { matchesLibraryMutationScope, subscribeLibraryNodesMutated } from '@/features/file-explorer/services/node-mutation-events';
 import { API_CONFIG } from '@/config/api';
 import BrowserSettingsWorkspace, { type BrowserSettingsSection } from './BrowserSettingsWorkspace';
 import ToolWorkspace from "@/features/tool-workspace";
@@ -278,6 +280,19 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   const [searchMode, setSearchMode] = React.useState<SearchWorkspaceMode>(initialWorkspaceState.searchMode);
   const [searchDraft] = React.useState(initialWorkspaceState.searchDraft);
   const [selectedTreeNode, setSelectedTreeNode] = React.useState<SelectedTreeNode | null>(null);
+  React.useEffect(() => subscribeLibraryFilesDeleted(event => {
+    if (!matchesLibraryMutationScope(event, agentOwnerScope?.accountScope ?? null, API_CONFIG.BASE_URL, libraryId)) return;
+    setSelectedTreeNode(previous => previous && event.nodeIds.includes(previous.id) ? null : previous);
+  }), [agentOwnerScope, libraryId]);
+  React.useEffect(() => subscribeLibraryNodesMutated(event => {
+    if (!matchesLibraryMutationScope(event, agentOwnerScope?.accountScope ?? null, API_CONFIG.BASE_URL, libraryId)) return;
+    setSelectedTreeNode(previous => previous && previous.id === event.nodeId ? {
+      ...previous,
+      name: event.name ?? previous.name,
+      ext: event.ext ?? previous.ext,
+      parentId: event.parentId ?? previous.parentId,
+    } : previous);
+  }), [agentOwnerScope, libraryId]);
   const [treeRootNodeId, setTreeRootNodeId] = React.useState<number | null>(null);
   const [workspaceDisplayMode, setWorkspaceDisplayMode] = React.useState<WorkspaceDisplayMode>(initialWorkspaceState.workspaceDisplayMode);
   const [systemWorkspaceTabs, setSystemWorkspaceTabs] = React.useState<SystemWorkspaceView[]>([]);

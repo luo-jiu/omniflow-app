@@ -1,6 +1,9 @@
 import type { AgentTool } from '../agent-tool-registry';
 import { fileWriteTool } from './file-write-tool';
 import { fileDeleteTool } from './file-delete-tool';
+import { libraryActionTools } from './library-action-tools';
+import { getAgentTagTools } from './tag-tools';
+import { normalizeAgentLibraryAction } from '../../../../src/shared/agent/agent-library-actions';
 
 const MAX_DIRECTORY_NAME_LENGTH = 120;
 const WINDOWS_RESERVED_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
@@ -31,11 +34,15 @@ export function normalizeAgentDirectoryName(input: unknown): string {
 }
 
 export const directoryCreateTool: AgentTool = {
-  description: '在 OmniFlow 当前目录中创建一个文件夹。只接受文件夹名称，目标固定为当前目录；运行时根据当前权限模式决定是否需要确认，不覆盖同名内容。',
+  description: '在资料库创建文件夹。提供完整新目录path，或name加parentPath/parentId指定父目录；仅提供name时使用当前目录，无当前目录则使用根目录。父目录须已存在，多级目录逐级创建。冲突默认error，可选择auto_rename，不覆盖。',
   executor: 'renderer',
   inputSchema: {
     additionalProperties: false,
     properties: {
+      path: { type: 'string', minLength: 2, maxLength: 2048 },
+      parentPath: { type: 'string', minLength: 1, maxLength: 2048 },
+      parentId: { type: 'integer', minimum: 1 },
+      conflictPolicy: { type: 'string', enum: ['error', 'auto_rename'] },
       name: {
         description: '要创建的文件夹名称，不包含路径。',
         maxLength: MAX_DIRECTORY_NAME_LENGTH,
@@ -43,7 +50,7 @@ export const directoryCreateTool: AgentTool = {
         type: 'string',
       },
     },
-    required: ['name'],
+    oneOf: [{ properties: { name: {} }, required: ['name'] }, { properties: { path: {} }, required: ['path'] }],
     type: 'object',
   },
   name: 'directory.create',
@@ -51,7 +58,7 @@ export const directoryCreateTool: AgentTool = {
   timeoutMs: 30_000,
   validate(input, context) {
     try {
-      normalizeAgentDirectoryName(input);
+      normalizeAgentLibraryAction('directory.create', input);
     } catch (error) {
       return {
         message: error instanceof Error ? error.message : '文件夹名称无效',
@@ -59,15 +66,15 @@ export const directoryCreateTool: AgentTool = {
       };
     }
     const libraryId = Number(context.appContext.libraryId);
-    const parentId = Number(context.appContext.currentDirectory?.id);
-    if (!Number.isFinite(libraryId) || libraryId <= 0 || !Number.isFinite(parentId) || parentId <= 0) {
-      return { message: '当前没有可写入的目录上下文', ok: false };
+    if (!Number.isSafeInteger(libraryId) || libraryId <= 0) {
+      return { message: '当前没有可写入的资料库上下文', ok: false };
     }
     return { ok: true };
   },
   assess(input, context) {
-    const name = normalizeAgentDirectoryName(input);
-    const directoryName = String(context.appContext.currentDirectory?.name || '当前目录');
+    const query = normalizeAgentLibraryAction('directory.create', input);
+    const name = query.name!;
+    const directoryName = query.parentPath || (query.parentId ? `目录 ${query.parentId}` : context.appContext.currentDirectory?.name || '根目录');
     return {
       behavior: 'ask',
       preview: {
@@ -83,15 +90,17 @@ export const directoryCreateTool: AgentTool = {
     };
   },
   createRendererRequest(input, context) {
+    const query = normalizeAgentLibraryAction('directory.create', input);
     return {
-      conflictPolicy: 'error',
+      ...query,
+      conflictPolicy: query.conflictPolicy || 'error',
       libraryId: Number(context.appContext.libraryId),
-      name: normalizeAgentDirectoryName(input),
-      parentId: Number(context.appContext.currentDirectory?.id),
+      ...(query.parentPath || query.parentId ? {} : context.appContext.currentDirectory?.id
+        ? { parentId: context.appContext.currentDirectory.id } : { parentPath: '/' }),
     };
   },
 };
 
 export function getBuiltInActionTools(): AgentTool[] {
-  return [directoryCreateTool, fileWriteTool, fileDeleteTool];
+  return [directoryCreateTool, fileWriteTool, fileDeleteTool, ...libraryActionTools, ...getAgentTagTools()];
 }

@@ -21,14 +21,14 @@ describe('directory.create Agent tool', () => {
     const executionContext = context();
     await expect(assessAgentToolPermission(
       directoryCreateTool,
-      { name: ' 测试 ' },
+      { name: '测试' },
       executionContext,
     )).resolves.toMatchObject({
       behavior: 'ask',
       preview: { description: '将在“视频”中创建文件夹“测试”。' },
     });
     expect(directoryCreateTool.createRendererRequest?.(
-      { name: ' 测试 ' },
+      { name: '测试' },
       executionContext,
     )).toEqual({
       conflictPolicy: 'error',
@@ -44,7 +44,7 @@ describe('directory.create Agent tool', () => {
     expect(() => normalizeAgentDirectoryName({ name: 'ending.' })).toThrow('Windows');
   });
 
-  it('denies creation when no current directory is available', async () => {
+  it('uses the root when no current directory is available', async () => {
     await expect(assessAgentToolPermission(
       directoryCreateTool,
       { name: '测试' },
@@ -56,6 +56,6 @@ describe('directory.create Agent tool', () => {
           selectedNodeIds: [],
         },
       },
-    )).resolves.toMatchObject({ behavior: 'deny' });
+    )).resolves.toMatchObject({ behavior: 'ask', preview: { description: '将在“根目录”中创建文件夹“测试”。' } });
   });
 });
