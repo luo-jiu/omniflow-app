@@ -13,8 +13,8 @@
 
 1. import 保留原始文件副本并识别 image/text/document/file。上传成功只代表副本已保存，不代表解析成功。未知二进制可被检查，但不能被执行或假装读取。
 2. AgentAttachmentStore 负责 owner/backend/library/session 授权与 immutable bytes，不把私有路径交给模型。
-3. attachment.inspect 返回真实支持操作及 PDF 页数；attachment.read 返回指定 PDF 页或 DOCX 的正文分页；attachment.view 返回图片或渲染的 PDF 页面。
-4. PDF/DOCX 解析和渲染运行在单独 Node worker，30 秒超时、可取消、JS heap 上限；不在 Electron 主线程解析大文档。worker 是故障隔离，不声称为操作系统沙箱。
+3. attachment.inspect 返回真实支持操作、PDF/PPTX 页数及 XLSX 工作表；attachment.read 返回正文分页；attachment.query 筛选和统计 XLSX；attachment.view 返回图片或渲染的 PDF/PPTX 页面。
+4. PDF/DOCX/XLSX/PPTX 解析运行在单独 Node worker，30 秒超时、可取消、JS heap 上限；不在 Electron 主线程解析大文档。worker 是故障隔离，不声称为操作系统沙箱。PPTX 视觉转换另外使用受控 LibreOffice 子进程。
 5. 视觉结果以受控 imageId 返回，派发方重新解析 session-bound 图片描述，进入 Tool message 的 attachments。持久化结果只保留引用，发送前才读取图片字节。
 
 ## 当前能力
@@ -25,9 +25,21 @@
 | PNG/JPEG/WebP | inspect/view | 直接视觉输入和工具再次查看共用授权副本 |
 | PDF | inspect/read/view | 每次明确处理一页；没有文字时提示查看页面，不把扫描页当空白结论 |
 | DOCX | inspect/read | 正文按段落顺序提取，不承诺分页、表格排版、公式或图像保真 |
-| 其他二进制 | inspect | operations=[]，明确暂不支持解析；未接 XLSX/PPTX/旧 DOC/OCR 引擎 |
+| XLSX | inspect/read/query | ExcelJS 读取工作表、A1 范围及公式缓存；筛选和统计明确报告缺失缓存 |
+| PPTX | inspect/read/view（有条件） | 按实际幻灯片引用顺序提取文字与备注；真实页面渲染需要本机 LibreOffice |
+| 其他二进制 | inspect | operations=[]，明确暂不支持解析；未接旧 DOC/XLS/PPT/OCR 引擎 |
 
 PDF 页码从 1 开始，正文分页仍使用 offset/column/limit。正文 revision 包含源字节身份和页码，不允许把第一页的续读条件用于第二页。工具结果区分 hasMore（本页正文未完）和 hasMorePages（还有其他页）。DOCX 没有可靠页码，不接受 page。
+
+## 表格与幻灯片契约
+
+- XLSX inspect 列出工作表名称、行列数和隐藏状态。read 接受 sheet（默认首张工作表）与 range（如 A1:C100），逐行返回带单元格地址的 JSON。offset/column/limit 仍是返回文本的续读位置，不是 Excel 坐标。一次范围最多 100000 个单元格，输出正文最多 4M 字符。
+- query 必须指定 range；filters 同时成立时保留行，支持 eq/contains/gt/gte/lt/lte。aggregate 的 sum/average/min/max/count 只统计数字，count 不是匹配行数；matchedRows 单独返回。没有数字时 count=0，其余统计值为 null。数值字符串不自动转数字，日期返回 ISO 文本。
+- 不执行或重算公式，也不访问外部引用。公式同时返回表达式、缓存值与 hasCachedValue，零缓存保留为零。统计或筛选所需公式缺少缓存时返回 warnings、missingCachedValues/unknownFilterRows，统计 complete=false，不能把部分值当作完整总和。
+- revision 同时绑定附件内容、工作表、范围、筛选与统计参数；改变查询条件后旧续读凭据失效。旧正文压缩保留查询参数，允许工具重新读取。
+- PPTX 使用 OOXML presentation 关系顺序，不按 slide 文件名排序；备注沿 notesSlide 关系读取，保留段内换行。文本提取不声称已识别图片或所有图表。
+- view 先确认没有宏或外部资源引用，再通过 LibreOffice 生成 PDF，最后复用 PDF 渲染。检查转换前后页数一致，并导出隐藏幻灯片以保持索引。外部普通超链接不点击、不抓取；外部图片等资源会禁止自动渲染。
+- LibreOffice 是可选本机依赖：检查 OMNIFLOW_LIBREOFFICE_PATH、标准安装目录和 PATH，不绑定开发机私有路径、不自动安装。缺失时 inspect 只提供 read，view 明确报错。每次转换使用独立临时目录与用户配置、禁用宏、固定 argv 且 shell=false；45 秒转换超时，取消终止进程树并清理临时文件。view 总工具超时为 120 秒。
 
 ## 图像结果与上下文
 
@@ -37,7 +49,7 @@ Claude 在 tool_result 内放入 image 块。OpenAI-compatible Chat Completions 
 
 ## 资源与打包
 
-沿用附件总配额与单文件上限。DOCX central directory 校验最多 4096 个 ZIP entry、总解压声明大小 32 MiB，不落地解压路径，拒绝加密 ZIP。提取正文最大 4M 字符，超限明确失败。PDF 渲染最长边 2048px，内嵌图片像素受限；生成图像复用附件存储配额与 session 生命周期。
+沿用附件总配额与单文件上限。DOCX/XLSX/PPTX 共用 ZIP 检查：最多 4096 个 entry，声明及实际流式解压总大小均不超过 32 MiB，不落地解压路径，拒绝加密与重复条目。PPTX XML 拒绝 DTD、实体声明和解析器修复的损坏结构。提取正文最大 4M 字符，超限明确失败。PDF 渲染最长边 2048px，内嵌图片像素受限；生成图像复用附件存储配额与 session 生命周期。
 
 PDF.js 4.x 即使启用 stopAtErrors，也可能在移除超限 XObject 图像后完成 render。隔离线程因此收集解析警告：图片被移除、缺少尺寸或解码失败时拒绝提供完整预览，不能返回成功白页；其他警告随读取/查看结果返回。警告捕获只存在于单任务 worker，结束时恢复日志方法。
 
@@ -55,4 +67,6 @@ Vite 构建独立 agent-document-worker.js；Mammoth、yauzl 及其纯 JS 依赖
 
 可重复运行：先 npm run build，再 npm run agent:smoke-documents；真实连接使用 npm run agent:smoke-documents -- --live，默认模型 gpt-5.5，可用 OMNIFLOW_DOCUMENT_SMOKE_MODEL 覆盖。脚本与正式应用使用相同的安全存储应用身份，完成后清理临时附件及测试入口文件。
 
-后续按实际使用补充：结构化表格、PPTX、OCR、资料库文档 source，以及基于 immutable revision 的提取缓存。UI 由用户后续优化，本轮仅开放必要的附件类型。
+2026-09-10 Office 扩展验证：全量 2178 项测试通过；补充取消/超时测试后文档专项 18 项通过，lint/build 通过。Electron 本地 smoke 验证四种文档的导入、会话绑定、读取、XLSX 统计（结果 50）、PPTX 实际顺序与备注、LibreOffice 真实渲染及绿色图形像素。macOS arm64 目录包的 app.asar worker 已验证 XLSX/PPTX 动态模块可加载。真实模型联调本轮因保存的 API Key 解密失败未完成；锁屏期间不改写配置。Windows/亮色桌面及本轮 UI 手动交互未验证。
+
+后续按实际使用补充 OCR、资料库文档 source，以及基于 immutable revision 的提取缓存。UI 由另一条任务维护，本轮不调整聊天附件布局。

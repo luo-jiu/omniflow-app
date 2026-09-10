@@ -826,7 +826,7 @@ function resolveAgentProviderToolResultPolicy(
   if (canonicalToolName === AGENT_SKILL_ACTIVATE_TOOL_NAME) {
     return { maxTokens: SKILL_PROVIDER_TOOL_RESULT_TOKENS };
   }
-  if (['file.read', 'file.grep', 'attachment.read'].includes(canonicalToolName)) return { maxTokens: 10_000 };
+  if (['file.read', 'file.grep', 'attachment.read', 'attachment.query'].includes(canonicalToolName)) return { maxTokens: 10_000 };
   if (['file.list', 'file.search', 'file.resolve', 'file.stat'].includes(canonicalToolName)) return { maxTokens: 10_000 };
   return { maxTokens: DEFAULT_PROVIDER_TOOL_RESULT_TOKENS };
 }
@@ -3356,7 +3356,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
           if (call.name === 'file.grep' && result.ok && projectedResult.truncated) {
             throw new Error('上下文不足以完整交付正文搜索页，不能使用未交付页面的续搜游标');
           }
-          if (['file.read', 'attachment.read'].includes(call.name) && result.ok && projectedResult.truncated) {
+          if (['file.read', 'attachment.read', 'attachment.query'].includes(call.name) && result.ok && projectedResult.truncated) {
             throw new Error('当前上下文不足以完整交付正文页；不能使用未完整交付页面的续读位置');
           }
           const preferredCurrentResultMessage: AgentProviderMessage = {
@@ -3419,7 +3419,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
               data: { retryCursor: query.cursor || null, retryLimit: Math.max(1, Math.floor((query.limit || 50) / 2)) },
             }, projectedResult.estimatedTokens);
           }
-          if (['file.read', 'attachment.read'].includes(call.name) && result.ok && projectedResult.truncated) {
+          if (['file.read', 'attachment.read', 'attachment.query'].includes(call.name) && result.ok && projectedResult.truncated) {
             throw new Error('当前上下文不足以完整交付正文页；不能使用未完整交付页面的续读位置');
           }
           appendAgentActiveToolResult({

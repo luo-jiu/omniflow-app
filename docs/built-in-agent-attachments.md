@@ -2,7 +2,7 @@
 
 ## 当前范围
 
-输入框上方按加入顺序显示图片缩略图和文件名称，支持粘贴图片、选择多个文件、拖入文件及逐项移除。附件准备中或失败时不能发送；纯文本粘贴仍交给 textarea。允许只发送附件。PNG/JPEG/WebP 和 UTF-8 文本可直接读取；PDF/DOCX 通过文档工具处理，其他二进制保留副本但明确报告没有读取能力。详见 [文档处理调研与实现](agent-document-processing.md)。
+输入框上方按加入顺序显示图片缩略图和文件名称，支持粘贴图片、选择多个文件、拖入文件及逐项移除。附件准备中或失败时不能发送；纯文本粘贴仍交给 textarea。允许只发送附件。PNG/JPEG/WebP 和 UTF-8 文本可直接读取；PDF/DOCX/XLSX/PPTX 通过文档工具处理，其他二进制保留副本但明确报告没有读取能力。详见 [文档处理调研与实现](agent-document-processing.md)。
 
 
 ## 所有权与持久化
@@ -20,7 +20,7 @@
 
 图片在每次请求前从 main 管理的副本读取，OpenAI-compatible 使用 image_url 内容块，Claude 使用 image/base64 内容块。只在真实请求里生成 Base64，不让上下文摘要、消息截断或日志把编码串当文本处理。附件清单与视觉内容的顺序一致，模型的附件指令保持用户资料权限，不升级为系统规则。
 
-文本文件不自动全文注入。attachment.read 接受 id、offset、column、limit、revision，PDF 另外支持 page，使用 Run 内只读工具预算。attachment.inspect 检查格式、页数及支持操作；attachment.view 返回原图片或 PDF 页面视觉结果。图片不是可按行读取的文本。
+文本文件不自动全文注入。attachment.read 接受 id、offset、column、limit、revision，PDF/PPTX 另外支持 page，XLSX 支持 sheet/range，使用 Run 内只读工具预算。attachment.inspect 检查格式、页数、工作表及支持操作；attachment.query 提供 XLSX 筛选和数字统计；attachment.view 返回原图片或 PDF/PPTX 页面视觉结果（PPTX 需要本机 LibreOffice）。公式只读取缓存值，不重新计算；缺失缓存明确标记。图片不是可按行读取的文本。
 
 保留图片的历史轮次重建请求时重新加载同一副本；文本摘要只保留附件清单和已有对话结论，不声称看到未传入摘要请求的图片像素。明确标注不支持视觉的模型在发送前拒绝图片，不静默删除。未知兼容模型由真实 Provider 接口确定能力。
 

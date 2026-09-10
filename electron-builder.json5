@@ -19,6 +19,7 @@
     "dist",
     "dist-electron",
     "!dist-electron/agent-document-smoke*.mjs",
+    "!dist-electron/agent-document-smoke*.cjs",
     {
       "from": "node_modules/@napi-rs",
       "to": "node_modules/@napi-rs",

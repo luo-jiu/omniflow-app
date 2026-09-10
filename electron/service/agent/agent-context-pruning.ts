@@ -7,7 +7,7 @@ export const AGENT_PRUNE_PROTECT_TOKENS = 40_000;
 export const AGENT_PRUNE_MINIMUM_TOKENS = 20_000;
 
 function prunedReadBody(record: AgentActiveToolResultRecord): string | undefined {
-  if (!record.consumed || !record.allowCompaction || !['file.read', 'attachment.read'].includes(record.toolName)) return;
+  if (!record.consumed || !record.allowCompaction || !['file.read', 'attachment.read', 'attachment.query'].includes(record.toolName)) return;
   try {
     const result = JSON.parse(record.message.content);
     const data = result?.data;
@@ -22,7 +22,7 @@ function prunedReadBody(record: AgentActiveToolResultRecord): string | undefined
       originalContentCharacters: content.length,
       sourceToolCallId: record.message.toolCallId,
       contentNotice: data.scope === 'attachment'
-        ? '此前读取成功；旧正文已从当前模型上下文移除。需要时按 attachmentId、page（若有）和 revision 重新读取，不是空文件。'
+        ? '此前读取成功；旧正文已从当前模型上下文移除。需要时按 attachmentId、page/query（若有）和 revision 重新读取，不是空文件。'
         : '此前读取成功；旧正文已从当前模型上下文移除，不是空文件。需要正文时按原路径和 revision 重新读取，文件变化时不能猜测原内容。',
     } });
   } catch { return; }

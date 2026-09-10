@@ -1,37 +1,17 @@
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { fromBuffer } from 'yauzl';
+import { readOfficeArchive } from './office-archive';
 import type { AgentDocumentJob, AgentDocumentResult } from './document.types';
 
 const require = createRequire(import.meta.url);
 const MAX_EXTRACTED_CHARACTERS = 4 * 1024 * 1024;
 
-async function checkDocxZip(bytes: Buffer): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    fromBuffer(bytes, { lazyEntries: true, validateEntrySizes: true }, (error, zip) => {
-      if (error || !zip) { reject(new Error('DOCX 压缩结构无效')); return; }
-      let expanded = 0;
-      let entries = 0;
-      let hasDocument = false;
-      zip.on('error', reject);
-      zip.on('entry', entry => {
-        expanded += entry.uncompressedSize; entries += 1;
-        if (expanded > 32 * 1024 * 1024 || entries > 4096 || (entry.generalPurposeBitFlag & 1)) {
-          zip.close(); reject(new Error('DOCX 解压大小超限或已加密')); return;
-        }
-        if (entry.fileName === 'word/document.xml') hasDocument = true;
-        zip.readEntry();
-      });
-      zip.on('end', () => hasDocument ? resolve() : reject(new Error('文件不是有效的 DOCX 文档')));
-      zip.readEntry();
-    });
-  });
-}
-
 export async function processAgentDocument(job: AgentDocumentJob): Promise<AgentDocumentResult> {
+  if (job.format === 'xlsx') return (await import('./spreadsheet-engine')).processAgentSpreadsheet(job);
+  if (job.format === 'pptx') return (await import('./presentation-engine')).processAgentPresentation(job);
   if (job.format === 'docx') {
     if (job.operation === 'render') throw new Error('DOCX 当前支持正文提取，尚未提供可靠的页面渲染');
-    await checkDocxZip(Buffer.from(job.bytes));
+    await readOfficeArchive(job.bytes, 'word/document.xml');
     if (job.operation === 'inspect') return { warnings: ['DOCX 不提供固定页码；使用按行正文读取，表格格式和版式可能丢失。'] };
     const mammoth = await import('mammoth');
     const extracted = await mammoth.extractRawText({ buffer: Buffer.from(job.bytes) });

@@ -112,7 +112,7 @@ export interface AgentToolMainPreparationSealResult {
 }
 
 export interface AgentToolExecutionContext {
-  operateAttachment?: (operation: 'inspect' | 'view', query: import('./documents/attachment-documents').AgentAttachmentQuery) => Promise<unknown>;
+  operateAttachment?: (operation: 'inspect' | 'view' | 'query', query: import('./documents/attachment-documents').AgentAttachmentQuery) => Promise<unknown>;
   readAttachment?: (input: import('./documents/attachment-documents').AgentAttachmentQuery) => Promise<unknown>;
   readOutputTokenBudget?: number;
   readLibraryText?: (nodeId: number, signal: AbortSignal) => Promise<Uint8Array>;

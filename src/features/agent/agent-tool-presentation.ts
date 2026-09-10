@@ -105,6 +105,7 @@ const TOOL_TITLES: Record<string, string> = {
   'file.read': '读取文件正文',
   'attachment.read': '读取附件',
   'attachment.inspect': '检查附件',
+  'attachment.query': '查询工作表',
   'attachment.view': '查看附件页面',
   'file.write': '保存文件',
   'file.grep': '搜索文件正文',

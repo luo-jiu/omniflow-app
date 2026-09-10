@@ -8,7 +8,7 @@ export interface AgentAttachment {
   id: string;
   name: string;
   kind: 'image' | 'text' | 'document' | 'file';
-  format?: 'pdf' | 'docx';
+  format?: 'pdf' | 'docx' | 'xlsx' | 'pptx';
   mimeType: string;
   sizeBytes: number;
   width?: number;

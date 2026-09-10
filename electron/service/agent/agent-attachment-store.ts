@@ -74,17 +74,19 @@ export class AgentAttachmentStore {
         || (bytes.subarray(0, 4).toString() === 'RIFF' && bytes.subarray(8, 12).toString() === 'WEBP');
       const image = isImage ? this.prepareImage(bytes) : undefined;
       const isPdf = bytes.subarray(0, 5).equals(Buffer.from('%PDF-'));
-      const isDocx = bytes.subarray(0, 4).equals(Buffer.from([80, 75, 3, 4])) && /\.docx$/iu.test(name);
+      const officeExtension = /\.(docx|xlsx|pptx)$/iu.exec(name)?.[1]?.toLowerCase() as 'docx' | 'xlsx' | 'pptx' | undefined;
+      const officeFormat = bytes.subarray(0, 4).equals(Buffer.from([80, 75, 3, 4])) ? officeExtension : undefined;
       let text = false;
       if (image) bytes = image.bytes;
-      else if (!isPdf && !isDocx) {
+      else if (!isPdf && !officeFormat) {
         try { decodeAgentText(bytes); text = true; } catch { /* Opaque files can be inspected but never executed. */ }
       }
       if (bytes.length > AGENT_ATTACHMENT_MAX_BYTES) throw new Error('处理后的附件超过 8 MiB');
       if (await this.usage() + bytes.length + Buffer.byteLength(image?.thumbnail || '') + 2048 > MAX_STORAGE_BYTES) throw new Error('附件存储空间已满');
-      const attachment: AgentAttachment = { id: crypto.randomUUID(), name, kind: isImage ? 'image' : isPdf || isDocx ? 'document' : text ? 'text' : 'file',
-        ...(isPdf || isDocx ? { format: isPdf ? 'pdf' as const : 'docx' as const } : {}),
-        mimeType: isImage ? 'image/png' : isPdf ? 'application/pdf' : isDocx ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' : text ? 'text/plain' : 'application/octet-stream', sizeBytes: bytes.length,
+      const officeMime = officeFormat === 'docx' ? 'wordprocessingml.document' : officeFormat === 'xlsx' ? 'spreadsheetml.sheet' : 'presentationml.presentation';
+      const attachment: AgentAttachment = { id: crypto.randomUUID(), name, kind: isImage ? 'image' : isPdf || officeFormat ? 'document' : text ? 'text' : 'file',
+        ...(isPdf || officeFormat ? { format: isPdf ? 'pdf' as const : officeFormat } : {}),
+        mimeType: isImage ? 'image/png' : isPdf ? 'application/pdf' : officeFormat ? `application/vnd.openxmlformats-officedocument.${officeMime}` : text ? 'text/plain' : 'application/octet-stream', sizeBytes: bytes.length,
         ...(image ? { width: image.width, height: image.height, thumbnail: image.thumbnail } : {}),
       };
       await writeFile(this.file(attachment.id, 'bin'), bytes, { flag: 'wx', mode: 0o600 });
