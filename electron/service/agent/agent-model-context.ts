@@ -19,6 +19,7 @@ export interface AgentModelContextBudgetInput {
 }
 
 export interface AgentModelMetadata {
+  supportsImages?: boolean;
   supportsToolCalling?: boolean;
   supportsParallelToolCalls?: boolean;
   supportsShellTool?: boolean;
@@ -52,6 +53,7 @@ export function parseAgentModelMetadata(body: unknown): Map<string, AgentModelMe
       item.max_output_tokens ?? record(item.top_provider).max_completion_tokens, 1_000_000,
     );
     const capabilities: AgentModelMetadata = {};
+    if (typeof item.supports_image_input === 'boolean') capabilities.supportsImages = item.supports_image_input;
     if (typeof item.supports_tool_calling === 'boolean') capabilities.supportsToolCalling = item.supports_tool_calling;
     if (typeof item.supports_parallel_tool_calls === 'boolean') capabilities.supportsParallelToolCalls = item.supports_parallel_tool_calls;
     if (item.shell_type === 'disabled') capabilities.supportsShellTool = false;

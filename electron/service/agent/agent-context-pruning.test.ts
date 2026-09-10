@@ -24,6 +24,20 @@ function fixture(count = 12) {
 }
 
 describe('OpenCode-inspired read-body pruning', () => {
+  it('preserves attachment ID, page and revision while pruning recoverable document text', () => {
+    const input = fixture();
+    for (const record of input.toolResults) {
+      record.toolName = 'attachment.read'; record.message.name = 'attachment.read';
+      const result = JSON.parse(record.message.content);
+      Object.assign(result.data, { scope: 'attachment', attachmentId: 'test-attachment', page: 2 });
+      record.message.content = JSON.stringify(result);
+    }
+    const ids = pruneAgentReadBodies({ ...input, eligibleCallIds: new Set(input.toolResults.map(record => record.message.toolCallId)) });
+    expect(ids.length).toBeGreaterThan(0);
+    for (const record of input.toolResults.filter(record => ids.includes(record.message.toolCallId))) {
+      expect(JSON.parse(record.message.content).data).toMatchObject({ attachmentId: 'test-attachment', page: 2, revision: 'a'.repeat(64), contentPruned: true });
+    }
+  });
   it('avoids a summary request under pressure, retaining recent results, constraints and source records', async () => {
     const input = fixture();
     const originalRecords = [...input.toolResults];

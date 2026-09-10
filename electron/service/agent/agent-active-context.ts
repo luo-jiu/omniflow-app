@@ -11,6 +11,7 @@ export interface AgentActiveToolResultRecord {
 }
 
 export interface AppendAgentActiveToolResultInput {
+  attachments?: import('../../../src/shared/agent/agent-attachments').AgentAttachment[];
   allowCompaction: boolean;
   messages: AgentProviderMessage[];
   projectedResult: AgentProviderToolResultProjection;
@@ -85,6 +86,7 @@ export function appendAgentActiveToolResult(
 ): AgentActiveToolResultRecord {
   assertToolCallPair(input.messages, input.toolCallId, input.toolName);
   const message: Extract<AgentProviderMessage, { role: 'tool' }> = {
+    ...(input.attachments?.length ? { attachments: input.attachments } : {}),
     content: input.projectedResult.content,
     name: input.toolName,
     role: 'tool',

@@ -103,6 +103,9 @@ const TOOL_TITLES: Record<string, string> = {
   'file.stage': '暂存文件',
   'file.stat': '读取文件信息',
   'file.read': '读取文件正文',
+  'attachment.read': '读取附件',
+  'attachment.inspect': '检查附件',
+  'attachment.view': '查看附件页面',
   'file.write': '保存文件',
   'file.grep': '搜索文件正文',
   'file.upload': '上传本机文件',
@@ -131,7 +134,7 @@ export function buildAgentToolSummary(activity: AgentToolActivitySnapshot, libra
     label: data?.complete === false && !data?.hasMore ? '已搜索正文 · 结果不完整' : '已搜索正文',
     subject: textValue(data?.path) || undefined,
   };
-  if (activity.call.name === 'file.read') {
+  if (activity.call.name === 'file.read' || activity.call.name === 'attachment.read') {
     const path = textValue(data?.fileName) || textValue(data?.path) || textValue(asRecord(activity.call.input)?.path);
     return { label: '已读取', subject: path?.replace(/\\/g, '/').split('/').pop() || undefined };
   }

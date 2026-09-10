@@ -10,6 +10,7 @@ import { reportAgentToolExecutionProgress } from './agent.api';
 import { notifyLibraryFileContentChanged } from '@/features/file-viewer/services/file-content-events';
 import { fetchNodeDetailById, getFileLink, updateNodeFileContent, uploadLocalPathAndCreateNode } from '@/features/file-explorer/services/file.api';
 import { resolveAgentLibraryPath } from './agent-library.api';
+import { resolveHealthyLibraryWriteProvider } from './agent-file-authority';
 import type { AgentRendererToolOutcome } from './agent-tool-executor';
 
 class WriteValidationError extends Error {}
@@ -24,6 +25,7 @@ export interface AgentFileWriteDependencies {
   assertOwner?: () => void;
   onCommitted?: (result: AgentToolResult) => void | Promise<void>;
   beforeCommit?: () => Promise<void>;
+  selectProvider?: typeof resolveHealthyLibraryWriteProvider;
   signal?: AbortSignal;
 }
 
@@ -102,12 +104,23 @@ export async function executeAgentFileWrite(request: AgentToolExecutionRequest, 
       const parent = await resolve(libraryId, parentPath, 'dir');
       check();
       parentId = parent.id;
+      let provider: { id: string; label: string };
+      try {
+        provider = await (deps.selectProvider || resolveHealthyLibraryWriteProvider)({
+          fileName, fileSize: contentBytes.length, contentType: 'text/plain; charset=utf-8',
+        }, check);
+      } catch {
+        check();
+        throw new WriteValidationError('没有可用的资料库存储服务，文件未提交；请检查存储连接。');
+      }
+      check();
       const staged = await (deps.stage || ((name, content) => window.electronAPI.createStagedTextFile(name, content)))(fileName, input.content);
       stagedPath = staged.filePath;
       check();
       attempted = true;
       const uploaded = await (deps.upload || uploadLocalPathAndCreateNode)(stagedPath, parentId, libraryId, {
         conflictPolicy: 'error', contentType: 'text/plain; charset=utf-8',
+        storageProvider: provider.id,
         beforeCommit,
         setAbort: abort => {
           abortListener = () => { void abort().catch(() => undefined); };

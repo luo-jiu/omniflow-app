@@ -18,6 +18,7 @@ function dependencies() {
   return {
     assertOwner: vi.fn(),
     beforeCommit: vi.fn(async () => undefined),
+    selectProvider: vi.fn(async () => ({ id: 'reachable-provider', label: 'Online storage' })),
     resolvePath: vi.fn(async (_library: number, _path: string, type?: string) => ({ id: type === 'file' ? 9 : 8, parentId: 8, libraryId: 3, type: type || 'dir', name: 'test', path: '/docs/test.cpp' })) as any,
     detail: vi.fn(async () => ({ id: 9, parentId: 8, libraryId: 3, name: 'test', type: 'file', storageKey: 'old-binding', fileSize: 3 })) as any,
     readBytes: vi.fn(async () => new TextEncoder().encode('old')),
@@ -29,11 +30,20 @@ function dependencies() {
   };
 }
 describe('direct library file writes', () => {
+  it('does not stage or upload when no storage provider is reachable', async () => {
+    const deps = dependencies();
+    deps.selectProvider.mockRejectedValueOnce(new Error('offline'));
+    const output = await executeAgentFileWrite(request(), deps);
+    expect(output.result).toMatchObject({ ok: false, data: { writeCommitState: 'uncommitted' } });
+    expect(output.result.message).toContain('没有可用');
+    expect(deps.stage).not.toHaveBeenCalled();
+    expect(deps.upload).not.toHaveBeenCalled();
+  });
   it('creates through the existing upload chain with exclusive name protection', async () => {
     const deps = dependencies();
     const output = await executeAgentFileWrite(request(), deps);
     expect(deps.stage).toHaveBeenCalledWith('test.cpp', '// 中文\nint main() {}');
-    expect(deps.upload).toHaveBeenCalledWith('/tmp/synthetic-stage.txt', 8, 3, expect.objectContaining({ conflictPolicy: 'error' }));
+    expect(deps.upload).toHaveBeenCalledWith('/tmp/synthetic-stage.txt', 8, 3, expect.objectContaining({ conflictPolicy: 'error', storageProvider: 'reachable-provider' }));
     expect(output).toMatchObject({ committed: true, result: { ok: true, data: { path: '/docs/test.cpp', writeCommitState: 'committed', revision: digest('// 中文\nint main() {}') } } });
     expect(deps.cleanup).toHaveBeenCalledOnce();
   });

@@ -1,4 +1,7 @@
 import crypto from 'node:crypto';
+import { attachmentManifest } from '../../../src/shared/agent/agent-attachments';
+import { getAgentAttachmentStore, hydrateAgentAttachmentImages } from './agent-attachment-runtime';
+import { operateAgentAttachment } from './documents/attachment-documents';
 import { createAgentContextUsageLedger, type AgentContextRequest } from './agent-context-usage-ledger';
 import type { AgentContextUsageSnapshot } from '../../../src/shared/agent/agent-context-usage';
 import { agentLibraryTextReader, readAgentLibraryText } from './agent-library-text-reader';
@@ -345,6 +348,7 @@ interface AgentMediaArtifactFallbackGrant {
 }
 
 interface AgentOrchestratorOptions {
+  attachmentBindings?: Pick<import('./agent-attachment-store').AgentAttachmentStore, 'resolve' | 'bind' | 'rollbackBinding'>;
   readLibraryMetadata?: (input: AgentFileAuthorityBrokerRequestInput) => Promise<AgentLibraryReadResult>;
   readLibraryText?: (input: AgentFileAuthorityBrokerRequestInput) => Promise<Uint8Array>;
   getModelMetadata?: (connection: AIServiceRuntimeConnection, model: string) => Promise<AgentModelMetadata | undefined>;
@@ -822,7 +826,7 @@ function resolveAgentProviderToolResultPolicy(
   if (canonicalToolName === AGENT_SKILL_ACTIVATE_TOOL_NAME) {
     return { maxTokens: SKILL_PROVIDER_TOOL_RESULT_TOKENS };
   }
-  if (canonicalToolName === 'file.read' || canonicalToolName === 'file.grep') return { maxTokens: 10_000 };
+  if (['file.read', 'file.grep', 'attachment.read'].includes(canonicalToolName)) return { maxTokens: 10_000 };
   if (['file.list', 'file.search', 'file.resolve', 'file.stat'].includes(canonicalToolName)) return { maxTokens: 10_000 };
   return { maxTokens: DEFAULT_PROVIDER_TOOL_RESULT_TOKENS };
 }
@@ -1959,6 +1963,15 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       });
     };
     const executionContext: AgentToolExecutionContext = {
+      operateAttachment: (operation, query) => operateAgentAttachment(getAgentAttachmentStore(),
+        { ownerScope: input.ownerScope, libraryId: Number(input.appContext.libraryId) }, sessionId,
+        operation, query, signal, readOutputTokenBudget ?? 10000),
+      readAttachment: async query => {
+        signal.throwIfAborted();
+        const result = await operateAgentAttachment(getAgentAttachmentStore(), { ownerScope: input.ownerScope, libraryId: Number(input.appContext.libraryId) }, sessionId,
+          'read', query, signal, readOutputTokenBudget ?? 10000);
+        signal.throwIfAborted(); return result;
+      },
       readOutputTokenBudget,
       ...(options.readLibraryText ? { readLibraryText: (nodeId: number, requestSignal: AbortSignal) =>
         options.readLibraryText!({ sender, libraryId: Number(input.appContext.libraryId),
@@ -2766,6 +2779,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       };
       const plainMessages = messages.map(message => ({
         content: message.content,
+        ...(message.role === 'user' && message.attachments?.length ? { attachments: message.attachments } : {}),
         role: message.role as 'user' | 'assistant',
       }));
       let currentPerception = input.perception;
@@ -2895,7 +2909,9 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
             round === 0 ? '当前 Agent 请求' : `Agent 第 ${round + 1} 轮工具续接请求`,
           );
           await publishContextUsage(providerTurnInput, 'before-request');
-          turn = await streamAgentProviderTurn(runtimeConnection, providerTurnInput, (delta) => {
+          const multimodalMessages = await hydrateAgentAttachmentImages(providerTurnInput.messages, { ownerScope: input.ownerScope, libraryId: Number(input.appContext.libraryId) }, sessionId);
+          controller.signal.throwIfAborted();
+          turn = await streamAgentProviderTurn(runtimeConnection, { ...providerTurnInput, messages: multimodalMessages }, (delta) => {
             if (!bufferTurn) appendAndEmitAssistantDelta(delta);
           }, controller.signal, {
             maxAssistantContentCharacters: Math.min(
@@ -2947,7 +2963,9 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
           );
           const fallbackRequest = { ...fallbackInput, tools: [] };
           await publishContextUsage(fallbackRequest, 'before-request');
-          const fallbackResponse = await streamAgentProviderTurn(runtimeConnection, fallbackRequest, (delta) => {
+          const fallbackMessages = await hydrateAgentAttachmentImages(fallbackRequest.messages, { ownerScope: input.ownerScope, libraryId: Number(input.appContext.libraryId) }, sessionId);
+          controller.signal.throwIfAborted();
+          const fallbackResponse = await streamAgentProviderTurn(runtimeConnection, { ...fallbackRequest, messages: fallbackMessages }, (delta) => {
             appendAndEmitAssistantDelta(delta);
           }, controller.signal, {
             maxAssistantContentCharacters: Math.min(
@@ -3314,7 +3332,12 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
             omittedSkillCount,
             modelAdapter,
           );
+          const imageId = call.name === 'attachment.view' && result.ok
+            ? (result.data as { imageId?: string } | undefined)?.imageId : undefined;
+          const visualAttachments = imageId ? await getAgentAttachmentStore().resolve(
+            { ownerScope: input.ownerScope, libraryId: Number(input.appContext.libraryId) }, [imageId], sessionId) : [];
           const emptyCurrentResultMessage: AgentProviderMessage = {
+            ...(visualAttachments.length ? { attachments: visualAttachments } : {}),
             content: '',
             name: call.name,
             role: 'tool',
@@ -3333,7 +3356,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
           if (call.name === 'file.grep' && result.ok && projectedResult.truncated) {
             throw new Error('上下文不足以完整交付正文搜索页，不能使用未交付页面的续搜游标');
           }
-          if (call.name === 'file.read' && result.ok && projectedResult.truncated) {
+          if (['file.read', 'attachment.read'].includes(call.name) && result.ok && projectedResult.truncated) {
             throw new Error('当前上下文不足以完整交付正文页；不能使用未完整交付页面的续读位置');
           }
           const preferredCurrentResultMessage: AgentProviderMessage = {
@@ -3396,7 +3419,11 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
               data: { retryCursor: query.cursor || null, retryLimit: Math.max(1, Math.floor((query.limit || 50) / 2)) },
             }, projectedResult.estimatedTokens);
           }
+          if (['file.read', 'attachment.read'].includes(call.name) && result.ok && projectedResult.truncated) {
+            throw new Error('当前上下文不足以完整交付正文页；不能使用未完整交付页面的续读位置');
+          }
           appendAgentActiveToolResult({
+            ...(visualAttachments.length ? { attachments: visualAttachments } : {}),
             allowCompaction: call.name !== AGENT_SKILL_ACTIVATE_TOOL_NAME,
             messages,
             projectedResult,
@@ -3517,7 +3544,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     const profileId = String(input?.profileId || '').trim();
     const model = String(input?.model || '').trim();
     let reasoningEffort = normalizeReasoningEffort(input?.reasoningEffort);
-    if (!userPrompt) throw new Error('请求内容不能为空');
+    if (!userPrompt && !input.attachmentIds?.length) throw new Error('请求内容不能为空');
     if (userPrompt.length > 100_000) throw new Error('请求内容过长');
     if (containsAgentSensitiveData(userPrompt)) {
       throw new Error('请求中包含 API Key、密码、Cookie、令牌、私钥或其他凭据，请改用对应配置页面管理');
@@ -3536,6 +3563,9 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       throw new Error('当前 Agent 缺少有效的资料库上下文');
     }
     const perception = normalizePerception(input.perception);
+    const attachmentBindings = input.attachmentIds?.length ? options.attachmentBindings || getAgentAttachmentStore() : undefined;
+    const attachments = attachmentBindings
+      ? await attachmentBindings.resolve({ ownerScope, libraryId }, input.attachmentIds!) : [];
     const requestedSessionId = String(input?.sessionId || '').trim();
     if (requestedSessionId.length > MAX_AGENT_SESSION_ID_CHARACTERS) {
       throw new Error('Agent 会话 ID 过长');
@@ -3557,6 +3587,8 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     let runSessionStarted = false;
     let createdSession = false;
     let runCreated = false;
+    let runCreationAttempted = false;
+    let addedAttachmentBindings: string[] = [];
     let store: AgentSessionStore | null = null;
     let session: AgentSessionSnapshot | null = null;
     try {
@@ -3564,6 +3596,9 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       const metadata = options.getModelMetadata ? await options.getModelMetadata(runtimeConnection, model)
         : options.resolveContextBudget ? undefined : await agentModelCatalog.get(runtimeConnection, model);
       const modelAdapter = resolveAgentModelAdapter(runtimeConnection, model, metadata);
+      if (modelAdapter.supportsImages === false && attachments.some(item => item.kind === 'image')) {
+        throw new Error('当前模型不支持图片输入，请选择支持视觉的模型');
+      }
       reasoningEffort = resolveAgentAdapterEffort(modelAdapter, reasoningEffort) || 'auto';
       const modelBudget = (options.resolveContextBudget ? resolveContextBudget({
           baseUrl: runtimeConnection.baseUrl,
@@ -3630,7 +3665,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         ], []) + estimateAgentProviderMessagesTokens(preflightFallbackContextMessages),
       );
       assertAgentCurrentRunFitsContext(
-        [{ content: userPrompt, role: 'user' }],
+        [{ content: userPrompt + attachmentManifest(attachments), role: 'user', ...(attachments.length ? { attachments } : {}) }],
         preflightFixedInputTokens,
         contextBudget,
       );
@@ -3664,7 +3699,11 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       }
       throwIfAborted(controller.signal);
 
+      if (attachments.length) addedAttachmentBindings = await attachmentBindings!.bind({ ownerScope, libraryId }, attachments.map(item => item.id), session.id);
+      throwIfAborted(controller.signal);
+      runCreationAttempted = true;
       const createdRun = await store.createRun({
+        ...(attachments.length ? { attachments } : {}),
         capabilityIdentity: capabilitySnapshot.identity,
         id: runId,
         model,
@@ -3706,23 +3745,37 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       }, runtimeConnection, controller, contextBudget, recalledMemories, capabilitySnapshot, modelAdapter, windowSource);
       return { runId, sessionId: session.id };
     } catch (error) {
-      if (session && store && isAbortError(error, controller.signal)) {
-        if (runCreated) {
-          const cancelledAt = now();
-          await store.updateRun(runId, {
-            currentStep: '已取消',
-            finishedAt: cancelledAt,
-            status: 'cancelled',
-            updatedAt: cancelledAt,
-          }).catch(() => undefined);
-        } else if (createdSession) {
-          await store.deleteSession(session.id, ownerScope, libraryId).catch(() => undefined);
+      let confirmedUncreated = !runCreated && !runCreationAttempted;
+      if (session && store && !runCreated && runCreationAttempted) {
+        try {
+          const persisted = await store.getSession(session.id, ownerScope, libraryId);
+          runCreated = Boolean(persisted?.runs.some(item => item.id === runId));
+          confirmedUncreated = !runCreated;
+        } catch { /* Keep bindings when the database cannot confirm the commit outcome. */ }
+      }
+      try {
+        if (session && store) {
+          if (confirmedUncreated) {
+            if (addedAttachmentBindings.length) await attachmentBindings!.rollbackBinding({ ownerScope, libraryId }, addedAttachmentBindings, session.id);
+            if (createdSession) await store.deleteSession(session.id, ownerScope, libraryId).catch(() => undefined);
+          } else if (runCreated) {
+            const cancelled = isAbortError(error, controller.signal);
+            const finishedAt = now();
+            await store.updateRun(runId, {
+              currentStep: cancelled ? '已取消' : '启动失败',
+              finishedAt,
+              status: cancelled ? 'cancelled' : 'failed',
+              ...(cancelled ? {} : { error: normalizeAgentErrorMessage(error, 'Agent 启动失败') }),
+              updatedAt: finishedAt,
+            }).catch(() => undefined);
+          }
         }
+      } finally {
+        if (session && activeRuns.get(session.id)?.runId === runId) {
+          activeRuns.delete(session.id);
+        }
+        if (runSessionStarted) runSessionRegistry.end(runId, sender.id);
       }
-      if (session && activeRuns.get(session.id)?.runId === runId) {
-        activeRuns.delete(session.id);
-      }
-      if (runSessionStarted) runSessionRegistry.end(runId, sender.id);
       throw error;
     } finally {
       startingRuns.delete(runId);
@@ -3839,12 +3892,17 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     if (activeRuns.has(sessionId) || startingSessions.has(sessionId)) {
       throw new Error('Agent 正在处理消息，暂时不能删除该会话');
     }
-    const deleted = await (await resolveSessionStore()).deleteSession(
+    const sessionStore = await resolveSessionStore();
+    const deletingSession = await sessionStore.getSession(sessionId, normalizeAgentOwnerScope(ownerScope), libraryId);
+    const deleted = await sessionStore.deleteSession(
       sessionId,
       normalizeAgentOwnerScope(ownerScope),
       libraryId,
     );
     if (!deleted) throw new Error('Agent 会话不存在或不属于当前资料库');
+    if (deletingSession?.messages.some(message => message.attachments?.length)) {
+      await getAgentAttachmentStore().releaseSession({ ownerScope, libraryId }, sessionId).catch(() => undefined);
+    }
     return true;
   }
 

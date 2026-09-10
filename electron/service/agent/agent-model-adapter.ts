@@ -7,6 +7,7 @@ import { findAgentModelProfile } from './agent-model-profiles';
 
 type Effort = 'low' | 'medium' | 'high';
 export interface AgentModelAdapter {
+  readonly supportsImages?: boolean;
   readonly identity: string;
   readonly profileId: string;
   readonly source: 'builtin' | 'protocol-fallback';
@@ -34,6 +35,8 @@ export function resolveAgentModelAdapter(
   const parallelToolCalls = metadata?.supportsParallelToolCalls === false ? false
     : profile?.family === 'openai-reasoning' ? true : undefined;
   const facts = {
+    ...(metadata?.supportsImages !== undefined ? { supportsImages: metadata.supportsImages }
+      : /^deepseek-(chat|reasoner)$/iu.test(model) ? { supportsImages: false } : {}),
     version: 1, profileId: profile?.id || `${connection.providerType}-compatible`,
     source: profile ? 'builtin' as const : 'protocol-fallback' as const,
     reasoningParameter, reasoningEfforts, toolCalling,
@@ -64,7 +67,8 @@ export function resolveAgentAdapterEffort(adapter: AgentModelAdapter, effort?: s
 }
 
 export function restrictAgentToolsForModel(snapshot: AgentToolRegistrySnapshot, adapter: AgentModelAdapter): AgentToolRegistrySnapshot {
-  const tools = Object.freeze(snapshot.tools.filter(tool => adapter.toolCalling && (adapter.shellTool || tool.name !== 'shell.run')));
+  const tools = Object.freeze(snapshot.tools.filter(tool => adapter.toolCalling && (adapter.shellTool || tool.name !== 'shell.run')
+    && (adapter.supportsImages !== false || tool.name !== 'attachment.view')));
   const allowed = new Set(tools.map(tool => tool.name));
   const assertAllowed = (name: string) => { if (!allowed.has(name)) throw new Error('当前模型适配未开放该工具'); };
   return Object.freeze({ ...snapshot, tools,

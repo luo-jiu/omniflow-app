@@ -1,7 +1,7 @@
 import type { AgentTool, AgentToolExecutionContext, AgentToolPermissionDecision } from '../agent-tool-registry';
 import { AGENT_TEXT_MAX_BYTES, AGENT_READ_DEFAULT_OUTPUT_TOKENS, AGENT_READ_OUTPUT_MAX_BYTES,
-  decodeAgentText, sliceDecodedAgentText, type AgentTextReadQuery } from '../agent-text-reader';
-import { projectAgentToolResultForProvider } from '../agent-tool-result-projection';
+  decodeAgentText, type AgentTextReadQuery } from '../agent-text-reader';
+import { packAgentTextResult } from '../agent-text-result';
 import { openAgentLocalFile, verifyOpenedAgentLocalFileUnchanged } from './agent-local-file';
 
 export function assessFileScope(input: unknown, context: AgentToolExecutionContext): AgentToolPermissionDecision {
@@ -65,25 +65,6 @@ export const fileContentTool: AgentTool = {
     const requested = query.maxOutputTokens ?? AGENT_READ_DEFAULT_OUTPUT_TOKENS;
     if (!Number.isSafeInteger(requested) || requested < 1) throw new Error('输出预算无效');
     const budget = Math.min(requested, context.readOutputTokenBudget ?? AGENT_READ_DEFAULT_OUTPUT_TOKENS);
-    let low = 0, high = Math.min(AGENT_READ_OUTPUT_MAX_BYTES, budget * 4);
-    const maximumBytes = high;
-    let firstAttempt = true;
-    const fileName = query.path.replace(/\\/g, '/').split('/').pop() || query.path;
-    let best: Awaited<ReturnType<NonNullable<AgentTool['execute']>>> | undefined;
-    // Pack the actual result envelope, not per-line JSON, into the provider budget.
-    while (low <= high) {
-      const size = firstAttempt ? high : Math.floor((low + high) / 2);
-      firstAttempt = false;
-      const { lines, ...data } = sliceDecodedAgentText(decoded, query, size);
-      const result = { ok: true, data: { ...data, fileName }, message: `已读取 ${fileName}` };
-      const fits = !projectAgentToolResultForProvider(result, budget).truncated;
-      if (fits && (lines.length || decoded.lines.length === 0)) {
-        best = result;
-        if (size === maximumBytes) break;
-        low = size + 1;
-      } else high = size - 1;
-    }
-    if (!best) throw new Error('当前上下文不足以交付正文，请缩小请求或整理上下文');
-    return best;
+    return packAgentTextResult(decoded, query, budget);
   },
 };

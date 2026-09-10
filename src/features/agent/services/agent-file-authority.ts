@@ -136,10 +136,10 @@ async function resolveLibraryDirectory(request: Extract<
   return detail;
 }
 
-async function resolveHealthyProvider(request: Extract<
-  AgentFileAuthorityRequestV1,
-  { operation: 'publish-library-file' }
->): Promise<{ id: string; label: string }> {
+export async function resolveHealthyLibraryWriteProvider(request: {
+  providerId?: string; fileSize: number; fileName: string; contentType?: string;
+}, assertCurrent: () => void = () => undefined): Promise<{ id: string; label: string }> {
+  assertCurrent();
   const providerData = await fetchProviders();
   const providers = Array.isArray(providerData.providers) ? providerData.providers : [];
   const byAlias = new Map(providers.map(provider => [String(provider.alias || '').trim(), provider]));
@@ -156,13 +156,15 @@ async function resolveHealthyProvider(request: Extract<
     requested,
     routed,
     String(providerData.defaultProvider || '').trim(),
-    String(providers[0]?.alias || '').trim(),
+    ...providers.map(provider => String(provider.alias || '').trim()).sort(),
   ].filter(alias => alias && byAlias.has(alias))));
   for (const alias of candidates) {
+    assertCurrent();
     const healthy = await testProvider(alias)
       .then(result => result?.success === true)
       .catch(() => false);
     if (!healthy) continue;
+    assertCurrent();
     const provider = byAlias.get(alias);
     return {
       id: alias,
@@ -218,7 +220,7 @@ export async function resolveAgentFileAuthority(
   ) {
     throw new Error('资料库目标目录已经变化或不可用');
   }
-  const provider = await resolveHealthyProvider(request);
+  const provider = await resolveHealthyLibraryWriteProvider(request);
   const token = String(auth.getToken() || '').trim();
   const username = String(auth.getUsername() || '').trim();
   if (request.includeCredentials && (!token || !username)) {

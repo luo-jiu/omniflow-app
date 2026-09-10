@@ -184,6 +184,7 @@ export interface AgentAssistantItemState {
 }
 
 interface AgentMessageBase {
+  attachments?: import('./agent-attachments').AgentAttachment[];
   content: string;
   createdAt: string;
   id: string;
@@ -228,6 +229,7 @@ export function isAgentConversationMessage(
 }
 
 export interface AgentChatRequest {
+  attachmentIds?: string[];
   appContext: AgentAppContext;
   model: string;
   ownerScope: AgentOwnerScope;

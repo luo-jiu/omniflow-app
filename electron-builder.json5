@@ -5,6 +5,7 @@
   "asar": true,
   "beforeBuild": "tools/prepare-sqlite3-native.cjs",
   "asarUnpack": [
+    "node_modules/@napi-rs/**",
     "node_modules/sqlite3/**",
     "build/native/sqlite3/**"
   ],
@@ -17,6 +18,17 @@
   "files": [
     "dist",
     "dist-electron",
+    "!dist-electron/agent-document-smoke*.mjs",
+    {
+      "from": "node_modules/@napi-rs",
+      "to": "node_modules/@napi-rs",
+      "filter": ["canvas/**/*", "canvas-*/**/*"]
+    },
+    {
+      "from": "node_modules/pdfjs-dist",
+      "to": "node_modules/pdfjs-dist",
+      "filter": ["package.json", "LICENSE", "legacy/build/pdf.mjs", "legacy/build/pdf.worker.mjs", "standard_fonts/**/*", "cmaps/**/*", "wasm/**/*"]
+    },
     {
       "from": "node_modules/sqlite3",
       "to": "node_modules/sqlite3",

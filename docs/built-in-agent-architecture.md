@@ -1,5 +1,10 @@
 # 内置 Agent 架构
 
+多图片与文本附件的 IPC、主进程副本、消息持久化、视觉请求和按行读取见 [附件契约](built-in-agent-attachments.md)。
+
+
+文档检查、PDF 按页读取/渲染、DOCX 正文、可取消 worker 与 Tool 多模态结果适配见 [文件处理调研与实现](agent-document-processing.md)。
+
 main-owned文件发布/上传完成后，renderer按已提交ToolActivity触发父目录刷新和树快照失效；失败刷新不反转写入成功。路径基准、根目录刷新修复及实测见 [发布与目录树同步](agent-publication-refresh.md)。
 
 瞬态网络错误重试、只读部分响应续接与长工具任务一次性完成核对见 [运行恢复与完成核对](agent-run-reliability.md)。这些规则继续使用 main Run/assistant item 的规范生命周期，不扩大工具权限或新增 renderer 执行状态。

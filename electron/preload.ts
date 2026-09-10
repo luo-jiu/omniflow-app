@@ -260,6 +260,8 @@ contextBridge.exposeInMainWorld('electronAIService', {
 })
 
 contextBridge.exposeInMainWorld('electronAgent', {
+  importAttachment: (input: import('../src/shared/agent/agent-attachments').AgentAttachmentImport) => ipcRenderer.invoke('agent:attachment:import', input),
+  discardAttachment: (input: import('../src/shared/agent/agent-attachments').AgentAttachmentScope & { id: string }) => ipcRenderer.invoke('agent:attachment:discard', input),
   startChat: (input: AgentChatRequest): Promise<AgentChatStartResult> => (
     ipcRenderer.invoke('agent:chat:start', input)
   ),

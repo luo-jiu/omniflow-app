@@ -14,6 +14,10 @@
 
 复用 Tool Registry、Permission Gate、renderer Tool Broker 和权威 committed 回执。renderer 在异步准备后检查账号与取消状态。新建内部复用文本 staging 和上传会话，finally 清理暂存；模型无须管理 Run 工作副本。修改由后端事务锁和条件比较防止并发覆盖。
 
+新建在 staging 和上传 init 前复用发布的 `resolveHealthyLibraryWriteProvider`：检查路由目标及候选 Provider 连通性，明确传入选中的 storageProvider，不能省略后任由后端再次选中不可达的默认目标。全部不可达时返回 uncommitted，不建立上传会话。修改已有文件仍保留原存储身份，不通过换 Provider 绕过不可达的旧内容或版本校验。
+
+Provider 列表来自后端 map，顺序不稳定；检查路由和默认目标后必须覆盖其余配置候选，不能只尝试列表第一项。
+
 只有有效回执才能返回 `writeCommitState=committed`，模型结果包含路径、节点、父目录、新 revision 和字节数，不包含存储 key。上传初始化、租约、会话和 PUT 阶段失败属于 uncommitted；只有上传 complete 的不确定错误、无效提交回执或条件 PUT 的网络错误才属于 commit_unknown。
 
 准备、读旧文件和上传阶段可以立即取消。renderer 在条件 PUT 前，或上传完成并即将调用 complete 前，通过现有 execution progress IPC 发送 `phase=committing`，等待 main 验证 owner、库、Run、execution 及 file.write 工具身份后再提交。只有这个阶段启用最多 30 秒的取消后回执等待；已确认未提交的结果也能提前结束等待。停止期间返回的 committed 结果优先于后续重复完成消息。
@@ -25,3 +29,5 @@
 ## 验证
 
 自动测试覆盖新建、条件替换、版本变化、409、取消、账号范围、提交未知、回执投递失败和权限分级。真实验收必须使用非第一个资料库；检查保存后目录立即出现、重读新内容、旧 revision 被拒绝以及停止后不继续准备写入。
+
+2026-09-10 在本机 win 资料库实测：不可达的 win-minio 为默认/路由目标，file.write 选择健康的 local-minio，新建并读回中文文本成功；随后条件修改保持节点身份，读回 v2，已打开的编辑器自动同步。验收明确禁止 Shell/file.publish 兜底。

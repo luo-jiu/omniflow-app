@@ -242,6 +242,42 @@ describe('Agent orchestrator', () => {
       ...options,
     });
   }
+  it.each(['cancel-before-run', 'run-write-failed'] as const)('rolls back new attachment bindings on %s', async failure => {
+    const id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+    const attachmentBindings = {
+      resolve: vi.fn(async () => [{ id, name: 'note.txt', kind: 'text' as const, mimeType: 'text/plain', sizeBytes: 1 }]),
+      bind: vi.fn(async () => [id]), rollbackBinding: vi.fn(async () => undefined),
+    };
+    const webContents = sender();
+    const orchestrator = createOrchestrator({ attachmentBindings });
+    const createRun = vi.spyOn(store, 'createRun');
+    if (failure === 'cancel-before-run') attachmentBindings.bind.mockImplementationOnce(async () => {
+      orchestrator.releaseOwner(webContents.id); return [id];
+    });
+    else createRun.mockRejectedValueOnce(new Error('run write failed'));
+    await expect(orchestrator.start(webContents as never, { ...request(), attachmentIds: [id] })).rejects.toThrow();
+    expect(attachmentBindings.rollbackBinding).toHaveBeenCalledWith({ ownerScope: OWNER_SCOPE, libraryId: 3 }, [id], expect.any(String));
+    expect((await store.listSessions(OWNER_SCOPE, 3)).total).toBe(0);
+    if (failure === 'cancel-before-run') expect(createRun).not.toHaveBeenCalled();
+    expect(mocks.streamAgentProviderTurn).not.toHaveBeenCalled();
+  });
+  it('retains bindings when the Run was committed despite a lost creation response', async () => {
+    const id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+    const attachmentBindings = {
+      resolve: vi.fn(async () => [{ id, name: 'note.txt', kind: 'text' as const, mimeType: 'text/plain', sizeBytes: 1 }]),
+      bind: vi.fn(async () => [id]), rollbackBinding: vi.fn(async () => undefined),
+    };
+    const createRun = store.createRun.bind(store);
+    vi.spyOn(store, 'createRun').mockImplementationOnce(async input => { await createRun(input); throw new Error('lost receipt'); });
+    const orchestrator = createOrchestrator({ attachmentBindings });
+    await expect(orchestrator.start(sender() as never, { ...request(), attachmentIds: [id] })).rejects.toThrow('lost receipt');
+    expect(attachmentBindings.rollbackBinding).not.toHaveBeenCalled();
+    const sessions = await store.listSessions(OWNER_SCOPE, 3);
+    expect(sessions.total).toBe(1);
+    const session = await store.getSession(sessions.sessions[0].id, OWNER_SCOPE, 3);
+    expect(session?.messages[0].attachments?.[0].id).toBe(id);
+    expect(session?.runs[0].status).toBe('failed');
+  });
 
   it('publishes and persists measured-input context accounting separately from cumulative usage', async () => {
     mocks.streamAgentProviderTurn.mockResolvedValueOnce({ content: '',
@@ -2254,6 +2290,7 @@ describe('Agent orchestrator', () => {
     }));
     const webContents = sender();
     const orchestrator = createAgentOrchestrator({
+      contextBudget: { contextWindowTokens: 32_000 },
       getRuntimeProfile: () => ({
         apiKey: 'test-key',
         baseUrl: 'https://ai.example.com/v1',
@@ -2517,6 +2554,7 @@ describe('Agent orchestrator', () => {
     };
     const webContents = sender();
     const orchestrator = createAgentOrchestrator({
+      contextBudget: { contextWindowTokens: 32_000 },
       getPermissionMode: () => permissionMode,
       extractMediaAudio: extractMediaAudio as never,
       getRuntimeProfile: () => ({
@@ -5549,6 +5587,7 @@ describe('Agent orchestrator', () => {
     const webContents = sender();
     const orchestrator = createOrchestrator();
     const started = await orchestrator.start(webContents as never, request());
+    await vi.waitFor(() => expect(mocks.streamAgentProviderTurn).toHaveBeenCalledOnce());
 
     orchestrator.releaseOwner(webContents.id);
     await abortObserved;

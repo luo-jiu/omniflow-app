@@ -536,6 +536,23 @@ describe('SQLite Agent session store', () => {
     stores.push(store);
     return store;
   }
+  it('restores ordered attachments alongside the original user prompt', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'agent-attachment-session-'));
+    temporaryDirectories.push(directory);
+    const databasePath = path.join(directory, 'session.sqlite3');
+    const store = await createStore(databasePath);
+    await createSession(store, 'attachment-session', 3, 'attachments');
+    const attachments = [
+      { id: 'picture', name: '截图.png', kind: 'image' as const, mimeType: 'image/png', sizeBytes: 24, thumbnail: 'data:image/png;base64,YQ==' },
+      { id: 'text', name: 'notes.txt', kind: 'text' as const, mimeType: 'text/plain', sizeBytes: 10 },
+    ];
+    await store.createRun({ id: 'attachment-run', sessionId: 'attachment-session', model: 'model', profileId: 'profile',
+      reasoningEffort: 'auto', userPrompt: '比较附件', attachments, now: timestamp(1) });
+    await store.close(); stores.splice(stores.indexOf(store), 1);
+    const reopened = await createStore(databasePath);
+    const session = await reopened.getSession('attachment-session', OWNER_SCOPE, 3);
+    expect(session?.messages[0]).toMatchObject({ role: 'user', content: '比较附件', attachments });
+  });
 
   async function createSession(
     store: AgentSessionStore,

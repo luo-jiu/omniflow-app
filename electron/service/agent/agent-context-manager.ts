@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { attachmentManifest } from '../../../src/shared/agent/agent-attachments';
 
 import type {
   AgentMessage,
@@ -106,7 +107,7 @@ function toSummaryTranscript(
   return messages.flatMap((message) => {
     if (!isAgentConversationMessage(message)) return [];
     return [{
-      content: message.content,
+      content: message.content + attachmentManifest(message.attachments || [], false),
       role: message.role,
     }];
   });

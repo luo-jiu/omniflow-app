@@ -1,4 +1,6 @@
 import React from 'react';
+import { useAgentAttachments } from './useAgentAttachments';
+import { useAgentDraftRecovery } from './useAgentDraftRecovery';
 
 import type {
   AgentAppContext,
@@ -100,7 +102,13 @@ export function useAgentSession({
   reasoningEffort,
 }: UseAgentSessionInput) {
   const [messages, setMessages] = React.useState<AgentMessage[]>([]);
-  const [draft, setDraft] = React.useState('');
+  const [draft, setDraftState] = React.useState('');
+  const draftRef = React.useRef('');
+  const setDraft = React.useCallback((value: React.SetStateAction<string>) => {
+    draftRef.current = typeof value === 'function' ? value(draftRef.current) : value;
+    setDraftState(draftRef.current);
+  }, []);
+  const readDraft = React.useCallback(() => draftRef.current, []);
   const [sessionId, setSessionId] = React.useState<string | null>(null);
   const [isStreaming, setIsStreaming] = React.useState(false);
   const [isPreparing, setIsPreparing] = React.useState(false);
@@ -112,6 +120,14 @@ export function useAgentSession({
   const [interactionBusyIds, setInteractionBusyIds] = React.useState<Set<string>>(() => new Set());
   const ownerScopeKey = serializeAgentOwnerScope(ownerScope);
   const sessionScopeKey = `${ownerScopeKey}\u0000${Number(appContext.libraryId)}`;
+  const attachments = useAgentAttachments(ownerScope ? { ownerScope, libraryId: Number(appContext.libraryId) } : null);
+  const clearAttachments = attachments.clear;
+  const { recover: recoverFailedDraft, clear: clearFailedDrafts } = useAgentDraftRecovery({
+    scope: ownerScope ? { ownerScope, libraryId: Number(appContext.libraryId) } : null,
+    draft, entries: attachments.entries, busy: isPreparing || isStreaming,
+    readDraft, readEntries: attachments.getEntries, setDraft,
+    restoreAttachments: attachments.restore, notify: setWarning,
+  });
   const sessionScopeKeyRef = React.useRef(sessionScopeKey);
   const sessionIdRef = React.useRef<string | null>(null);
   const optimisticMessageIdRef = React.useRef<string | null>(null);
@@ -625,7 +641,7 @@ export function useAgentSession({
     interactionsInFlightRef.current.clear();
     setIsStreaming(false);
     setPreparing(false);
-  }, [sessionScopeKey, setPreparing]);
+  }, [sessionScopeKey, setPreparing, setDraft]);
 
   const flushPendingEvents = React.useCallback((nextSessionId: string) => {
     const pending = pendingEventsRef.current.get(nextSessionId) || [];
@@ -643,6 +659,8 @@ export function useAgentSession({
       || isPreparingRef.current
     ) return false;
     const restoreScopeKey = sessionScopeKey;
+    clearFailedDrafts();
+    if (sessionIdRef.current && sessionIdRef.current !== nextSessionId) clearAttachments();
     const preparationToken = preparationTokenRef.current + 1;
     preparationTokenRef.current = preparationToken;
     assistantRepairTokensRef.current.clear();
@@ -696,16 +714,20 @@ export function useAgentSession({
     }
   }, [
     appContext.libraryId,
+    clearAttachments,
+    clearFailedDrafts,
     flushPendingEvents,
     ownerScope,
     ownerScopeKey,
     sessionScopeKey,
     setPreparing,
+    setDraft,
   ]);
 
   const submit = React.useCallback(async (value = draft) => {
     const userPrompt = String(value || '').trim();
-    if (!userPrompt || isStreaming || isPreparingRef.current) return;
+    const currentAttachments = attachments.getEntries();
+    if ((!userPrompt && !currentAttachments.length) || currentAttachments.some(item => !item.attachment || item.error) || isStreaming || isPreparingRef.current) return;
     if (!profileId || !model) {
       setError('请先在 AI 服务配置中启用配置并选择模型');
       return;
@@ -716,8 +738,10 @@ export function useAgentSession({
     }
 
     const optimisticId = createMessageId('agent-user');
+    const submittedAttachments = attachments.take();
     const optimisticSessionId = sessionIdRef.current || '';
     const userMessage: AgentMessage = {
+      ...(submittedAttachments.length ? { attachments: submittedAttachments.map(item => item.attachment!) } : {}),
       content: userPrompt,
       createdAt: new Date().toISOString(),
       id: optimisticId,
@@ -756,6 +780,7 @@ export function useAgentSession({
         || sessionScopeKeyRef.current !== submissionScopeKey
       ) return;
       const result = await startAgentChat({
+        ...(submittedAttachments.length ? { attachmentIds: submittedAttachments.map(item => item.attachment!.id) } : {}),
         appContext,
         model,
         ownerScope,
@@ -792,7 +817,7 @@ export function useAgentSession({
           optimisticMessageIdRef.current = null;
         }
         setMessages(current => current.filter(message => message.id !== optimisticId));
-        setDraft(current => current || userPrompt);
+        recoverFailedDraft({ prompt: userPrompt, attachments: submittedAttachments });
         setError(submitError instanceof Error ? submitError.message : 'Agent 请求失败');
         setIsStreaming(false);
       }
@@ -804,6 +829,7 @@ export function useAgentSession({
     }
   }, [
     appContext,
+    attachments,
     draft,
     flushPendingEvents,
     isStreaming,
@@ -813,8 +839,10 @@ export function useAgentSession({
     ownerScopeKey,
     profileId,
     reasoningEffort,
+    recoverFailedDraft,
     sessionScopeKey,
     setPreparing,
+    setDraft,
   ]);
 
   const stop = React.useCallback(async () => {
@@ -965,6 +993,8 @@ export function useAgentSession({
     setSessionId(null);
     setMessages([]);
     setDraft('');
+    clearAttachments();
+    clearFailedDrafts();
     setError(null);
     setWarning(null);
     setRuns([]);
@@ -974,9 +1004,10 @@ export function useAgentSession({
     approvalsInFlightRef.current.clear();
     interactionsInFlightRef.current.clear();
     setPreparing(false);
-  }, [isStreaming, setPreparing]);
+  }, [clearAttachments, clearFailedDrafts, isStreaming, setPreparing, setDraft]);
 
   return {
+    attachments,
     draft,
     error,
     isBusy: isPreparing || isStreaming,

@@ -14,6 +14,8 @@ import type {
 import { useAgentSession } from './useAgentSession';
 
 const apiMocks = vi.hoisted(() => ({
+  importAgentAttachment: vi.fn(),
+  discardAgentAttachment: vi.fn(async () => undefined),
   completeAgentFileAuthority: vi.fn(),
   completeAgentToolExecution: vi.fn(),
   getAgentSession: vi.fn(),
@@ -245,6 +247,50 @@ describe('useAgentSession event coordination', () => {
     await act(async () => { started.reject(new Error('offline')); await submission; });
     expect(hook.current.draft).toBe('next draft');
     expect(hook.current.error).toBe('offline');
+    hook.unmount();
+  });
+  it('keeps failed text and attachments together without merging them into the next draft', async () => {
+    apiMocks.importAgentAttachment.mockImplementation(async ({ name }) => ({ id: name, name, kind: 'text', mimeType: 'text/plain', sizeBytes: 1 }));
+    const file = (name: string) => ({ name, size: 1, arrayBuffer: async () => new Uint8Array([97]).buffer }) as File;
+    const started = deferred<never>();
+    apiMocks.startAgentChat.mockReturnValueOnce(started.promise);
+    const hook = renderSessionHook();
+    await act(async () => hook.current.attachments.add([file('first.txt')]));
+    let submission!: Promise<void>;
+    await act(async () => { submission = hook.current.submit('first question'); });
+    act(() => hook.current.setDraft('second question'));
+    await act(async () => hook.current.attachments.add([file('second.txt')]));
+    await act(async () => { started.reject(new Error('offline')); await submission; });
+    expect(hook.current.draft).toBe('second question');
+    expect(hook.current.attachments.entries.map(item => item.name)).toEqual(['second.txt']);
+    expect(hook.current.warning).toContain('原消息已保留');
+    act(() => hook.current.setDraft(''));
+    expect(hook.current.attachments.entries.map(item => item.name)).toEqual(['second.txt']);
+    await act(async () => hook.current.attachments.remove(hook.current.attachments.entries[0].key));
+    expect(hook.current.draft).toBe('first question');
+    expect(hook.current.attachments.entries.map(item => item.name)).toEqual(['first.txt']);
+    expect(hook.current.warning).toContain('已恢复');
+    hook.unmount();
+  });
+  it('restores a failed message immediately when no new draft exists and discards queued attachments on reset', async () => {
+    apiMocks.importAgentAttachment.mockImplementation(async ({ name }) => ({ id: name, name, kind: 'text', mimeType: 'text/plain', sizeBytes: 1 }));
+    const file = { name: 'first.txt', size: 1, arrayBuffer: async () => new Uint8Array([97]).buffer } as File;
+    const hook = renderSessionHook();
+    await act(async () => hook.current.attachments.add([file]));
+    apiMocks.startAgentChat.mockRejectedValueOnce(new Error('offline'));
+    await act(async () => { await hook.current.submit('first question'); });
+    expect(hook.current.draft).toBe('first question');
+    expect(hook.current.attachments.entries[0].name).toBe('first.txt');
+    const started = deferred<never>();
+    apiMocks.startAgentChat.mockReturnValueOnce(started.promise);
+    let submission!: Promise<void>;
+    await act(async () => { submission = hook.current.submit(); });
+    act(() => hook.current.setDraft('next draft'));
+    await act(async () => { started.reject(new Error('offline')); await submission; });
+    await act(async () => hook.current.reset());
+    expect(hook.current.draft).toBe('');
+    expect(hook.current.attachments.entries).toHaveLength(0);
+    expect(apiMocks.discardAgentAttachment).toHaveBeenCalledWith(expect.objectContaining({ id: 'first.txt', libraryId: 3 }));
     hook.unmount();
   });
   let listener: ((event: AgentChatStreamEvent) => void) | null;

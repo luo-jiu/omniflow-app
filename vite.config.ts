@@ -88,7 +88,7 @@ export default defineConfig(({ mode }) => {
     electron({
       main: {
         // Shortcut of `build.lib.entry`.
-        entry: 'electron/main.ts',
+        entry: { main: 'electron/main.ts', 'agent-document-worker': 'electron/service/agent/documents/document-worker.ts' },
         vite: {
           define: {
             __OMNIFLOW_API_BASE_URL__: JSON.stringify(apiBaseUrl),
@@ -99,7 +99,7 @@ export default defineConfig(({ mode }) => {
             rollupOptions: {
               // The Tree-sitter CommonJS runtime derives its own URL from __filename
               // during module evaluation, so it must remain a real Node dependency.
-              external: ['sqlite3', '@vscode/tree-sitter-wasm'],
+              external: ['sqlite3', '@vscode/tree-sitter-wasm', 'pdfjs-dist/legacy/build/pdf.mjs', '@napi-rs/canvas'],
             },
           },
         },

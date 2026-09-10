@@ -14,6 +14,7 @@ import { registerAppUpdateIpcHandlers } from './service/appUpdateIpc'
 import { createAppGracefulShutdown } from './service/appGracefulShutdown'
 import { agentMediaArtifactStore } from './service/agent/agent-media-artifact-store'
 import { agentOrchestrator } from './service/agent/agent-orchestrator'
+import { disposeAgentAttachmentDrafts } from './service/agent/agent-attachment-runtime'
 import {
   disposeAgentPersistenceRuntime,
   getAgentPersistenceRuntime,
@@ -408,6 +409,7 @@ const appGracefulShutdown = createAppGracefulShutdown({
       agentSettled = await agentOrchestrator.shutdown(1_000)
     }
     if (agentSettled) {
+      await disposeAgentAttachmentDrafts()
       await disposeAgentPersistenceRuntime()
     } else {
       console.error('[agent] active work did not settle; persistence will remain open until process exit')

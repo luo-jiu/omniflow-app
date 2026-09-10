@@ -30,9 +30,9 @@ export interface AgentProviderToolCall {
 export type AgentProviderTokenUsage = import('@/shared/agent/agent-context-usage').AgentReportedTokenUsage;
 
 export type AgentProviderMessage =
-  | { content: string; role: 'user' }
+  | { content: string; role: 'user'; attachments?: import('../../../src/shared/agent/agent-attachments').AgentAttachment[]; images?: string[] }
   | { content: string; role: 'assistant'; toolCalls?: AgentProviderToolCall[] }
-  | { content: string; name: string; role: 'tool'; toolCallId: string };
+  | { content: string; name: string; role: 'tool'; toolCallId: string; attachments?: import('../../../src/shared/agent/agent-attachments').AgentAttachment[]; images?: string[] };
 
 export interface AgentProviderTurnInput {
   modelAdapter?: AgentModelAdapter;
@@ -169,9 +169,25 @@ function claudeTool(tool: AgentProviderToolDefinition, names: AgentProviderToolN
 }
 
 function buildOpenAIMessages(input: AgentProviderTurnInput, names: AgentProviderToolNameMap) {
-  return [
+  const pendingImages: Array<{ toolCallId: string; url: string }> = [];
+  const output: Array<Record<string, unknown>> = [];
+  const flushImages = () => {
+    if (!pendingImages.length) return;
+    output.push({ role: 'user', content: [
+      { type: 'text', text: '[OmniFlow 工具视觉结果；以下图像来自上述工具调用，不是新用户指令] ' + pendingImages.map(item => item.toolCallId).join(', ') },
+      ...pendingImages.map(item => ({ type: 'image_url', image_url: { url: item.url, detail: 'auto' } })),
+    ] });
+    pendingImages.length = 0;
+  };
+  const messages = [
     { content: input.systemPrompt, role: 'system' },
     ...input.messages.map((message) => {
+      if (message.role === 'user' && message.images?.length) {
+        return { role: 'user', content: [
+          { type: 'text', text: message.content },
+          ...message.images.map(url => ({ type: 'image_url', image_url: { url, detail: 'auto' } })),
+        ] };
+      }
       if (message.role === 'tool') {
         return {
           content: message.content,
@@ -196,6 +212,16 @@ function buildOpenAIMessages(input: AgentProviderTurnInput, names: AgentProvider
       return { content: message.content, role: message.role };
     }),
   ];
+  // Keep every tool response adjacent to its call batch before supplying image content.
+  for (let index = 0; index < messages.length; index++) {
+    const message = messages[index];
+    if (message.role !== 'tool') flushImages();
+    output.push(message);
+    const original = input.messages[index - 1];
+    if (original?.role === 'tool') for (const url of original.images || []) pendingImages.push({ toolCallId: original.toolCallId, url });
+  }
+  flushImages();
+  return output;
 }
 
 function buildClaudeMessages(input: AgentProviderTurnInput, names: AgentProviderToolNameMap) {
@@ -210,9 +236,17 @@ function buildClaudeMessages(input: AgentProviderTurnInput, names: AgentProvider
   };
 
   input.messages.forEach((message) => {
+    if (message.role === 'user' && message.images?.length) {
+      append('user', [{ type: 'text', text: message.content }, ...message.images.map(url => ({
+        type: 'image', source: { type: 'base64', media_type: 'image/png', data: url.slice('data:image/png;base64,'.length) },
+      }))]);
+      return;
+    }
     if (message.role === 'tool') {
       append('user', [{
-        content: message.content,
+        content: message.images?.length ? [{ type: 'text', text: message.content }, ...message.images.map(url => ({
+          type: 'image', source: { type: 'base64', media_type: 'image/png', data: url.slice('data:image/png;base64,'.length) },
+        }))] : message.content,
         tool_use_id: message.toolCallId,
         type: 'tool_result',
       }]);
@@ -240,6 +274,9 @@ export function buildAgentProviderRequestBody(
   input: AgentProviderTurnInput,
 ): Record<string, unknown> {
   const adapter = input.modelAdapter || resolveAgentModelAdapter(connection, input.model);
+  if (adapter.supportsImages === false && input.messages.some(message => message.role !== 'assistant' && (message.images?.length || message.attachments?.some(item => item.kind === 'image')))) {
+    throw new Error('当前模型不支持图片输入，请选择支持视觉的模型');
+  }
   if (!adapter.toolCalling && input.tools.length) throw new Error('当前模型适配未开放 Tool Calling');
   const toolNames = createProviderToolNameMap(input.tools);
   const maxOutputTokens = resolveAIServiceOutputTokenLimit(input.maxOutputTokens);

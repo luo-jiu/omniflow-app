@@ -175,6 +175,7 @@ export function estimateAgentProviderMessagesTokens(
     let messageTokens = MESSAGE_OVERHEAD_TOKENS
       + estimateAgentTextTokens(message.role)
       + estimateAgentTextTokens(message.content);
+    if (message.role !== 'assistant') messageTokens += attachmentTokenEstimate(message.attachments);
     if (message.role === 'tool') {
       messageTokens += estimateAgentTextTokens(message.name)
         + estimateAgentTextTokens(message.toolCallId);
@@ -285,9 +286,12 @@ export function assertAgentProviderTurnFitsContext(
   return estimatedTokens;
 }
 
+import { attachmentManifest, attachmentTokenEstimate } from '../../../src/shared/agent/agent-attachments';
+
 function toProviderMessage(message: AgentMessage): AgentProviderMessage | null {
   if (!isAgentConversationMessage(message)) return null;
-  return { content: sanitizeAgentMemoryText(message.content), role: message.role };
+  return { content: sanitizeAgentMemoryText(message.content) + attachmentManifest(message.attachments || []), role: message.role,
+    ...(message.role === 'user' && message.attachments?.length ? { attachments: message.attachments } : {}) };
 }
 
 function terminalRunIds(runs: readonly AgentRunSnapshot[]): Set<string> {

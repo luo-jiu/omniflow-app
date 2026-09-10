@@ -21,6 +21,8 @@ import type {
   AgentToolPrepareCompletion,
 } from '@/shared/agent/agent.types';
 import { agentOrchestrator } from '../service/agent/agent-orchestrator';
+import { getAgentAttachmentStore } from '../service/agent/agent-attachment-runtime';
+import type { AgentAttachmentImport, AgentAttachmentScope } from '../../src/shared/agent/agent-attachments';
 import { agentShellSettingsStore } from '../service/agent/shell/agent-shell-settings-store';
 import { agentFileAuthorityBroker } from '../service/agent/agent-file-authority-broker';
 import type { AgentShellLogPageRequestV1 } from '@/shared/agent/shell/agent-shell.types';
@@ -54,6 +56,14 @@ export function registerAgentIpc(
     const sender = requireMainWindow(event);
     ensureOwnerCleanup(sender);
     return agentOrchestrator.start(sender, input);
+  });
+  ipcMain.handle('agent:attachment:import', (event, input: AgentAttachmentImport) => {
+    requireMainWindow(event);
+    return getAgentAttachmentStore().import(input);
+  });
+  ipcMain.handle('agent:attachment:discard', (event, input: AgentAttachmentScope & { id: string }) => {
+    requireMainWindow(event);
+    return getAgentAttachmentStore().discard(input, input.id);
   });
 
   ipcMain.handle('agent:chat:stop', (event, sessionId: string) => {

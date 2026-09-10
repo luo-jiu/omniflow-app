@@ -843,6 +843,7 @@ const TOOL_RUNTIME_COLUMNS = [
 ] as const;
 
 const RUN_RUNTIME_COLUMNS = [
+  ['attachments_json', 'TEXT'],
   ['context_usage_json', 'TEXT'],
   ['capability_identity', "TEXT NOT NULL DEFAULT 'legacy'"],
   ['plan_json', 'TEXT'],
@@ -910,6 +911,7 @@ interface SessionRow {
 }
 
 interface MessageRow {
+  attachments_json?: string | null;
   assistant_phase: AgentAssistantItemSnapshot['assistantItem']['phase'] | null;
   assistant_status: AgentAssistantItemSnapshot['assistantItem']['status'] | null;
   assistant_turn_ordinal: number | null;
@@ -1007,6 +1009,7 @@ export interface CreateAgentSessionInput {
 }
 
 export interface CreateAgentRunInput {
+  attachments?: import('../../../src/shared/agent/agent-attachments').AgentAttachment[];
   capabilityIdentity?: string;
   id: string;
   model: string;
@@ -1442,6 +1445,7 @@ function toSessionSummary(row: SessionRow): AgentSessionSummary {
 
 function toMessage(row: MessageRow): AgentMessage {
   const base = {
+    ...(row.role === 'user' && row.attachments_json ? { attachments: JSON.parse(row.attachments_json) as import('../../../src/shared/agent/agent-attachments').AgentAttachment[] } : {}),
     content: row.content,
     createdAt: row.created_at,
     id: row.id,
@@ -1689,6 +1693,7 @@ const CONTEXT_CHECKPOINT_SELECT = `
 `;
 
 const MESSAGE_SELECT_COLUMNS = `
+  (SELECT attachments_json FROM agent_runs WHERE agent_runs.id = agent_messages.run_id) AS attachments_json,
   id,
   session_id,
   run_id,
@@ -3425,8 +3430,8 @@ export async function createSQLiteAgentSessionStore(
         INSERT INTO agent_runs (
           id, session_id, capability_identity, status, user_prompt, profile_id, model,
           reasoning_effort, skill_catalog_revision, tool_catalog_revision,
-          current_step, created_at, updated_at
-        ) VALUES (?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, '请求 AI 服务', ?, ?)
+          current_step, created_at, updated_at, attachments_json
+        ) VALUES (?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, '请求 AI 服务', ?, ?, ?)
       `, [
         input.id,
         input.sessionId,
@@ -3439,6 +3444,7 @@ export async function createSQLiteAgentSessionStore(
         normalizeCatalogRevision(input.toolCatalogRevision),
         input.now,
         input.now,
+        input.attachments?.length ? JSON.stringify(input.attachments) : null,
       ]);
       return readRun(input.id);
     },
