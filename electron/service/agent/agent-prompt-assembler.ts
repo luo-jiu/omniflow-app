@@ -110,6 +110,9 @@ function agentFileRoutingPrompt(capabilities: readonly string[]): string {
   if (available.has('file.write')) {
     rules.push(`普通文本、Markdown、配置或源码文件默认使用 ${providerToolName('file.write')} 直接保存到资料库绝对路径，无需创建 Run 工作副本或发布。新建省略 revision 且不覆盖同名文件；修改先 file.read，使用返回的 revision 和完整新正文写入，不能把读取结果的行号写进正文。版本冲突时重新读取再修改；writeCommitState=commit_unknown 时先核对目标，不盲目重试。需要程序生成二进制、转换或复杂批处理时仍可使用 Shell 和发布；用户指定本机位置时按本机操作。`);
   }
+  if (available.has('file.delete')) {
+    rules.push(`删除资料库文件使用 ${providerToolName('file.delete')} 移入系统回收站，不使用本机 rm 或存储对象删除接口。先定位并核对节点；用户明确要求删除整个文件夹时才传 recursive=true，不因为文件不可达就删除。运行时负责权限确认，不重复询问已明确的删除要求。deleteCommitState=commit_unknown 时先检查原目录及回收站，不盲目重试。`);
+  }
   if (available.has('file.list')) {
     rules.push(`${providerToolName('file.list')} 可以按目录 ID 或资料库绝对路径分页浏览其他目录，不需要用户先展开目录树；hasMore=true 时保持查询条件并使用 nextCursor 续页。`);
   }

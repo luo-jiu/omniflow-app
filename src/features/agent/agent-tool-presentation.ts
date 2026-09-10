@@ -108,6 +108,7 @@ const TOOL_TITLES: Record<string, string> = {
   'attachment.query': '查询工作表',
   'attachment.view': '查看附件页面',
   'file.write': '保存文件',
+  'file.delete': '移入回收站',
   'file.grep': '搜索文件正文',
   'file.upload': '上传本机文件',
   'interaction.request': '用户输入',

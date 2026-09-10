@@ -161,7 +161,7 @@ export function useAgentSession({
         return onRefreshDirectory ? onRefreshDirectory(parent) : refreshDirectoryInTree(parent);
       }).catch(() => {
         if (mountedRef.current && sessionIdRef.current === sessionId && sessionScopeKeyRef.current === sessionScopeKey) {
-          setWarning('文件已保存，但目录树刷新失败，请刷新目标目录；不要重复发布。');
+          setWarning('文件操作已完成，但目录树刷新失败，请刷新目标目录；不要重复执行。');
         }
       });
     }
@@ -215,7 +215,7 @@ export function useAgentSession({
         onRefreshDirectory,
         signal: controller.signal,
       });
-      if (controller.signal.aborted && !outcome.committed && request.toolName !== 'file.write') return;
+      if (controller.signal.aborted && !outcome.committed && !['file.write', 'file.delete'].includes(request.toolName)) return;
       await completeAgentToolExecution({
         executionId: request.executionId,
         libraryId: Number(request.appContext.libraryId),

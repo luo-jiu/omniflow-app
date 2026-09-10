@@ -25,6 +25,7 @@ import { readAgentMediaError } from '@/shared/agent/agent-media-error';
 import { normalizeAgentLibraryDirectoryPath } from '@/shared/agent/agent-library-path';
 import { readAgentLibraryNode } from './agent-library.api';
 import { executeAgentFileWrite } from './agent-file-write';
+import { executeAgentFileDelete } from './agent-file-delete';
 
 interface DirectoryCreateExecutionInput {
   conflictPolicy: 'error';
@@ -318,6 +319,7 @@ export async function executeAgentRendererTool(
 ): Promise<AgentRendererToolOutcome> {
   throwIfAborted(dependencies.signal);
   if (request.toolName === 'file.write') return executeAgentFileWrite(request, dependencies);
+  if (request.toolName === 'file.delete') return executeAgentFileDelete(request, dependencies);
   if (request.toolName === 'media.inspect') {
     return executeMediaInspect(request, dependencies);
   }

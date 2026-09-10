@@ -24,6 +24,7 @@ import { isDisposingLibraryWorkspace } from '@/features/workspace-resource-relea
 import type { FileViewerFileType } from '@/shared/file-viewer-types';
 import { updateExistingFileViewerTabResource } from './file-viewer-tab-resource';
 import { subscribeLibraryFileContentChanged } from '@/features/file-viewer/services/file-content-events';
+import { subscribeLibraryFilesDeleted } from '@/features/file-viewer/services/file-deletion-events';
 import { getFileLink } from '@/features/file-explorer/services/file.api';
 import { API_CONFIG } from '@/config/api';
 import { runtimeLogger } from '@/utils/runtimeLogger';
@@ -501,6 +502,13 @@ export const FileViewerProvider: React.FC<{
       }));
     setViewerState(prev => targetIds.reduce((state, tabId) => closeTabInState(state, tabId), prev));
   };
+
+  const closeDeletedNodeRef = React.useRef(closeTabByNodeId);
+  closeDeletedNodeRef.current = closeTabByNodeId;
+  useEffect(() => subscribeLibraryFilesDeleted(event => {
+    if (event.accountScope !== viewerAccountScope || event.backendScope !== API_CONFIG.BASE_URL || event.libraryId !== libraryId) return;
+    event.nodeIds.forEach(nodeId => closeDeletedNodeRef.current(nodeId));
+  }), [libraryId, viewerAccountScope]);
 
   const reloadActiveTab = () => {
     setViewerState(prev => {

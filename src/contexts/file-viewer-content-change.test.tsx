@@ -10,6 +10,9 @@ vi.mock('@/features/workspace-resource-release', () => ({ isDisposingLibraryWork
 import { FileViewerProvider } from './FileViewerContext';
 import { FileViewerContext } from './file-viewer.context';
 import { notifyLibraryFileContentChanged } from '@/features/file-viewer/services/file-content-events';
+import { notifyLibraryFilesDeleted } from '@/features/file-viewer/services/file-deletion-events';
+import { globalAudioPlayer } from '@/features/file-viewer/services/global-audio-player';
+import { floatingVideoService } from '@/features/file-viewer/services/floating-video.service';
 import { API_CONFIG } from '@/config/api';
 
 let renderer: TestRenderer.ReactTestRenderer | undefined;
@@ -18,6 +21,20 @@ function Probe() { viewer = React.useContext(FileViewerContext)!; return null; }
 afterEach(() => { act(() => renderer?.unmount()); renderer = undefined; vi.resetAllMocks(); });
 
 describe('file viewer external content changes', () => {
+  it('closes deleted tabs through the media release path only in their owner and library scope', async () => {
+    await act(async () => { renderer = TestRenderer.create(<FileViewerProvider libraryId={3}><Probe /></FileViewerProvider>); });
+    act(() => viewer.setFileUrl('audio', 'first.mp3', 'audio', 9));
+    act(() => viewer.setFileUrl('video', 'second.mp4', 'video', 10));
+    act(() => viewer.setFileUrl('text', 'keep.txt', 'text', 11));
+    const event = { nodeIds: [9, 10], libraryId: 3, accountScope: 'user:7', backendScope: API_CONFIG.BASE_URL };
+    act(() => notifyLibraryFilesDeleted({ ...event, libraryId: 4 }));
+    act(() => notifyLibraryFilesDeleted({ ...event, accountScope: 'user:8' }));
+    expect(viewer.tabs).toHaveLength(3);
+    act(() => notifyLibraryFilesDeleted(event));
+    expect(viewer.tabs.map(tab => tab.nodeId)).toEqual([11]);
+    expect(globalAudioPlayer.releaseForTab).toHaveBeenCalledWith('node:9');
+    expect(floatingVideoService.releaseForTab).toHaveBeenCalledWith('node:10');
+  });
   it('updates only the matching existing tab without activating it or crossing account boundaries', async () => {
     await act(async () => { renderer = TestRenderer.create(<FileViewerProvider libraryId={3}><Probe /></FileViewerProvider>); });
     act(() => viewer.setFileUrl('old', 'first.txt', 'text', 9));

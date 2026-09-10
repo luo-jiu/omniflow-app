@@ -1,5 +1,6 @@
 import type { AgentTool } from '../agent-tool-registry';
 import { fileWriteTool } from './file-write-tool';
+import { fileDeleteTool } from './file-delete-tool';
 
 const MAX_DIRECTORY_NAME_LENGTH = 120;
 const WINDOWS_RESERVED_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
@@ -92,5 +93,5 @@ export const directoryCreateTool: AgentTool = {
 };
 
 export function getBuiltInActionTools(): AgentTool[] {
-  return [directoryCreateTool, fileWriteTool];
+  return [directoryCreateTool, fileWriteTool, fileDeleteTool];
 }

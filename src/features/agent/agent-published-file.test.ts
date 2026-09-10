@@ -8,6 +8,13 @@ const activity: AgentToolActivitySnapshot = {
   result: { ok: true, data: { uploadCommitState: 'committed', destination: { kind: 'library', nodeId: 32, parentId: 20 } } },
 };
 describe('committed publication refresh target', () => {
+  it('refreshes a deleted node parent only after confirmed trash commit', () => {
+    for (const state of ['committed', 'commit_unknown', 'uncommitted']) {
+      expect(committedAgentFileParent({ ...activity, call: { ...activity.call, name: 'file.delete' }, result: { ok: true, data: {
+        deleteCommitState: state, destination: { kind: 'library', nodeId: 9, parentId: 8 },
+      } } })).toBe(state === 'committed' ? 8 : null);
+    }
+  });
   it('refreshes direct writes only after an authoritative commit', () => {
     const direct = { ...activity, call: { ...activity.call, name: 'file.write' } };
     for (const state of ['committed', 'commit_unknown', 'uncommitted']) {

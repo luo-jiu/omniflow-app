@@ -233,7 +233,7 @@ describe('useAgentSession event coordination', () => {
     apiMocks.getAgentSession.mockResolvedValue({ ...sessionSnapshot(), toolActivities: [published] });
     const hook = renderSessionHook(vi.fn().mockRejectedValue(new Error('offline')));
     await act(async () => { await hook.current.restore('session-1'); });
-    expect(hook.current.warning).toContain('不要重复发布');
+    expect(hook.current.warning).toContain('不要重复执行');
     expect(hook.current.toolActivities[0].result?.ok).toBe(true);
     hook.unmount();
   });

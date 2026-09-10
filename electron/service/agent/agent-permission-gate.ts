@@ -6,7 +6,7 @@ import type {
 import type { AgentPreparedActionPublic } from '@/shared/agent/agent.types';
 import type { AgentShellPermissionMode } from '@/shared/agent/shell/agent-shell.types';
 
-/** Apply the frozen Run mode only to known, validated, non-destructive built-ins. */
+/** Apply the frozen Run mode only to known, validated writes, including recoverable trash. */
 export function resolveAgentRunPermissionDecision(
   toolName: string,
   decision: AgentToolPermissionDecision,
@@ -14,7 +14,7 @@ export function resolveAgentRunPermissionDecision(
   action?: AgentPreparedActionPublic,
 ): AgentToolPermissionDecision {
   if (mode !== 'full-access' || decision.behavior !== 'ask' || decision.risk !== 'write') return decision;
-  if ((toolName === 'directory.create' || toolName === 'file.write') && !action) return { behavior: 'allow', risk: 'write' };
+  if (['directory.create', 'file.write', 'file.delete'].includes(toolName) && !action) return { behavior: 'allow', risk: 'write' };
   if (!action || action.kind !== toolName) return decision;
   if (action.kind === 'media.extractAudio' && action.conflictPolicy !== 'replace') {
     return { behavior: 'allow', risk: 'write' };

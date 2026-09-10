@@ -502,37 +502,46 @@ describe('Agent tool broker', () => {
       vi.useRealTimers();
     }
   });
-  it('retains a direct file write commit that arrives just after cancellation', async () => {
+  it('preserves the authoritative deletion facts while reporting a late cleanup warning', async () => {
+    const broker = createAgentToolBroker({ createId: () => 'delete-warning' });
+    const prepared = broker.prepareRendererExecution({ ...prepareInput(new AbortController().signal), toolName: 'file.delete' });
+    const identity = { executionId: 'delete-warning', libraryId: 3, ownerScope: OWNER_SCOPE, runId: 'run-1', sessionId: 'session-1' };
+    const result = { ok: true, data: { deleteCommitState: 'committed', nodeId: 9 }, message: '已移入回收站' };
+    broker.markRendererExecutionCommitted(77, { ...identity, result });
+    broker.completeRendererExecution(77, { ...identity, result: { ok: true, data: { nodeId: 99 }, message: '已移入回收站，但预览清理失败' } });
+    await expect(prepared.outcome).resolves.toEqual({ perception: undefined, result: { ...result, message: '已移入回收站，但预览清理失败' } });
+  });
+  it.each(['file.write', 'file.delete'])('retains a %s commit that arrives just after cancellation', async toolName => {
     const controller = new AbortController();
     const broker = createAgentToolBroker({ createId: () => 'direct-write' });
-    const prepared = broker.prepareRendererExecution({ ...prepareInput(controller.signal), toolName: 'file.write' });
+    const prepared = broker.prepareRendererExecution({ ...prepareInput(controller.signal), toolName });
     broker.reportRendererProgress(77, {
       executionId: 'direct-write', libraryId: 3, ownerScope: OWNER_SCOPE,
       runId: 'run-1', sessionId: 'session-1', phase: 'committing', progress: { message: '正在保存文件' },
     });
     controller.abort();
-    const result = { ok: true, data: { writeCommitState: 'committed' }, message: '已保存' };
+    const result = { ok: true, data: { [toolName === 'file.delete' ? 'deleteCommitState' : 'writeCommitState']: 'committed' }, message: '已完成' };
     expect(broker.markRendererExecutionCommitted(77, {
       executionId: 'direct-write', libraryId: 3, ownerScope: OWNER_SCOPE,
       result, runId: 'run-1', sessionId: 'session-1',
     })).toBe(true);
     await expect(prepared.outcome).resolves.toEqual({ result });
   });
-  it('cancels file write preparation immediately, without a settlement timer', async () => {
+  it.each(['file.write', 'file.delete'])('cancels %s preparation immediately, without a settlement timer', async toolName => {
     const controller = new AbortController();
     const broker = createAgentToolBroker({ createId: () => 'not-committing' });
-    const prepared = broker.prepareRendererExecution({ ...prepareInput(controller.signal), toolName: 'file.write' });
+    const prepared = broker.prepareRendererExecution({ ...prepareInput(controller.signal), toolName });
     controller.abort();
     await expect(prepared.outcome).rejects.toMatchObject({ name: 'AbortError' });
   });
-  it('finishes a cancelled commit wait when the renderer confirms no write was committed', async () => {
+  it.each(['file.write', 'file.delete'])('settles cancelled %s waits with an explicit uncommitted result', async toolName => {
     const controller = new AbortController();
     const broker = createAgentToolBroker({ createId: () => 'no-commit' });
-    const prepared = broker.prepareRendererExecution({ ...prepareInput(controller.signal), toolName: 'file.write' });
+    const prepared = broker.prepareRendererExecution({ ...prepareInput(controller.signal), toolName });
     const identity = { executionId: 'no-commit', libraryId: 3, ownerScope: OWNER_SCOPE, runId: 'run-1', sessionId: 'session-1' };
     broker.reportRendererProgress(77, { ...identity, phase: 'committing', progress: { message: '正在保存文件' } });
     controller.abort();
-    const result = { ok: false, data: { writeCommitState: 'uncommitted' } };
+    const result = { ok: false, data: { [toolName === 'file.delete' ? 'deleteCommitState' : 'writeCommitState']: 'uncommitted' } };
     broker.completeRendererExecution(77, { ...identity, result });
     await expect(prepared.outcome).resolves.toEqual({ result });
   });

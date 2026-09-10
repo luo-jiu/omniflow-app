@@ -1,5 +1,7 @@
 # 内置 Agent 架构
 
+内部文件删除现已通过 `file.delete` 接入资料库回收站，权限、提交状态和目录/预览同步见 [内部文件操作](agent-internal-file-actions.md)。
+
 多图片与文本附件的 IPC、主进程副本、消息持久化、视觉请求和按行读取见 [附件契约](built-in-agent-attachments.md)。
 
 

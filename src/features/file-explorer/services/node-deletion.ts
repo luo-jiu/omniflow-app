@@ -14,6 +14,8 @@ import {
 import { runtimeLogger } from '@/utils/runtimeLogger';
 
 interface NodeDeletionOptions {
+  beforeDelete?: () => Promise<void>;
+  onDeleted?: (nodeIds: number[]) => Promise<void>;
   accountScope: string | null;
   ancestorId: number;
   expectedDescendantCount?: number;
@@ -168,7 +170,9 @@ export function createNodeDeletionService(dependencies: NodeDeletionDependencies
       options.libraryId,
       options.expectedDescendantCount,
     );
+    await options.beforeDelete?.();
     await dependencies.deleteNodeAndChildren(options.ancestorId, options.libraryId);
+    await options.onDeleted?.(collected.nodeIds);
     const cleanup = await discardDeletedNodeLocalState(
       options.accountScope,
       options.libraryId,

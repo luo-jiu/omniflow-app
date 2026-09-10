@@ -381,7 +381,7 @@ export function createAgentToolBroker(options: AgentToolBrokerOptions = {}) {
     const message = String(input.progress?.message || '').trim().slice(0, 500);
     if (!message) throw new Error('Agent Tool 进度消息不能为空');
     if (input.phase !== undefined) {
-      if (input.phase !== 'committing' || pending.toolName !== 'file.write') {
+      if (input.phase !== 'committing' || !['file.write', 'file.delete'].includes(pending.toolName)) {
         throw new Error('该工具不支持提交阶段通知');
       }
       pending.beginCriticalSettlement();
@@ -414,13 +414,16 @@ export function createAgentToolBroker(options: AgentToolBrokerOptions = {}) {
       throw new Error('当前窗口无权提交该 Agent Tool 结果');
     }
     const result = normalizeAgentToolResult(input.result);
-    const state = (result.data as { writeCommitState?: string } | undefined)?.writeCommitState;
-    const writeSettled = pending.toolName === 'file.write' && !result.ok
+    const data = result.data as { writeCommitState?: string; deleteCommitState?: string } | undefined;
+    const state = pending.toolName === 'file.delete' ? data?.deleteCommitState : data?.writeCommitState;
+    const writeSettled = ['file.write', 'file.delete'].includes(pending.toolName) && !result.ok
       && (state === 'uncommitted' || state === 'commit_unknown');
     if (pending.signal.aborted && !pending.committedResult && !writeSettled) throw abortError();
+    const committedResult = pending.committedResult && pending.toolName === 'file.delete' && result.ok && result.message
+      ? { ...pending.committedResult, message: result.message } : pending.committedResult;
     pending.resolve({
       perception: options.normalizePerception?.(input.perception),
-      result: pending.committedResult || result,
+      result: committedResult || result,
     });
     return true;
   }

@@ -19,6 +19,24 @@ function createDependencies() {
 }
 
 describe('Node deletion service', () => {
+  it('revalidates after collecting descendants and reports commit before cleaning local state', async () => {
+    const deps = createDependencies(); const service = createNodeDeletionService(deps);
+    const beforeDelete = vi.fn(async () => undefined), onDeleted = vi.fn(async () => undefined);
+    await service.softDeleteNodeSubtree({ accountScope: 'user:7', libraryId: 3, ancestorId: 8, beforeDelete, onDeleted });
+    expect(deps.getAllDescendantsByNodeId.mock.invocationCallOrder[0]).toBeLessThan(beforeDelete.mock.invocationCallOrder[0]);
+    expect(beforeDelete.mock.invocationCallOrder[0]).toBeLessThan(deps.deleteNodeAndChildren.mock.invocationCallOrder[0]);
+    expect(deps.deleteNodeAndChildren.mock.invocationCallOrder[0]).toBeLessThan(onDeleted.mock.invocationCallOrder[0]);
+    expect(onDeleted.mock.invocationCallOrder[0]).toBeLessThan(deps.discardDrafts.mock.invocationCallOrder[0]);
+    expect(onDeleted).toHaveBeenCalledWith([8, 9]);
+  });
+  it('does not submit when precommit revalidation fails', async () => {
+    const deps = createDependencies(); const service = createNodeDeletionService(deps);
+    await expect(service.softDeleteNodeSubtree({ accountScope: 'user:7', libraryId: 3, ancestorId: 8,
+      beforeDelete: async () => { throw new Error('changed'); },
+    })).rejects.toThrow('changed');
+    expect(deps.deleteNodeAndChildren).not.toHaveBeenCalled();
+    expect(deps.discardDrafts).not.toHaveBeenCalled();
+  });
   it('deletes the backend subtree before invalidating every matching draft writer', async () => {
     const dependencies = createDependencies();
     const service = createNodeDeletionService(dependencies);

@@ -3311,6 +3311,9 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
                 },
                 Math.min(10_000, Math.max(1, getProviderRequestLimit() - preExecutionMinimumTokens)),
               );
+          if (call.name === 'file.delete' && result.ok && currentPerception) {
+            currentPerception = { ...currentPerception, knownNodes: [], selectedNodes: [], currentDirectory: undefined };
+          }
           toolTurnProgress.push({
             input: call.input,
             name: call.name,
