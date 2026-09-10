@@ -13,7 +13,7 @@ await build({ entryPoints: [path.join(root, 'tools/agent-documents-smoke/host.ts
   banner: { js: "import { createRequire as createSmokeRequire } from 'node:module'; const require = createSmokeRequire(import.meta.url);" },
   tsconfig: path.join(root, 'tsconfig.json'),
 });
-await writeFile(bootstrap, `import(${JSON.stringify(pathToFileURL(entry).href)}).catch(error => { console.error('OMNIFLOW_DOCUMENT_SMOKE_RESULT=' + JSON.stringify({ ok: false, error: String(error.message) })); require('electron').app.exit(1); });`);
+await writeFile(bootstrap, `const { app } = require('electron'); app.setName('OmniFlow'); import(${JSON.stringify(pathToFileURL(entry).href)}).catch(error => { console.error('OMNIFLOW_DOCUMENT_SMOKE_RESULT=' + JSON.stringify({ ok: false, error: String(error.message) })); app.exit(1); });`);
 const env = { ...process.env, OMNIFLOW_DOCUMENT_SMOKE_LIVE: process.argv.includes('--live') ? '1' : '0' };
 delete env.ELECTRON_RUN_AS_NODE;
 const electron = path.join(root, 'node_modules/.bin', process.platform === 'win32' ? 'electron.cmd' : 'electron');

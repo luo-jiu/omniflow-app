@@ -67,6 +67,8 @@ Vite 构建独立 agent-document-worker.js；Mammoth、yauzl 及其纯 JS 依赖
 
 可重复运行：先 npm run build，再 npm run agent:smoke-documents；真实连接使用 npm run agent:smoke-documents -- --live，默认模型 gpt-5.5，可用 OMNIFLOW_DOCUMENT_SMOKE_MODEL 覆盖。脚本与正式应用使用相同的安全存储应用身份，完成后清理临时附件及测试入口文件。
 
-2026-09-10 Office 扩展验证：全量 2178 项测试通过；补充取消/超时测试后文档专项 18 项通过，lint/build 通过。Electron 本地 smoke 验证四种文档的导入、会话绑定、读取、XLSX 统计（结果 50）、PPTX 实际顺序与备注、LibreOffice 真实渲染及绿色图形像素。macOS arm64 目录包的 app.asar worker 已验证 XLSX/PPTX 动态模块可加载。真实模型联调本轮因保存的 API Key 解密失败未完成；锁屏期间不改写配置。Windows/亮色桌面及本轮 UI 手动交互未验证。
+2026-09-10 Office 扩展验证：全量 2178 项测试通过；补充取消/超时测试后文档专项 18 项通过，lint/build 通过。Electron 本地 smoke 验证四种文档的导入、会话绑定、读取、XLSX 统计（结果 50）、PPTX 实际顺序与备注、LibreOffice 真实渲染及绿色图形像素。macOS arm64 目录包的 app.asar worker 已验证 XLSX/PPTX 动态模块可加载。真实 gpt-5.5 联调已通过：实际调用 inspect/read/query/view，返回 PDF 编号、DOCX 数量、Excel 总和 50、无缓存公式标志，以及正确的 PPTX 首张幻灯片标题、备注和绿色图形描述。Windows/亮色桌面及本轮 UI 手动交互未验证。
+
+独立 Electron smoke 的 CJS bootstrap 必须在异步加载测试模块之前同步 app.setName('OmniFlow')，避免 app ready 时使用错误的钥匙串应用身份。仅在异步模块内设置名称可能导致已有 API Key 解密失败；此次问题通过修正启动顺序解决，无需用户重存密钥，不能归因为锁屏。
 
 后续按实际使用补充 OCR、资料库文档 source，以及基于 immutable revision 的提取缓存。UI 由另一条任务维护，本轮不调整聊天附件布局。
