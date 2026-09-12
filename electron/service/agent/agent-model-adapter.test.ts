@@ -13,7 +13,7 @@ describe('trusted model adaptation', () => {
     expect(resolveAgentModelAdapter(openai, 'gpt-5.5-2026-09-01').profileId).toBe('gpt-5.5');
     expect(resolveAgentModelAdapter(openai, 'gpt-5.5-custom').source).toBe('protocol-fallback');
     expect(resolveAgentModelAdapter({ providerType: 'local' }, 'gpt-5.5').source).toBe('protocol-fallback');
-    expect(resolveAgentModelContextBudget({ ...openai, model: 'gpt-6-astra' })).toMatchObject({ contextWindowTokens: 272000, maxContextWindowTokens: 872000, source: 'catalog' });
+    expect(resolveAgentModelContextBudget({ ...openai, model: 'gpt-6-astra' })).toMatchObject({ contextWindowTokens: 1_050_000, maxContextWindowTokens: 1_050_000, source: 'catalog' });
   });
   it('uses provider wire formats and omits unsupported effort fields', () => {
     expect(buildAgentProviderRequestBody(openai, input)).toMatchObject({ reasoning_effort: 'high', parallel_tool_calls: true });

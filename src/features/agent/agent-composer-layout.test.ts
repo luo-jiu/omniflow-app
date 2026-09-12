@@ -4,13 +4,17 @@ import {
   MAX_AGENT_COMPOSER_HEIGHT,
   MIN_AGENT_COMPOSER_HEIGHT,
   INITIAL_AGENT_COMPOSER_HEIGHT,
+  AGENT_COMPOSER_CHROME_HEIGHT,
   clampAgentComposerHeight,
 } from './agent-composer-layout';
 
 describe('Agent composer automatic height', () => {
   it('uses content height within the allowed range', () => {
     expect(clampAgentComposerHeight(140)).toBe(140);
-    expect(MAX_AGENT_COMPOSER_HEIGHT).toBe(INITIAL_AGENT_COMPOSER_HEIGHT * 2);
+    expect(INITIAL_AGENT_COMPOSER_HEIGHT).toBe(120);
+    expect(MAX_AGENT_COMPOSER_HEIGHT).toBe(320);
+    expect(INITIAL_AGENT_COMPOSER_HEIGHT - AGENT_COMPOSER_CHROME_HEIGHT).toBe(76);
+    expect(MAX_AGENT_COMPOSER_HEIGHT - AGENT_COMPOSER_CHROME_HEIGHT).toBe(276);
   });
 
   it('clamps the resized height', () => {

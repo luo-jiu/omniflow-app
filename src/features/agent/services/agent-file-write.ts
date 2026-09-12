@@ -134,7 +134,7 @@ export async function executeAgentFileWrite(request: AgentToolExecutionRequest, 
     if (!Number.isSafeInteger(node.id) || Number(node.id) <= 0 || (node.libraryId !== undefined && node.libraryId !== libraryId)) throw new Error('invalid write receipt');
     const result: AgentToolResult = { ok: true, message: `已保存 ${fileName}`, data: {
       scope: 'library', path: input.path, fileName, revision, sizeBytes: contentBytes.length,
-      writeCommitState: 'committed', destination: { kind: 'library', nodeId: Number(node.id), parentId },
+      writeCommitState: 'committed', operationId: request.executionId, destination: { kind: 'library', nodeId: Number(node.id), parentId },
     } };
     // A lost UI receipt must not reverse an already committed write.
     notifyLibraryFileContentChanged({ ...request.ownerScope, libraryId, nodeId: Number(node.id) });
@@ -147,7 +147,7 @@ export async function executeAgentFileWrite(request: AgentToolExecutionRequest, 
       return { result: { ok: false, message: status === 409
         ? replacing ? '文件版本已变化，未覆盖；请重新file.read后修改。' : '同名文件已存在，未覆盖；修改前请file.read取得revision。'
         : replacing && status === 404 ? '后端条件写入接口或目标文件不存在，未写入；请更新后端并检查路径。' : '服务端拒绝写入，未提交。',
-      data: { writeCommitState: 'uncommitted' } } };
+      data: { writeCommitState: 'uncommitted', operationId: request.executionId } } };
     }
     return { result: { ok: false, message: error instanceof WriteValidationError ? error.message
       : unknown ? '写入结果尚未确认，请file.read核对目标；不要盲目重试或覆盖。'
@@ -155,7 +155,7 @@ export async function executeAgentFileWrite(request: AgentToolExecutionRequest, 
           : error instanceof UploadSessionExpiredError || error instanceof UploadSessionNotFoundError
             ? '上传会话已失效，文件未提交；可重新保存。'
             : attempted ? '文件上传失败，未提交；请检查存储可达性后重试。' : '无法准备文件写入，请检查资料库路径、存储可达性和权限。',
-    data: { writeCommitState: unknown ? 'commit_unknown' : 'uncommitted' } } };
+    data: { writeCommitState: unknown ? 'commit_unknown' : 'uncommitted', operationId: request.executionId } } };
   } finally {
     if (abortListener) deps.signal?.removeEventListener('abort', abortListener);
     if (stagedPath) {

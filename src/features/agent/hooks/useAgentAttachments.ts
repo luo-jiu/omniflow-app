@@ -3,7 +3,7 @@ import { AGENT_ATTACHMENT_MAX_BYTES, AGENT_ATTACHMENT_MAX_FILES, AGENT_ATTACHMEN
   type AgentAttachment, type AgentAttachmentScope } from '@/shared/agent/agent-attachments';
 import { importAgentAttachment, discardAgentAttachment } from '../services/agent.api';
 
-export interface AgentAttachmentDraft { key: string; name: string; size: number; attachment?: AgentAttachment; error?: string }
+export interface AgentAttachmentDraft { key: string; name: string; size: number; previewKind?: 'image' | 'file'; attachment?: AgentAttachment; error?: string }
 export function useAgentAttachments(scope: AgentAttachmentScope | null) {
   const [entries, setEntries] = React.useState<AgentAttachmentDraft[]>([]);
   const [error, setError] = React.useState('');
@@ -35,7 +35,8 @@ export function useAgentAttachments(scope: AgentAttachmentScope | null) {
     }
     setError('');
     const token = generation.current;
-    const additions = files.map(file => ({ key: crypto.randomUUID(), name: file.name || '截图.png', size: file.size }));
+    const additions: AgentAttachmentDraft[] = files.map(file => ({ key: crypto.randomUUID(), name: file.name || '截图.png', size: file.size,
+      previewKind: /^(image\/(png|jpeg|webp))$/i.test(file.type) ? 'image' : 'file' }));
     update(items => [...items, ...additions]);
     files.forEach((file, index) => {
       const slot = additions[index];

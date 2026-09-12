@@ -9,10 +9,13 @@ export function formatAgentRunElapsed(run: AgentRunSnapshot, now: number): strin
   const end = isAgentRunActive(run) ? now : Date.parse(run.finishedAt || run.updatedAt);
   const elapsed = Math.max(0, Math.floor((end - Date.parse(run.createdAt)) / 1000));
   if (!Number.isFinite(elapsed)) return run.status === 'cancelled' ? '任务已停止' : '用时 --';
-  const hours = Math.floor(elapsed / 3600);
+  const days = Math.floor(elapsed / 86400);
+  const hours = Math.floor(elapsed % 86400 / 3600);
   const minutes = Math.floor(elapsed % 3600 / 60);
   const seconds = elapsed % 60;
-  const duration = `${hours ? `${hours}h ` : ''}${minutes}m ${seconds}s`;
+  const duration = [[days, 'd'], [hours, 'h'], [minutes, 'm'], [seconds, 's']]
+    .filter(([value]) => Number(value) > 0)
+    .map(([value, unit]) => `${value}${unit}`).join(' ') || '0s';
   return run.status === 'cancelled' ? `你在 ${duration} 停止了任务` : `用时 ${duration}`;
 }
 

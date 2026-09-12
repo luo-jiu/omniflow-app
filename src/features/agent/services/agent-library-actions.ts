@@ -110,7 +110,7 @@ export async function executeAgentLibraryAction(request: AgentToolExecutionReque
     const affectedParentIds = Array.from(new Set([parentId, ...(operation === 'file.move' && source ? [source.parentId] : [])].filter(id => id > 0)));
     const label = { 'directory.create': '已创建文件夹', 'file.rename': '已重命名', 'file.move': '已移动', 'file.copy': '已复制', 'recycle.restore': '已恢复' }[operation];
     committed = { ok: true, message: `${label} ${nextName}${nextExt ? '.' + nextExt : ''}`, data: {
-      mutationCommitState: 'committed', operation, nodeId, name: nextName, ext: nextExt, affectedParentIds,
+      mutationCommitState: 'committed', operationId: request.executionId, operation, nodeId, name: nextName, ext: nextExt, affectedParentIds,
       destination: { kind: 'library', nodeId, parentId }, ...(copiedCount !== undefined ? { copiedCount } : {}),
     } };
     try { await deps.onCommitted?.(committed); } catch { /* Final completion retries the receipt. */ }
@@ -136,7 +136,7 @@ export async function executeAgentLibraryAction(request: AgentToolExecutionReque
     const rejected = error instanceof IpcRequestError && error.status >= 400 && error.status < 500 && ![408, 429].includes(error.status);
     const unknown = attempted && !rejected;
     return { result: { ok: false, message: unknown ? '操作提交状态无法确认，请核对来源、目标或回收站，不要盲目重试'
-      : error instanceof Error ? error.message : '内部文件操作失败', data: { mutationCommitState: unknown ? 'commit_unknown' : 'uncommitted' } } };
+      : error instanceof Error ? error.message : '内部文件操作失败', data: { mutationCommitState: unknown ? 'commit_unknown' : 'uncommitted', operationId: request.executionId } } };
   }
 }
 

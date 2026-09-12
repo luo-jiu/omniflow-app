@@ -16,5 +16,5 @@ export function selectAgentLiveStatus(runs: AgentRunSnapshot[], messages: AgentM
     return { runId: run.id, kind: 'working' as const, label: run.currentStep! };
   }
   return { runId: run.id, kind: 'working' as const,
-    label: run.status === 'preparing' ? '正在准备' : '正在处理' };
+    label: '正在思考' };
 }

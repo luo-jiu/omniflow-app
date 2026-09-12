@@ -21,7 +21,7 @@ import { normalizeAgentPreparedActionPublic } from '../../../src/shared/agent/ag
 
 export { estimateAgentTextTokens } from './agent-token-estimator';
 
-export const DEFAULT_AGENT_CONTEXT_WINDOW_TOKENS = 16_384;
+export const DEFAULT_AGENT_CONTEXT_WINDOW_TOKENS = 128_000;
 const DEFAULT_EFFECTIVE_CONTEXT_WINDOW_PERCENT = 100;
 const DEFAULT_OUTPUT_RESERVE_TOKENS = 4_096;
 const DEFAULT_TOOL_LOOP_RESERVE_TOKENS = 2_048;

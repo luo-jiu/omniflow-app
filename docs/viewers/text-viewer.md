@@ -44,6 +44,8 @@
 
 `text-viewer` 当前继续使用 CodeMirror 6，不引入富文本编辑模型。语法高亮分三层：
 
+Markdown 默认进入渲染模式；底部使用单个图标按钮在渲染与 CodeMirror 源码之间切换。渲染模式显示 Eye，源码模式显示 Code2，颜色区分当前模式，不改变正文、草稿或保存状态。
+
 - 官方 Lezer parser：用于 JavaScript / TypeScript / JSON / Markdown / HTML / CSS / XML / Python / Go / Rust / Java / C/C++ / SQL / YAML / PHP 等主流代码文件。
 - `@codemirror/legacy-modes` stream parser：用于 Shell / PowerShell / Dockerfile / TOML / Ruby / Perl / Lua / diff / nginx / protobuf / Swift / R / CMake / Kotlin / SCSS / Sass / Less / Stylus 等轻量兼容场景。
 - 纯文本：用于 txt / log / csv / tsv / subtitle / ignore 文件等不适合强行套 parser 的内容。

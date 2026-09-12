@@ -1,5 +1,5 @@
 import React from 'react';
-import { IconAlertCircle, IconShrink, IconMore } from '@douyinfe/semi-icons';
+import { IconAlertCircle, IconShrink } from '@douyinfe/semi-icons';
 import styled from 'styled-components';
 
 import type {
@@ -18,6 +18,7 @@ import {
 import AgentToolActivityCard from './AgentToolActivityCard';
 import AgentToolActivityGroup from './AgentToolActivityGroup';
 import AgentMessageContent from './AgentMessageContent';
+import { AgentMessageAttachments } from './AgentAttachmentStrip';
 import AgentActivityText from './AgentActivityText';
 import { selectAgentLiveStatus } from '../agent-live-status';
 import { canCollapseAgentProcess, isAgentRunActive, shouldAutoCollapseAgentProcess, timelineItemRunId } from '../agent-run-presentation';
@@ -44,6 +45,7 @@ const Timeline = styled.div`
       visibility 0s;
   }
   .agent-timeline-entry-inner { min-height: 0; overflow: hidden; }
+  .agent-timeline-entry[data-empty='true'] { display: none; }
   .agent-timeline-entry-content { display: flex; flex-direction: column; min-width: 0; }
   .agent-timeline-entry[aria-hidden='true'] {
     grid-template-rows: 0fr;
@@ -66,11 +68,13 @@ const LiveStatus = styled.div`
   display: flex;
   align-items: flex-start;
   gap: 7px;
-  min-height: 24px;
+  min-height: 0;
+  width: 100%;
   max-width: 100%;
-  padding: 2px 3px;
-  font-size: 13px;
-  line-height: 20px;
+  padding: 4px 0;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.65;
   color: var(--app-text-muted);
   > .semi-icon { flex: none; width: 20px; height: 20px; }
 `;
@@ -309,7 +313,8 @@ export default function AgentTimeline({
         }
         if (item.message.role === 'user') {
           return (
-            <UserMessageBubble key={item.key}>{item.message.content}</UserMessageBubble>
+            <UserMessageBubble key={item.key}><AgentMessageAttachments attachments={item.message.attachments}
+              scope={ownerScope ? { ownerScope, libraryId } : null} sessionId={item.message.sessionId} />{item.message.content}</UserMessageBubble>
           );
         }
         return (
@@ -339,6 +344,7 @@ export default function AgentTimeline({
         return <React.Fragment key={item.key}>
           {!user ? elapsed : null}
           <div className="agent-timeline-entry" data-user={user}
+            data-empty={item.type === 'assistant-work-item' && item.item.assistantItem.status === 'streaming' && !item.item.content.trim() || undefined}
             data-agent-question={user && item.type === 'message' ? item.message.id : undefined}
             aria-hidden={collapsed || undefined} {...(collapsed ? { inert: '' } : {})}>
             <div className="agent-timeline-entry-inner">
@@ -353,7 +359,7 @@ export default function AgentTimeline({
       ))}
       {liveStatus ? (
         <LiveStatus role="status" aria-live="polite" data-agent-live-status={liveStatus.kind} key={`live:${liveStatus.runId}`}>
-          {liveStatus.kind === 'compaction' ? <IconShrink aria-hidden="true" /> : <IconMore aria-hidden="true" />}
+          {liveStatus.kind === 'compaction' ? <IconShrink aria-hidden="true" /> : null}
           <AgentActivityText $active>{liveStatus.label}</AgentActivityText>
         </LiveStatus>
       ) : null}

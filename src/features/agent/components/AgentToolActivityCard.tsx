@@ -3,10 +3,10 @@ import {
   IconAlertCircle,
   IconFile,
   IconFolder,
-  IconSpin,
   IconTickCircle,
 } from '@douyinfe/semi-icons';
 import styled from 'styled-components';
+import OutlineIcon from '@/components/ui/outline-icon';
 
 import { workspaceScrollbarStyles } from '@/components/ui/workspace-scrollbar';
 import { normalizeAgentPreparedActionPublic } from '@/shared/agent/agent-prepared-action';
@@ -93,9 +93,11 @@ const ActivityCard = styled.article`
     color: var(--agent-tool-record-color);
   }
 
-  &[data-status='preparing'] .agent-activity-status-icon svg,
-  &[data-status='running'] .agent-activity-status-icon svg {
-    animation: none;
+  .agent-activity-spinner { display: inline-flex; align-items: center; justify-content: center; line-height: 0; }
+  &[data-status='preparing'] .agent-activity-spinner svg,
+  &[data-status='running'] .agent-activity-spinner svg {
+    transform-origin: center;
+    animation: agent-activity-spin 900ms linear infinite;
   }
 
   .agent-activity-title {
@@ -550,7 +552,7 @@ function ActivityStatusIcon({ status }: { status: AgentToolActivitySnapshot['sta
   if (status === 'failed' || status === 'cancelled' || status === 'interrupted') {
     return <IconAlertCircle aria-hidden="true" />;
   }
-  return <IconSpin aria-hidden="true" />;
+  return <span className="agent-activity-spinner"><OutlineIcon name="loading" /></span>;
 }
 
 function renderBlock(
@@ -905,7 +907,7 @@ export default function AgentToolActivityCard({
   }
 
   const active = activity.status === 'running' || activity.status === 'preparing';
-  const nameOnlyRead = activity.call.name === 'file.read' && (activity.status === 'completed' || active);
+  const nameOnlyRead = ['file.read', 'attachment.read'].includes(activity.call.name) && (activity.status === 'completed' || active);
   const blocks = nameOnlyRead ? [] : buildAgentToolPresentation(activity, libraryId);
   const summary = buildAgentToolSummary(activity, libraryId);
   const forcedBody = activity.status === 'failed' || activity.status === 'interrupted'

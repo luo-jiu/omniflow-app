@@ -90,7 +90,7 @@ export function resolveAgentModelContextBudget(
     ? Math.max(catalog?.[1] ?? knownCatalogWindow, positiveLimit(metadata?.maxContextWindowTokens) ?? 0)
     : positiveLimit(metadata?.maxContextWindowTokens) ?? remoteWindow ?? catalog?.[1];
   const contextWindowTokens = Math.min(
-    override.contextWindowTokens ?? knownCatalogWindow ?? remoteWindow ?? 16_384,
+    override.contextWindowTokens ?? knownCatalogWindow ?? remoteWindow ?? 128_000,
     maxContextWindowTokens ?? MAX_AGENT_CONTEXT_TOKENS,
   );
   const remoteOutput = positiveLimit(metadata?.outputReserveTokens, 1_000_000);

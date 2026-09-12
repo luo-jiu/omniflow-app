@@ -2,12 +2,17 @@
 
 ## 当前范围
 
+图片预览遮罩采用70%黑色压暗与10px backdrop blur，只虚化背后的界面，图片和操作控件保持清晰；不对预览容器使用 filter:blur，遮罩点击关闭和缩放行为不变。
+
 输入框上方按加入顺序显示图片缩略图和文件名称，支持粘贴图片、选择多个文件、拖入文件及逐项移除。附件准备中或失败时不能发送；纯文本粘贴仍交给 textarea。允许只发送附件。PNG/JPEG/WebP 和 UTF-8 文本可直接读取；PDF/DOCX/XLSX/PPTX 通过文档工具处理，其他二进制保留副本但明确报告没有读取能力。详见 [文档处理调研与实现](agent-document-processing.md)。
 
+Composer 附件区上/左/右留 10px，与下方文字区间隔 10px，单行排列且不换行；图片框 82×72px，仅显示缩略图（名称保留在 tooltip/alt），其他文件为 164×72px，左侧文件图标、右侧单行文件名，超长省略。文件卡给移除按钮留独立空间；准备中保留占位，失败原因仍可见。超出输入框宽度时在附件行下方、textarea 上方横向滚动，复用 workspaceScrollbarStyles。历史附件复用同一图像/文件展示结构但不显示移除按钮。草稿 previewKind 只预留图片布局，不作为文件格式或执行权限事实，导入完成以 main 返回的 kind 为准。
 
 ## 所有权与持久化
 
+点击已准备好的图片使用 Semi ImagePreview 打开遮罩预览，支持缩放、Esc/遮罩/关闭按钮退出并恢复焦点。先展示缩略图，再通过 `agent:attachment:preview` 读取主进程保存的归一化 PNG（最长边 2048px）；失败明确提示仅有缩略图。该 IPC 仅允许主窗口调用，验证 owner/library/id；已提交图片还必须提供匹配的 sessionId，未提交草稿无会话绑定时才允许不带 sessionId。关闭或切换 scope 后迟到结果不更新 UI，不向 renderer 返回宿主路径，也不触发模型请求。
 
+当前布局：附件横向间距10px，上/左各10px；附件区下方文字区顶部padding为10px，不重复叠加旧的18px输入padding。文字区域（含42px底栏及2px外框）初始120px、最大320px，独立于附件区计高，正文超限内部滚动。移除按钮18px、X图形10px，距上/右各2px，padding清零并居中。输入placeholder为“从这里开始...”。
 
 - renderer 的附件草稿由 useAgentAttachments 管理；每个异步导入先占据固定位置，完成顺序不改变展示顺序。移除、切库或卸载后晚到的导入结果会清理，不写回新上下文。发送失败的正文和附件由 useAgentDraftRecovery 作为完整草稿排队，只有当前输入为空且没有准备/执行任务时恢复；用户期间输入的新正文或附件保持独立，不与失败消息混合。新建/切换会话及卸载时清理未恢复队列。
 - 主进程经 requireMainWindow 限定 attachment import/discard IPC；仅接受有大小上限的字节，不接受任意宿主路径。主进程重新检测格式、校验 UTF-8，并生成 opaque ID。原文件移动不会改变已附加副本。

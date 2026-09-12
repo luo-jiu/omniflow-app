@@ -4,6 +4,7 @@ import { attachmentInspectTool, attachmentViewTool, attachmentQueryTool } from '
 import type { AgentTool } from '../agent-tool-registry';
 import type { AgentLibraryQuery } from '@/shared/agent/agent-library-query';
 import { assessFileScope, fileContentTool } from './file-content-tool';
+import { libraryDocumentTools } from './library-document-tools';
 import { queryAgentHostFiles } from '../agent-host-file-query';
 import { agentGlobProperty, createAgentFileGlob } from '../agent-file-glob';
 import { searchAgentFiles } from '../agent-file-search';
@@ -146,7 +147,7 @@ export const fileStatTool: AgentTool = {
 };
 
 export function getBuiltInReadTools(): AgentTool[] {
-  return [fileListTool, fileStatTool, fileSearchTool, fileResolveTool, fileContentTool, fileGrepTool, attachmentReadTool, attachmentInspectTool, attachmentViewTool, attachmentQueryTool];
+  return [fileListTool, fileStatTool, fileSearchTool, fileResolveTool, fileContentTool, fileGrepTool, attachmentReadTool, attachmentInspectTool, attachmentViewTool, attachmentQueryTool, ...libraryDocumentTools];
 }
 
 export const fileSearchTool: AgentTool = {

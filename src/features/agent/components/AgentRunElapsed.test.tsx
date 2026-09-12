@@ -19,11 +19,11 @@ describe('Agent run timer lifecycle', () => {
     const props = { run, collapsible: false, expanded: false, onToggle: vi.fn() };
     act(() => { renderer = TestRenderer.create(<AgentRunElapsed {...props} />); });
     act(() => { vi.advanceTimersByTime(2000); });
-    expect(JSON.stringify(renderer.toJSON())).toContain('用时 0m 2s');
+    expect(JSON.stringify(renderer.toJSON())).toContain('用时 2s');
     act(() => renderer.update(<AgentRunElapsed {...props} run={{ ...run, status: 'completed', finishedAt: '2026-09-09T00:00:03Z' }} />));
     expect(vi.getTimerCount()).toBe(0);
     act(() => { vi.advanceTimersByTime(10000); });
-    expect(JSON.stringify(renderer.toJSON())).toContain('用时 0m 3s');
+    expect(JSON.stringify(renderer.toJSON())).toContain('用时 3s');
     act(() => renderer.unmount());
     expect(vi.getTimerCount()).toBe(0);
   });

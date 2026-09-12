@@ -1,7 +1,7 @@
-import { Activity, ArrowLeft, ArrowRight, Bookmark, CloudUpload, Copy, FolderClosed, Globe, History, House, Plus, RotateCw, Settings, SlidersHorizontal, Sparkles, Star, Trash2, Wrench } from 'lucide-react';
+import { Activity, ArrowLeft, ArrowRight, Bookmark, CloudUpload, Copy, FolderClosed, Globe, History, House, LoaderCircle, Plus, RotateCw, Settings, SlidersHorizontal, Sparkles, Star, Trash2, Wrench } from 'lucide-react';
 import styled from 'styled-components';
 
-const icons = { bookmark: Bookmark, upload: CloudUpload, copy: Copy, history: History, home: House, plus: Plus, settings: Settings, trash: Trash2, star: Star, activity: Activity, wrench: Wrench, agent: Sparkles, folder: FolderClosed, tools: SlidersHorizontal, browser: Globe, refresh: RotateCw, back: ArrowLeft, forward: ArrowRight };
+const icons = { bookmark: Bookmark, upload: CloudUpload, copy: Copy, history: History, home: House, plus: Plus, settings: Settings, trash: Trash2, star: Star, activity: Activity, wrench: Wrench, agent: Sparkles, folder: FolderClosed, tools: SlidersHorizontal, browser: Globe, refresh: RotateCw, back: ArrowLeft, forward: ArrowRight, loading: LoaderCircle };
 
 const Slot = styled.span`
   display: inline-flex;

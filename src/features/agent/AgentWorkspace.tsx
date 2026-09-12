@@ -1,4 +1,5 @@
 import React from 'react';
+import { AgentAttachmentStrip } from './components/AgentAttachmentStrip';
 import { createPortal } from 'react-dom';
 import OutlineIcon from '@/components/ui/outline-icon';
 import { Toast } from '@douyinfe/semi-ui';
@@ -31,6 +32,7 @@ import AgentSessionManager from './components/AgentSessionManager';
 import AgentTimeline from './components/AgentTimeline';
 import AgentSubmitButton from './components/AgentSubmitButton';
 import AgentPermissionControl from './components/AgentPermissionControl';
+import AgentSessionPeek from './components/AgentSessionPeek';
 import { createAgentCompositionGuard, shouldSubmitAgentComposer } from './agent-composer-keyboard';
 import AgentConversationIndex from './components/AgentConversationIndex';
 import {
@@ -40,6 +42,7 @@ import {
 } from './agent-model-preferences';
 import {
   clampAgentComposerHeight,
+  AGENT_COMPOSER_CHROME_HEIGHT,
   INITIAL_AGENT_COMPOSER_HEIGHT,
   MAX_AGENT_COMPOSER_HEIGHT,
   MIN_AGENT_COMPOSER_HEIGHT,
@@ -91,6 +94,7 @@ const agentColumnStyles = css`
   max-width: 100%;
   min-width: min(560px, 100%);
   margin-inline: auto;
+  @container (min-width: 900px) { transform: translateX(-24px); }
 `;
 
 const AgentContent = styled.div`
@@ -170,13 +174,13 @@ const Composer = styled.form`
   textarea {
     display: block;
     width: 100%;
-    min-height: ${MIN_AGENT_COMPOSER_HEIGHT}px;
-    max-height: ${MAX_AGENT_COMPOSER_HEIGHT}px;
+    min-height: ${MIN_AGENT_COMPOSER_HEIGHT - AGENT_COMPOSER_CHROME_HEIGHT}px;
+    max-height: ${MAX_AGENT_COMPOSER_HEIGHT - AGENT_COMPOSER_CHROME_HEIGHT}px;
     overflow-y: auto;
     resize: none;
     border: 0;
     outline: 0;
-    padding: 18px 16px 8px;
+    padding: 10px 10px 8px;
     background: transparent;
     color: var(--app-text);
     font: inherit;
@@ -190,7 +194,8 @@ const Composer = styled.form`
   }
 
   .agent-composer-footer {
-    min-height: 42px;
+    height: 42px;
+    flex: none;
     display: flex;
     align-items: center;
     gap: 10px;
@@ -298,6 +303,7 @@ export default function AgentWorkspace({
   const [configError, setConfigError] = React.useState<string | null>(null);
   const [composerHeight, setComposerHeight] = React.useState(INITIAL_AGENT_COMPOSER_HEIGHT);
   const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+  const attachmentInputRef = React.useRef<HTMLInputElement>(null);
   const compositionGuard = React.useRef(createAgentCompositionGuard());
   const composerFrameRef = React.useRef<HTMLDivElement>(null);
   const [composerDockHeight, setComposerDockHeight] = React.useState(0);
@@ -456,7 +462,8 @@ export default function AgentWorkspace({
     setSessionsTotal(0);
     setManagerMode(null);
     setSessionQuery('');
-  }, [sessionScopeKey]);
+    void loadSessions();
+  }, [loadSessions, sessionScopeKey]);
 
   React.useEffect(() => {
     if (managerMode !== 'sessions') return;
@@ -478,9 +485,9 @@ export default function AgentWorkspace({
     const textarea = textareaRef.current;
     if (!textarea) return;
     const measure = () => {
-      textarea.style.height = `${INITIAL_AGENT_COMPOSER_HEIGHT}px`;
-      const height = clampAgentComposerHeight(textarea.scrollHeight);
-      textarea.style.height = `${height}px`;
+      textarea.style.height = `${INITIAL_AGENT_COMPOSER_HEIGHT - AGENT_COMPOSER_CHROME_HEIGHT}px`;
+      const height = clampAgentComposerHeight(textarea.scrollHeight + AGENT_COMPOSER_CHROME_HEIGHT);
+      textarea.style.height = `${height - AGENT_COMPOSER_CHROME_HEIGHT}px`;
       setComposerHeight(height);
     };
     measure();
@@ -592,7 +599,7 @@ export default function AgentWorkspace({
       ? '当前上下文：资料库根目录'
       : '当前上下文：未选择文件';
   const canSubmit = Boolean(
-    ownerScope && session.draft.trim() && modelPreferences.model && activeProfile && !loadingConfig
+    ownerScope && (session.draft.trim() || session.attachments.entries.length) && session.attachments.ready && modelPreferences.model && activeProfile && !loadingConfig
     && !resume.loading && !resume.failed,
   );
   const workspaceError = ownerScope
@@ -729,20 +736,12 @@ export default function AgentWorkspace({
       '--agent-scrollbar-width': `${scrollbarWidth}px`,
     } as React.CSSProperties}>
       {toolbarTarget ? createPortal(<>
-            <button
-              aria-label="管理 Agent 会话"
-              className="toolbar-action-btn"
-              disabled={sessionBusy}
-              onClick={() => {
+            <AgentSessionPeek sessions={sessions} total={sessionsTotal} activeSessionId={currentSessionId}
+              loading={sessionsLoading} onOpen={target => { void handleOpenSession(target); }} onManage={() => {
                 setSessionQuery('');
                 setSessionsLoading(true);
                 setManagerMode('sessions');
-              }}
-              title="会话记录"
-              type="button"
-            >
-              <OutlineIcon name="history" />
-            </button>
+              }} onNew={handleNewSession} />
             <button
               aria-label="管理 Agent 长期记忆"
               className="toolbar-action-btn"
@@ -873,15 +872,23 @@ export default function AgentWorkspace({
         onNavigate={() => { indexNavigationRef.current = true; shouldFollowScrollRef.current = false; }}
       /> : null}
         {!managerMode ? <ComposerFrame ref={composerFrameRef}>
-          <Composer onSubmit={(event) => {
+          <Composer onDragOver={event => { if (event.dataTransfer.types.includes('Files')) event.preventDefault(); }}
+            onDrop={event => { if (event.dataTransfer.files.length) { event.preventDefault(); session.attachments.add(Array.from(event.dataTransfer.files)); } }}
+            onSubmit={(event) => {
             event.preventDefault();
             if (resume.loading || resume.failed) return;
             shouldFollowScrollRef.current = true;
             void session.submit();
           }}>
+          <AgentAttachmentStrip entries={session.attachments.entries} onRemove={session.attachments.remove}
+            scope={ownerScope ? { ownerScope, libraryId } : null} />
+          {session.attachments.error && <div role="alert">{session.attachments.error}</div>}
+          <input ref={attachmentInputRef} type="file" multiple hidden aria-label="选择图片或文本文件"
+            onChange={event => { session.attachments.add(Array.from(event.target.files || [])); event.target.value = ''; }} />
           <textarea
             ref={textareaRef}
             aria-label="Agent 输入"
+            onPaste={event => { const files = Array.from(event.clipboardData.files); if (files.length) { event.preventDefault(); session.attachments.add(files); } }}
             onCompositionStart={() => compositionGuard.current.start()}
             onCompositionEnd={event => compositionGuard.current.end(event.timeStamp)}
             onKeyUp={event => compositionGuard.current.keyUp(event.key)}
@@ -895,11 +902,16 @@ export default function AgentWorkspace({
                 void session.submit();
               }
             }}
-            placeholder={loadingConfig ? '正在读取 AI 服务配置…' : '输入你想让 Agent 完成的事情…'}
-            style={{ height: `${composerHeight}px` }}
+            placeholder="从这里开始..."
+            style={{ height: `${composerHeight - AGENT_COMPOSER_CHROME_HEIGHT}px` }}
             value={session.draft}
           />
           <div className="agent-composer-footer">
+            <button type="button" aria-label="添加图片或文本文件" title="添加图片或文本文件"
+              onClick={() => attachmentInputRef.current?.click()}
+              style={{ display: 'grid', placeItems: 'center', width: 28, height: 28, flexShrink: 0, border: 0, background: 'transparent', cursor: 'pointer' }}>
+              <OutlineIcon name="plus" />
+            </button>
             <span className="agent-context-label" title={contextLabel}>{contextLabel}</span>
             <AIModelSettingsControl
               availableModels={models}

@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import OutlineIcon from './outline-icon';
 
 describe('Workspace outline icons', () => {
-  it.each(['copy', 'history', 'bookmark', 'plus', 'home', 'upload', 'trash', 'settings', 'star', 'activity', 'wrench', 'agent', 'folder', 'tools', 'browser', 'refresh', 'back', 'forward'] as const)(
+  it.each(['copy', 'history', 'bookmark', 'plus', 'home', 'upload', 'trash', 'settings', 'star', 'activity', 'wrench', 'agent', 'folder', 'tools', 'browser', 'refresh', 'back', 'forward', 'loading'] as const)(
     'renders %s as a decorative 16px outline with stable physical stroke width', name => {
       const sheet = new ServerStyleSheet();
       try {

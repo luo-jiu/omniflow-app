@@ -112,10 +112,19 @@ export interface AgentToolMainPreparationSealResult {
 }
 
 export interface AgentToolExecutionContext {
+  readOperationJournal?: (operationId: string, signal: AbortSignal) => Promise<{
+    operationId: string;
+    toolName: string;
+    status: 'committed' | 'uncommitted' | 'commit_unknown' | 'unknown';
+    result?: AgentToolResult;
+  } | undefined>;
   operateAttachment?: (operation: 'inspect' | 'view' | 'query', query: import('./documents/attachment-documents').AgentAttachmentQuery) => Promise<unknown>;
   readAttachment?: (input: import('./documents/attachment-documents').AgentAttachmentQuery) => Promise<unknown>;
   readOutputTokenBudget?: number;
   readLibraryText?: (nodeId: number, signal: AbortSignal) => Promise<Uint8Array>;
+  readLibraryDocument?: (nodeId: number, signal: AbortSignal) => Promise<Uint8Array>;
+  readLibraryDocumentImage?: (input: { nodeId: number; format: import('./documents/document.types').AgentDocumentFormat; page?: number }, signal: AbortSignal) => Promise<unknown>;
+  sessionId?: string;
   readLibraryMetadata?: (
     query: import('@/shared/agent/agent-library-query').AgentLibraryQuery,
     signal: AbortSignal,

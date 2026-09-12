@@ -1,4 +1,5 @@
-import { net } from 'electron';
+import { app, net } from 'electron';
+import { createHttpFaultInjector } from '../service/http-fault';
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
@@ -44,6 +45,7 @@ function buildFileContentDisposition(fileName: string): string {
 }
 
 export function registerHttpIpc(ipcMain: Electron.IpcMain) {
+  const consumeHttpFault = createHttpFaultInjector(!app.isPackaged && Boolean(process.env.VITE_DEV_SERVER_URL), process.env.OMNIFLOW_HTTP_FAULT || '');
   type PresignedPutRuntime = {
     uploadId: string;
     partNumber: number;
@@ -124,6 +126,9 @@ export function registerHttpIpc(ipcMain: Electron.IpcMain) {
           body += chunk;
         });
         response.on("end", () => {
+          const fault = consumeHttpFault(options.method || 'GET', url, response.statusCode);
+          if (fault === 'drop-response') { reject(new Error('synthetic network response drop')); return; }
+          if (fault === 'timeout') { setTimeout(() => reject(new Error('synthetic network timeout')), 5000); return; }
           runtimeLogger.debug("http:fetch body bytes:", Buffer.byteLength(body));
           let parsedBody: any;
           try {

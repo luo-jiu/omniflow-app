@@ -135,6 +135,11 @@ describe('resolveAgentModelContextBudget', () => {
       .toMatchObject({ contextWindowTokens: 32_000 });
   });
 
+  it('uses a 128K fallback for an unknown model instead of the obsolete 16K fallback', () => {
+    expect(resolveAgentModelContextBudget({ baseUrl: 'https://proxy.example/v1', model: 'unknown-model', providerType: 'openai' }))
+      .toMatchObject({ contextWindowTokens: 128_000, outputReserveTokens: 4_096, source: 'fallback' });
+  });
+
   it('ignores invalid metadata and rejects invalid user overrides', () => {
     expect(parseAgentModelMetadata({ data: [{ id: 'a', context_window: -1 }, { id: 'b', context_length: '200000' }] }).size).toBe(0);
     for (const override of [{ contextWindowTokens: -1 }, { contextWindowTokens: Infinity }, { outputReserveTokens: 1_000_000 }]) {

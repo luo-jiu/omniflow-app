@@ -1,5 +1,7 @@
 import React from 'react';
 import TestRenderer, { act } from 'react-test-renderer';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { ServerStyleSheet } from 'styled-components';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type {
@@ -17,7 +19,6 @@ vi.mock('@douyinfe/semi-icons', () => ({
   IconChevronRightStroked: () => null,
   IconFile: () => null,
   IconFolder: () => null,
-  IconSpin: () => null,
   IconTickCircle: () => null,
 }));
 
@@ -165,6 +166,24 @@ afterEach(() => {
 });
 
 describe('AgentToolActivityCard Shell presentation', () => {
+  it('animates only the active loading glyph and provides reduced-motion fallback', () => {
+    const activity: AgentToolActivitySnapshot = { id: 'write', runId: 'r', sessionId: 's', revision: 1,
+      ordinal: 1, createdAt: '2026-09-10T00:00:00Z', status: 'running', permissionBehavior: 'allow',
+      call: { id: 'c', name: 'file.write', input: {} } };
+    const sheet = new ServerStyleSheet();
+    try {
+      const html = renderToStaticMarkup(sheet.collectStyles(cardElement(activity)));
+      expect(html).toContain('agent-activity-spinner');
+      expect(html).toContain('stroke-width="1.25"');
+      expect(html).toContain('lucide-loader-circle');
+      const css = sheet.getStyleTags();
+      expect(css).toContain('animation:agent-activity-spin 900ms linear infinite');
+      expect(css).toContain('prefers-reduced-motion');
+      expect(css).toContain('animation:none!important');
+      expect(renderToStaticMarkup(cardElement({ ...activity, status: 'completed' }))).not.toContain('agent-activity-spinner');
+      expect(renderToStaticMarkup(cardElement({ ...activity, call: { ...activity.call, name: 'file.read' } }))).not.toContain('agent-activity-spinner');
+    } finally { sheet.seal(); }
+  });
   it('shows an active filename with shimmer, no extra status or body, and stops on completion', () => {
     const activity: AgentToolActivitySnapshot = {
       ...shellActivity(), preparation: undefined, result: undefined, status: 'running',

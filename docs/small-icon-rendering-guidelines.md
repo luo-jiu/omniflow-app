@@ -24,6 +24,8 @@
 
 ## 2. 当前结论
 
+工具准备/执行中的加载圈使用 OutlineIcon 的 LoaderCircle，统一16px与1.25px实际描边，900ms匀速旋转；只有加载圈旋转，文档/完成/失败图标保持静止，reduced-motion下停用。
+
 刷新（文件/库列表/浏览器）统一为 RotateCw；浏览器前进/后退为 ArrowRight/ArrowLeft，收藏、资源捕获面板、设置复用 Star/Activity/Settings。均经 OutlineIcon 使用16px、1.25px实际描边，收藏保持空心并以主题色和 aria-pressed 表达选中，不因旧 Semi 星标画布不同缩小。
 
 资料库导航与侧栏展开按钮的当前态统一使用局部 --workspace-nav-accent：亮色 #7850b8、暗色 #bd9af2。普通图标保持中性灰，悬停即时提亮，不再混用青色与绿色；该调整不改变全局成功/错误状态或索引玫瑰色语义。

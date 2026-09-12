@@ -29,7 +29,8 @@ describe('Agent live status', () => {
     expect(selectAgentLiveStatus([run], [], [tool])).toBeNull();
     expect(selectAgentLiveStatus([run], [message], [])).toBeNull();
     expect(selectAgentLiveStatus([run], [{ ...message, assistantItem: { ...message.assistantItem, phase: 'final' } }], [])).toBeNull();
-    expect(selectAgentLiveStatus([run], [{ ...message, content: '' }], [])?.label).toBe('正在处理');
+    expect(selectAgentLiveStatus([run], [{ ...message, content: '' }], [])?.label).toBe('正在思考');
+    expect(selectAgentLiveStatus([{ ...run, status: 'preparing' }], [], [])?.label).toBe('正在思考');
   });
   it.each(['completed', 'failed', 'cancelled', 'interrupted', 'awaiting_approval', 'awaiting_interaction'] as const)(
     'does not animate a %s run', status => {
@@ -38,6 +39,6 @@ describe('Agent live status', () => {
   );
   it('gives pending user decisions priority and ignores other runs', () => {
     expect(selectAgentLiveStatus([{ ...run, currentStep: '整理当前任务上下文' }], [], [{ ...tool, status: 'awaiting_approval' }])).toBeNull();
-    expect(selectAgentLiveStatus([run], [{ ...message, runId: 'other' }], [{ ...tool, runId: 'other' }])?.label).toBe('正在处理');
+    expect(selectAgentLiveStatus([run], [{ ...message, runId: 'other' }], [{ ...tool, runId: 'other' }])?.label).toBe('正在思考');
   });
 });

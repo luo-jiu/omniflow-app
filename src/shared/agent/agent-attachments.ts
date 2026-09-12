@@ -18,6 +18,7 @@ export interface AgentAttachment {
 
 export interface AgentAttachmentScope { ownerScope: AgentOwnerScope; libraryId: number }
 export interface AgentAttachmentImport extends AgentAttachmentScope { name: string; base64: string }
+export interface AgentAttachmentPreviewRequest extends AgentAttachmentScope { id: string; sessionId?: string }
 
 export function attachmentManifest(items: readonly AgentAttachment[], imagesIncluded = true): string {
   if (!items.length) return '';

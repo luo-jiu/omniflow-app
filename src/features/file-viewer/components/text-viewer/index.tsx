@@ -2,6 +2,9 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { Button, Input, Modal, Spin, Toast } from '@douyinfe/semi-ui';
 import { IconCopyAdd, IconDownload, IconSave } from '@douyinfe/semi-icons';
 import CodeMirror from '@uiw/react-codemirror';
+import { Code2, Eye } from 'lucide-react';
+import Markdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { keymap, EditorView, type ViewUpdate } from '@codemirror/view';
 import type { Extension } from '@codemirror/state';
 import { useTheme } from '@/hooks/useTheme';
@@ -155,6 +158,7 @@ const TextViewer: React.FC<TextViewerProps> = ({
   const saveInFlightRef = useRef(false);
   const downloadInFlightRef = useRef(false);
   const [wordWrap, setWordWrap] = useState(false);
+  const [markdownSourceMode, setMarkdownSourceMode] = useState(false);
   const contentRef = useRef('');
   const draftErrorShownRef = useRef(false);
   const draftKeyRef = useRef<ViewerDraftKey | null>(null);
@@ -193,6 +197,8 @@ const TextViewer: React.FC<TextViewerProps> = ({
   resourceIdentityRef.current = resourceIdentity;
   const canUseEditorContent = active && content !== null && !isLoading && !errorMessage && draftRecovery === null;
   useEffect(() => { setSaveAsVisible(false); }, [active, resourceIdentity]);
+  const isMarkdown = /\.(md|markdown)$/iu.test(String(fileName || ''));
+  useEffect(() => { setMarkdownSourceMode(false); }, [resourceIdentity, fileName]);
 
   const syncRetentionPin = useCallback(() => {
     const nextPinned = isDirtyRef.current && !draftPersistedRef.current;
@@ -874,6 +880,10 @@ const TextViewer: React.FC<TextViewerProps> = ({
         </div>
       ) : errorMessage ? (
         <div className="state-error">{errorMessage}</div>
+      ) : isMarkdown && !markdownSourceMode ? (
+        <div className="markdown-stage">
+          <Markdown remarkPlugins={[remarkGfm]}>{content ?? ''}</Markdown>
+        </div>
       ) : (
         <div className="editor-stage">
           <CodeMirror
@@ -923,6 +933,11 @@ const TextViewer: React.FC<TextViewerProps> = ({
         </div>
 
         <div className="footer-actions">
+          {isMarkdown ? <Button aria-label={markdownSourceMode ? '切换到 Markdown 预览' : '切换到 Markdown 源码'}
+            className={`markdown-mode-toggle ${markdownSourceMode ? 'is-source' : 'is-rendered'}`}
+            icon={markdownSourceMode ? <Code2 size={16} strokeWidth={1.25} /> : <Eye size={16} strokeWidth={1.25} />}
+            size="small" theme="borderless" title={markdownSourceMode ? 'Markdown 预览' : 'Markdown 源码'}
+            onClick={() => setMarkdownSourceMode(value => !value)} /> : null}
           <Button
             aria-label="保存"
             className="icon-action-btn"

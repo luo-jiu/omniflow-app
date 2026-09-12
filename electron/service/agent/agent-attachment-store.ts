@@ -144,6 +144,13 @@ export class AgentAttachmentStore {
     if (record.attachment.kind !== 'image') throw new Error('附件不是图片');
     return `data:image/png;base64,${(await readFile(this.file(id, 'bin'))).toString('base64')}`;
   }
+  async previewImage(scope: AgentAttachmentScope, id: string, sessionId?: string): Promise<string> {
+    if (sessionId !== undefined && (typeof sessionId !== 'string' || !sessionId.trim())) throw new Error('附件会话无效');
+    const record = await this.load(scope, id, sessionId);
+    if (!sessionId && record.sessions.length) throw new Error('历史附件需要所属会话');
+    if (record.attachment.kind !== 'image') throw new Error('附件不是图片');
+    return `data:image/png;base64,${(await readFile(this.file(id, 'bin'))).toString('base64')}`;
+  }
   releaseSession(scope: AgentAttachmentScope, sessionId: string): Promise<void> {
     return this.serial(async () => {
       await mkdir(this.directory, { recursive: true, mode: 0o700 });

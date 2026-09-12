@@ -65,6 +65,10 @@ export function registerAgentIpc(
     requireMainWindow(event);
     return getAgentAttachmentStore().discard(input, input.id);
   });
+  ipcMain.handle('agent:attachment:preview', (event, input: import('../../src/shared/agent/agent-attachments').AgentAttachmentPreviewRequest) => {
+    requireMainWindow(event);
+    return getAgentAttachmentStore().previewImage(input, input.id, input.sessionId);
+  });
 
   ipcMain.handle('agent:chat:stop', (event, sessionId: string) => {
     const sender = requireMainWindow(event);

@@ -125,11 +125,20 @@ function agentFileRoutingPrompt(capabilities: readonly string[]): string {
   if (available.has('tag.update')) {
     rules.push(`标签操作先 ${providerToolName('tag.list')} 取得可见标签及适用范围，再 ${providerToolName('tag.update')} 只增删明确标签ID；保留其他标签，不把看不到的标签推断为不存在。`);
   }
+  if (available.has('library.batch')) {
+    rules.push(`多个明确节点需要同一种整理时，使用 ${providerToolName('library.batch')} 一次提交 actions；每项独立处理并查看 results/counts。部分成功继续保留，conflict 或 commit_unknown 只核对对应项，不重做整个批次。数量、源节点和目标目录必须先通过搜索/定位确认。`);
+  }
+  if (available.has('operation.verify')) {
+    rules.push(`写操作返回 commit_unknown 或网络中断时，使用 ${providerToolName('operation.verify')} 重新读取实际节点状态；先核对再重试，不凭错误消息判断，也不要重复整批操作。`);
+  }
   if (available.has('file.list')) {
     rules.push(`${providerToolName('file.list')} 可以按目录 ID 或资料库绝对路径分页浏览其他目录，不需要用户先展开目录树；hasMore=true 时保持查询条件并使用 nextCursor 续页。`);
   }
   if (available.has('file.search') && available.has('file.resolve')) {
     rules.push(`名称或位置不明确时使用 ${providerToolName('file.search')} 搜索元数据；已给出 /音乐 这样的完整路径时，可以直接按 path 列目录或读文件，不要固定串联 search、resolve、stat。只有确实需要节点 ID 时才使用 ${providerToolName('file.resolve')}。查询发现的节点可继续交给文件和媒体工具，未知历史 ID 先用 ${providerToolName('file.stat')} 重新确认。`);
+  }
+  if (available.has('library.document.inspect')) {
+    rules.push(`资料库中搜索到唯一明确的 PDF、DOCX、XLSX 或 PPTX 后，直接把搜索结果的 nodeId 或 path 交给 ${providerToolName('library.document.inspect')}，不要再向用户询问已经搜索到的路径。inspect 后按格式调用对应的 document.read/query/view；多个候选或格式不支持时才向用户说明并请求选择。`);
   }
   if (available.has('file.read')) {
     rules.push(`${providerToolName('file.read')} 读取正文，file.stat 只读取元数据。文件工具默认 scope=library，明确本机资源使用 scope=host 和本机绝对路径。正文 offset/column 从1开始；不指定 limit 时尽量读到末尾，只在主动限定行数或达到输出预算时分段。默认输出10000 tokens，并受剩余上下文限制。content 为带行号文本；hasMore=true 时使用 nextOffset、nextColumn 和 revision 续读，不能当作读完。不要机械地先读一行、再逐行读取。不要把二进制或 PDF 当 UTF-8；本机复杂管道仍可使用 Shell。目录搜索默认50、最多100条，不是正文搜索，也不把 | 当作管道。`);

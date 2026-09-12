@@ -116,6 +116,8 @@ const TOOL_TITLES: Record<string, string> = {
   'recycle.restore': '恢复文件',
   'tag.list': '查询标签',
   'tag.update': '修改标签',
+  'library.batch': '批量整理文件',
+  'operation.verify': '核对操作结果',
   'file.grep': '搜索文件正文',
   'file.upload': '上传本机文件',
   'interaction.request': '用户输入',

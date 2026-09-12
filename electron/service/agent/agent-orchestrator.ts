@@ -3,6 +3,7 @@ import { isAgentRendererMutationTool } from '../../../src/shared/agent/agent-lib
 import { attachmentManifest } from '../../../src/shared/agent/agent-attachments';
 import { getAgentAttachmentStore, hydrateAgentAttachmentImages } from './agent-attachment-runtime';
 import { operateAgentAttachment } from './documents/attachment-documents';
+import { runAgentDocument } from './documents/document-runner';
 import { createAgentContextUsageLedger, type AgentContextRequest } from './agent-context-usage-ledger';
 import type { AgentContextUsageSnapshot } from '../../../src/shared/agent/agent-context-usage';
 import { agentLibraryTextReader, readAgentLibraryText } from './agent-library-text-reader';
@@ -206,6 +207,9 @@ import {
 } from './skills/agent-skill.types';
 import { getBuiltInActionTools } from './tools/directory-create-tool';
 import { getBuiltInReadTools } from './tools/file-read-tools';
+import { libraryDocumentTools } from './tools/library-document-tools';
+import { libraryBatchTool } from './tools/library-batch-tool';
+import { operationVerifyTool } from './tools/operation-verify-tool';
 import {
   mediaExtractAudioTool,
   normalizeAgentAudioOutputFormat,
@@ -255,7 +259,7 @@ const AVAILABLE_PERCEPTION_BUDGET_PROBE: AgentPerceptionSnapshot = {
   selectedNodes: [],
 };
 
-[...getBuiltInReadTools(), interactionRequestTool, memoryProposeTool, mediaInspectTool, mediaExtractAudioTool, ...getBuiltInActionTools()].forEach((tool) => {
+[...getBuiltInReadTools(), ...libraryDocumentTools, libraryBatchTool, operationVerifyTool, interactionRequestTool, memoryProposeTool, mediaInspectTool, mediaExtractAudioTool, ...getBuiltInActionTools()].forEach((tool) => {
   if (!agentToolRegistry.get(tool.name)) agentToolRegistry.register(tool);
 });
 ensureBuiltInAgentCapabilities();
@@ -828,6 +832,7 @@ function resolveAgentProviderToolResultPolicy(
     return { maxTokens: SKILL_PROVIDER_TOOL_RESULT_TOKENS };
   }
   if (['file.read', 'file.grep', 'attachment.read', 'attachment.query', 'recycle.list', 'tag.list'].includes(canonicalToolName)) return { maxTokens: 10_000 };
+  if (canonicalToolName === 'operation.verify') return { maxTokens: 10_000 };
   if (['file.list', 'file.search', 'file.resolve', 'file.stat'].includes(canonicalToolName)) return { maxTokens: 10_000 };
   return { maxTokens: DEFAULT_PROVIDER_TOOL_RESULT_TOKENS };
 }
@@ -1974,10 +1979,55 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         signal.throwIfAborted(); return result;
       },
       readOutputTokenBudget,
+      readLibraryDocumentImage: async ({ nodeId, format, page }, requestSignal) => {
+        const bytes = await (options.readLibraryText || readAgentLibraryText)({ sender, libraryId: Number(input.appContext.libraryId), ownerScope: input.ownerScope,
+          sessionId, runId, toolRunId, signal: requestSignal, operation: { operation: 'stage-library-node', nodeId, includeDownloadUrl: true } });
+        const rendered = await runAgentDocument({ format, operation: 'render', bytes, page }, requestSignal);
+        if (!rendered.png) throw new Error('文档工具没有生成页面图片');
+        const store = getAgentAttachmentStore();
+        const scope = { ownerScope: input.ownerScope, libraryId: Number(input.appContext.libraryId) };
+        const image = await store.import({ ...scope, name: `library-node-${nodeId}-page-${rendered.page}.png`, base64: Buffer.from(rendered.png).toString('base64') });
+        try { await store.bind(scope, [image.id], sessionId); } catch (error) { await store.discard(scope, image.id).catch(() => undefined); throw error; }
+        return { imageId: image.id, fileName: image.name, page: rendered.page, pageCount: rendered.pageCount, warnings: rendered.warnings };
+      },
       ...(options.readLibraryText ? { readLibraryText: (nodeId: number, requestSignal: AbortSignal) =>
         options.readLibraryText!({ sender, libraryId: Number(input.appContext.libraryId),
           ownerScope: input.ownerScope, sessionId, runId, toolRunId, signal: requestSignal,
           operation: { operation: 'stage-library-node', nodeId, includeDownloadUrl: true } }) } : {}),
+      ...(options.readLibraryText ? { readLibraryDocument: (nodeId: number, requestSignal: AbortSignal) =>
+        options.readLibraryText!({ sender, libraryId: Number(input.appContext.libraryId), ownerScope: input.ownerScope,
+          sessionId, runId, toolRunId, signal: requestSignal,
+          operation: { operation: 'stage-library-node', nodeId, includeDownloadUrl: true } }) } : {}),
+      sessionId,
+      readOperationJournal: async (operationId: string, operationSignal: AbortSignal) => {
+        throwIfAborted(operationSignal);
+        const journalSession = await resolveSessionStore().then(store => store.getSession(
+          sessionId,
+          input.ownerScope,
+          Number(input.appContext.libraryId),
+        ));
+        throwIfAborted(operationSignal);
+        const activity = journalSession?.toolActivities.find(candidate => {
+          const data = candidate.result?.data;
+          return candidate.id === operationId
+            || (data && typeof data === 'object' && !Array.isArray(data)
+              && (data as Record<string, unknown>).operationId === operationId);
+        });
+        if (!activity) return undefined;
+        const data = activity.result?.data;
+        const commitState = data && typeof data === 'object' && !Array.isArray(data)
+          ? String((data as Record<string, unknown>).mutationCommitState
+            || (data as Record<string, unknown>).writeCommitState
+            || (data as Record<string, unknown>).deleteCommitState
+            || (data as Record<string, unknown>).uploadCommitState
+            || '')
+          : '';
+        const status = commitState === 'committed' || activity.result?.ok === true
+          ? 'committed'
+          : commitState === 'uncommitted' ? 'uncommitted'
+            : commitState === 'commit_unknown' ? 'commit_unknown' : 'unknown';
+        return { operationId, toolName: activity.call.name, status, ...(activity.result ? { result: activity.result } : {}) };
+      },
       ...(options.readLibraryMetadata ? { readLibraryMetadata: async (query, requestSignal) => {
         const libraryId = Number(input.appContext.libraryId);
         const data = normalizeAgentLibraryReadResult(await options.readLibraryMetadata!({

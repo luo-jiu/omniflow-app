@@ -13,6 +13,20 @@ async function setup() {
 }
 afterEach(async () => { for (const dir of directories.splice(0)) await rm(dir, { recursive: true, force: true }); });
 describe('managed attachments', () => {
+  it('previews drafts and session-bound images without allowing foreign scopes or non-images', async () => {
+    const { store } = await setup();
+    const image = await store.import({ ...scope, name: 'preview.png', base64: imageBytes.toString('base64') });
+    expect(await store.previewImage(scope, image.id)).toBe('data:image/png;base64,' + imageBytes.toString('base64'));
+    await expect(store.previewImage({ ...scope, libraryId: 4 }, image.id)).rejects.toThrow('不属于');
+    await expect(store.previewImage({ ...scope, ownerScope: { ...scope.ownerScope, accountScope: 'user:8' } }, image.id)).rejects.toThrow('不属于');
+    await store.bind(scope, [image.id], 'session-preview');
+    await expect(store.previewImage(scope, image.id)).rejects.toThrow('所属会话');
+    await expect(store.previewImage(scope, image.id, 'other')).rejects.toThrow('不属于');
+    await expect(store.previewImage(scope, image.id, '')).rejects.toThrow('无效');
+    expect(await store.previewImage(scope, image.id, 'session-preview')).toContain('data:image/png;base64,');
+    const text = await store.import({ ...scope, name: 'note.txt', base64: '' });
+    await expect(store.previewImage(scope, text.id)).rejects.toThrow('不是图片');
+  });
   it('rolls back only newly added bindings, preserving retry bytes and prior session references', async () => {
     const { store } = await setup();
     const existing = await store.import({ ...scope, name: 'existing.txt', base64: '' });

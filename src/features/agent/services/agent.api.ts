@@ -57,6 +57,9 @@ export function importAgentAttachment(input: import('@/shared/agent/agent-attach
 export function discardAgentAttachment(input: import('@/shared/agent/agent-attachments').AgentAttachmentScope & { id: string }) {
   return bridge().discardAttachment(input);
 }
+export function previewAgentAttachment(input: import('@/shared/agent/agent-attachments').AgentAttachmentPreviewRequest): Promise<string> {
+  return bridge().previewAttachment(input);
+}
 
 export function stopAgentChat(sessionId: string): Promise<boolean> {
   return bridge().stopChat(sessionId);

@@ -196,6 +196,7 @@ describe('Agent context projection', () => {
       message('m3', 'run-2', 'user', '继续'),
     ];
     const projection = createAgentContextProjection({
+      budget: { contextWindowTokens: 16_384 },
       fixedInputTokens: 100,
       messages,
       runs: [run('run-1', 'completed'), run('run-2', 'running')],
@@ -213,6 +214,7 @@ describe('Agent context projection', () => {
 
   it('projects only completed final assistant items into future Provider history', () => {
     const projection = createAgentContextProjection({
+      budget: { contextWindowTokens: 16_384 },
       fixedInputTokens: 100,
       messages: [
         message('m1', 'run-1', 'user', '检查目录'),
@@ -234,6 +236,7 @@ describe('Agent context projection', () => {
 
   it('scrubs credentials from legacy messages before provider projection', () => {
     const projection = createAgentContextProjection({
+      budget: { contextWindowTokens: 16_384 },
       fixedInputTokens: 100,
       messages: [
         message('m1', 'run-1', 'user', 'Authorization: Bearer private-token'),
@@ -440,6 +443,7 @@ describe('Agent context projection', () => {
       'DOCUMENT_TAIL',
     ].join('\n');
     const projection = createAgentContextProjection({
+      budget: { contextWindowTokens: 16_384 },
       fixedInputTokens: 100,
       messages: [message('m-current', 'run-current', 'user', '继续总结文档')],
       runs: [run('run-shell', 'cancelled'), run('run-current', 'running')],

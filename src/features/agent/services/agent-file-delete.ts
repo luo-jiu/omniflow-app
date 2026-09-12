@@ -76,7 +76,7 @@ export async function executeAgentFileDelete(request: AgentToolExecutionRequest,
       },
       onDeleted: async nodeIds => {
         committed = { ok: true, message: `已移入回收站 ${input.path || input.name}`, data: {
-          deleteCommitState: 'committed', recoverable: true, nodeId: input.nodeId, recursive: input.recursive,
+          deleteCommitState: 'committed', operationId: request.executionId, recoverable: true, nodeId: input.nodeId, recursive: input.recursive,
           destination: { kind: 'library', nodeId: input.nodeId, parentId: input.parentId },
         } };
         try { await deps.onCommitted?.(committed); } catch { /* Final completion retries the receipt. */ }
@@ -97,6 +97,6 @@ export async function executeAgentFileDelete(request: AgentToolExecutionRequest,
     const rejected = error instanceof IpcRequestError && error.status >= 400 && error.status < 500 && ![408, 429].includes(error.status);
     const unknown = attempted && !rejected;
     return { result: { ok: false, message: unknown ? '删除提交状态无法确认，请检查回收站和原目录，不要盲目重试'
-      : error instanceof Error ? error.message : '删除失败', data: { deleteCommitState: unknown ? 'commit_unknown' : 'uncommitted' } } };
+      : error instanceof Error ? error.message : '删除失败', data: { deleteCommitState: unknown ? 'commit_unknown' : 'uncommitted', operationId: request.executionId } } };
   }
 }

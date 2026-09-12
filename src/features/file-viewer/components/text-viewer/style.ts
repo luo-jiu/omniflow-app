@@ -1,4 +1,5 @@
 import styled, { createGlobalStyle } from 'styled-components';
+import { workspaceScrollbarStyles } from '@/components/ui/workspace-scrollbar';
 
 export const TextViewerSaveAsModalStyle = createGlobalStyle`
   .text-viewer-save-as-modal {
@@ -95,6 +96,29 @@ export const TextViewerWrapper = styled.div`
     min-height: 0;
     display: flex;
     flex-direction: column;
+  }
+
+  .markdown-stage {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 24px 32px 40px;
+    color: var(--app-text);
+    line-height: 1.7;
+    font-size: 15px;
+    ${workspaceScrollbarStyles}
+    h1, h2, h3, h4, h5, h6 { margin: 1.2em 0 .5em; line-height: 1.3; }
+    h1 { font-size: 26px; } h2 { font-size: 22px; } h3 { font-size: 18px; }
+    p { margin: .75em 0; }
+    ul, ol { padding-left: 28px; }
+    blockquote { margin: 1em 0; padding: 4px 16px; border-left: 3px solid var(--app-accent); color: var(--app-text-secondary); }
+    code { padding: 2px 5px; border-radius: 4px; background: var(--app-bg-elevated); font-family: 'JetBrains Mono', monospace; font-size: 13px; }
+    pre { padding: 14px 16px; overflow: auto; border: 1px solid var(--app-border); border-radius: 6px; background: var(--app-bg-elevated); }
+    pre code { padding: 0; background: transparent; }
+    table { width: 100%; border-collapse: collapse; } th, td { padding: 7px 10px; border: 1px solid var(--app-border); text-align: left; }
+    img { max-width: 100%; height: auto; }
+    a { color: var(--app-accent); }
+    hr { border: 0; border-top: 1px solid var(--app-border); }
   }
 
   .editor-stage > div {
@@ -247,6 +271,12 @@ export const TextViewerWrapper = styled.div`
     gap: 4px;
     flex-shrink: 0;
   }
+
+  .markdown-mode-toggle { width: 28px; height: 28px; margin-right: 8px; padding: 0; color: var(--app-text-muted); }
+  .markdown-mode-toggle:hover { color: var(--app-text); }
+  .markdown-mode-toggle.is-rendered { color: var(--app-accent); }
+  .markdown-mode-toggle.is-source { color: var(--app-text-secondary); }
+  .markdown-mode-toggle svg { display: block; width: 16px; height: 16px; }
 
   .icon-action-btn {
     width: 28px;

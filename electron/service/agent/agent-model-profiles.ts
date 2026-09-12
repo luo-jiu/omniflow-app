@@ -11,16 +11,17 @@ export interface AgentModelProfile {
 // Local Codex catalog 4b0d9669cc (2026-09-08). These are client defaults,
 // not proof that an identically named model behind a gateway has the same limits.
 const reasoningContexts: Readonly<Record<string, readonly [number, number]>> = {
-  'gpt-6-astra': [272_000, 872_000],
+  'gpt-6': [1_050_000, 1_050_000], 'gpt-6-astra': [1_050_000, 1_050_000],
   'gpt-5.6-sol': [272_000, 872_000], 'gpt-5.6-terra': [272_000, 872_000],
   'gpt-5.6-luna': [272_000, 872_000], 'gpt-daybreak-blue-latest': [272_000, 872_000],
   'gpt-daybreak-red-latest': [372_000, 372_000], 'gpt-5.5': [272_000, 272_000],
-  'gpt-5.4': [272_000, 1_000_000], 'gpt-5.4-mini': [272_000, 272_000],
-  'gpt-5.2': [272_000, 272_000], 'codex-auto-review': [272_000, 872_000],
+  'gpt-5.4': [272_000, 272_000], 'gpt-5.4-mini': [272_000, 272_000],
+  'gpt-5.3-codex-spark': [272_000, 272_000], 'gpt-5.2': [272_000, 272_000],
+  'gpt-5.2-pro': [272_000, 272_000], 'codex-auto-review': [272_000, 872_000],
 };
 const profiles: readonly AgentModelProfile[] = Object.freeze([
   ...Object.entries(reasoningContexts).map(([id, context]) => ({ id, provider: 'openai' as const, family: 'openai-reasoning' as const, context: Object.freeze(context) })),
-  ...['gpt-4o', 'gpt-4o-mini', 'gpt-4.1', 'gpt-4.1-mini', 'gpt-4.1-nano'].map(id => ({ id, provider: 'openai' as const, family: 'openai-standard' as const })),
+  ...['gpt-4o', 'gpt-4o-mini', 'gpt-4o-audio-preview', 'gpt-4o-realtime-preview', 'gpt-4.1', 'gpt-4.1-mini', 'gpt-4.1-nano'].map(id => ({ id, provider: 'openai' as const, family: 'openai-standard' as const })),
   ...['claude-opus-4-6', 'claude-sonnet-4-6'].map(id => ({ id, provider: 'claude' as const, family: 'claude-effort' as const })),
   ...['claude-sonnet-4-5', 'claude-haiku-4-5', 'claude-3-7-sonnet'].map(id => ({ id, provider: 'claude' as const, family: 'claude-standard' as const })),
   { id: 'deepseek-chat', provider: 'deepseek', family: 'deepseek-chat' } as const,

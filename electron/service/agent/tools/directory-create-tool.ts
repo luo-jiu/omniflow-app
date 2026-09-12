@@ -4,6 +4,7 @@ import { fileDeleteTool } from './file-delete-tool';
 import { libraryActionTools } from './library-action-tools';
 import { getAgentTagTools } from './tag-tools';
 import { normalizeAgentLibraryAction } from '../../../../src/shared/agent/agent-library-actions';
+import { libraryBatchTool } from './library-batch-tool';
 
 const MAX_DIRECTORY_NAME_LENGTH = 120;
 const WINDOWS_RESERVED_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
@@ -102,5 +103,5 @@ export const directoryCreateTool: AgentTool = {
 };
 
 export function getBuiltInActionTools(): AgentTool[] {
-  return [directoryCreateTool, fileWriteTool, fileDeleteTool, ...libraryActionTools, ...getAgentTagTools()];
+  return [directoryCreateTool, fileWriteTool, fileDeleteTool, ...libraryActionTools, ...getAgentTagTools(), libraryBatchTool];
 }

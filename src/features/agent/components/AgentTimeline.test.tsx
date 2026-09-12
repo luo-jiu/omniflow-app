@@ -12,7 +12,6 @@ import AgentMessageContent from './AgentMessageContent';
 vi.mock('@douyinfe/semi-icons', () => ({
   IconAlertCircle: () => null,
   IconShrink: () => null,
-  IconMore: () => null,
 }));
 
 vi.mock('./AgentMessageContent', () => ({
@@ -25,6 +24,7 @@ vi.mock('./AgentToolActivityCard', () => ({
   ),
 }));
 vi.mock('./AgentToolActivityGroup', () => ({ default: () => null }));
+vi.mock('./AgentAttachmentPreview', () => ({ default: () => null }));
 
 const renderers: TestRenderer.ReactTestRenderer[] = [];
 
@@ -71,6 +71,29 @@ afterEach(() => {
 });
 
 describe('AgentTimeline commentary presentation', () => {
+  it('shows plain thinking text without a leading icon during provider waiting', () => {
+    const run: AgentRunSnapshot = { id: 'thinking', sessionId: 'thinking', model: 'test', profileId: 'test',
+      reasoningEffort: 'medium', revision: 1, status: 'running', userPrompt: 'test',
+      createdAt: '2026-09-10T00:00:00Z', updatedAt: '2026-09-10T00:00:00Z' };
+    let renderer!: TestRenderer.ReactTestRenderer;
+    act(() => { renderer = TestRenderer.create(<AgentTimeline approvalBusyIds={new Set()} interactionBusyIds={new Set()}
+      libraryId={3} ownerScope={null} onResolveApproval={vi.fn()} messages={[]} runs={[run]} toolActivities={[]} />); });
+    renderers.push(renderer);
+    const status = renderer.root.findByProps({ 'data-agent-live-status': 'working' });
+    expect(status.findAllByType('span').some(node => node.children.includes('正在思考'))).toBe(true);
+    expect(status.findAllByType('svg')).toHaveLength(0);
+    const empty = { ...commentary(), id: 'thinking-item', runId: run.id, sessionId: run.sessionId, content: '',
+      assistantItem: { ...commentary().assistantItem, phase: 'unknown' as const, status: 'streaming' as const } };
+    const renderMessage = (content: string) => <AgentTimeline approvalBusyIds={new Set()} interactionBusyIds={new Set()}
+      libraryId={3} ownerScope={null} onResolveApproval={vi.fn()} messages={[{ ...empty, content }]} runs={[run]} toolActivities={[]} />;
+    act(() => renderer.update(renderMessage('')));
+    const entry = renderer.root.findByProps({ className: 'agent-timeline-entry' });
+    expect(entry.props['data-empty']).toBe(true);
+    act(() => renderer.update(renderMessage('开始回复')));
+    expect(renderer.root.findByProps({ className: 'agent-timeline-entry' })).toBe(entry);
+    expect(entry.props['data-empty']).toBeUndefined();
+    expect(renderer.root.findAllByProps({ 'data-agent-live-status': 'working' })).toHaveLength(0);
+  });
   it.each(['running', 'preparing', 'awaiting_approval', 'awaiting_interaction', 'cancelled', 'failed', 'interrupted', 'completed'] as const)(
     'keeps %s without a final answer visible and removes the fold control even on reload', status => {
       const run: AgentRunSnapshot = {

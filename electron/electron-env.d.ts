@@ -21,6 +21,8 @@ declare namespace NodeJS {
     APP_ROOT: string
     /** /dist/ or /public/ */
     VITE_PUBLIC: string
+    /** Development-only one-shot HTTP fault, for example drop-response:/api/v1/nodes. */
+    OMNIFLOW_HTTP_FAULT?: string
   }
 }
 
@@ -265,6 +267,7 @@ interface Window {
   electronAgent?: {
     importAttachment: (input: import('@/shared/agent/agent-attachments').AgentAttachmentImport) => Promise<import('@/shared/agent/agent-attachments').AgentAttachment>;
     discardAttachment: (input: import('@/shared/agent/agent-attachments').AgentAttachmentScope & { id: string }) => Promise<void>;
+    previewAttachment: (input: import('@/shared/agent/agent-attachments').AgentAttachmentPreviewRequest) => Promise<string>;
     startChat: (
       input: import('@/shared/agent/agent.types').AgentChatRequest,
     ) => Promise<import('@/shared/agent/agent.types').AgentChatStartResult>;

@@ -5387,7 +5387,7 @@ describe('Agent orchestrator', () => {
     });
 
     const webContents = sender();
-    const orchestrator = createOrchestrator({ contextBudget: { contextWindowTokens: 24_000 } });
+    const orchestrator = createOrchestrator({ contextBudget: { contextWindowTokens: 32_000 } });
     const started = await orchestrator.start(webContents as never, {
       ...request(),
       sessionId,
@@ -6040,7 +6040,7 @@ describe('Agent orchestrator', () => {
     const activationResult = resolveAgentSkillActivationResult(activationCall.input, {
       runCapabilitySnapshot: capabilitySnapshot,
     });
-    const completeProjection = projectAgentToolResultForProvider(activationResult, 1_024);
+    const completeProjection = projectAgentToolResultForProvider(activationResult, 10_000);
     expect(completeProjection.truncated).toBe(false);
     const initialTurnTokens = estimateAgentProviderTurnTokens({
       messages: initialMessages,

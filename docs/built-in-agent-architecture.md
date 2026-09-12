@@ -4,6 +4,7 @@
 
 多图片与文本附件的 IPC、主进程副本、消息持久化、视觉请求和按行读取见 [附件契约](built-in-agent-attachments.md)。
 
+附件清晰预览通过只读 `agent:attachment:preview` 与 preload.previewAttachment 提供，主窗口校验、scope及历史会话绑定由主进程执行，只返回托管PNG数据，不返回宿主路径；不创建Run、不调用模型。输入区与历史图片共用此入口，详情见附件契约。
 
 文档检查、PDF 按页读取/渲染、DOCX 正文、可取消 worker 与 Tool 多模态结果适配见 [文件处理调研与实现](agent-document-processing.md)。
 

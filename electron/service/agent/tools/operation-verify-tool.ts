@@ -11,13 +11,17 @@ export const operationVerifyTool: AgentTool = {
     const query = input as { operationId: string; nodeId: number; expectedExists: boolean; expectedParentId?: number; expectedName?: string };
     if (!context.readLibraryMetadata) return { ok: false, message: '当前运行时未接入资料库核对' };
     try {
+      const journal = await context.readOperationJournal?.(query.operationId, context.signal);
+      if (journal?.status === 'uncommitted') {
+        return { ok: true, message: `账本显示操作 ${query.operationId} 未提交`, data: { operationId: query.operationId, status: 'not_committed', journalStatus: journal.status, node: null } };
+      }
       const result = await context.readLibraryMetadata({ kind: 'stat', nodeId: query.nodeId }, context.signal);
       const node = result.node;
       const matches = query.expectedExists && Boolean(node)
         && (query.expectedParentId === undefined || node!.parentId === query.expectedParentId)
         && (query.expectedName === undefined || `${node!.name}${node!.ext ? `.${node!.ext}` : ''}` === query.expectedName);
       const committed = query.expectedExists ? matches : !node;
-      return { ok: true, message: `已核对操作 ${query.operationId}`, data: { operationId: query.operationId, status: committed ? 'committed' : 'not_committed', node: node || null } };
+      return { ok: true, message: `已核对操作 ${query.operationId}`, data: { operationId: query.operationId, status: committed ? 'committed' : 'not_committed', journalStatus: journal?.status || 'unknown', node: node || null } };
     } catch (error) {
       return { ok: false, message: error instanceof Error ? error.message : '操作结果仍无法确认', data: { operationId: query.operationId, status: 'commit_unknown' } };
     }

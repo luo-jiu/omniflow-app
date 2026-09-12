@@ -104,7 +104,7 @@ export async function executeAgentTagTool(
         attempted = true;
         const state = validateState(await (deps.updateNodeTags || updateNodeTags)(input.nodeId,
           { libraryId: input.libraryId, addTagIds, removeTagIds }), input.nodeId, input.libraryId);
-        committed = { ok: true, message: '已更新节点标签', data: { mutationCommitState: 'committed',
+        committed = { ok: true, message: '已更新节点标签', data: { mutationCommitState: 'committed', operationId: request.executionId,
           nodeId: state.nodeId, libraryId: state.libraryId, affectedParentIds: state.affectedParentIds,
           addedTagIds: addTagIds, removedTagIds: removeTagIds } };
         try { await deps.onCommitted?.(committed); } catch { /* 最终完成阶段可重试提交回执。 */ }
@@ -175,6 +175,6 @@ export async function executeAgentTagTool(
     const unknown = attempted && !rejected;
     return { result: { ok: false, message: unknown ? '标签提交状态无法确认，请用 tag.list 核对，不要盲目重试'
       : error instanceof Error ? error.message.slice(0, 1000) : '标签操作失败',
-      ...(request.toolName === 'tag.update' ? { data: { mutationCommitState: unknown ? 'commit_unknown' : 'uncommitted' } } : {}) } };
+      ...(request.toolName === 'tag.update' ? { data: { mutationCommitState: unknown ? 'commit_unknown' : 'uncommitted', operationId: request.executionId } } : {}) } };
   }
 }
