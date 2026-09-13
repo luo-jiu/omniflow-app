@@ -40,7 +40,7 @@
 | `move` / `resize` / `maximize` / `unmaximize` | `syncBoundsFromMain()`(coalesced 到下一 tick) |
 | `enter-full-screen` / `leave-full-screen` | 立即 sync + 300ms 后再 sync 一次(mac 全屏动画延迟) |
 | `minimize` / `hide` | overlay `hide()` |
-| `restore` / `show` | overlay 如有浮层则 show + sync |
+| `restore` / `show` / `focus` | 下一 tick 检查主窗口仍可见且聚焦，有活跃浮层时恢复显示、置顶并归还焦点；不重发 spec，不重挂载表单 |
 | `close`(或 closed) | `overlayController.destroy()` |
 | `screen.on('display-metrics-changed')` | `syncBoundsFromMain()`(多显示器兜底) |
 | `app.on('before-quit')` | `overlayController.destroy()` |
@@ -62,6 +62,8 @@
 `ipcMain.handle('overlay:open')` 的 handler 返回一个长 Promise，main 在收到 `overlay:host:resolve` 时 resolve 这个 Promise，作为 `invoke` 的返回值回到主 renderer。
 
 **并发策略**:串行队列,`currentRequest` + `queue`。并发 open 调用会排队等前一个结算后才显示,不支持栈叠(MVP)。
+
+窗口 controller 保存当前显示 spec 的身份，仅用于窗口恢复，不拥有请求结算。Cmd+Tab 返回时恢复仍未关闭的属性窗口，避免隐藏属性继续占用队列而使右键菜单无响应。dismiss、idle 和 destroy 清除该身份；异步等待 renderer ready 后必须复验身份，防止过期浮窗重新弹出。应用失焦时不抢回焦点。
 
 **清理保障**:每个 pending 挂 `senderContents.once('destroyed', ...)` 和 10 分钟 timeout;overlay 进程崩溃时 `resetAll()` 把所有 pending reject,恢复 click-through。
 

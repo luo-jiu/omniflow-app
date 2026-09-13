@@ -59,6 +59,8 @@ renderer 的 `getDesktopPlatform()` 将其归一为：
 
 `electron/main.ts` 继续拥有 BrowserWindow 生命周期、窗口状态持久化、overlay 同步和应用退出语义；`electron/platform` 只返回平台窗口选项并执行平台初始化，不接管业务生命周期。
 
+主窗口启用vibrancy时，`mainWindowBackground`保持透明底色`#00000000`，MainLayout与body也保持透明，让目录树原有半透明背景透出macOS毛玻璃。禁止为掩盖快速resize露底而给整个页面外壳或vibrancy窗口填充不透明聊天背景；实色`--app-bg`由右侧ContentArea和AgentRoot负责。未启用vibrancy的平台才使用与renderer一致的底色：暗色`#1e1e1e`、亮色`#f5f5f0`，Windows继续使用原有MainLayout实色。底色跟随nativeTheme更新，窗口关闭时清理监听；独立overlay仍透明。不承诺仅靠CSS消除macOS原生resize未绘制帧，保留目录树毛玻璃优先。
+
 Windows 的 `titleBarOverlay` 策略收敛在 `electron/platform/windows/mainWindow.ts`：标题栏透明，最小化、最大化和关闭仍由 Windows 原生绘制，符号色跟随 `nativeTheme`。首行工具栏使用 Window Controls Overlay 提供的 `titlebar-area-*` CSS 环境变量计算右侧安全区，不能用固定 padding 覆盖不同 DPI；不支持环境变量时才回退到三枚标准 caption button 的宽度。
 
 Windows 不模拟 macOS vibrancy：目录树侧栏和主内容圆角背板通过 `data-platform="windows"` 使用不透明的 `--app-bg-sidebar`，亮暗主题分别继承自己的实色 token，避免圆角露出 BrowserWindow 默认白底。侧栏折叠按钮位于左上角并显式使用 `no-drag`，其余顶部空白仍可拖动窗口。文件模式的刷新按钮位于“工具”和“网页”入口之间；浏览器模式继续使用地址栏左侧的网页刷新按钮。

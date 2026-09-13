@@ -22,6 +22,7 @@ export type OverlayWindowController = {
   dismissSpec: (payload: OverlayDismissFromMainPayload) => void;
   setClickThrough: (ignore: boolean) => void;
   hideIdle: () => void;
+  restoreActive: () => void;
   syncBoundsFromMain: () => void;
   destroy: () => void;
 };
@@ -34,6 +35,8 @@ export function createOverlayWindowController(
   let readyResolve: (() => void) | null = null;
   let boundsSyncScheduled = false;
   let screenListenerAttached = false;
+  let activeSpec: OverlaySpec | null = null;
+  let restoreScheduled = false;
 
   function ensureCreated(): BrowserWindow | null {
     if (overlayWin && !overlayWin.isDestroyed()) {
@@ -136,12 +139,14 @@ export function createOverlayWindowController(
   }
 
   function showSpec(spec: OverlaySpec) {
+    activeSpec = spec;
     const win = ensureCreated();
     if (!win) return;
     void (async () => {
       await ensureReady();
-      if (!overlayWin || overlayWin.isDestroyed()) return;
+      if (!overlayWin || overlayWin.isDestroyed() || activeSpec !== spec) return;
       syncBoundsFromMain();
+      overlayWin.setIgnoreMouseEvents(false);
       if (!overlayWin.isVisible()) {
         overlayWin.show();
       }
@@ -151,6 +156,7 @@ export function createOverlayWindowController(
   }
 
   function dismissSpec(payload: OverlayDismissFromMainPayload) {
+    if (activeSpec?.requestId === payload.requestId) activeSpec = null;
     if (!overlayWin || overlayWin.isDestroyed()) return;
     overlayWin.webContents.send('overlay:host:dismiss-from-main', payload);
   }
@@ -178,6 +184,7 @@ export function createOverlayWindowController(
   }
 
   function hideIdle() {
+    activeSpec = null;
     // Hide the overlay window entirely when no pending requests, so it stops
     // intercepting drag/drop events from macOS (setIgnoreMouseEvents does not
     // reliably pass drag events through a visible transparent window).
@@ -187,7 +194,25 @@ export function createOverlayWindowController(
     }
   }
 
+  function restoreActive() {
+    if (restoreScheduled) return;
+    restoreScheduled = true;
+    setImmediate(() => {
+      restoreScheduled = false;
+      const mainWindow = options.getMainWindow();
+      if (!activeSpec || !overlayWin || overlayWin.isDestroyed()
+        || !mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible()
+        || mainWindow.isMinimized() || !mainWindow.isFocused()) return;
+      syncBoundsFromMain();
+      overlayWin.setIgnoreMouseEvents(false);
+      if (!overlayWin.isVisible()) overlayWin.show();
+      overlayWin.moveTop();
+      overlayWin.focus();
+    });
+  }
+
   function destroy() {
+    activeSpec = null;
     if (overlayWin && !overlayWin.isDestroyed()) {
       overlayWin.destroy();
     }
@@ -204,6 +229,7 @@ export function createOverlayWindowController(
     dismissSpec,
     setClickThrough,
     hideIdle,
+    restoreActive,
     syncBoundsFromMain,
     destroy,
   };

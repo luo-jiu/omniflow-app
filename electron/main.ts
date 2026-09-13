@@ -6,6 +6,7 @@ import registerIpcHandlers from './ipc'
 import { createEmbeddedBrowserMainController } from './service/embeddedBrowserMainController'
 import { isDevToolsToggleShortcut } from './service/embeddedBrowserInputShortcuts'
 import { registerWindowControlIpcHandlers } from './service/windowControlIpc'
+import { getMainWindowBackgroundColor, syncMainWindowBackground } from './service/mainWindowBackground'
 import { createOverlayWindowController } from './service/overlayWindowController'
 import { registerOverlayWindowIpcHandlers } from './service/overlayWindowIpc'
 import { createSystemVideoWindowController } from './service/systemVideoWindowController'
@@ -273,6 +274,7 @@ function createWindow() {
     minWidth: MIN_WINDOW_WIDTH,
     minHeight: MIN_WINDOW_HEIGHT,
     ...getMainWindowPlatformOptions(),
+    backgroundColor: getMainWindowBackgroundColor(),
     ...(isFiniteNumber(persistedWindowState?.x) && isFiniteNumber(persistedWindowState?.y)
       ? { x: persistedWindowState.x, y: persistedWindowState.y }
       : {}),
@@ -286,6 +288,7 @@ function createWindow() {
   })
   mainWindow = win
   applyMainWindowPlatformBehavior(win)
+  syncMainWindowBackground(win)
 
   if (persistedWindowState?.maximized) {
     win.maximize()
@@ -324,6 +327,7 @@ function createWindow() {
   })
   win.on('restore', () => {
     overlayWindowController.syncBoundsFromMain()
+    overlayWindowController.restoreActive()
   })
   win.on('hide', () => {
     const overlay = overlayWindowController.getWindow()
@@ -333,6 +337,10 @@ function createWindow() {
   })
   win.on('show', () => {
     overlayWindowController.syncBoundsFromMain()
+    overlayWindowController.restoreActive()
+  })
+  win.on('focus', () => {
+    overlayWindowController.restoreActive()
   })
 
   win.on('close', (event) => {
