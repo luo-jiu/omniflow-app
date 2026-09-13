@@ -321,7 +321,8 @@ export const LibrarySystemFrame = styled.div`
 
 export const CardGrid = styled.div`
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(0, min(140px, 100%)));
+  justify-content: start;
   gap: 6px;
   padding: 2px 0 8px;
   align-content: flex-start;

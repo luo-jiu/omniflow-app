@@ -130,7 +130,6 @@ const GalleryArchiveViewer: React.FC<GalleryArchiveViewerProps> = ({
 }) => {
   const { viewportRef, wrapperStyle } = useArchiveCardGrid({
     baseCardWidth: 220,
-    minScale: 0.82,
     gridGap: 18,
   });
   const { closeTabByNodeId, setFileUrl } = useFileViewer();
