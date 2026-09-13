@@ -3,6 +3,7 @@
 import { app, dialog } from 'electron';
 import fs from 'fs/promises';
 import path from 'node:path';
+import { readLocalFilePreview } from '../service/local-file-preview';
 
 import { downloadUrlToFile } from '../service/fileTransfer';
 import {
@@ -418,6 +419,15 @@ async function collectFilesFromSelectedFolders(folderPaths: string[]): Promise<D
 }
 
 export function registerFileIpc(ipcMain: Electron.IpcMain) {
+  ipcMain.handle('file:preview-local', async (event, filePath: string) => {
+    const frame = event.senderFrame;
+    const url = frame?.url || '';
+    const dev = process.env.VITE_DEV_SERVER_URL;
+    const trusted = dev ? new URL(url).origin === new URL(dev).origin
+      : url.startsWith('file:') && decodeURIComponent(new URL(url).pathname) === path.join(app.getAppPath(), 'dist', 'index.html');
+    if (!trusted || frame !== event.sender.mainFrame) throw new Error('无效的本机预览来源');
+    return readLocalFilePreview(filePath);
+  });
   ipcMain.handle('file:open', async (
     _event,
     options?: DesktopTextFileOpenOptions,

@@ -12,12 +12,15 @@ import type {
   AgentPreparedActionPublic,
   AgentReasoningEffort,
   AgentRunSnapshot,
+  AgentSessionSummary,
   AgentToolActivitySnapshot,
   AgentToolApprovalSnapshot,
   AgentToolExecutionRequest,
   AgentToolPrepareRequest,
 } from '@/shared/agent/agent.types';
 import { serializeAgentOwnerScope } from '@/shared/agent/agent-owner-scope';
+import { getResumableAgentRun } from '@/shared/agent/agent-run-continuation';
+import { pickAgentSessionSummary, type AgentSessionPermissionMode } from '@/shared/agent/agent-session-management';
 import {
   getAgentSession,
   completeAgentFileAuthority,
@@ -50,10 +53,13 @@ import { markRepositoryTreeSnapshotDirty } from '@/features/file-explorer/hooks/
 import { refreshDirectoryInTree } from '@/features/file-explorer/services/tree-locate';
 
 interface UseAgentSessionInput {
+  groupId?: string | null;
+  permissionMode?: AgentSessionPermissionMode;
   appContext: AgentAppContext;
   model: string;
   onRefreshDirectory?: (directoryId: number) => Promise<void> | void;
   onSessionChanged?: (sessionId: string) => void;
+  onSessionTitleChanged?: () => void;
   ownerScope: AgentOwnerScope | null;
   profileId: string;
   reasoningEffort: AgentReasoningEffort;
@@ -94,10 +100,13 @@ function ensureToolTimelineAnchor(
 }
 
 export function useAgentSession({
+  groupId,
+  permissionMode,
   appContext,
   model,
   onRefreshDirectory,
   onSessionChanged,
+  onSessionTitleChanged,
   ownerScope,
   profileId,
   reasoningEffort,
@@ -111,6 +120,7 @@ export function useAgentSession({
   }, []);
   const readDraft = React.useCallback(() => draftRef.current, []);
   const [sessionId, setSessionId] = React.useState<string | null>(null);
+  const [sessionInfo, setSessionInfo] = React.useState<AgentSessionSummary | null>(null);
   const [isStreaming, setIsStreaming] = React.useState(false);
   const [isPreparing, setIsPreparing] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -560,6 +570,12 @@ export function useAgentSession({
   }, []);
 
   React.useEffect(() => subscribeAgentChat((event) => {
+    if (event.type === 'session-title-updated') {
+      if (serializeAgentOwnerScope(event.ownerScope) === ownerScopeKey && event.libraryId === Number(appContext.libraryId)) {
+        onSessionTitleChanged?.();
+      }
+      return;
+    }
     if (
       restoringSessionIdRef.current === event.sessionId
       || assistantRepairTokensRef.current.has(event.sessionId)
@@ -577,7 +593,7 @@ export function useAgentSession({
     }
     if (activeSessionId !== event.sessionId) return;
     applyEvent(event);
-  }), [applyEvent]);
+  }), [appContext.libraryId, applyEvent, onSessionTitleChanged, ownerScopeKey]);
 
   React.useEffect(() => subscribeAgentFileAuthorityRequests((request) => {
     void resolveAgentFileAuthority(request).then(
@@ -630,6 +646,7 @@ export function useAgentSession({
     sessionIdRef.current = null;
     optimisticMessageIdRef.current = null;
     setSessionId(null);
+    setSessionInfo(null);
     setMessages([]);
     setDraft('');
     setError(null);
@@ -679,6 +696,7 @@ export function useAgentSession({
       ) return false;
       sessionIdRef.current = snapshot.id;
       setSessionId(snapshot.id);
+      setSessionInfo(pickAgentSessionSummary(snapshot));
       setMessages(snapshot.messages);
       setRuns(snapshot.runs);
       setToolActivities(snapshot.toolActivities);
@@ -725,10 +743,11 @@ export function useAgentSession({
     setDraft,
   ]);
 
-  const submit = React.useCallback(async (value = draft) => {
+  const submit = React.useCallback(async (value = draft, resumeRunId?: string) => {
     const userPrompt = String(value || '').trim();
     const currentAttachments = attachments.getEntries();
-    if ((!userPrompt && !currentAttachments.length) || currentAttachments.some(item => !item.attachment || item.error) || isStreaming || isPreparingRef.current) return;
+    if (resumeRunId && (getResumableAgentRun(runs)?.id !== resumeRunId || draft.trim() || currentAttachments.length)) return;
+    if ((!resumeRunId && !userPrompt && !currentAttachments.length) || currentAttachments.some(item => !item.attachment || item.error) || isStreaming || isPreparingRef.current) return;
     if (!profileId || !model) {
       setError('请先在 AI 服务配置中启用配置并选择模型');
       return;
@@ -738,19 +757,19 @@ export function useAgentSession({
       return;
     }
 
-    const optimisticId = createMessageId('agent-user');
-    const submittedAttachments = attachments.take();
+    const optimisticId = resumeRunId ? null : createMessageId('agent-user');
+    const submittedAttachments = resumeRunId ? [] : attachments.take();
     const optimisticSessionId = sessionIdRef.current || '';
     const userMessage: AgentMessage = {
       ...(submittedAttachments.length ? { attachments: submittedAttachments.map(item => item.attachment!) } : {}),
       content: userPrompt,
       createdAt: new Date().toISOString(),
-      id: optimisticId,
+      id: optimisticId || '',
       role: 'user',
       sessionId: optimisticSessionId,
     };
     optimisticMessageIdRef.current = optimisticId;
-    setMessages(current => [...current, userMessage]);
+    if (optimisticId) setMessages(current => [...current, userMessage]);
     setDraft('');
     setError(null);
     setWarning(null);
@@ -781,6 +800,8 @@ export function useAgentSession({
         || sessionScopeKeyRef.current !== submissionScopeKey
       ) return;
       const result = await startAgentChat({
+        ...(!sessionIdRef.current ? { groupId: groupId || null, permissionMode: permissionMode || (groupId ? 'group' : 'ask') } : {}),
+        ...(resumeRunId ? { resumeRunId } : {}),
         ...(submittedAttachments.length ? { attachmentIds: submittedAttachments.map(item => item.attachment!.id) } : {}),
         appContext,
         model,
@@ -801,6 +822,7 @@ export function useAgentSession({
       }
       sessionIdRef.current = result.sessionId;
       setSessionId(result.sessionId);
+      if (result.session) setSessionInfo(result.session);
       setMessages(current => current.map(message => (
         message.id === optimisticId
           ? { ...message, runId: result.runId, sessionId: result.sessionId }
@@ -818,7 +840,7 @@ export function useAgentSession({
           optimisticMessageIdRef.current = null;
         }
         setMessages(current => current.filter(message => message.id !== optimisticId));
-        recoverFailedDraft({ prompt: userPrompt, attachments: submittedAttachments });
+        if (!resumeRunId) recoverFailedDraft({ prompt: userPrompt, attachments: submittedAttachments });
         setError(submitError instanceof Error ? submitError.message : 'Agent 请求失败');
         setIsStreaming(false);
       }
@@ -832,6 +854,8 @@ export function useAgentSession({
     appContext,
     attachments,
     draft,
+    groupId,
+    permissionMode,
     flushPendingEvents,
     isStreaming,
     model,
@@ -841,10 +865,16 @@ export function useAgentSession({
     profileId,
     reasoningEffort,
     recoverFailedDraft,
+    runs,
     sessionScopeKey,
     setPreparing,
     setDraft,
   ]);
+
+  const resumableRunId = getResumableAgentRun(runs)?.id;
+  const continueTask = React.useCallback(async () => {
+    if (resumableRunId) await submit('', resumableRunId);
+  }, [resumableRunId, submit]);
 
   const stop = React.useCallback(async () => {
     const currentSessionId = sessionIdRef.current;
@@ -992,6 +1022,7 @@ export function useAgentSession({
     sessionIdRef.current = null;
     optimisticMessageIdRef.current = null;
     setSessionId(null);
+    setSessionInfo(null);
     setMessages([]);
     setDraft('');
     clearAttachments();
@@ -1008,6 +1039,10 @@ export function useAgentSession({
   }, [clearAttachments, clearFailedDrafts, isStreaming, setPreparing, setDraft]);
 
   return {
+    sessionInfo: sessionInfo?.id === sessionId ? sessionInfo : null,
+    updateSessionInfo: (value: AgentSessionSummary) => {
+      if (value.id === sessionIdRef.current && value.libraryId === Number(appContext.libraryId)) setSessionInfo(pickAgentSessionSummary(value));
+    },
     attachments,
     draft,
     error,
@@ -1020,6 +1055,8 @@ export function useAgentSession({
     approvalBusyIds,
     interactionBusyIds,
     reset,
+    continueTask,
+    resumableRunId,
     resolveApproval,
     submitInteraction,
     restore,

@@ -709,6 +709,163 @@ describe('SQLite Agent session store', () => {
     };
   }
 
+  it.each(['unchanged', 'renamed', 'continued', 'other-owner', 'other-library', 'deleted'] as const)(
+    'updates a generated title only for the unchanged first completed run: %s', async scenario => {
+      const store = await createStore();
+      await createSession(store, 'title-session', 3, '用户的原始提问');
+      await createCompletedTurn(store, 'title-session', 'title-run', 1);
+      const snapshot = (await store.getSession('title-session', OWNER_SCOPE, 3))!;
+      if (scenario === 'renamed') await store.renameSession('title-session', OWNER_SCOPE, 3, '用户手动标题', timestamp(5));
+      if (scenario === 'continued') await store.createRun({ id: 'next-run', sessionId: 'title-session', now: timestamp(5),
+        model: 'model', profileId: 'profile', reasoningEffort: 'auto', userPrompt: '继续' });
+      if (scenario === 'deleted') await store.deleteSession('title-session', OWNER_SCOPE, 3);
+
+      const changed = await store.setGeneratedSessionTitle({
+        sessionId: snapshot.id, runId: 'title-run', title: '简短标题',
+        ownerScope: scenario === 'other-owner' ? OTHER_OWNER_SCOPE : OWNER_SCOPE,
+        libraryId: scenario === 'other-library' ? 4 : 3,
+        expectedTitle: snapshot.title, expectedUpdatedAt: snapshot.updatedAt,
+      });
+      expect(changed).toBe(scenario === 'unchanged');
+      if (scenario === 'unchanged') {
+        const updated = (await store.getSession(snapshot.id, OWNER_SCOPE, 3))!;
+        expect(updated.title).toBe('简短标题');
+        expect(updated.updatedAt).toBe(snapshot.updatedAt);
+        expect(updated.messages).toEqual(snapshot.messages);
+      }
+      if (scenario === 'renamed') expect((await store.getSession(snapshot.id, OWNER_SCOPE, 3))?.title).toBe('用户手动标题');
+    },
+  );
+
+  it('persists continuation links without reopening cancelled runs or allowing duplicate continuation', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'agent-continuation-'));
+    temporaryDirectories.push(directory);
+    const databasePath = path.join(directory, 'sessions.sqlite3');
+    let store = await createStore(databasePath);
+    await createSession(store, 'resume-session', 3, '整理文件');
+    const input = { sessionId: 'resume-session', model: 'model', profileId: 'profile', reasoningEffort: 'auto' as const,
+      userPrompt: '整理文件', now: timestamp(1) };
+    await store.createRun({ ...input, id: 'stopped' });
+    await store.updateRun('stopped', { status: 'cancelled', updatedAt: timestamp(2), finishedAt: timestamp(2) });
+    const continued = await store.createRun({ ...input, id: 'continued', resumesRunId: 'stopped', now: timestamp(3) });
+    expect(continued.resumesRunId).toBe('stopped');
+    await expect(store.createRun({ ...input, id: 'duplicate', resumesRunId: 'stopped' })).rejects.toThrow('continuation');
+    await expect(executeDatabaseSql(databasePath, "UPDATE agent_runs SET resumes_run_id = NULL WHERE id = 'continued'"))
+      .rejects.toThrow('immutable');
+    await store.close();
+    stores.splice(stores.indexOf(store), 1);
+    store = await createStore(databasePath);
+    const restored = (await store.getSession('resume-session', OWNER_SCOPE, 3))!;
+    expect(restored.runs[0].status).toBe('cancelled');
+    expect(restored.runs[1].resumesRunId).toBe('stopped');
+  });
+
+  it.each(['running', 'completed', 'other-session', 'changed-prompt'] as const)(
+    'rejects an invalid continuation source: %s', async reason => {
+      const store = await createStore();
+      await createSession(store, 'source-session', 3, '原任务');
+      await createSession(store, 'other-session', 4, '其他任务');
+      const input = { sessionId: 'source-session', model: 'model', profileId: 'profile', reasoningEffort: 'auto' as const,
+        userPrompt: '原任务', now: timestamp(1) };
+      await store.createRun({ ...input, id: 'source' });
+      if (reason !== 'running') await store.updateRun('source', {
+        status: reason === 'completed' ? 'completed' : 'cancelled', updatedAt: timestamp(2), finishedAt: timestamp(2),
+      });
+      await expect(store.createRun({ ...input, id: 'invalid', resumesRunId: 'source',
+        sessionId: reason === 'other-session' ? 'other-session' : input.sessionId,
+        userPrompt: reason === 'changed-prompt' ? '另一个任务' : input.userPrompt,
+      })).rejects.toThrow('continuation');
+      expect((await store.getSession('source-session', OWNER_SCOPE, 3))?.runs).toHaveLength(1);
+    },
+  );
+
+  it('stores flat local groups, counts sessions and pages by group or archive state', async () => {
+    const store = await createStore();
+    const group = await store.saveGroup(OWNER_SCOPE, 3, { name: '项目文档', directories: [{ nodeId: 10, name: '/docs' }], access: 'read-write' }, timestamp(0));
+    const grouped = await store.createSession({ id: 'grouped', ownerScope: OWNER_SCOPE, appContext: { libraryId: 3, platform: 'darwin', selectedNodeIds: [] },
+      title: '组内会话', groupId: group.id, now: timestamp(1) });
+    await createSession(store, 'ungrouped', 3, '未分组会话');
+    expect(grouped.permissionMode).toBe('group');
+    expect(await store.listGroups(OWNER_SCOPE, 3)).toMatchObject({ total: 2, ungroupedCount: 1, archivedCount: 0,
+      groups: [{ id: group.id, sessionCount: 1 }] });
+    expect((await store.listSessions(OWNER_SCOPE, 3, '', undefined, { groupId: group.id })).sessions.map(item => item.id)).toEqual(['grouped']);
+    expect((await store.listSessions(OWNER_SCOPE, 3, '', undefined, { groupId: null })).sessions.map(item => item.id)).toEqual(['ungrouped']);
+    const archived = await store.archiveSession(grouped.id, OWNER_SCOPE, 3, true, grouped.revision!, timestamp(2));
+    expect(await store.getSession(grouped.id, OWNER_SCOPE, 3)).toBeNull();
+    expect((await store.getSession(grouped.id, OWNER_SCOPE, 3, true))?.groupId).toBe(group.id);
+    expect((await store.listSessions(OWNER_SCOPE, 3, '', undefined, { archived: true })).sessions.map(item => item.id)).toEqual(['grouped']);
+    expect(await store.listGroups(OWNER_SCOPE, 3)).toMatchObject({ total: 1, archivedCount: 1, groups: [{ sessionCount: 0 }] });
+    await store.archiveSession(grouped.id, OWNER_SCOPE, 3, false, archived.revision!, timestamp(3));
+    expect(await store.deleteSession(grouped.id, OWNER_SCOPE, 3, true)).toBe(false);
+    expect((await store.getSession(grouped.id, OWNER_SCOPE, 3))?.groupId).toBe(group.id);
+  });
+
+  it('retains local group policy and archive state after reopening without rewriting Run authorization', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'agent-local-groups-'));
+    temporaryDirectories.push(directory);
+    const databasePath = path.join(directory, 'sessions.sqlite3');
+    const store = await createStore(databasePath);
+    const group = await store.saveGroup(OWNER_SCOPE, 3, { name: '本地组', directories: [{ nodeId: 10, name: '/docs' }], access: 'read' }, timestamp(0));
+    const session = await store.createSession({ id: 'local-session', groupId: group.id, ownerScope: OWNER_SCOPE,
+      appContext: { libraryId: 3, platform: 'darwin', selectedNodeIds: [] }, title: '持久化', now: timestamp(1) });
+    const policy = { version: 1 as const, mode: 'group' as const, groupId: group.id, policyRevision: group.policyRevision, access: group.access, directories: group.directories };
+    await store.createRun({ id: 'local-run', sessionId: session.id, model: 'model', profileId: 'profile', reasoningEffort: 'auto', userPrompt: '工作', libraryAccess: policy, now: timestamp(2) });
+    await store.updateRun('local-run', { status: 'cancelled', updatedAt: timestamp(3), finishedAt: timestamp(3) });
+    await store.archiveSession(session.id, OWNER_SCOPE, 3, true, session.revision!, timestamp(4));
+    await expect(executeDatabaseSql(databasePath, "UPDATE agent_runs SET library_access_json = NULL WHERE id = 'local-run'")).rejects.toThrow('immutable');
+    await store.close(); stores.splice(stores.indexOf(store), 1);
+    const reopened = await createStore(databasePath);
+    const restored = await reopened.getSession(session.id, OWNER_SCOPE, 3, true);
+    expect(restored?.runs[0].libraryAccess).toEqual(policy);
+    expect(restored?.archivedAt).toBeTruthy();
+    expect((await reopened.listGroups(OWNER_SCOPE, 3)).groups[0].id).toBe(group.id);
+    expect((await reopened.listGroups(OWNER_SCOPE, 4)).groups).toEqual([]);
+  });
+
+  it('rejects nested groups, cross-owner membership and stale metadata changes', async () => {
+    const store = await createStore();
+    await expect(store.saveGroup(OWNER_SCOPE, 3, { name: '嵌套', parentId: 'other', access: 'read', directories: [] } as never, timestamp(0))).rejects.toThrow('嵌套');
+    const group = await store.saveGroup(OTHER_OWNER_SCOPE, 3, { name: '其他账号', access: 'read', directories: [] }, timestamp(0));
+    await expect(store.createSession({ id: 'bad-member', groupId: group.id, ownerScope: OWNER_SCOPE,
+      appContext: { libraryId: 3, platform: 'darwin', selectedNodeIds: [] }, title: '不应创建', now: timestamp(1) })).rejects.toThrow('owner mismatch');
+    const session = await createSession(store, 'member', 3, '会话');
+    await expect(store.organizeSession(session.id, OWNER_SCOPE, 3, { groupId: group.id, permissionMode: 'group', revision: session.revision! }, timestamp(2))).rejects.toThrow('owner mismatch');
+    const renamed = await store.renameSession(session.id, OWNER_SCOPE, 3, '新标题', timestamp(3));
+    await expect(store.archiveSession(session.id, OWNER_SCOPE, 3, true, session.revision!, timestamp(4))).rejects.toThrow('已变化');
+    expect(renamed.revision).toBeGreaterThan(session.revision!);
+    expect(await store.getGroup(OWNER_SCOPE, 3, group.id)).toBeNull();
+  });
+
+  it('prevents running sessions from being archived, regrouped or having group access revoked', async () => {
+    const store = await createStore();
+    const group = await store.saveGroup(OWNER_SCOPE, 3, { name: '工作', access: 'read-write', directories: [] }, timestamp(0));
+    const session = await store.createSession({ id: 'active-member', groupId: group.id, ownerScope: OWNER_SCOPE,
+      appContext: { libraryId: 3, platform: 'darwin', selectedNodeIds: [] }, title: '任务', now: timestamp(1) });
+    await store.createRun({ id: 'active-run', sessionId: session.id, model: 'model', profileId: 'profile', reasoningEffort: 'auto', userPrompt: '工作', now: timestamp(2) });
+    await expect(store.archiveSession(session.id, OWNER_SCOPE, 3, true, session.revision!, timestamp(3))).rejects.toThrow('running');
+    await expect(store.organizeSession(session.id, OWNER_SCOPE, 3, { groupId: null, permissionMode: 'ask', revision: session.revision! }, timestamp(3))).rejects.toThrow('running');
+    await expect(store.saveGroup(OWNER_SCOPE, 3, { id: group.id, revision: group.revision, name: group.name, access: 'read', directories: [] }, timestamp(3))).rejects.toThrow('running');
+    await expect(store.deleteGroup(OWNER_SCOPE, 3, group.id, group.revision)).rejects.toThrow('running');
+    const renamed = await store.saveGroup(OWNER_SCOPE, 3, { id: group.id, revision: group.revision, name: '改名', access: 'read-write', directories: [] }, timestamp(3));
+    expect(renamed.policyRevision).toBe(group.policyRevision);
+  });
+
+  it('removes a group without deleting sessions and prevents archived sessions from starting runs', async () => {
+    const store = await createStore();
+    const group = await store.saveGroup(OWNER_SCOPE, 3, { name: '组', access: 'read', directories: [] }, timestamp(0));
+    const session = await store.createSession({ id: 'archived-member', groupId: group.id, ownerScope: OWNER_SCOPE,
+      appContext: { libraryId: 3, platform: 'darwin', selectedNodeIds: [] }, title: '任务', now: timestamp(1) });
+    await store.archiveSession(session.id, OWNER_SCOPE, 3, true, session.revision!, timestamp(2));
+    await expect(store.createRun({ id: 'invalid-active', sessionId: session.id, model: 'model', profileId: 'profile', reasoningEffort: 'auto', userPrompt: '工作', now: timestamp(3) })).rejects.toThrow('archived');
+    await store.deleteGroup(OWNER_SCOPE, 3, group.id, group.revision);
+    const moved = (await store.getSession(session.id, OWNER_SCOPE, 3, true))!;
+    expect(moved.groupId).toBeNull();
+    expect(moved.permissionMode).toBe('ask');
+    expect(moved.archivedAt).toBeTruthy();
+    await store.archiveSession(moved.id, OWNER_SCOPE, 3, false, moved.revision!, timestamp(4));
+    expect((await store.getSession(moved.id, OWNER_SCOPE, 3))?.groupId).toBeNull();
+  });
+
   it('stores ordered messages and isolates sessions by library', async () => {
     const store = await createStore();
     await createSession(store, 'session-win', 3, 'Win 会话');

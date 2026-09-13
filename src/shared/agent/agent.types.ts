@@ -14,7 +14,7 @@ export type AgentMessageRole = 'system' | 'user' | 'assistant' | 'tool';
 
 export type AgentToolRisk = 'read' | 'write' | 'destructive' | 'external';
 
-export type AgentToolDisplayGroupKind = 'resource-read';
+export type AgentToolDisplayGroupKind = 'resource-read' | 'internal-operation';
 
 export type AgentToolDisplayOperationKind = 'list' | 'stat' | 'read' | 'search';
 
@@ -77,6 +77,8 @@ export interface AgentRunPlanSnapshot {
 }
 
 export interface AgentRunSnapshot {
+  libraryAccess?: import('./agent-session-management').AgentLibraryAccessSnapshot;
+  resumesRunId?: string;
   contextUsage?: import('./agent-context-usage').AgentContextUsageSnapshot;
   capabilityIdentity?: string;
   createdAt: string;
@@ -229,6 +231,9 @@ export function isAgentConversationMessage(
 }
 
 export interface AgentChatRequest {
+  groupId?: string | null;
+  permissionMode?: import('./agent-session-management').AgentSessionPermissionMode;
+  resumeRunId?: string;
   attachmentIds?: string[];
   appContext: AgentAppContext;
   model: string;
@@ -241,6 +246,7 @@ export interface AgentChatRequest {
 }
 
 export interface AgentChatStartResult {
+  session?: AgentSessionSummary;
   runId: string;
   sessionId: string;
 }
@@ -650,6 +656,7 @@ export interface AgentToolPrepareCompletion {
 }
 
 export interface AgentToolExecutionRequest {
+  requireAccessCheck?: boolean;
   appContext: AgentAppContext;
   executionId: string;
   input: unknown;
@@ -881,6 +888,13 @@ export type AgentChatStreamEvent =
       type: 'tool-completed';
     }
   | {
+      runId: string;
+      sessionId: string;
+      type: 'session-title-updated';
+      ownerScope: AgentOwnerScope;
+      libraryId: number;
+    }
+  | {
       messages?: AgentMessage[];
       run?: AgentRunSnapshot;
       runId: string;
@@ -918,6 +932,10 @@ export interface AgentSessionPage {
 }
 
 export interface AgentSessionSummary {
+  groupId?: string | null;
+  permissionMode?: import('./agent-session-management').AgentSessionPermissionMode;
+  archivedAt?: string;
+  revision?: number;
   createdAt: string;
   id: string;
   lastMessagePreview: string;

@@ -1,5 +1,7 @@
 # 内置 Agent 架构
 
+会话组、归档与会话级目录授权由main和本机SQLite持有，纯客户端、不做跨设备同步；元数据版本、Run冻结策略、目录检查与归档只读门禁见 [本机会话组与访问](agent-session-groups-and-access.md)。组不是Shell沙箱或历史信息擦除边界。
+
 内部文件删除现已通过 `file.delete` 接入资料库回收站，权限、提交状态和目录/预览同步见 [内部文件操作](agent-internal-file-actions.md)。
 
 多图片与文本附件的 IPC、主进程副本、消息持久化、视觉请求和按行读取见 [附件契约](built-in-agent-attachments.md)。
@@ -56,7 +58,7 @@ Shell 的 main-only 一次性 execution lease、Process Supervisor、LogStore、
 - Tool Registry 与 Orchestrator 的通用 prepare 生命周期：声明 prepare 的 Tool 必须由 main 或 renderer 单一持有；main-owned prepare 直接从 Run 冻结快照生成 public action、不可变私有 binding 和 hash，私有 binding 只经 main execution context 交给同一冻结 Tool 实现，不进入模型输入、SQLite 或 renderer IPC。macOS 开发预览中的 `shell.run` 已使用该 main-owned prepare 链路。
 - macOS Zsh `shell.run` 开发预览：只支持非交互前台命令；用户可以在 Agent 页面选择 `ask / auto / full-access`，main 持久化该本机设置并只影响后续新 Run。`ask` 展示完整冻结命令、Provider、逻辑 cwd、风险、超时和非敏感环境覆盖；`auto` 只自动批准确定性分析已证明在 Run workspace 内的普通操作，访问外部路径时仍询问；`full-access` 对已经完整分析的外部路径读取直接放行，但仍受不可变 deny 和 Analyzer 完整性门禁约束。查看、读取、概括或分析用户明确给出的宿主绝对路径时，模型直接调用受支持只读命令，不先暂存文件。`run-workspace` 中的 `~ / HOME` 指向 Run 虚拟 home，`host` 中则指向 main 冻结的宿主 home。Supervisor 在继续 drain 全部输出的同时维护最多 `1 MiB`、等额保留 head / tail 的 main-only 诊断采集；该采集同时受固定字节数和最多 `4,096` 个返回事件约束，尾部回收不依赖数组头部搬移。原始采集不进入 SQLite、模型或 renderer。输出事件经控制序列清洗和脱敏后进入详细日志，并同步形成最多 `160,000` UTF-8 bytes、使用固定 Buffer 而不按来源碎片积累对象的安全 head / tail 模型源；规范 Tool result 仍经过 `100,000` JSON 字符门禁，Shell 会自适应收口到约 `90,000` JSON 字符为清洗和传输字段留余量。Orchestrator 为单个 `shell.run` Tool result 提供最高约 `40,000 tokens` 的独立投影预算，真实 continuation 空间不足时按 byte / token 再次投影并重算真实 `omittedBytes`。renderer 每个 stdout / stderr 摘要最多 `4 KiB`，但非审批 Shell 默认只以无框单行展示最低状态和 main public prepared action 中的命令摘要，不铺开输出，也不显示耗时、退出码或预览截断；点击具备 owner-bound 结果的行后，才展开最高约 `156px`、内部滚动的受控详细日志，真实过期或缺口只在展开区弱提示。审批态继续使用完整确认卡；命令显示禁止回退到 `call.input`。原始采集、规范结果中的模型源、provider Tool result、renderer 摘要和详细日志是互不替代的预算层。
 - `file.stage@1` / `file.publish@1` / `file.upload@1` 文件桥开发预览：stage 可由 main 系统 picker 或用户在当前请求中明确给出的本机绝对 / `~/` 来源路径把需要工作副本的普通文件暂存进 Run，也可暂存当前资料库普通文件；本机文件只有在需要修改、转码或生成新文件时才走 stage，单纯查看不复制。publish 把 Run 输出发布到 Save As、目录节点或从资料库根开始的绝对目录路径；upload 将明确本机来源原样上传到资料库，不先进入 Run。资料库路径由 renderer authority 从根逐段精确解析，缺失、重名、文件段或层级漂移均失败；prepare 与 execute 分别重验节点、目标、owner、Session、Run 和 ToolRun。stage 的签名 URL 只在 main 下载期存在，publish / upload 复用 main-owned 上传事务并保留 `committed / uncommitted / commit_unknown` 三态。用户明确提供的来源路径可进入对应 Tool input、public prepared action、确认卡和 SQLite 审计；canonical 路径、workspace 物理路径、token、签名 URL 与 credentials 仍只由 main 持有。三个 Tool 都是规范 `business` Tool，并使用 45 秒有界取消结算预算；真实资料库与安装包行为仍需人工验收。
-- 本机会话分页列表、搜索、新建、打开、重命名和删除。
+- 本机会话分组分页、搜索、新建、打开、重命名、移组、归档、只读查档、恢复及归档后的永久删除。
 - 等待确认状态持久化、应用重启后的会话恢复，以及未完成运行的中断标记。
 - 由持久化 ToolRun 驱动的统一 Agent 时间线：实时进度、确认、结果、产物和中断状态在恢复后保持一致。
 - 由规范 Run + ToolRun 派生的任务现场：当前阶段、已实际执行步骤和终态可实时展示并从 SQLite 恢复，不在 renderer 复制第二套任务状态。
@@ -82,7 +84,7 @@ Workspace Store 的恢复、manifest / usage / touch / cleanup、adapter remove 
 
 `AgentShellWorkspaceStore` 关闭时会先同步关闭公开准入，再等待此前已接纳的多阶段操作和 adapter 回调，最后注销 adapter 并关闭 persistence；重复 dispose 复用同一 Promise。
 
-Shell 权限核心已经落地纯 main 的 `ask / auto / full-access` 三态 Policy Engine，并把模式冻结进 Run capability identity 与 prepared snapshot。`auto` 只允许确定性分析器已经完整证明处于 Run workspace 内的普通操作，不调用第二个模型代替用户审批；`full-access` 明确代表当前宿主用户权限而不是沙箱。Agent 页面通过受控 IPC 读写 main-owned 本机设置，切换只影响后续新 Run；持久命令规则仍不是当前用户能力。
+Shell 权限核心保留纯 main 的 `ask / auto / full-access` 三态 Policy Engine，并把模式冻结进 Run capability identity 与 prepared snapshot。`auto` 只允许确定性分析器已经完整证明处于 Run workspace 内的普通操作，不调用第二个模型代替用户审批；`full-access` 明确代表当前宿主用户权限而不是沙箱。Agent 页面现操作会话级 `ask / group / full-access`，不改写共享Shell设置；前两者映射Shell询问，显式完全访问映射Shell完全访问。组内普通资料库操作另由目录guard准入，不自动扩大宿主权限；持久命令规则仍不是当前用户能力。
 
 ## 2. 分层与所有权
 
@@ -142,7 +144,7 @@ Main-owned Agent media upload transaction
 
 状态所有权约束：
 
-- SQLite 是 Session、Run、Message、ToolRun 和已确认长期记忆的唯一持久化事实源；召回排序与 provider 消息都是可重建投影。
+- SQLite 是会话组、Session、Run、Message、ToolRun 和已确认长期记忆的唯一持久化事实源；召回排序与 provider 消息都是可重建投影。组目录授权、会话归属/模式与归档字段由main管理，Run目录权限快照不可变。
 - Renderer 不把会话历史复制到 `localStorage`，只保留本机模型 / 推理强度偏好和临时展示状态。
 - `LibraryDetail` 只向 Agent 投影当前 `libraryId`、目录和选中节点，不持有 Agent 会话副本。
 - API Key 继续由 AI Service 的本机安全存储负责，禁止进入 Agent 数据库、消息或事件。
@@ -179,6 +181,7 @@ agent_shell_workspaces
 
 - `agent_sessions`：按 `backend_scope + account_scope + library_id` 隔离，保存标题、最新安全上下文、消息预览和生命周期时间。
 - `agent_runs`：一次用户提交对应一个 Run，保存 provider 配置 ID、模型、推理强度、状态、当前步骤、错误、可空的受限计划快照、稳定的 `capability_identity`、`tool_catalog_revision`、`skill_catalog_revision` 和从 `1` 起单调递增的 `revision`。诊断身份不包含 Probe 的 `checkedAt`，也不保存完整 Capability / Tool / Skill 定义。
+- 主动停止后的继续在同一Session内创建新的执行Run，使用可空且不可变的`resumes_run_id`引用最后一个cancelled Run；不修改旧终态、不复用旧工具权限。该列由现有schema初始化原地添加，不变更schema版本或重置历史。插入trigger校验同Session、原目标不变、来源cancelled且为最新Run，防止重复分支；readRun和getSession都投影resumesRunId。UI按该关系合并逻辑任务，Provider仍保留逐Run审计与目标记录。详见`agent-run-reliability.md`。
 - `agent_messages`：按 Session 内单调递增的 `sequence` 排序。user / tool 保存普通消息；assistant 保存稳定 `turn_ordinal`、`phase / status`、revision 和终态时间。Provider delta 只存在于 main 内存 writer 与实时事件，SQLite 只在 commentary、final、失败、取消或中断边界提交 item；失败、取消和崩溃不保存当前半句话。
 - `agent_context_checkpoints`：append-only 的派生摘要记录，保存 base checkpoint、覆盖到的消息和 `sequence`、模型来源及 `started / completed / failed / interrupted` 状态。只有 `completed` 能进入 provider 投影；它不改变 Session 排序、预览、消息数或任何 Run / ToolRun 事实。
 - `agent_tool_runs`：保存 Tool 输入、结构化结果、最新进度、权限决策、确认快照、交互请求 / 回答、`business / control` 分类、Run 内稳定 `ordinal`、可空的 `plan_step_id`、从 `1` 起单调递增的 `revision` 和运行状态，不把 Tool 状态压进聊天文本作为唯一事实。需要审批前准备的 Tool 还原子保存 `prepared_action_id / prepared_action_json / prepared_snapshot_hash`；三字段禁止半状态，三者与 `approval_input_hash` 在 prepared action 存在时必须以 SQLite `text` 保存，且两个 hash 必须完全相等。public action 使用包含 `media.extractAudio@1`、`shell.run@1`、`file.stage@1`、`file.publish@1` 与 `file.upload@1` 的严格 `kind / version` 判别联合，TypeScript normalizer、main hash / Tool 绑定校验与 SQLite 独立 branch trigger 共同拒绝未知版本、错误字段类型、危险逻辑路径或本机来源路径、错误 hash、额外或重复字段。交互字段为 `interaction_id / interaction_request_json / interaction_status / interaction_response_json / interaction_decided_at`，请求和最终回答都归属于原 ToolRun。
@@ -255,6 +258,9 @@ Run / ToolRun 每次成功状态 mutation 都在同一条 SQL 中执行 `revisio
 - 进入资料库 Agent 首页时恢复该资料库最近更新的会话。
 - 会话管理页可打开其他历史会话；新建会话只清空当前展示投影，不删除历史。
 - 会话列表使用稳定的 `updatedAt + sessionId` 游标分页，每页 50 条，同时返回当前查询的真实总数；搜索由 SQLite 执行，不受 renderer 已加载页限制。
+- 会话标题初始为首次用户提问的单行摘要（最多80字符）。新会话首轮成功完成并发送completed事件后，main通过`agent-session-title.ts`后台请求一个短标题，沿用该轮冻结的模型与连接；只发送脱敏后的提问/最终回答有界片段，无工具、最多256输出tokens、512输出字符、15秒超时。该请求不创建Run、不追加消息，也不阻塞完成事件；失败或无效标题保留原提问，不批量回填旧历史。
+- 自动标题最多40个Unicode字符，使用现有`agent_sessions.title`，不新增表或schema版本。`setGeneratedSessionTitle`按owner/资料库、原title、原updatedAt和唯一已完成首轮作原子条件更新；手动改名、后续对话或删除后的迟到结果不能覆盖当前元数据。自动更新不修改updatedAt和排序。完成后通过现有`agent:chat:event`发送携带owner/library/session/run范围的`session-title-updated`，renderer只重新读取列表，不复活运行态。
+- 标题任务由orchestrator独立跟踪；有效手动改名、删除会话及releaseOwner会取消相关请求，shutdown同时等待标题任务收口。自动标题与会话/Run仍只有main+SQLite一份事实源。
 - 切换资料库时立即清空旧资料库投影；迟到的列表响应和流式事件不得写入新资料库界面。
 - 切换资料库或卸载 Agent 页面时，仍在读取感知快照的待提交请求不得继续启动 provider；已经跨过启动边界的迟到请求收到 `sessionId` 后立即停止。
 - 恢复仍在运行的 Session 时，Renderer 在 SQLite 快照读取期间暂存该 Session 的流式事件，再以快照为基线顺序补入，避免丢失中间增量。

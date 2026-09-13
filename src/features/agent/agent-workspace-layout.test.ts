@@ -16,16 +16,16 @@ function jsxElements(node: ts.Node, name: string): ts.JsxElement[] {
 }
 
 describe('Agent workspace floating composer layout', () => {
-  it('keeps session actions in a toolbar portal rather than the composer', () => {
+  it('keeps session actions in the directory rather than the toolbar or composer', () => {
     const composer = jsxElements(file, 'Composer')[0].getText(file);
     expect(composer).not.toContain('管理 Agent 会话');
     expect(composer).not.toContain('管理 Agent 长期记忆');
     expect(composer).not.toContain('新建 Agent 会话');
-    expect(source).toContain('createPortal(');
-    expect(source).toContain('</>, toolbarTarget)');
+    expect(source).not.toContain('createPortal(');
+    expect(source).toContain('onMemories=');
     const page = readFileSync(new URL('../../views/library/detail/index.tsx', import.meta.url), 'utf8');
     expect(page).toContain("!browserModeOpen && workspaceDisplayMode !== 'search-home'");
-    expect(page).toContain('toolbarTarget={agentToolbarTarget}');
+    expect(page).not.toContain('toolbarTarget={agentToolbarTarget}');
   });
 
   it('keeps the composer outside the full-height message scroll surface', () => {
@@ -33,7 +33,11 @@ describe('Agent workspace floating composer layout', () => {
     const scroll = jsxElements(root, 'AgentScroll')[0];
     expect(jsxElements(root, 'ComposerFrame')).toHaveLength(1);
     expect(jsxElements(scroll, 'ComposerFrame')).toHaveLength(0);
-    expect(jsxElements(scroll, 'AgentContent')).toHaveLength(1);
+    const contents = jsxElements(scroll, 'AgentContent');
+    expect(contents).toHaveLength(2);
+    expect(contents.filter(content => content.getText(file).includes('archivedPreview.messages'))).toHaveLength(1);
+    expect(contents.filter(content => content.getText(file).includes('messages={session.messages}'))).toHaveLength(1);
+    for (const content of contents) expect(jsxElements(content, 'ComposerFrame')).toHaveLength(0);
   });
 
   it('reserves measured dock space and keeps the scrollbar outside the overlay', () => {

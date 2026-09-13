@@ -2,6 +2,7 @@ import type {
   AgentPresentationBlock,
   AgentToolActivitySnapshot,
 } from '@/shared/agent/agent.types';
+import { buildFileFullName } from '@/utils/fileTreeSettings';
 
 type ToolPresenter = (
   activity: AgentToolActivitySnapshot,
@@ -94,6 +95,7 @@ function mediaInspectPresenter(activity: AgentToolActivitySnapshot): AgentPresen
 }
 
 const TOOL_TITLES: Record<string, string> = {
+  'agent.access.request': '目录访问确认',
   'skill.activate': '加载流程',
   'directory.create': '创建文件夹',
   'file.list': '读取目录',
@@ -156,7 +158,11 @@ export function buildAgentToolSummary(activity: AgentToolActivitySnapshot, libra
   const file = activity.call.name === 'file.stat' || activity.call.name === 'file.resolve' ? data
     : activity.call.name === 'file.list' ? asRecord(data?.directory)
       : activity.call.name === 'media.inspect' ? asRecord(data?.file) : null;
-  const subject = activity.call.name === 'file.resolve' ? textValue(file?.path) || textValue(file?.name) : textValue(file?.name);
+  const name = textValue(file?.name);
+  const fullName = name && file?.type !== 'dir' && activity.call.name !== 'file.list'
+    ? buildFileFullName(name, textValue(file?.ext))
+    : name;
+  const subject = activity.call.name === 'file.resolve' ? textValue(file?.path) || fullName : fullName;
   const nodeId = positiveId(file?.id ?? file?.nodeId);
   if (subject) return {
     label: asRecord(file?.storage)?.availability === 'unavailable'
@@ -173,7 +179,7 @@ export function buildAgentToolSummary(activity: AgentToolActivitySnapshot, libra
       ...(createdNodeId ? { action: { action: 'tree.revealNode', label: name, libraryId, nodeId: createdNodeId } } : {}),
     };
   }
-  return { label: `已完成${getAgentToolTitle(activity)}` };
+  return { label: `已完成 ${getAgentToolTitle(activity)}` };
 }
 
 const TOOL_PRESENTERS: Record<string, ToolPresenter> = {

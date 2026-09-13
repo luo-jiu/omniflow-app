@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Button, Input, Modal, Spin, Toast } from '@douyinfe/semi-ui';
-import { IconCopyAdd, IconDownload, IconSave } from '@douyinfe/semi-icons';
 import CodeMirror from '@uiw/react-codemirror';
-import { Code2, Eye } from 'lucide-react';
+import { Code2, Eye, Save, FilePlus2, Download } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { keymap, EditorView, type ViewUpdate } from '@codemirror/view';
@@ -444,7 +443,11 @@ const TextViewer: React.FC<TextViewerProps> = ({
           return;
         }
         if (cancelled) return;
-        const response = await window.electronAPI.fetch(url, { method: 'GET' }) as IpcTextFetchResponse;
+        const response = url.startsWith('data:text/plain;')
+          ? { status: 200, body: new TextDecoder('utf-8', { fatal: true }).decode(
+            Uint8Array.from(atob(url.slice(url.indexOf(',') + 1)), char => char.charCodeAt(0)),
+          ) }
+          : await window.electronAPI.fetch(url, { method: 'GET' }) as IpcTextFetchResponse;
         const status = Number(response?.status ?? 0);
         if (status >= 400) throw new Error(`HTTP ${status}`);
         const remoteContent = readTextResponseBody(response?.body);
@@ -942,7 +945,7 @@ const TextViewer: React.FC<TextViewerProps> = ({
             aria-label="保存"
             className="icon-action-btn"
             disabled={!canUseEditorContent || !isDirty || isSaving}
-            icon={<IconSave />}
+            icon={<Save size={16} strokeWidth={1.25} />}
             loading={isSaving && !saveAsVisible}
             size="small"
             theme="borderless"
@@ -953,7 +956,7 @@ const TextViewer: React.FC<TextViewerProps> = ({
             aria-label="另存为"
             className="icon-action-btn"
             disabled={!canUseEditorContent || isSaving}
-            icon={<IconCopyAdd />}
+            icon={<FilePlus2 size={16} strokeWidth={1.25} />}
             size="small"
             theme="borderless"
             title="另存为"
@@ -963,7 +966,7 @@ const TextViewer: React.FC<TextViewerProps> = ({
             aria-label="下载"
             className="icon-action-btn"
             disabled={!canUseEditorContent || isDownloading}
-            icon={<IconDownload />}
+            icon={<Download size={16} strokeWidth={1.25} />}
             loading={isDownloading}
             size="small"
             theme="borderless"

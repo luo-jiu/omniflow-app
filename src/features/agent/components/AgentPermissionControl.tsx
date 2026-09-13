@@ -3,10 +3,10 @@ import { IconShieldStroked, IconTick } from '@douyinfe/semi-icons';
 import { Popover } from '@douyinfe/semi-ui';
 import styled from 'styled-components';
 import { getAppPopupContainer } from '@/utils/popup-container';
-import type { AgentShellPermissionMode } from '@/shared/agent/shell/agent-shell.types';
+import type { AgentSessionPermissionMode } from '@/shared/agent/agent-session-management';
 
-const LABELS: Record<AgentShellPermissionMode, string> = {
-  ask: '询问我', auto: '自动批准', 'full-access': '完全访问',
+const LABELS: Record<AgentSessionPermissionMode, string> = {
+  ask: '询问访问', group: '组内自动', 'full-access': '完全访问',
 };
 
 const Trigger = styled.button`
@@ -64,10 +64,11 @@ const Menu = styled.div`
   svg { display: block; width: 14px; height: 14px; }
 `;
 
-export default function AgentPermissionControl({ value, disabled, onChange }: {
-  value: AgentShellPermissionMode;
+export default function AgentPermissionControl({ value, disabled, onChange, grouped = false }: {
+  value: AgentSessionPermissionMode;
+  grouped?: boolean;
   disabled: boolean;
-  onChange: (value: AgentShellPermissionMode) => void;
+  onChange: (value: AgentSessionPermissionMode) => void;
 }) {
   const [visible, setVisible] = React.useState(false);
   const triggerRef = React.useRef<HTMLButtonElement>(null);
@@ -92,7 +93,7 @@ export default function AgentPermissionControl({ value, disabled, onChange }: {
       const current = options.indexOf(document.activeElement as HTMLButtonElement);
       options[(current + (event.key === 'ArrowDown' ? 1 : options.length - 1)) % options.length]?.focus();
     }}>
-      {(Object.keys(LABELS) as AgentShellPermissionMode[]).map(mode => (
+      {(Object.keys(LABELS) as AgentSessionPermissionMode[]).filter(mode => mode !== 'group' || grouped).map(mode => (
         <button key={mode} type="button" role="menuitemradio" aria-checked={mode === value}
           onClick={() => { setVisible(false); triggerRef.current?.focus(); onChange(mode); }}>
           <span>{LABELS[mode]}</span>{mode === value ? <IconTick aria-hidden="true" /> : null}
@@ -108,7 +109,7 @@ export default function AgentPermissionControl({ value, disabled, onChange }: {
           else { focusMenuOnOpen.current = true; setVisible(true); }
         }
       }}
-      aria-label={`Agent 权限模式：${LABELS[value]}`} title="设置后续 Agent 任务的 Shell 权限模式">
+      aria-label={`Agent 权限模式：${LABELS[value]}`} title="当前会话的访问权限">
       <IconShieldStroked aria-hidden="true" /><span>{LABELS[value]}</span>
     </Trigger>
   </Popover>;

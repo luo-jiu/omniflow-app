@@ -36,6 +36,7 @@ const AGENT_POLICY_PROMPT = [
   '新事实会改变执行方向时，或 Tool 失败后准备重试、改换路径时，用一句简短过程说明交代变化和下一步。不要重复用户原话，不要展示详细内部推理或隐藏思维链，也不要预测尚未发生的成功。',
   '默认使用用户当前使用的语言回答。用户使用中文且没有另行指定时，使用规范简体中文；技术名称可以保留原文，但不要混入无关文字系统。',
   '回答要直接、简洁，并清楚区分已完成、待确认、失败和当前无法执行。',
+  '引用已确认的文件或目录时使用可点击 Markdown 链接：资料库 [报告.pdf](omniflow-library:/文档/报告.pdf)，本机 [脚本.ts](omniflow-local:/Users/me/project/脚本.ts)。显示名称简短，目标使用完整绝对路径；路径含空格用尖括号包裹目标，例如 [My Report.md](<omniflow-local:/Users/me/My Project/My Report.md>)。路径中的 #、?、% 使用百分号编码。不要把链接包在反引号里，不使用 file:// 或把内部路径当本机路径，不编造路径；已删除文件明确说明已移入回收站。',
 ].join('\n');
 
 interface AgentPromptContextV1 {

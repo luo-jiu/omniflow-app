@@ -39,6 +39,7 @@ export interface AgentMediaArtifactUploadInput {
   artifactId: string;
   credentials: AgentMediaUploadCredentials;
   expectedUserId: number;
+  beforeCommit?: () => Promise<void>;
   onProgress?: (uploadedBytes: number, totalBytes: number) => void;
   onSettlementStarted?: () => void;
   owner: AgentMediaArtifactOwner;
@@ -491,6 +492,7 @@ export function createAgentMediaArtifactUploadManager(options: AgentMediaArtifac
         }
 
         await ownedFile.verifyUnchanged();
+        await input.beforeCommit?.();
         throwIfAborted(input.signal);
         input.onSettlementStarted?.();
         completeStarted = true;

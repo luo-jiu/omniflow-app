@@ -5,6 +5,18 @@ export function isAgentRunActive(run: AgentRunSnapshot): boolean {
   return ['preparing', 'running', 'awaiting_approval', 'awaiting_interaction'].includes(run.status);
 }
 
+export function projectAgentContinuationElapsed(attempts: AgentRunSnapshot[]): AgentRunSnapshot {
+  const latest = attempts[attempts.length - 1];
+  const elapsedBefore = attempts.slice(0, -1).reduce((total, run) => {
+    const duration = Date.parse(run.finishedAt || run.updatedAt) - Date.parse(run.createdAt);
+    return total + (Number.isFinite(duration) ? Math.max(0, duration) : 0);
+  }, 0);
+  const start = Date.parse(latest.createdAt);
+  return elapsedBefore && Number.isFinite(start)
+    ? { ...latest, createdAt: new Date(start - elapsedBefore).toISOString() }
+    : latest;
+}
+
 export function formatAgentRunElapsed(run: AgentRunSnapshot, now: number): string {
   const end = isAgentRunActive(run) ? now : Date.parse(run.finishedAt || run.updatedAt);
   const elapsed = Math.max(0, Math.floor((end - Date.parse(run.createdAt)) / 1000));

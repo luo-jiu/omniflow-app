@@ -75,6 +75,12 @@ import { getAppPopupContainer } from '@/utils/popup-container';
 import { getDesktopPlatform } from '@/platform';
 import { useAuth } from '@/hooks/useAuth';
 import AgentWorkspace from '@/features/agent/AgentWorkspace';
+import { AGENT_WORKSPACE_MIN_WIDTH } from '@/features/agent/agent-session-directory-layout';
+import type { AgentFileLink } from '@/shared/agent/agent-file-link';
+import { resolveAgentLibraryPath } from '@/features/agent/services/agent-library.api';
+import { localPreviewUrl } from '@/features/file-viewer/services/local-preview';
+import { locateNodeInDirectoryTree } from '@/features/file-explorer/services/tree-locate';
+import { resolvePreviewFileType } from '@/utils/preview-file-type';
 import { createAgentOwnerScope } from '@/shared/agent/agent-owner-scope';
 import { subscribeLibraryFilesDeleted } from '@/features/file-viewer/services/file-deletion-events';
 import { matchesLibraryMutationScope, subscribeLibraryNodesMutated } from '@/features/file-explorer/services/node-mutation-events';
@@ -104,6 +110,7 @@ import {
   MIN_BROWSER_RESOURCE_PANEL_WIDTH,
   MIN_SIDE_PANEL_WIDTH,
   SIDE_PANEL_COLLAPSE_ANIMATION_MS,
+  getMaxSidePanelWidth,
   loadBrowserResourcePanelWidth,
   loadSidePanelWidth,
   saveBrowserResourcePanelWidth,
@@ -306,6 +313,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   const latestPanelWidthRef = React.useRef<number>(sidePanelWidth);
   const sidePanelCollapsedRef = React.useRef<boolean>(sidePanelCollapsed);
   const sidePanelVisualWidthRef = React.useRef<number>(sidePanelVisualWidth);
+  const maxSidePanelWidthRef = React.useRef(Number.POSITIVE_INFINITY);
   const videoWideModeRestoreRef = React.useRef<{
     sidePanelCollapsed: boolean;
     sidePanelWidth: number;
@@ -466,7 +474,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   }, [applySidePanelVisualWidthPreview]);
 
   const previewSidePanelVisualWidth = React.useCallback((nextWidth: number) => {
-    const normalizedWidth = Math.max(0, Math.floor(nextWidth));
+    const normalizedWidth = Math.min(maxSidePanelWidthRef.current, Math.max(0, Math.floor(nextWidth)));
     sidePanelVisualWidthRef.current = normalizedWidth;
     pendingSidePanelVisualWidthRef.current = normalizedWidth;
     if (sidePanelResizePreviewFrameRef.current === null) {
@@ -478,12 +486,33 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   }, [applySidePanelVisualWidthPreview]);
 
   const setSidePanelVisualWidth = React.useCallback((nextWidth: number) => {
-    const normalizedWidth = Math.max(0, Math.floor(nextWidth));
+    const normalizedWidth = Math.min(maxSidePanelWidthRef.current, Math.max(0, Math.floor(nextWidth)));
     sidePanelVisualWidthRef.current = normalizedWidth;
     pendingSidePanelVisualWidthRef.current = normalizedWidth;
     applySidePanelVisualWidthPreview(normalizedWidth);
     setSidePanelVisualWidthState(normalizedWidth);
   }, [applySidePanelVisualWidthPreview]);
+
+  React.useLayoutEffect(() => {
+    const wrapper = detailWrapperRef.current;
+    if (!wrapper) return;
+    const updateLimit = () => {
+      const width = wrapper.getBoundingClientRect().width;
+      if (width <= 0) return;
+      maxSidePanelWidthRef.current = getMaxSidePanelWidth(
+        width,
+        window.innerWidth,
+        workspaceDisplayMode === 'search-home' ? AGENT_WORKSPACE_MIN_WIDTH : 0,
+      );
+      wrapper.style.setProperty('--side-panel-max-width', `${maxSidePanelWidthRef.current}px`);
+      // Constrain the display without overwriting the saved expanded width.
+      setSidePanelVisualWidth(sidePanelCollapsedRef.current ? 0 : latestPanelWidthRef.current);
+    };
+    updateLimit();
+    const observer = new ResizeObserver(updateLimit);
+    observer.observe(wrapper);
+    return () => observer.disconnect();
+  }, [setSidePanelVisualWidth, workspaceDisplayMode]);
 
   const toggleSidePanelCollapsed = React.useCallback(() => {
     cleanupResizeListeners();
@@ -620,18 +649,20 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
 
     const onMouseMove = (ev: MouseEvent) => {
       if (!sidePanelRef.current) return;
-      const maxWidth = Math.floor(window.innerWidth * 0.8);
+      const maxWidth = maxSidePanelWidthRef.current;
       const newWidth = Math.min(Math.max(startWidth + ev.clientX - startX, MIN_SIDE_PANEL_WIDTH), maxWidth);
       previewSidePanelVisualWidth(newWidth);
-      latestPanelWidthRef.current = newWidth;
+      if (newWidth > 0) latestPanelWidthRef.current = newWidth;
     };
 
     const onMouseUp = () => {
       flushSidePanelVisualWidthPreview();
-      const finalWidth = Math.floor(latestPanelWidthRef.current);
-      setSidePanelWidth(finalWidth);
+      const finalWidth = Math.min(maxSidePanelWidthRef.current, Math.floor(latestPanelWidthRef.current));
       setSidePanelVisualWidth(finalWidth);
-      saveSidePanelWidth(libraryId, finalWidth);
+      if (finalWidth > 0) {
+        setSidePanelWidth(finalWidth);
+        saveSidePanelWidth(libraryId, finalWidth);
+      }
       setSidePanelResizing(false);
       cleanupResizeListeners();
     };
@@ -1849,8 +1880,6 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     reloadActiveTab();
   }, [activeBrowserTab?.url, browserModeOpen, reloadActiveTab]);
 
-  const [agentToolbarTarget, setAgentToolbarTarget] = React.useState<HTMLDivElement | null>(null);
-
   const fileRefreshButton = !browserModeOpen && workspaceDisplayMode !== 'search-home'
     && workspaceDisplayMode !== 'tools' ? (
     <button
@@ -2818,9 +2847,6 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                 </button>
               </Popover>
             ) : null}
-            {workspaceDisplayMode === 'search-home' ? (
-              <div className="toolbar-right agent-toolbar-actions" ref={setAgentToolbarTarget} />
-            ) : null}
             {!isWindows ? fileRefreshButton : null}
           </div>
         </ContentToolbar>
@@ -3037,7 +3063,31 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
           ) : workspaceDisplayMode === 'search-home' ? (
             <div className="workspace-pane active">
               <AgentWorkspace
-                toolbarTarget={agentToolbarTarget}
+                onOpenFileLink={(link: AgentFileLink) => {
+                  const requestedLibrary = libraryId;
+                  void (async () => {
+                    try {
+                      if (link.scope === 'local') {
+                        setFileUrl(localPreviewUrl(link.path), link.path.split(/[\\/]/u).pop() || link.path, 'other', null, { tabTypeLabel: '本机' });
+                      } else {
+                        const node = await resolveAgentLibraryPath(requestedLibrary, link.path);
+                        if (Number(window.location.hash.match(/libraries\/(\d+)/u)?.[1]) !== requestedLibrary) return;
+                        setSidePanelCollapsed(false);
+                        locateNodeInDirectoryTree({ libraryId: requestedLibrary, nodeId: node.id });
+                        if (node.type === 'dir') return;
+                        if (node.type === 'file') {
+                          const url = await getFileLink(node.id, requestedLibrary);
+                          if (Number(window.location.hash.match(/libraries\/(\d+)/u)?.[1]) !== requestedLibrary) return;
+                          const name = node.ext && !node.name.endsWith(`.${node.ext}`) ? `${node.name}.${node.ext}` : node.name;
+                          setFileUrl(url, name, resolvePreviewFileType(undefined, node.ext, name), node.id);
+                        }
+                      }
+                      setBrowserModeOpen(false);
+                      setWorkspaceDisplayMode('file-viewer');
+                      void window.electronEmbeddedBrowser.deactivate();
+                    } catch { Toast.error('无法打开文件：目标不存在或当前不可访问'); }
+                  })();
+                }}
                 libraryId={libraryId}
                 onRefreshDirectory={(directoryId) => (
                   directorySidebarRef.current?.refreshNodeSubtree(directoryId)

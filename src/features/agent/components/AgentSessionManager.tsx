@@ -1,13 +1,8 @@
 import React from 'react';
-import {
-  IconChevronLeft,
-  IconDelete,
-  IconEdit,
-  IconPlus,
-  IconSearch,
-} from '@douyinfe/semi-icons';
 import { Spin } from '@douyinfe/semi-ui';
 import styled from 'styled-components';
+import OutlineIcon from '@/components/ui/outline-icon';
+import type { AgentSessionGroup } from '@/shared/agent/agent-session-management';
 
 import type { AgentRunStatus, AgentSessionSummary } from '@/shared/agent/agent.types';
 
@@ -103,6 +98,7 @@ const Manager = styled.section`
   .agent-session-search input::placeholder {
     color: var(--app-text-muted);
   }
+  .agent-session-search select { max-width:180px; min-width:90px; height:28px; border:0; background:var(--app-bg-elevated); color:var(--app-text); font-size:12px; }
 
   .agent-session-list {
     width: 100%;
@@ -285,6 +281,13 @@ function formatSessionTime(value: string): string {
 }
 
 export interface AgentSessionManagerProps {
+  groupFilter?: string;
+  onGroupFilterChange?: (value: string) => void;
+  archived?: boolean;
+  groups?: AgentSessionGroup[];
+  onArchive?: (session: AgentSessionSummary) => void;
+  onRestore?: (session: AgentSessionSummary) => void;
+  onMove?: (session: AgentSessionSummary) => void;
   activeSessionId: string | null;
   hasMore: boolean;
   loading: boolean;
@@ -302,6 +305,13 @@ export interface AgentSessionManagerProps {
 }
 
 export default function AgentSessionManager({
+  groupFilter = 'all',
+  onGroupFilterChange,
+  archived = false,
+  groups = [],
+  onArchive,
+  onRestore,
+  onMove,
   activeSessionId,
   hasMore,
   loading,
@@ -344,33 +354,37 @@ export default function AgentSessionManager({
           title="返回当前会话"
           type="button"
         >
-          <IconChevronLeft aria-hidden="true" />
+          <OutlineIcon name="back" />
         </button>
         <div className="agent-session-heading">
-          <h2 className="agent-session-title">会话记录</h2>
+          <h2 className="agent-session-title">{archived ? '归档会话' : '会话管理'}</h2>
           <div className="agent-session-count">
             {query ? `${total} 个匹配会话` : `${total} 个本机会话`}
           </div>
         </div>
-        <button
+        {!archived ? <button
           aria-label="新建 Agent 会话"
           className="agent-session-icon-button"
           onClick={onNew}
           title="新建会话"
           type="button"
         >
-          <IconPlus aria-hidden="true" />
-        </button>
+          <OutlineIcon name="plus" />
+        </button> : null}
       </header>
 
       <label className="agent-session-search">
-        <IconSearch aria-hidden="true" />
+        <OutlineIcon name="search" />
         <input
           aria-label="搜索 Agent 会话"
           onChange={event => onQueryChange(event.target.value)}
           placeholder="搜索会话"
           value={query}
         />
+        {onGroupFilterChange ? <select aria-label="筛选会话组" value={groupFilter} onChange={event => onGroupFilterChange(event.target.value)}>
+          <option value="all">全部分组</option><option value="__ungrouped">未分组</option>
+          {groups.map(group => <option key={group.id} value={group.id}>{group.name}</option>)}
+        </select> : null}
       </label>
 
       {loading ? (
@@ -415,6 +429,7 @@ export default function AgentSessionManager({
                       {session.lastMessagePreview || '尚无消息'}
                     </span>
                     <span className="agent-session-meta">
+                      <span>{groups.find(group => group.id === session.groupId)?.name || '未分组'}</span>
                       <span>{formatSessionTime(session.updatedAt)}</span>
                       <span>{session.messageCount} 条消息</span>
                       {statusLabel ? <span className="agent-session-status">{statusLabel}</span> : null}
@@ -423,23 +438,26 @@ export default function AgentSessionManager({
                 )}
                 {editingId !== session.id ? (
                   <div className="agent-session-actions">
-                    <button
+                    {!archived ? <button
                       aria-label={`重命名 ${session.title}`}
                       className="agent-session-icon-button"
                       onClick={() => beginRename(session)}
                       title="重命名"
                       type="button"
                     >
-                      <IconEdit aria-hidden="true" />
-                    </button>
+                      <OutlineIcon name="edit" />
+                    </button> : null}
+                    {!archived && onMove ? <button className="agent-session-icon-button" type="button" title="移到组" aria-label={`移动 ${session.title}`} onClick={() => onMove(session)}><OutlineIcon name="folder" /></button> : null}
+                    {archived ? <button className="agent-session-icon-button" type="button" title="恢复会话" aria-label={`恢复 ${session.title}`} onClick={() => onRestore?.(session)}><OutlineIcon name="archive-restore" /></button> : null}
                     <button
-                      aria-label={`删除 ${session.title}`}
+                      aria-label={`${archived ? '永久删除' : '归档'} ${session.title}`}
                       className="agent-session-icon-button"
-                      onClick={() => onDelete(session)}
-                      title="删除"
+                      onClick={() => archived ? onDelete(session) : onArchive?.(session)}
+                      disabled={['running', 'preparing', 'awaiting_approval', 'awaiting_interaction'].includes(session.lastRunStatus || '')}
+                      title={archived ? '永久删除' : '归档'}
                       type="button"
                     >
-                      <IconDelete aria-hidden="true" />
+                      <OutlineIcon name={archived ? 'trash' : 'archive'} />
                     </button>
                   </div>
                 ) : null}

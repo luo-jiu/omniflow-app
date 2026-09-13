@@ -33,6 +33,23 @@ function prepareInput(signal: AbortSignal) {
 }
 
 describe('Agent tool broker', () => {
+  it('binds commit authorization to the live execution owner and rechecks every time', async () => {
+    const broker = createAgentToolBroker({ createId: () => 'access-check' });
+    const verifyAccess = vi.fn(async () => undefined);
+    const prepared = broker.prepareRendererExecution({ ...prepareInput(new AbortController().signal), verifyAccess });
+    const input = { executionId: prepared.request.executionId, libraryId: 3, ownerScope: OWNER_SCOPE, runId: 'run-1', sessionId: 'session-1' };
+    expect(prepared.request.requireAccessCheck).toBe(true);
+    await expect(broker.verifyRendererAccess(78, input)).rejects.toThrow('已失效');
+    await expect(broker.verifyRendererAccess(77, { ...input, libraryId: 4 })).rejects.toThrow('已失效');
+    expect(verifyAccess).not.toHaveBeenCalled();
+    await expect(broker.verifyRendererAccess(77, input)).resolves.toBe(true);
+    verifyAccess.mockRejectedValueOnce(new Error('Authorization changed'));
+    await expect(broker.verifyRendererAccess(77, input)).rejects.toThrow('Authorization changed');
+    broker.completeRendererExecution(77, { ...input, result: { ok: false, message: 'denied' } });
+    await prepared.outcome;
+    await expect(broker.verifyRendererAccess(77, input)).rejects.toThrow('已失效');
+  });
+
   it('removes credentials from canonical Tool results before persistence or events', () => {
     const input = {
       data: {

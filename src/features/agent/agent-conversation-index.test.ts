@@ -32,6 +32,18 @@ describe('Conversation index projection', () => {
     expect(buildConversationIndex(many, [run])).toHaveLength(85);
     expect(buildConversationIndex(many, [run])[84].ordinal).toBe(85);
   });
+  it('marks only the latest stopped question yellow and clears it on continuation or a new question', () => {
+    const stopped = { ...run, status: 'cancelled' as const };
+    expect(buildConversationIndex(messages, [stopped])[0]).toMatchObject({ tone: 'paused', active: false });
+    const resumed = { ...run, id: 'r2', resumesRunId: run.id };
+    const continuation = { ...messages[0], id: 'continuation-user', runId: resumed.id };
+    expect(buildConversationIndex([...messages, continuation], [stopped, resumed])).toMatchObject([
+      { id: 'm1', tone: 'normal', active: true, ordinal: 1 },
+    ]);
+    expect(buildConversationIndex([...messages, { ...messages[0], id: 'new-question', runId: 'new-run' }], [stopped])[0].tone)
+      .toBe('normal');
+    expect(buildConversationIndex(messages, [{ ...run, status: 'failed' }])[0].tone).toBe('error');
+  });
   it('accepts only bounded local label metadata, including empty bookmarks', () => {
     expect(parseIndexMarks('{"m1":"","m2":"重点"}')).toEqual({ m1: '', m2: '重点' });
     expect(parseIndexMarks('broken')).toEqual({});

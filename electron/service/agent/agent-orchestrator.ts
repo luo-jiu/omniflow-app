@@ -76,6 +76,13 @@ import {
 import { aiServiceRunSessionRegistry } from '../aiServiceRunSession';
 import { getAIServiceRuntimeProfile } from '../aiServiceStore';
 import { streamAgentProviderTurn } from './agent-provider-client';
+import { generateAgentSessionTitle, sessionTitleFromPrompt } from './agent-session-title';
+import { buildAgentResumeInstruction } from './agent-run-continuation';
+import { createAgentLibraryAccessGuard, type AgentLibraryAccessGuard, type AgentAccessApproval } from './agent-library-access';
+import { normalizeAgentSessionGroupInput, normalizeAgentSessionPermissionMode, pickAgentSessionSummary,
+  type AgentSessionGroupInput, type AgentSessionOrganizationInput, type AgentSessionListFilter,
+  type AgentLibraryAccessSnapshot,
+} from '../../../src/shared/agent/agent-session-management';
 import { AGENT_COMPLETION_CHECK_PROMPT, shouldCheckAgentCompletion } from './agent-completion-check';
 import { canResumeInterruptedReadTurn, retryBufferedAgentTransport, waitForAgentRetry } from './agent-transport-retry';
 import {
@@ -218,7 +225,6 @@ import { mediaInspectTool } from './tools/media-inspect-tool';
 import { interactionRequestTool } from './tools/interaction-request-tool';
 import { memoryProposeTool } from './tools/memory-propose-tool';
 import {
-  getAgentShellPermissionModeForRun,
   getAgentShellProviderSnapshotForRun,
   releaseAgentShellRun,
 } from './shell/agent-shell-service-runtime';
@@ -265,6 +271,11 @@ const AVAILABLE_PERCEPTION_BUDGET_PROBE: AgentPerceptionSnapshot = {
 ensureBuiltInAgentCapabilities();
 
 interface ActiveAgentRun {
+  accessGuard?: AgentLibraryAccessGuard;
+  releaseAccess?: () => void;
+  groupKey?: string;
+  stoppedByUser?: boolean;
+  task?: Promise<void>;
   assistantWriter?: AgentAssistantTurnWriter;
   controller: AbortController;
   ownerWebContentsId: number;
@@ -287,6 +298,7 @@ type AgentApprovalOutcome =
     };
 
 interface PendingAgentApproval {
+  verifyAccess?: () => Promise<void>;
   appContext: AgentAppContext;
   approval: AgentToolApprovalSnapshot;
   executor: AgentToolExecutor;
@@ -353,6 +365,7 @@ interface AgentMediaArtifactFallbackGrant {
 }
 
 interface AgentOrchestratorOptions {
+  generateSessionTitle?: typeof generateAgentSessionTitle;
   attachmentBindings?: Pick<import('./agent-attachment-store').AgentAttachmentStore, 'resolve' | 'bind' | 'rollbackBinding'>;
   readLibraryMetadata?: (input: AgentFileAuthorityBrokerRequestInput) => Promise<AgentLibraryReadResult>;
   readLibraryText?: (input: AgentFileAuthorityBrokerRequestInput) => Promise<Uint8Array>;
@@ -730,10 +743,6 @@ function isToolProtocolUnsupported(error: unknown): boolean {
   );
 }
 
-function sessionTitleFromPrompt(prompt: string): string {
-  return prompt.replace(/\s+/g, ' ').trim().slice(0, 80);
-}
-
 function stableJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
   if (value && typeof value === 'object') {
@@ -985,6 +994,27 @@ function sameOwnerScope(left: AgentOwnerScope, right: AgentOwnerScope): boolean 
   return left.accountScope === right.accountScope && left.backendScope === right.backendScope;
 }
 
+export function updatePerceptionAfterLibraryMutation(
+  perception: AgentPerceptionSnapshot,
+  toolName: string,
+  nodeId?: number,
+): AgentPerceptionSnapshot {
+  if (toolName === 'file.delete') {
+    return {
+      ...perception,
+      knownNodes: perception.knownNodes?.filter(node => node.id !== nodeId) || [],
+      selectedNodes: [],
+      currentDirectory: undefined,
+    };
+  }
+  return {
+    ...perception,
+    knownNodes: perception.knownNodes?.filter(node => node.id === nodeId) || [],
+    selectedNodes: [],
+    currentDirectory: undefined,
+  };
+}
+
 function abortError(message = 'Agent 任务已取消'): Error {
   const error = new Error(message);
   error.name = 'AbortError';
@@ -1039,13 +1069,65 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     request: AgentShellLogReadRequest,
   ) => (await getAgentShellStorageRuntime()).logStore.readPage(request));
   const activeRuns = new Map<string, ActiveAgentRun>();
+  const activeTitleTasks = new Map<string, { controller: AbortController; ownerWebContentsId: number }>();
   const startingRuns = new Map<string, StartingAgentRun>();
   const startingSessions = new Set<string>();
+  const startingGroupKeys = new Map<string, string>();
   const pendingApprovals = new Map<string, PendingAgentApproval>();
   const pendingInteractions = new Map<string, PendingAgentInteraction>();
   const activeMediaArtifactSaves = new Set<ActiveMediaArtifactSave>();
   const mediaArtifactFallbackGrants = new Map<string, AgentMediaArtifactFallbackGrant>();
   let shuttingDown = false;
+
+  function groupKey(owner: AgentOwnerScope, libraryId: number, groupId: string): string {
+    const scope = normalizeAgentOwnerScope(owner);
+    return JSON.stringify([scope.backendScope, scope.accountScope, Number(libraryId), groupId]);
+  }
+  function assertGroupIdle(key: string) {
+    if ([...startingGroupKeys.values()].includes(key) || [...activeRuns.values()].some(run => run.groupKey === key)) {
+      throw new Error('组内任务正在运行或停止收尾，请稍后修改');
+    }
+  }
+  function assertSessionIdle(id: string) {
+    if (activeRuns.has(id) || startingSessions.has(id)) throw new Error('会话正在运行或停止收尾，请稍后操作');
+  }
+
+  function scheduleSessionTitle(
+    sender: WebContents,
+    store: AgentSessionStore,
+    session: AgentSessionSnapshot,
+    runId: string,
+    input: AgentChatRequest,
+    connection: AIServiceRuntimeConnection,
+    answer: string,
+  ) {
+    if (shuttingDown || activeTitleTasks.has(session.id) || session.runs.length !== 1
+      || session.runs[0].id !== runId || session.title !== sessionTitleFromPrompt(input.userPrompt)) return;
+    const controller = new AbortController();
+    const task = { controller, ownerWebContentsId: sender.id };
+    activeTitleTasks.set(session.id, task);
+    const timer = setTimeout(() => controller.abort(), 15_000);
+    void (async () => {
+      const current = await store.getSession(session.id, input.ownerScope, Number(input.appContext.libraryId));
+      if (controller.signal.aborted || !current || current.title !== session.title || current.runs.length !== 1) return;
+      const title = await (options.generateSessionTitle || generateAgentSessionTitle)({
+        prompt: input.userPrompt, answer, model: input.model, profileId: input.profileId,
+        connection, signal: controller.signal,
+      });
+      if (!title || controller.signal.aborted) return;
+      const updated = await store.setGeneratedSessionTitle({
+        sessionId: session.id, runId, ownerScope: input.ownerScope, libraryId: Number(input.appContext.libraryId),
+        expectedTitle: current.title, expectedUpdatedAt: current.updatedAt, title,
+      });
+      if (updated && !controller.signal.aborted) emit(sender, {
+        sessionId: session.id, runId, type: 'session-title-updated',
+        ownerScope: input.ownerScope, libraryId: Number(input.appContext.libraryId),
+      });
+    })().catch(() => undefined).finally(() => {
+      clearTimeout(timer);
+      if (activeTitleTasks.get(session.id) === task) activeTitleTasks.delete(session.id);
+    });
+  }
 
   function clearMediaArtifactFallbackGrants(
     predicate: (grant: AgentMediaArtifactFallbackGrant) => boolean,
@@ -1102,6 +1184,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
   }
 
   function waitForApproval(input: {
+    verifyAccess?: () => Promise<void>;
     appContext: AgentAppContext;
     approval: AgentToolApprovalSnapshot;
     executor: AgentToolExecutor;
@@ -1205,6 +1288,37 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       if (input.signal.aborted) handleAbort();
       else input.signal.addEventListener('abort', handleAbort, { once: true });
     });
+  }
+
+  async function requestDirectoryApproval(sender: WebContents, store: AgentSessionStore, sessionId: string,
+    runId: string, appContext: AgentAppContext, ownerScope: AgentOwnerScope, signal: AbortSignal, request: AgentAccessApproval): Promise<boolean> {
+    signal.throwIfAborted();
+    const call = { id: crypto.randomUUID(), name: 'agent.access.request', input: request };
+    const approvalId = crypto.randomUUID();
+    const preview: AgentActionPreview = { title: request.title, description: request.description,
+      risk: request.write ? 'write' : 'read', details: request.targets.map(target => ({
+        label: target.write ? '修改' : target.descendants ? '读取目录及子目录' : '读取文件', value: target.name,
+      })) };
+    let activity = await store.createToolRun({ id: crypto.randomUUID(), runId, callId: call.id, toolName: call.name,
+      toolKind: 'control', input: request, now: now(), status: 'awaiting_approval', permissionBehavior: 'ask',
+      approvalId, approvalPreview: preview, approvalInputHash: hashToolInput(request) });
+    const approval: AgentToolApprovalSnapshot = { approvalId, call, preview, runId, sessionId };
+    await updateRunAndEmit(sender, store, sessionId, runId, { status: 'awaiting_approval', currentStep: request.title, updatedAt: now() });
+    const waiting = waitForApproval({ approval, appContext, ownerScope, ownerWebContentsId: sender.id, sender,
+      executor: 'main', executionInput: undefined, onProgress: () => undefined, onCancel: () => undefined,
+      signal, store, timeoutMs: approvalTimeoutMs });
+    emit(sender, { activity, approval, runId, sessionId, type: 'tool-approval-required' });
+    try {
+      const outcome = await waiting;
+      const result = { ok: outcome.approved, message: outcome.approved ? '已批准本次执行的访问范围' : '用户未批准访问' };
+      activity = await store.completeToolRun(activity.id, result, now(), outcome.approved ? 'completed' : 'failed');
+      emit(sender, { activity, approvalId, approved: outcome.approved, runId, sessionId, type: 'tool-approval-resolved' });
+      emit(sender, { activity, call, result, runId, sessionId, type: 'tool-completed' });
+      return outcome.approved;
+    } catch (error) {
+      await store.completeToolRun(activity.id, { ok: false, message: '访问确认已结束' }, now(), signal.aborted ? 'cancelled' : 'failed').catch(() => undefined);
+      throw error;
+    }
   }
 
   async function resolveToolApproval(
@@ -1349,6 +1463,9 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         preparedResolution,
       );
       approvalCommitted = true;
+      if (approved && pending.approval.call.name !== 'agent.access.request') {
+        activeRuns.get(pending.approval.sessionId)?.accessGuard?.grantApprovedTool(activity.id);
+      }
       throwIfAborted(pending.signal);
       if (approved && finalizedPrepared && pending.prepared) {
         pending.executionInput = finalizedPrepared.executionInput;
@@ -1382,6 +1499,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       }
 
       const execution = toolBroker.prepareRendererExecution({
+        verifyAccess: pending.verifyAccess,
         appContext: pending.appContext,
         executionInput: pending.executionInput,
         ownerScope: pending.ownerScope,
@@ -1601,10 +1719,15 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     return sourceUrl;
   }
 
+  async function verifyMediaAccess(ownerWebContentsId: number, input: Omit<AgentToolExecutionCommit, 'result'>) {
+    if (activeRuns.get(input.sessionId)?.accessGuard) await toolBroker.verifyRendererAccess(ownerWebContentsId, input);
+  }
+
   async function inspectMedia(
     ownerWebContentsId: number,
     input: AgentMediaInspectionRequest,
   ): Promise<AgentToolResult> {
+    await verifyMediaAccess(ownerWebContentsId, input);
     const capability = toolBroker.claimRendererCapability(ownerWebContentsId, {
       capability: 'media.inspect.source',
       executionId: input?.executionId,
@@ -1643,6 +1766,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     ownerWebContentsId: number,
     input: AgentMediaAudioExtractionRequest,
   ): Promise<AgentMediaAudioExtractionResult> {
+    await verifyMediaAccess(ownerWebContentsId, input);
     const capability = toolBroker.claimRendererCapability(ownerWebContentsId, {
       capability: 'media.extractAudio.source',
       executionId: input?.executionId,
@@ -1708,6 +1832,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     sender: WebContents,
     input: AgentMediaArtifactSaveRequest,
   ): Promise<AgentMediaArtifactSaveResult> {
+    await verifyMediaAccess(sender.id, input);
     const purpose = input?.purpose === 'destination' || input?.purpose === 'upload_fallback'
       ? input.purpose
       : null;
@@ -1803,6 +1928,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     sender: WebContents,
     input: AgentMediaArtifactUploadRequest,
   ): Promise<AgentMediaArtifactUploadResult> {
+    await verifyMediaAccess(sender.id, input);
     if (!mediaArtifactUploadManager) {
       throw new Error('当前运行时不支持 Agent 媒体产物上传');
     }
@@ -1847,6 +1973,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       artifactId: input.artifactId,
       credentials: input.credentials,
       expectedUserId: resolveOwnerUserId(ownerScope),
+      beforeCommit: () => verifyMediaAccess(sender.id, input),
       onProgress: (uploadedBytes, totalBytes) => {
         if (capability.signal.aborted || totalBytes <= 0) return;
         const percent = Math.floor(65 + Math.max(0, Math.min(1, uploadedBytes / totalBytes)) * 33);
@@ -1937,6 +2064,14 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       }
     }
     const toolRunId = crypto.randomUUID();
+    const accessGuard = activeRuns.get(sessionId)?.accessGuard;
+    const acceptRendererPerception = async (next: AgentPerceptionSnapshot) => {
+      if (!accessGuard) { onPerception(next); return; }
+      try {
+        const filtered = await accessGuard.initialPerception(next);
+        if (filtered) onPerception(filtered);
+      } catch { /* A refresh failure cannot erase an already committed result. */ }
+    };
     let activity: AgentToolActivitySnapshot | undefined;
     let progressWrites = Promise.resolve();
     const persistAndEmitProgress = (rawProgress: AgentToolProgress) => {
@@ -1980,6 +2115,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       },
       readOutputTokenBudget,
       readLibraryDocumentImage: async ({ nodeId, format, page }, requestSignal) => {
+        await accessGuard?.authorizeResource(nodeId, false, toolRunId, false);
         const bytes = await (options.readLibraryText || readAgentLibraryText)({ sender, libraryId: Number(input.appContext.libraryId), ownerScope: input.ownerScope,
           sessionId, runId, toolRunId, signal: requestSignal, operation: { operation: 'stage-library-node', nodeId, includeDownloadUrl: true } });
         const rendered = await runAgentDocument({ format, operation: 'render', bytes, page }, requestSignal);
@@ -1990,14 +2126,16 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         try { await store.bind(scope, [image.id], sessionId); } catch (error) { await store.discard(scope, image.id).catch(() => undefined); throw error; }
         return { imageId: image.id, fileName: image.name, page: rendered.page, pageCount: rendered.pageCount, warnings: rendered.warnings };
       },
-      ...(options.readLibraryText ? { readLibraryText: (nodeId: number, requestSignal: AbortSignal) =>
-        options.readLibraryText!({ sender, libraryId: Number(input.appContext.libraryId),
+      ...(options.readLibraryText ? { readLibraryText: async (nodeId: number, requestSignal: AbortSignal) => {
+        await accessGuard?.authorizeResource(nodeId, false, toolRunId, false);
+        return options.readLibraryText!({ sender, libraryId: Number(input.appContext.libraryId),
           ownerScope: input.ownerScope, sessionId, runId, toolRunId, signal: requestSignal,
-          operation: { operation: 'stage-library-node', nodeId, includeDownloadUrl: true } }) } : {}),
-      ...(options.readLibraryText ? { readLibraryDocument: (nodeId: number, requestSignal: AbortSignal) =>
-        options.readLibraryText!({ sender, libraryId: Number(input.appContext.libraryId), ownerScope: input.ownerScope,
+          operation: { operation: 'stage-library-node', nodeId, includeDownloadUrl: true } }); } } : {}),
+      ...(options.readLibraryText ? { readLibraryDocument: async (nodeId: number, requestSignal: AbortSignal) => {
+        await accessGuard?.authorizeResource(nodeId, false, toolRunId, false);
+        return options.readLibraryText!({ sender, libraryId: Number(input.appContext.libraryId), ownerScope: input.ownerScope,
           sessionId, runId, toolRunId, signal: requestSignal,
-          operation: { operation: 'stage-library-node', nodeId, includeDownloadUrl: true } }) } : {}),
+          operation: { operation: 'stage-library-node', nodeId, includeDownloadUrl: true } }); } } : {}),
       sessionId,
       readOperationJournal: async (operationId: string, operationSignal: AbortSignal) => {
         throwIfAborted(operationSignal);
@@ -2029,11 +2167,13 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         return { operationId, toolName: activity.call.name, status, ...(activity.result ? { result: activity.result } : {}) };
       },
       ...(options.readLibraryMetadata ? { readLibraryMetadata: async (query, requestSignal) => {
+        await accessGuard?.authorizeQuery(query, false, toolRunId);
         const libraryId = Number(input.appContext.libraryId);
         const data = normalizeAgentLibraryReadResult(await options.readLibraryMetadata!({
           sender, libraryId, ownerScope: input.ownerScope, sessionId, runId, toolRunId,
           signal: requestSignal, operation: { operation: 'query-library-metadata', query },
         }), libraryId);
+        await accessGuard?.checkMetadata(data, toolRunId);
         const known = new Map((executionContext.perception?.knownNodes || []).map(node => [node.id, node]));
         for (const node of [...(data.entries || []), ...(data.node ? [data.node] : []), ...(data.directory ? [data.directory] : [])]) {
           known.delete(node.id); known.set(node.id, node);
@@ -2144,6 +2284,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     });
     let omitDeniedAudit = false;
     let preflightDecision: AgentToolPermissionDecision | undefined;
+    let scopeMayAutoApprove = false;
     if (!call.inputError && call.name === interactionRequestTool.name) {
       try {
         call.input = normalizeAgentInteractionRequest(call.input);
@@ -2166,6 +2307,20 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
           : 'Agent Tool 参数超过安全审计上限',
         risk: registeredTool?.risk || 'external',
       };
+    }
+    if (!preflightDecision && !call.inputError && tool && accessGuard) {
+      try {
+        scopeMayAutoApprove = await accessGuard.authorizeTool(call, toolRunId);
+        const known = new Map((executionContext.perception?.knownNodes || []).map(node => [node.id, node]));
+        for (const node of accessGuard.observedNodes()) known.set(node.id, node);
+        perception = { ...executionContext.perception, selectedNodes: executionContext.perception?.selectedNodes || [],
+          collectedAt: now(), knownNodes: [...known.values()].slice(-500) };
+        executionContext.perception = perception;
+        onPerception(perception);
+      } catch (error) {
+        if (signal.aborted) throw error;
+        preflightDecision = { behavior: 'deny', risk: tool.risk, message: error instanceof Error ? error.message : '文件访问未获授权' };
+      }
     }
     const preparationMode: AgentPreparedRuntime['preparationMode'] | 'none' = tool?.prepareMain
       ? 'main'
@@ -2262,7 +2417,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
                   );
                   throwIfAborted(preparationSignal);
                   return createPreparedRuntime(result, call.name, tool.risk, tool.preparedRisk, 'renderer', {
-                    permissionMode: capabilitySnapshot.shellPermissionMode,
+                    permissionMode: await accessGuard?.canAutoApproveTool(call, toolRunId, result.publicAction) ? 'full-access' : capabilitySnapshot.shellPermissionMode,
                     preparedActionId,
                   });
                 },
@@ -2313,7 +2468,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
                   );
                   throwIfAborted(preparationSignal);
                   return createPreparedRuntime(result, call.name, tool.risk, tool.preparedRisk, 'main', {
-                    permissionMode: capabilitySnapshot.shellPermissionMode,
+                    permissionMode: await accessGuard?.canAutoApproveTool(call, toolRunId, result.publicAction) ? 'full-access' : capabilitySnapshot.shellPermissionMode,
                     identity: preparationIdentity,
                     sealMain: sealInput => capabilitySnapshot.sealMainPreparedExecution(
                       call.name,
@@ -2426,6 +2581,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     }
     if (preparationMode === 'none') {
       decision = resolveAgentRunPermissionDecision(call.name, decision, capabilitySnapshot.shellPermissionMode);
+      if (scopeMayAutoApprove && decision.behavior === 'ask' && decision.risk === 'write') decision = { behavior: 'allow', risk: 'write' };
     }
     if (decision.behavior === 'ask') {
       decision = {
@@ -2482,6 +2638,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
 
     let result: AgentToolResult;
     try {
+      if (decision.behavior !== 'deny') await accessGuard?.authorizeTool(call, toolRunId, preparedApproval?.current.action, false);
       if (decision.behavior === 'deny') {
         result = { message: decision.message, ok: false };
       } else if (!tool) {
@@ -2504,6 +2661,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
           sessionId,
         };
         const approvalResult = waitForApproval({
+          verifyAccess: accessGuard ? async () => { await accessGuard.authorizeTool(call, toolRunId, preparedApproval?.current.action, false); } : undefined,
           appContext: input.appContext,
           approval,
           executor: tool.executor || 'main',
@@ -2540,7 +2698,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         } else if ((tool.executor || 'main') === 'renderer') {
           if (!approved.execution) throw new Error(`工具 ${call.name} 缺少 Renderer 执行请求`);
           const outcome = await approved.execution;
-          if (outcome.perception) onPerception(outcome.perception);
+          if (outcome.perception) await acceptRendererPerception(outcome.perception);
           result = outcome.result;
         } else {
           const mainExecutionContext = tool.prepareMain
@@ -2558,6 +2716,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         }
       } else if ((tool.executor || 'main') === 'renderer') {
         const execution = toolBroker.prepareRendererExecution({
+          verifyAccess: accessGuard ? async () => { await accessGuard.authorizeTool(call, toolRunId, preparedApproval?.current.action, false); } : undefined,
           appContext: input.appContext,
           executionInput: rendererExecutionInput,
           ownerScope: input.ownerScope,
@@ -2577,7 +2736,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
           type: 'tool-execution-requested',
         });
         const outcome = await execution.outcome;
-        if (outcome.perception) onPerception(outcome.perception);
+        if (outcome.perception) await acceptRendererPerception(outcome.perception);
         result = outcome.result;
       } else {
         const mainExecutionContext = tool.prepareMain
@@ -2679,6 +2838,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     capabilitySnapshot: AgentRunCapabilitySnapshot,
     modelAdapter: AgentModelAdapter,
     windowSource: AgentContextUsageSnapshot['windowSource'],
+    continuationInstruction = '',
   ): Promise<void> {
     const sessionId = session.id;
     const providerMaxOutputTokens = resolveAgentProviderOutputTokens(contextBudget);
@@ -2768,7 +2928,8 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       );
       const contextProjection = await contextManager.prepare({
         budget: contextBudget,
-        fixedInputTokens,
+        fixedInputTokens: fixedInputTokens + (continuationInstruction
+          ? estimateAgentProviderMessagesTokens([{ role: 'user', content: continuationInstruction }]) : 0),
         libraryId: Number(input.appContext.libraryId),
         messages: session.messages,
         model: input.model,
@@ -2788,6 +2949,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       const messages: AgentProviderMessage[] = [
         ...memoryContextMessages,
         ...contextProjection.messages,
+        ...(continuationInstruction ? [{ role: 'user' as const, content: continuationInstruction }] : []),
       ];
       const activeToolResults: AgentActiveToolResultRecord[] = [];
       const usageLedger = createAgentContextUsageLedger(contextBudget, windowSource);
@@ -3364,9 +3526,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
               );
           if (isAgentRendererMutationTool(call.name) && !['directory.create', 'file.copy', 'file.write'].includes(call.name) && result.ok && currentPerception) {
             const nodeId = (result.data as { nodeId?: number } | undefined)?.nodeId;
-            currentPerception = { ...currentPerception,
-              knownNodes: call.name === 'file.delete' ? [] : currentPerception.knownNodes?.filter(node => node.id === nodeId) || [],
-              selectedNodes: [], currentDirectory: undefined };
+            currentPerception = updatePerceptionAfterLibraryMutation(currentPerception, call.name, nodeId);
           }
           toolTurnProgress.push({
             input: call.input,
@@ -3532,6 +3692,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         sessionId,
         type: 'completed',
       });
+      scheduleSessionTitle(sender, store, session, runId, input, runtimeConnection, completedResult.assistantItem.content);
     } catch (error) {
       const finishedAt = now();
       const effectiveError = error;
@@ -3590,6 +3751,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       await mediaArtifactStore.releaseRun(runId).catch(() => undefined);
       await releaseAgentShellRun(runId).catch(() => undefined);
       const active = activeRuns.get(sessionId);
+      if (active?.runId === runId) active.releaseAccess?.();
       if (active?.runId === runId) activeRuns.delete(sessionId);
       runSessionRegistry.end(runId, sender.id);
     }
@@ -3597,11 +3759,18 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
 
   async function start(sender: WebContents, input: AgentChatRequest): Promise<AgentChatStartResult> {
     if (shuttingDown) throw new Error('Agent 正在退出，暂时不能开始新任务');
-    const userPrompt = String(input?.userPrompt || '').trim();
+    let userPrompt = String(input?.userPrompt || '').trim();
+    const resumeRunId = String(input?.resumeRunId || '').trim();
+    if (input?.resumeRunId !== undefined && (typeof input.resumeRunId !== 'string' || !resumeRunId || resumeRunId.length > 200)) {
+      throw new Error('要继续的任务标识无效');
+    }
+    if (resumeRunId && (!input.sessionId || userPrompt || input.attachmentIds?.length)) {
+      throw new Error('继续任务不能同时提交新的消息或附件');
+    }
     const profileId = String(input?.profileId || '').trim();
     const model = String(input?.model || '').trim();
     let reasoningEffort = normalizeReasoningEffort(input?.reasoningEffort);
-    if (!userPrompt && !input.attachmentIds?.length) throw new Error('请求内容不能为空');
+    if (!userPrompt && !input.attachmentIds?.length && !resumeRunId) throw new Error('请求内容不能为空');
     if (userPrompt.length > 100_000) throw new Error('请求内容过长');
     if (containsAgentSensitiveData(userPrompt)) {
       throw new Error('请求中包含 API Key、密码、Cookie、令牌、私钥或其他凭据，请改用对应配置页面管理');
@@ -3619,16 +3788,19 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     if (!Number.isFinite(libraryId) || libraryId <= 0) {
       throw new Error('当前 Agent 缺少有效的资料库上下文');
     }
-    const perception = normalizePerception(input.perception);
+    let perception = normalizePerception(input.perception);
     const attachmentBindings = input.attachmentIds?.length ? options.attachmentBindings || getAgentAttachmentStore() : undefined;
-    const attachments = attachmentBindings
+    let attachments = attachmentBindings
       ? await attachmentBindings.resolve({ ownerScope, libraryId }, input.attachmentIds!) : [];
     const requestedSessionId = String(input?.sessionId || '').trim();
     if (requestedSessionId.length > MAX_AGENT_SESSION_ID_CHARACTERS) {
       throw new Error('Agent 会话 ID 过长');
     }
+    const stoppingRun = activeRuns.get(requestedSessionId);
+    const canWaitForStop = Boolean(stoppingRun?.stoppedByUser && (!resumeRunId || stoppingRun.runId === resumeRunId)
+      && stoppingRun.ownerWebContentsId === sender.id && stoppingRun.controller.signal.aborted && stoppingRun.task);
     if (requestedSessionId && (
-      activeRuns.has(requestedSessionId)
+      (activeRuns.has(requestedSessionId) && !canWaitForStop)
       || startingSessions.has(requestedSessionId)
     )) {
       throw new Error('Agent 正在处理上一条消息');
@@ -3649,6 +3821,60 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     let store: AgentSessionStore | null = null;
     let session: AgentSessionSnapshot | null = null;
     try {
+      if (canWaitForStop) await stoppingRun!.task;
+      throwIfAborted(controller.signal);
+      store = await resolveSessionStore();
+      session = requestedSessionId ? await store.getSession(requestedSessionId, ownerScope, libraryId) : null;
+      throwIfAborted(controller.signal);
+      if (requestedSessionId && !session) throw new Error('Agent 会话不存在或不属于当前资料库');
+      let continuationInstruction = '';
+      if (resumeRunId) {
+        const previous = session?.runs.at(-1);
+        if (!session || previous?.id !== resumeRunId || previous.status !== 'cancelled') {
+          throw new Error('只能继续当前会话最后一次主动停止的任务');
+        }
+        userPrompt = previous.userPrompt;
+        if (userPrompt.length > 100_000 || containsAgentSensitiveData(userPrompt)) {
+          throw new Error('原任务内容不符合当前请求限制，请重新提交不含凭据的请求');
+        }
+        attachments = session.messages.find(message => message.role === 'user' && message.runId === previous.id)?.attachments || [];
+        continuationInstruction = buildAgentResumeInstruction(session, resumeRunId);
+      }
+      const selectedGroupId = session ? session.groupId || null : input.groupId || null;
+      if (selectedGroupId !== null && (typeof selectedGroupId !== 'string' || selectedGroupId.length > 200)) throw new Error('会话组标识无效');
+      if (session && input.groupId !== undefined && input.groupId !== selectedGroupId) throw new Error('请先在会话管理中移动分组');
+      const permissionMode = normalizeAgentSessionPermissionMode(session?.permissionMode || input.permissionMode || (selectedGroupId ? 'group' : 'ask'));
+      if (permissionMode === 'group' && !selectedGroupId) throw new Error('组内访问需要选择一个会话组');
+      if (selectedGroupId) startingGroupKeys.set(runId, groupKey(ownerScope, libraryId, selectedGroupId));
+      const selectedGroup = selectedGroupId ? await store.getGroup(ownerScope, libraryId, selectedGroupId) : null;
+      if (selectedGroupId && !selectedGroup) throw new Error('会话组不存在或不属于当前资料库');
+      const libraryAccess: AgentLibraryAccessSnapshot = { version: 1, mode: permissionMode,
+        groupId: selectedGroupId, policyRevision: selectedGroup?.policyRevision || 0,
+        directories: selectedGroup?.directories || [], access: selectedGroup?.access || 'read' };
+      const accessGuard = createAgentLibraryAccessGuard({ policy: libraryAccess, context, signal: controller.signal,
+        read: async (query, signal) => {
+          if (!options.readLibraryMetadata) throw new Error('当前运行时无法验证资料库目录授权');
+          return normalizeAgentLibraryReadResult(await options.readLibraryMetadata({ sender, libraryId, ownerScope,
+            sessionId: session?.id || `preflight:${runId}`, runId, toolRunId: `scope-check:${runId}`, signal,
+            internalScopeLookup: true, operation: { operation: 'query-library-metadata', query } }), libraryId);
+        },
+        approve: request => {
+          if (!session || !runCreated) throw new Error('运行尚未开始，不能申请临时访问');
+          return requestDirectoryApproval(sender, store!, session.id, runId, context, ownerScope, controller.signal, request);
+        },
+        assertCurrent: async () => {
+          controller.signal.throwIfAborted();
+          if (libraryAccess.mode !== 'group' || !selectedGroupId) return;
+          const current = await store!.getGroup(ownerScope, libraryId, selectedGroupId);
+          if (!current || current.policyRevision !== libraryAccess.policyRevision) throw new Error('会话组授权已变化，请重新开始任务');
+        },
+      });
+      if (accessGuard && permissionMode !== 'full-access') {
+        perception = await accessGuard.initialPerception(perception);
+        context.currentDirectory = perception?.currentDirectory
+          ? { id: perception.currentDirectory.id, name: perception.currentDirectory.name }
+          : context.currentDirectory ? { id: context.currentDirectory.id, name: '当前目录' } : undefined;
+      }
       const runtimeConnection = { ...resolveRuntimeProfile(profileId) };
       const metadata = options.getModelMetadata ? await options.getModelMetadata(runtimeConnection, model)
         : options.resolveContextBudget ? undefined : await agentModelCatalog.get(runtimeConnection, model);
@@ -3689,9 +3915,10 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       throwIfAborted(controller.signal);
       const shellProviderSnapshot = getAgentShellProviderSnapshotForRun();
       const capabilitySnapshot = createAgentRunCapabilitySnapshot({
+        libraryAccess,
         modelAdapterIdentity: modelAdapter.identity,
         capabilitySnapshot: environmentCapabilitySnapshot,
-        shellPermissionMode: (options.getPermissionMode || getAgentShellPermissionModeForRun)(),
+        shellPermissionMode: options.getPermissionMode ? options.getPermissionMode() : permissionMode === 'full-access' ? 'full-access' : 'ask',
         ...(shellProviderSnapshot ? { shellProviderSnapshot } : {}),
         skillSnapshot,
         toolSnapshot,
@@ -3723,7 +3950,8 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       );
       assertAgentCurrentRunFitsContext(
         [{ content: userPrompt + attachmentManifest(attachments), role: 'user', ...(attachments.length ? { attachments } : {}) }],
-        preflightFixedInputTokens,
+        preflightFixedInputTokens + (continuationInstruction
+          ? estimateAgentProviderMessagesTokens([{ role: 'user', content: continuationInstruction }]) : 0),
         contextBudget,
       );
       runSessionRegistry.begin({
@@ -3732,18 +3960,11 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         profileId,
       }, runId);
       runSessionStarted = true;
-      store = await resolveSessionStore();
-      throwIfAborted(controller.signal);
-      session = requestedSessionId
-        ? await store.getSession(requestedSessionId, ownerScope, libraryId)
-        : null;
-      throwIfAborted(controller.signal);
-      if (requestedSessionId && !session) {
-        throw new Error('Agent 会话不存在或不属于当前资料库');
-      }
       const startedAt = now();
       if (!session) {
         session = await store.createSession({
+          groupId: selectedGroupId,
+          permissionMode,
           appContext: context,
           id: crypto.randomUUID(),
           now: startedAt,
@@ -3756,10 +3977,12 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       }
       throwIfAborted(controller.signal);
 
-      if (attachments.length) addedAttachmentBindings = await attachmentBindings!.bind({ ownerScope, libraryId }, attachments.map(item => item.id), session.id);
+      if (attachments.length && !resumeRunId) addedAttachmentBindings = await attachmentBindings!.bind({ ownerScope, libraryId }, attachments.map(item => item.id), session.id);
       throwIfAborted(controller.signal);
       runCreationAttempted = true;
       const createdRun = await store.createRun({
+        libraryAccess,
+        ...(resumeRunId ? { resumesRunId: resumeRunId } : {}),
         ...(attachments.length ? { attachments } : {}),
         capabilityIdentity: capabilitySnapshot.identity,
         id: runId,
@@ -3779,10 +4002,27 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       throwIfAborted(controller.signal);
 
       startingRuns.delete(runId);
-      activeRuns.set(session.id, {
+      const runtime: ActiveAgentRun = {
+        accessGuard,
+        ...(selectedGroupId ? { groupKey: groupKey(ownerScope, libraryId, selectedGroupId) } : {}),
         controller,
         ownerWebContentsId: sender.id,
         runId,
+      };
+      activeRuns.set(session.id, runtime);
+      if (accessGuard) runtime.releaseAccess = agentFileAuthorityBroker.registerRunAccess(runId, {
+        before: async request => {
+          if (request.sessionId !== session!.id || request.libraryId !== libraryId || request.sender.id !== sender.id
+            || !sameOwnerScope(normalizeAgentOwnerScope(request.ownerScope), ownerScope)) throw new Error('访问请求与运行范围不一致');
+          const operation = request.operation;
+          if (operation.operation === 'query-library-metadata') await accessGuard.authorizeQuery(operation.query, false, request.toolRunId);
+          else if (operation.operation === 'stage-library-node') await accessGuard.authorizeResource(operation.nodeId, false, request.toolRunId, false);
+          else if (operation.operation === 'resolve-library-directory') await accessGuard.authorizeDirectory(operation.directoryPath, true, request.toolRunId, false);
+          else if (operation.operation === 'publish-library-file') await accessGuard.authorizeResource(operation.parentId, true, request.toolRunId, false);
+        },
+        after: async (request, result) => {
+          if (result.operation === 'query-library-metadata') await accessGuard.checkMetadata(result.data, request.toolRunId);
+        },
       });
       emit(sender, {
         run: createdRun,
@@ -3790,7 +4030,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         sessionId: session.id,
         type: 'started',
       });
-      void run(sender, store, session, runId, {
+      runtime.task = run(sender, store, session, runId, {
         appContext: context,
         model,
         ownerScope,
@@ -3799,8 +4039,8 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         reasoningEffort,
         sessionId: session.id,
         userPrompt,
-      }, runtimeConnection, controller, contextBudget, recalledMemories, capabilitySnapshot, modelAdapter, windowSource);
-      return { runId, sessionId: session.id };
+      }, runtimeConnection, controller, contextBudget, recalledMemories, capabilitySnapshot, modelAdapter, windowSource, continuationInstruction);
+      return { runId, sessionId: session.id, session: pickAgentSessionSummary(session) };
     } catch (error) {
       let confirmedUncreated = !runCreated && !runCreationAttempted;
       if (session && store && !runCreated && runCreationAttempted) {
@@ -3836,6 +4076,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       throw error;
     } finally {
       startingRuns.delete(runId);
+      startingGroupKeys.delete(runId);
       if (requestedSessionId) startingSessions.delete(requestedSessionId);
     }
   }
@@ -3846,11 +4087,15 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     if (runtime.ownerWebContentsId !== ownerWebContentsId) {
       throw new Error('当前窗口无权停止该 Agent 会话');
     }
+    if (!runtime.controller.signal.aborted) runtime.stoppedByUser = true;
     runtime.controller.abort();
     return true;
   }
 
   function releaseOwner(ownerWebContentsId: number): void {
+    activeTitleTasks.forEach(task => {
+      if (task.ownerWebContentsId === ownerWebContentsId) task.controller.abort();
+    });
     startingRuns.forEach((runtime) => {
       if (runtime.ownerWebContentsId === ownerWebContentsId) {
         runtime.controller.abort();
@@ -3858,6 +4103,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     });
     activeRuns.forEach((runtime) => {
       if (runtime.ownerWebContentsId === ownerWebContentsId) {
+        runtime.stoppedByUser = false;
         runtime.controller.abort();
       }
     });
@@ -3876,6 +4122,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     const owners = new Set<number>();
     startingRuns.forEach(runtime => owners.add(runtime.ownerWebContentsId));
     activeRuns.forEach(runtime => owners.add(runtime.ownerWebContentsId));
+    activeTitleTasks.forEach(task => owners.add(task.ownerWebContentsId));
     activeMediaArtifactSaves.forEach(save => owners.add(save.ownerWebContentsId));
     owners.forEach(releaseOwner);
 
@@ -3884,6 +4131,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       startingRuns.size > 0
       || activeRuns.size > 0
       || activeMediaArtifactSaves.size > 0
+      || activeTitleTasks.size > 0
     ) {
       if (Date.now() >= deadline) return false;
       await new Promise(resolve => setTimeout(resolve, 25));
@@ -3896,12 +4144,14 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     libraryId: number,
     query = '',
     cursor?: AgentSessionCursor,
+    filter?: AgentSessionListFilter,
   ): Promise<AgentSessionPage> {
     return (await resolveSessionStore()).listSessions(
       normalizeAgentOwnerScope(ownerScope),
       libraryId,
       query,
       cursor,
+      filter,
     );
   }
 
@@ -3909,11 +4159,13 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     sessionId: string,
     ownerScope: AgentOwnerScope,
     libraryId: number,
+    includeArchived = false,
   ): Promise<AgentSessionSnapshot> {
     const session = await (await resolveSessionStore()).getSession(
       sessionId,
       normalizeAgentOwnerScope(ownerScope),
       libraryId,
+      includeArchived,
     );
     if (!session) throw new Error('Agent 会话不存在或不属于当前资料库');
     const activeWriter = activeRuns.get(session.id)?.assistantWriter;
@@ -3932,13 +4184,15 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     libraryId: number,
     title: string,
   ): Promise<AgentSessionSummary> {
-    return (await resolveSessionStore()).renameSession(
+    const renamed = await (await resolveSessionStore()).renameSession(
       sessionId,
       normalizeAgentOwnerScope(ownerScope),
       libraryId,
       title,
       now(),
     );
+    activeTitleTasks.get(sessionId)?.controller.abort();
+    return renamed;
   }
 
   async function deleteSession(
@@ -3950,17 +4204,55 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       throw new Error('Agent 正在处理消息，暂时不能删除该会话');
     }
     const sessionStore = await resolveSessionStore();
-    const deletingSession = await sessionStore.getSession(sessionId, normalizeAgentOwnerScope(ownerScope), libraryId);
+    const deletingSession = await sessionStore.getSession(sessionId, normalizeAgentOwnerScope(ownerScope), libraryId, true);
+    if (!deletingSession?.archivedAt) throw new Error('请先归档会话，再从归档页面永久删除');
     const deleted = await sessionStore.deleteSession(
       sessionId,
       normalizeAgentOwnerScope(ownerScope),
       libraryId,
+      true,
     );
     if (!deleted) throw new Error('Agent 会话不存在或不属于当前资料库');
+    activeTitleTasks.get(sessionId)?.controller.abort();
     if (deletingSession?.messages.some(message => message.attachments?.length)) {
       await getAgentAttachmentStore().releaseSession({ ownerScope, libraryId }, sessionId).catch(() => undefined);
     }
     return true;
+  }
+
+  async function listGroups(owner: AgentOwnerScope, libraryId: number) {
+    return (await resolveSessionStore()).listGroups(normalizeAgentOwnerScope(owner), libraryId);
+  }
+  async function saveGroup(owner: AgentOwnerScope, libraryId: number, value: AgentSessionGroupInput) {
+    const input = normalizeAgentSessionGroupInput(value);
+    const store = await resolveSessionStore();
+    if (input.id) {
+      const previous = await store.getGroup(owner, libraryId, input.id);
+      if (!previous) throw new Error('会话组不存在');
+      if (previous.access !== input.access || JSON.stringify(previous.directories) !== JSON.stringify(input.directories)) {
+        assertGroupIdle(groupKey(owner, libraryId, input.id));
+      }
+    }
+    return store.saveGroup(owner, libraryId, input, now());
+  }
+  async function deleteGroup(owner: AgentOwnerScope, libraryId: number, id: string, revision: number) {
+    const store = await resolveSessionStore();
+    assertGroupIdle(groupKey(owner, libraryId, id));
+    return store.deleteGroup(owner, libraryId, id, revision);
+  }
+  async function organizeSession(id: string, owner: AgentOwnerScope, libraryId: number, value: AgentSessionOrganizationInput) {
+    const store = await resolveSessionStore();
+    assertSessionIdle(id);
+    const result = await store.organizeSession(id, owner, libraryId, value, now());
+    activeTitleTasks.get(id)?.controller.abort();
+    return result;
+  }
+  async function archiveSession(id: string, owner: AgentOwnerScope, libraryId: number, archived: boolean, revision: number) {
+    const store = await resolveSessionStore();
+    assertSessionIdle(id);
+    const result = await store.archiveSession(id, owner, libraryId, archived, revision, now());
+    activeTitleTasks.get(id)?.controller.abort();
+    return result;
   }
 
   async function listMemories(
@@ -4082,6 +4374,12 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     releaseOwner,
     readShellLogPage,
     renameSession,
+    verifyToolAccess: (ownerWebContentsId: number, input: Omit<AgentToolExecutionCommit, 'result'>) => toolBroker.verifyRendererAccess(ownerWebContentsId, input),
+    listGroups,
+    saveGroup,
+    deleteGroup,
+    organizeSession,
+    archiveSession,
     reportToolExecutionProgress,
     resolveToolApproval,
     saveMediaArtifact,

@@ -1,4 +1,5 @@
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent, WebContents } from 'electron';
+import type { AgentSessionGroupInput, AgentSessionOrganizationInput, AgentSessionListFilter } from '../../src/shared/agent/agent-session-management';
 
 import type {
   AgentChatRequest,
@@ -201,6 +202,7 @@ export function registerAgentIpc(
   );
 
   ipcMain.handle('agent:session:list', (event, input: {
+    filter?: AgentSessionListFilter;
     cursor?: AgentSessionCursor;
     libraryId: number;
     ownerScope: AgentOwnerScope;
@@ -212,10 +214,16 @@ export function registerAgentIpc(
       Number(input?.libraryId),
       String(input?.query || ''),
       input?.cursor,
+      input?.filter,
     );
+  });
+  ipcMain.handle('agent:tool:access-check', (event, input: Omit<import('../../src/shared/agent/agent.types').AgentToolExecutionCommit, 'result'>) => {
+    const sender = requireMainWindow(event);
+    return agentOrchestrator.verifyToolAccess(sender.id, input);
   });
 
   ipcMain.handle('agent:session:get', (event, input: {
+    includeArchived?: boolean;
     libraryId: number;
     ownerScope: AgentOwnerScope;
     sessionId: string;
@@ -225,6 +233,7 @@ export function registerAgentIpc(
       String(input?.sessionId || ''),
       input?.ownerScope,
       Number(input?.libraryId),
+      input?.includeArchived === true,
     );
   });
 
@@ -254,6 +263,27 @@ export function registerAgentIpc(
       input?.ownerScope,
       Number(input?.libraryId),
     );
+  });
+
+  ipcMain.handle('agent:group:list', (event, input: { ownerScope: AgentOwnerScope; libraryId: number }) => {
+    requireMainWindow(event);
+    return agentOrchestrator.listGroups(input.ownerScope, Number(input.libraryId));
+  });
+  ipcMain.handle('agent:group:save', (event, input: { ownerScope: AgentOwnerScope; libraryId: number; group: AgentSessionGroupInput }) => {
+    requireMainWindow(event);
+    return agentOrchestrator.saveGroup(input.ownerScope, Number(input.libraryId), input.group);
+  });
+  ipcMain.handle('agent:group:delete', (event, input: { ownerScope: AgentOwnerScope; libraryId: number; groupId: string; revision: number }) => {
+    requireMainWindow(event);
+    return agentOrchestrator.deleteGroup(input.ownerScope, Number(input.libraryId), input.groupId, input.revision);
+  });
+  ipcMain.handle('agent:session:organize', (event, input: { ownerScope: AgentOwnerScope; libraryId: number; sessionId: string; organization: AgentSessionOrganizationInput }) => {
+    requireMainWindow(event);
+    return agentOrchestrator.organizeSession(input.sessionId, input.ownerScope, Number(input.libraryId), input.organization);
+  });
+  ipcMain.handle('agent:session:archive', (event, input: { ownerScope: AgentOwnerScope; libraryId: number; sessionId: string; archived: boolean; revision: number }) => {
+    requireMainWindow(event);
+    return agentOrchestrator.archiveSession(input.sessionId, input.ownerScope, Number(input.libraryId), input.archived, input.revision);
   });
 
   ipcMain.handle('agent:memory:list', (event, input: {

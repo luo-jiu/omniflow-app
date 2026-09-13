@@ -1,5 +1,9 @@
 # File Explorer 与 File Viewer 边界说明
 
+标签栏右侧“更多标签”图标按钮常态透明无边框，悬停显示主题背景；圆角使用 `--app-radius-medium`（10px），不保留常驻底框。
+
+Agent 的 `omniflow-library:` 引用由工作区解析并复用文件打开、树定位能力；`omniflow-local:` 引用进入无 nodeId 的本机预览标签。标签缓存只保存本机资源引用，不保存文件正文；dispatcher 获取有界本机快照，文本以纯文本展示，HTML 不执行。具体限制见内置 Agent UI 契约的文件引用章节。
+
 Agent发布后的目录刷新、根目录右键刷新及折叠分支缓存失效规则见 [Agent发布与目录树同步](agent-publication-refresh.md)。刷新仍由目录树owner持有，不复制Agent或Viewer状态。
 
 创建、复制、移动、重命名、恢复的通用事件与删除选中项清理见 [内部节点变更 UI 同步](internal-node-ui-synchronization.md)。通知必须携带账号、后端和资料库，预览改名只更新标题，不重开 tab 或释放媒体。

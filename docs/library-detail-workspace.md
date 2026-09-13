@@ -119,7 +119,7 @@
 
 文件标签栏当前只在 `file-viewer` 工作区显示，Agent、工具和系统工作区不显示，也不保留占位；暂不提供设置开关。隐藏标签栏不关闭已打开文件、不清空 tab 顺序或 Viewer 状态，返回文件工作区后继续显示已有标签。工具工作区也不显示文件刷新按钮。
 
-Agent 模式的主工具栏右侧提供 DOM slot，由 AgentWorkspace 通过 React portal 放置会话记录、长期记忆、新建会话按钮；主工具栏在此模式隐藏刷新。slot 只负责布局，事件、busy 条件和 manager mode 仍归 Agent，切换工作区时随实例清理，不保存会话状态副本。
+Agent模式的主工具栏隐藏刷新、长期记忆和新建入口，不再提供会话操作的DOM slot。380px会话目录支持单层组、按组分页；底部提供“会话管理”、带图标的“新建会话”“归档”和一个长期记忆图标。事件、busy条件与sessions/archives/memories管理模式仍归AgentWorkspace；LibraryDetail不保存会话状态副本。分组、归档与权限由本机main/SQLite持有，详见 [本机会话组与访问](agent-session-groups-and-access.md)。
 
 表示当前显示内置 Agent 默认工作区，不显示文件预览、工具区、系统视图或浏览器页面。`search-home` 是兼容状态名，不得据此重新接回旧 `SearchWorkspace`，也不得新增并行的 `agent-home` 模式。
 
@@ -422,6 +422,8 @@ Agent 模式的主工具栏右侧提供 DOM slot，由 AgentWorkspace 通过 Rea
 浏览器资源面板当前是“浏览器工作区的附属面板”，但它自己的显示宽度和展开状态是页面层管理的。
 
 目录树、浏览器资源面板、工具导航和工具内部局部分隔线通过带 token 的文档拖拽会话协调 cursor 与 user-select。每个 owner 只释放自己的 token；调用目录树快速折叠、切换工作区或卸载某个工具时，不得直接清空其他分隔线仍在使用的全局拖拽样式。
+
+Agent 模式额外限制目录树最大宽度，为右侧工作区保留至少784px（640px聊天栏、64px索引区、72px气泡区及8px滚动条）。页面owner通过ResizeObserver读取实际DetailWrapper宽度，在进入Agent、窗口改变和恢复已保存目录宽度时重新限制可见宽度；不按整个窗口的80%单独决定Agent布局。拖动仍只按动画帧预览CSS宽度，使用缓存的上限，不逐帧扫描DOM或重渲染整页；松手才保存用户调整。SidePanel的CSS max-width同时执行该上限，防止恢复动画的旧宽度暂时挤压正文。响应式限制不覆盖保存的展开偏好，空间不足以同时容纳240px目录树和Agent时暂时隐藏目录树，空间恢复后可恢复原宽度；其他工作区继续使用原80%上限和实际容器边界。
 
 当前规则：
 

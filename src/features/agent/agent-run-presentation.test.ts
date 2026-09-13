@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AgentRunSnapshot } from '@/shared/agent/agent.types';
-import { formatAgentRunElapsed } from './agent-run-presentation';
+import { formatAgentRunElapsed, projectAgentContinuationElapsed } from './agent-run-presentation';
 
 const run: AgentRunSnapshot = {
   id: 'r1', sessionId: 's1', model: 'test', profileId: 'test', reasoningEffort: 'medium',
@@ -9,6 +9,15 @@ const run: AgentRunSnapshot = {
 };
 
 describe('Agent run elapsed time', () => {
+  it('adds resumed execution time without counting the pause between attempts', () => {
+    const stopped = { ...run, status: 'cancelled' as const, finishedAt: '2026-09-09T00:00:30Z' };
+    const resumed = { ...run, id: 'r2', resumesRunId: run.id, createdAt: '2026-09-09T01:00:00Z',
+      status: 'completed' as const, finishedAt: '2026-09-09T01:00:20Z' };
+    const projected = projectAgentContinuationElapsed([stopped, resumed]);
+    expect(formatAgentRunElapsed(projected, Date.now())).toBe('用时 50s');
+    expect(stopped.status).toBe('cancelled');
+    expect(resumed.createdAt).toBe('2026-09-09T01:00:00Z');
+  });
   it.each([
     [0, '0s'], [19, '19s'], [59, '59s'], [60, '1m'], [61, '1m 1s'],
     [3599, '59m 59s'], [3600, '1h'], [3601, '1h 1s'],

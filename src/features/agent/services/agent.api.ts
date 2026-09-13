@@ -28,6 +28,7 @@ import type {
   AgentToolApprovalDecisionResult,
   AgentToolExecutionCompletion,
   AgentToolExecutionCommit,
+  AgentToolExecutionRequest,
   AgentToolExecutionProgressRequest,
   AgentToolPrepareCompletion,
 } from '@/shared/agent/agent.types';
@@ -39,6 +40,7 @@ import type {
 } from '@/shared/agent/shell/agent-shell.types';
 import { clearAuthSessionAndDisposeWorkspaces } from '@/service/auth-session-release';
 import { auth } from '@/utils/auth';
+import type { AgentSessionListFilter, AgentSessionGroupInput, AgentSessionOrganizationInput } from '@/shared/agent/agent-session-management';
 
 function bridge() {
   if (!window.electronAgent) {
@@ -63,6 +65,11 @@ export function previewAgentAttachment(input: import('@/shared/agent/agent-attac
 
 export function stopAgentChat(sessionId: string): Promise<boolean> {
   return bridge().stopChat(sessionId);
+}
+
+export function verifyAgentToolAccess(request: AgentToolExecutionRequest): Promise<boolean> {
+  return bridge().verifyToolAccess({ executionId: request.executionId, ownerScope: request.ownerScope,
+    libraryId: Number(request.appContext.libraryId), sessionId: request.sessionId, runId: request.runId });
 }
 
 export function releaseAgentOwnerRuns(): Promise<boolean> {
@@ -189,17 +196,25 @@ export function listAgentSessions(
   libraryId: number,
   query?: string,
   cursor?: AgentSessionCursor,
+  filter?: AgentSessionListFilter,
 ): Promise<AgentSessionPage> {
-  return bridge().listSessions(ownerScope, libraryId, query, cursor);
+  return bridge().listSessions(ownerScope, libraryId, query, cursor, filter);
 }
 
 export function getAgentSession(
   ownerScope: AgentOwnerScope,
   libraryId: number,
   sessionId: string,
+  includeArchived?: boolean,
 ): Promise<AgentSessionSnapshot> {
-  return bridge().getSession(ownerScope, libraryId, sessionId);
+  return bridge().getSession(ownerScope, libraryId, sessionId, includeArchived);
 }
+
+export const listAgentSessionGroups = (owner: AgentOwnerScope, libraryId: number) => bridge().listGroups(owner, libraryId);
+export const saveAgentSessionGroup = (owner: AgentOwnerScope, libraryId: number, input: AgentSessionGroupInput) => bridge().saveGroup(owner, libraryId, input);
+export const deleteAgentSessionGroup = (owner: AgentOwnerScope, libraryId: number, id: string, revision: number) => bridge().deleteGroup(owner, libraryId, id, revision);
+export const organizeAgentSession = (owner: AgentOwnerScope, libraryId: number, id: string, input: AgentSessionOrganizationInput) => bridge().organizeSession(owner, libraryId, id, input);
+export const archiveAgentSession = (owner: AgentOwnerScope, libraryId: number, id: string, archived: boolean, revision: number) => bridge().archiveSession(owner, libraryId, id, archived, revision);
 
 export function renameAgentSession(
   ownerScope: AgentOwnerScope,

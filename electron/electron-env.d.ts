@@ -31,6 +31,7 @@ interface Window {
   ipcRenderer: import('electron').IpcRenderer
 
   electronAPI: {
+    readLocalPreview: (path: string) => Promise<{ name: string; type: import('../src/utils/preview-file-type').PreviewFileType; dataUrl: string }>;
     openTextFile: (options?: {
       filters?: Array<{
         name: string;
@@ -323,11 +324,13 @@ interface Window {
       libraryId: number,
       query?: string,
       cursor?: import('@/shared/agent/agent.types').AgentSessionCursor,
+      filter?: import('@/shared/agent/agent-session-management').AgentSessionListFilter,
     ) => Promise<import('@/shared/agent/agent.types').AgentSessionPage>;
     getSession: (
       ownerScope: import('@/shared/agent/agent.types').AgentOwnerScope,
       libraryId: number,
       sessionId: string,
+      includeArchived?: boolean,
     ) => Promise<import('@/shared/agent/agent.types').AgentSessionSnapshot>;
     renameSession: (
       ownerScope: import('@/shared/agent/agent.types').AgentOwnerScope,
@@ -340,6 +343,12 @@ interface Window {
       libraryId: number,
       sessionId: string,
     ) => Promise<boolean>;
+    listGroups: (owner: import('@/shared/agent/agent.types').AgentOwnerScope, libraryId: number) => Promise<import('@/shared/agent/agent-session-management').AgentSessionDirectorySummary>;
+    verifyToolAccess: (input: Omit<import('@/shared/agent/agent.types').AgentToolExecutionCommit, 'result'>) => Promise<boolean>;
+    saveGroup: (owner: import('@/shared/agent/agent.types').AgentOwnerScope, libraryId: number, input: import('@/shared/agent/agent-session-management').AgentSessionGroupInput) => Promise<import('@/shared/agent/agent-session-management').AgentSessionGroup>;
+    deleteGroup: (owner: import('@/shared/agent/agent.types').AgentOwnerScope, libraryId: number, groupId: string, revision: number) => Promise<boolean>;
+    organizeSession: (owner: import('@/shared/agent/agent.types').AgentOwnerScope, libraryId: number, sessionId: string, input: import('@/shared/agent/agent-session-management').AgentSessionOrganizationInput) => Promise<import('@/shared/agent/agent.types').AgentSessionSummary>;
+    archiveSession: (owner: import('@/shared/agent/agent.types').AgentOwnerScope, libraryId: number, sessionId: string, archived: boolean, revision: number) => Promise<import('@/shared/agent/agent.types').AgentSessionSummary>;
     listMemories: (
       ownerScope: import('@/shared/agent/agent.types').AgentOwnerScope,
       libraryId: number,

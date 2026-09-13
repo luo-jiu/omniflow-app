@@ -1,5 +1,7 @@
 # Text Viewer 说明
 
+底栏保存、另存为、下载使用 Lucide 的 Save、FilePlus2、Download 细线图标，统一 1.25px 描边；保留 28px 点击区、透明常态和悬停中圆角背景，不修改操作行为。
+
 更新时间：2026-08-25
 适用范围：`src/features/file-viewer/components/text-viewer/` 下的文本预览、编辑、保存和另存为链路。
 

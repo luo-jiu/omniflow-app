@@ -32,7 +32,7 @@ export type AgentTimelineItem =
     }
   | {
       activities: AgentToolActivitySnapshot[];
-      groupKind: 'resource-read';
+      groupKind: 'resource-read' | 'internal-operation';
       key: string;
       layer: 'execution-facts';
       occurredAt: string;
@@ -134,49 +134,67 @@ function isRenderableWorkItem(item: AgentAssistantItemSnapshot): boolean {
   return !(item.assistantItem.phase === 'final' && item.assistantItem.status === 'completed');
 }
 
+function canGroupFailedActivity(activity: AgentToolActivitySnapshot): boolean {
+  // Validation failures can carry deny without any pending approval.
+  return activity.status === 'failed'
+    && activity.approval?.status !== 'pending'
+    && activity.interaction?.status !== 'pending';
+}
+
 function canJoinReadGroup(activity: AgentToolActivitySnapshot): boolean {
-  return activity.status === 'completed'
-    && activity.result?.ok !== false
-    && activity.permissionBehavior === 'allow'
-    && !activity.approval
-    && !activity.interaction
-    && activity.toolMetadata?.kind === 'business'
+  return activity.toolMetadata?.kind === 'business'
     && activity.toolMetadata.risk === 'read'
-    && activity.toolMetadata.groupKind === 'resource-read';
+    && activity.toolMetadata.groupKind === 'resource-read'
+    && (canGroupFailedActivity(activity) || (
+      activity.status === 'completed'
+      && activity.result?.ok !== false
+      && activity.permissionBehavior === 'allow'
+      && !activity.approval
+      && !activity.interaction
+    ));
+}
+
+function canJoinInternalGroup(activity: AgentToolActivitySnapshot): boolean {
+  return activity.toolMetadata?.kind === 'business'
+    && activity.call.name !== 'shell.run'
+    && activity.toolMetadata.risk !== 'external'
+    && (canGroupFailedActivity(activity) || (
+      (activity.status === 'completed' || activity.status === 'running' || activity.status === 'preparing')
+      && activity.result?.ok !== false
+      && activity.permissionBehavior === 'allow'
+      && !activity.approval
+      && !activity.interaction
+    ));
 }
 
 function groupReadActivities(items: AgentTimelineItem[]): AgentTimelineItem[] {
   const grouped: AgentTimelineItem[] = [];
   items.forEach((item) => {
-    const groupKind = item.type === 'tool-activity'
-      ? item.activity.toolMetadata?.groupKind
-      : undefined;
-    const operationKind = item.type === 'tool-activity'
-      ? item.activity.toolMetadata?.operationKind
-      : undefined;
-    if (
-      item.type !== 'tool-activity'
-      || groupKind !== 'resource-read'
-      || !operationKind
-    ) {
+    if (item.type !== 'tool-activity') {
       grouped.push(item);
       return;
     }
     const activity = item.activity;
+    const eligible = canJoinReadGroup(activity) || canJoinInternalGroup(activity);
+    if (!eligible) {
+      grouped.push(item);
+      return;
+    }
+    const nextGroupKind = canJoinReadGroup(activity) ? 'resource-read' : 'internal-operation';
     const previous = grouped.at(-1);
     if (
-      canJoinReadGroup(activity)
-      && previous?.type === 'tool-group'
+      previous?.type === 'tool-group'
       && previous.runId === activity.runId
-      && previous.groupKind === groupKind
-      && previous.activities.every(canJoinReadGroup)
+      && previous.groupKind === nextGroupKind
+      && previous.activities.every(itemActivity => nextGroupKind === 'resource-read'
+        ? canJoinReadGroup(itemActivity) : canJoinInternalGroup(itemActivity))
     ) {
       previous.activities.push(activity);
       return;
     }
     grouped.push({
       activities: [activity],
-      groupKind,
+      groupKind: nextGroupKind,
       key: `activity-group:${activity.id}`,
       layer: 'execution-facts',
       occurredAt: item.occurredAt,

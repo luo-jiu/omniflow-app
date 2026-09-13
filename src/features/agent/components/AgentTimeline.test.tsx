@@ -23,7 +23,14 @@ vi.mock('./AgentToolActivityCard', () => ({
     <button data-testid="tool-expand" onClick={onExpand} type="button">展开</button>
   ),
 }));
-vi.mock('./AgentToolActivityGroup', () => ({ default: () => null }));
+vi.mock('./AgentToolActivityGroup', () => ({
+  default: ({ activities, onExpand }: {
+    activities: AgentToolActivitySnapshot[];
+    onExpand?: () => void;
+  }) => activities.map(activity => (
+    <button data-testid="tool-expand" key={activity.id} onClick={onExpand} type="button">展开</button>
+  )),
+}));
 vi.mock('./AgentAttachmentPreview', () => ({ default: () => null }));
 
 const renderers: TestRenderer.ReactTestRenderer[] = [];
@@ -71,6 +78,35 @@ afterEach(() => {
 });
 
 describe('AgentTimeline commentary presentation', () => {
+  it('shows a continued task as one question and collapses all attempts under one final result', () => {
+    const stopped: AgentRunSnapshot = {
+      id: 'continued-root', sessionId: 'continued-session', model: 'test', profileId: 'test', reasoningEffort: 'medium',
+      revision: 1, status: 'cancelled', userPrompt: '整理文件',
+      createdAt: '2026-09-12T00:00:00Z', updatedAt: '2026-09-12T00:00:10Z', finishedAt: '2026-09-12T00:00:10Z',
+    };
+    const resumed: AgentRunSnapshot = { ...stopped, id: 'continued-final', resumesRunId: stopped.id, status: 'completed',
+      createdAt: '2026-09-12T01:00:00Z', updatedAt: '2026-09-12T01:00:20Z', finishedAt: '2026-09-12T01:00:20Z' };
+    const question = { id: 'continued-question', role: 'user' as const, runId: stopped.id, sessionId: stopped.sessionId,
+      createdAt: stopped.createdAt, content: '整理文件' };
+    const final = { ...commentary(), id: 'continued-answer', runId: resumed.id, sessionId: stopped.sessionId,
+      createdAt: resumed.finishedAt!, content: '统一最终结果', assistantItem: { ...commentary().assistantItem, phase: 'final' as const } };
+    let renderer!: TestRenderer.ReactTestRenderer;
+    act(() => { renderer = TestRenderer.create(<AgentTimeline approvalBusyIds={new Set()} interactionBusyIds={new Set()}
+      libraryId={3} ownerScope={null} onResolveApproval={vi.fn()} runs={[stopped, resumed]}
+      messages={[question, { ...commentary(), runId: stopped.id, sessionId: stopped.sessionId, createdAt: '2026-09-12T00:00:01Z' },
+        { ...question, id: 'continued-user-audit', runId: resumed.id, createdAt: resumed.createdAt }, final]}
+      toolActivities={[{ ...toolActivity(), runId: stopped.id, sessionId: stopped.sessionId, createdAt: '2026-09-12T00:00:02Z' }]} />); });
+    renderers.push(renderer);
+    expect(renderer.root.findAll(node => node.type === 'div' && Boolean(node.props['data-agent-question']))).toHaveLength(1);
+    const elapsed = renderer.root.findAll(node => node.type === 'div' && Boolean(node.props['data-agent-elapsed']));
+    expect(elapsed).toHaveLength(1);
+    expect(elapsed[0].findAllByType('span').some(node => node.children.includes('用时 30s'))).toBe(true);
+    expect(renderer.root.findByProps({ 'aria-expanded': false })).toBeTruthy();
+    expect(renderer.root.findAllByType(AgentMessageContent).some(node => node.props.content === '统一最终结果')).toBe(true);
+    act(() => renderer.root.findByProps({ 'aria-expanded': false }).props.onClick());
+    expect(renderer.root.findAll(node => node.type === 'div' && node.props.className === 'agent-timeline-entry' && node.props['aria-hidden'] === true)).toHaveLength(0);
+  });
+
   it('shows plain thinking text without a leading icon during provider waiting', () => {
     const run: AgentRunSnapshot = { id: 'thinking', sessionId: 'thinking', model: 'test', profileId: 'test',
       reasoningEffort: 'medium', revision: 1, status: 'running', userPrompt: 'test',

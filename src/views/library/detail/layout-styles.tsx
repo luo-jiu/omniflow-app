@@ -152,7 +152,7 @@ export const SidePanel = styled.div`
   position: relative;
   width: var(--side-panel-visual-width);
   min-width: 0;
-  max-width: 80vw;
+  max-width: var(--side-panel-max-width, 80vw);
   display: flex;
   flex-direction: column;
   background: var(--app-sidebar-vibrancy);

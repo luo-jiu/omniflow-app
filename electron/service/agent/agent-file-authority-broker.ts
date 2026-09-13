@@ -39,6 +39,7 @@ type AgentFileAuthorityOperationInput =
   | Omit<Extract<AgentFileAuthorityRequestV1, { operation: 'publish-library-file' }>, AgentFileAuthorityRequestBaseKeys>;
 
 export interface AgentFileAuthorityBrokerRequestInput {
+  internalScopeLookup?: boolean;
   libraryId: number;
   operation: AgentFileAuthorityOperationInput;
   ownerScope: AgentOwnerScope;
@@ -226,8 +227,12 @@ export function createAgentFileAuthorityBroker(options: AgentFileAuthorityBroker
   const createId = options.createId || crypto.randomUUID;
   const timeoutMs = Math.max(1_000, Number(options.timeoutMs) || DEFAULT_TIMEOUT_MS);
   const pending = new Map<string, PendingAuthority>();
+  const runAccess = new Map<string, {
+    before: (input: AgentFileAuthorityBrokerRequestInput) => Promise<void>;
+    after: (input: AgentFileAuthorityBrokerRequestInput, result: AgentFileAuthorityResultV1) => Promise<void>;
+  }>();
 
-  function request(input: AgentFileAuthorityBrokerRequestInput): Promise<AgentFileAuthorityResultV1> {
+  function requestUnchecked(input: AgentFileAuthorityBrokerRequestInput): Promise<AgentFileAuthorityResultV1> {
     if (input.signal.aborted) return Promise.reject(abortError());
     if (!input.sender || input.sender.isDestroyed()) {
       return Promise.reject(new Error('Agent 资料库文件授权窗口不可用'));
@@ -332,7 +337,20 @@ export function createAgentFileAuthorityBroker(options: AgentFileAuthorityBroker
     });
   }
 
-  return Object.freeze({ complete, releaseOwner, request });
+  async function request(input: AgentFileAuthorityBrokerRequestInput) {
+    const guard = input.internalScopeLookup ? undefined : runAccess.get(input.runId);
+    if (!guard) return requestUnchecked(input);
+    await guard?.before(input);
+    const result = await requestUnchecked(input);
+    await guard?.after(input, result);
+    return result;
+  }
+  return Object.freeze({ complete, releaseOwner, request,
+    registerRunAccess: (runId: string, guard: NonNullable<ReturnType<typeof runAccess.get>>) => {
+      runAccess.set(runId, guard);
+      return () => { if (runAccess.get(runId) === guard) runAccess.delete(runId); };
+    },
+  });
 }
 
 export const agentFileAuthorityBroker = createAgentFileAuthorityBroker();

@@ -176,8 +176,9 @@ export default function AgentConversationIndex({ messages, runs, scrollRef, stor
   entries.forEach((entry, index) => { if (entry.active) activeIndex = index; });
   const waveCenter = useAgentIndexWave(entries.length >= 10 ? activeIndex : -1);
   const baseColors = entries.map((entry, index) => {
-    if (current === index) return 'var(--dial-green)';
     if (entry.tone === 'error') return 'var(--dial-red)';
+    if (entry.tone === 'paused') return 'var(--dial-yellow)';
+    if (current === index) return 'var(--dial-green)';
     if (entry.tone === 'waiting') return 'var(--dial-yellow)';
     if (entry.active) return 'var(--dial-green)';
     const milestone = indexMilestone(entry.ordinal);

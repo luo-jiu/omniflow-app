@@ -28,6 +28,11 @@ export const WINDOWS_CONTENT_TOOLBAR_COLLAPSED_SAFE_SPACE = WINDOWS_SIDE_PANEL_T
 export const SIDE_PANEL_COLLAPSE_ANIMATION_MS = 260;
 export const BROWSER_SETTINGS_TAB_ID = 'browser-internal:settings';
 
+export function getMaxSidePanelWidth(containerWidth: number, viewportWidth: number, minContentWidth = 0): number {
+  const maxWidth = Math.max(0, Math.floor(Math.min(viewportWidth * 0.8, containerWidth - minContentWidth)));
+  return minContentWidth > 0 && maxWidth < MIN_SIDE_PANEL_WIDTH ? 0 : maxWidth;
+}
+
 const SIDE_PANEL_WIDTH_STORAGE_PREFIX = 'library-detail:side-panel-width:';
 const SIDE_PANEL_WIDTH_DENSITY_MIGRATION_PREFIX = 'library-detail:side-panel-width-density-migrated:';
 const BROWSER_RESOURCE_PANEL_WIDTH_STORAGE_PREFIX = 'library-detail:browser-resource-panel-width:';

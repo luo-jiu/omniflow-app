@@ -71,6 +71,20 @@ afterEach(() => {
 });
 
 describe('AgentSessionManager', () => {
+  it('shows restore and permanent deletion only in the archive view, with group filtering', () => {
+    const item = session({ archivedAt: '2026-09-13T00:00:00Z' });
+    const onRestore = vi.fn(); const onDelete = vi.fn(); const onGroupFilterChange = vi.fn();
+    const { renderer } = renderManager({ archived: true, sessions: [item], total: 1, onRestore, onDelete,
+      groupFilter: 'all', onGroupFilterChange, groups: [] });
+    expect(renderer.root.findAllByProps({ 'aria-label': `重命名 ${item.title}` })).toHaveLength(0);
+    act(() => renderer.root.findByProps({ 'aria-label': `恢复 ${item.title}` }).props.onClick());
+    expect(onRestore).toHaveBeenCalledWith(item);
+    act(() => renderer.root.findByProps({ 'aria-label': `永久删除 ${item.title}` }).props.onClick());
+    expect(onDelete).toHaveBeenCalledWith(item);
+    act(() => renderer.root.findByType('select').props.onChange({ target: { value: '__ungrouped' } }));
+    expect(onGroupFilterChange).toHaveBeenCalledWith('__ungrouped');
+  });
+
   it('uses the wider manager surface and bounds long session text', () => {
     const sheet = new ServerStyleSheet();
     try {
@@ -98,7 +112,7 @@ describe('AgentSessionManager', () => {
     expect(renderer.root.findByProps({ className: 'agent-session-preview' }).props.title)
       .toBe(longPreview);
     expect(renderer.root.findByProps({ 'aria-label': `重命名 ${longTitle}` })).toBeDefined();
-    expect(renderer.root.findByProps({ 'aria-label': `删除 ${longTitle}` })).toBeDefined();
+    expect(renderer.root.findByProps({ 'aria-label': `归档 ${longTitle}` })).toBeDefined();
   });
 
   it('delegates search and session opening without changing manager behavior', () => {

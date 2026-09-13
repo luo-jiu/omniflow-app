@@ -179,7 +179,7 @@ describe('AgentToolActivityCard Shell presentation', () => {
       const css = sheet.getStyleTags();
       expect(css).toContain('animation:agent-activity-spin 900ms linear infinite');
       expect(css).toContain('prefers-reduced-motion');
-      expect(css).toContain('animation:none!important');
+      expect(css).toContain('animation:none');
       expect(renderToStaticMarkup(cardElement({ ...activity, status: 'completed' }))).not.toContain('agent-activity-spinner');
       expect(renderToStaticMarkup(cardElement({ ...activity, call: { ...activity.call, name: 'file.read' } }))).not.toContain('agent-activity-spinner');
     } finally { sheet.seal(); }
@@ -222,7 +222,7 @@ describe('AgentToolActivityCard Shell presentation', () => {
       createdAt: '2026-09-07T00:00:00Z',
       permissionBehavior: 'allow', revision: 1, runId: 'read-run', sessionId: 'read-session', status: 'completed',
       toolMetadata: { kind: 'business', risk: 'read', groupKind: 'resource-read', operationKind: 'stat' },
-      result: { ok: true, message: 'private-to-details summary', data: { id: 8, name: 'agent-orchestrator.ts' } },
+      result: { ok: true, message: 'private-to-details summary', data: { id: 8, name: 'agent-orchestrator', ext: 'ts', type: 'file' } },
     };
     const renderer = TestRenderer.create(<AgentToolActivityCard activity={activity} approvalBusy={false} interactionBusy={false}
       libraryId={3} onAction={onAction} onExpand={onExpand} onResolveApproval={vi.fn()} ownerScope={OWNER_SCOPE} />);
@@ -244,6 +244,36 @@ describe('AgentToolActivityCard Shell presentation', () => {
     expect(renderer.root.findByProps({ className: 'agent-activity-collapse' }).props['aria-hidden'])
       .toBe(true);
   });
+
+  it('keeps failed tool details collapsed until explicitly opened', () => {
+    const onExpand = vi.fn();
+    const running = shellActivity({
+      call: { id: 'delete-call', input: { nodeId: 8 }, name: 'file.delete' },
+      preparation: undefined,
+      result: undefined,
+      status: 'running',
+    });
+    const renderer = renderCard(running, OWNER_SCOPE, onExpand);
+    const failed = { ...running, status: 'failed' as const, result: { ok: false, message: '目标节点不存在' } };
+
+    act(() => renderer.update(cardElement(failed, OWNER_SCOPE, 3, onExpand)));
+
+    const detail = renderer.root.findByProps({ className: 'agent-activity-collapse' });
+    expect(detail.props['aria-hidden']).toBe(true);
+    expect(onExpand).not.toHaveBeenCalled();
+    expect(textContent(renderer.root.findByProps({ className: 'agent-activity-header' })))
+      .not.toContain('目标节点不存在');
+
+    act(() => renderer.root.findByProps({ 'aria-label': '展开工具详情' }).props.onClick());
+    expect(detail.props['aria-hidden']).toBe(false);
+    expect(textContent(detail)).toContain('目标节点不存在');
+    expect(onExpand).toHaveBeenCalledOnce();
+
+    act(() => renderer.root.findByProps({ 'aria-label': '收起工具详情' }).props.onClick());
+    act(() => renderer.update(cardElement({ ...failed, revision: failed.revision + 1 }, OWNER_SCOPE, 3, onExpand)));
+    expect(detail.props['aria-hidden']).toBe(true);
+  });
+
   it('renders a borderless single-line summary without result metadata by default', () => {
     const renderer = renderCard(shellActivity());
     const summary = renderer.root.findByProps({ className: 'agent-shell-summary' });

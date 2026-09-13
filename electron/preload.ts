@@ -1,5 +1,6 @@
 // 渲染进程中的Bridge API
 import { ipcRenderer, contextBridge } from 'electron'
+import type { AgentSessionDirectorySummary, AgentSessionGroup, AgentSessionGroupInput, AgentSessionOrganizationInput, AgentSessionListFilter } from '../src/shared/agent/agent-session-management';
 import type { EmbeddedBrowserCaptureRuleSet } from './service/embedded-browser/contracts/capture-settings'
 import type {
   EmbeddedBrowserExternalToolDispatchRequest,
@@ -103,6 +104,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   }) => ipcRenderer.invoke('file:open', options),
   readLocalChromeBookmarks: () => ipcRenderer.invoke('file:read-local-chrome-bookmarks'),
   readTextFile: (filePath: string) => ipcRenderer.invoke('file:read-text', filePath),
+  readLocalPreview: (filePath: string) => ipcRenderer.invoke('file:preview-local', filePath),
   writeTextFile: (filePath: string, content: string) => ipcRenderer.invoke('fs:write-text-file', filePath, content),
   pickUploadFiles: () => ipcRenderer.invoke('dialog:pick-upload-files'),
   pickUploadFolders: () => ipcRenderer.invoke('dialog:pick-upload-folders'),
@@ -330,15 +332,17 @@ contextBridge.exposeInMainWorld('electronAgent', {
     libraryId: number,
     query?: string,
     cursor?: AgentSessionCursor,
+    filter?: AgentSessionListFilter,
   ): Promise<AgentSessionPage> => (
-    ipcRenderer.invoke('agent:session:list', { cursor, libraryId, ownerScope, query })
+    ipcRenderer.invoke('agent:session:list', { cursor, libraryId, ownerScope, query, filter })
   ),
   getSession: (
     ownerScope: AgentOwnerScope,
     libraryId: number,
     sessionId: string,
+    includeArchived?: boolean,
   ): Promise<AgentSessionSnapshot> => (
-    ipcRenderer.invoke('agent:session:get', { libraryId, ownerScope, sessionId })
+    ipcRenderer.invoke('agent:session:get', { libraryId, ownerScope, sessionId, includeArchived })
   ),
   renameSession: (
     ownerScope: AgentOwnerScope,
@@ -348,6 +352,18 @@ contextBridge.exposeInMainWorld('electronAgent', {
   ): Promise<AgentSessionSummary> => (
     ipcRenderer.invoke('agent:session:rename', { libraryId, ownerScope, sessionId, title })
   ),
+  listGroups: (ownerScope: AgentOwnerScope, libraryId: number): Promise<AgentSessionDirectorySummary> =>
+    ipcRenderer.invoke('agent:group:list', { ownerScope, libraryId }),
+  verifyToolAccess: (input: Omit<AgentToolExecutionCommit, 'result'>): Promise<boolean> =>
+    ipcRenderer.invoke('agent:tool:access-check', input),
+  saveGroup: (ownerScope: AgentOwnerScope, libraryId: number, group: AgentSessionGroupInput): Promise<AgentSessionGroup> =>
+    ipcRenderer.invoke('agent:group:save', { ownerScope, libraryId, group }),
+  deleteGroup: (ownerScope: AgentOwnerScope, libraryId: number, groupId: string, revision: number): Promise<boolean> =>
+    ipcRenderer.invoke('agent:group:delete', { ownerScope, libraryId, groupId, revision }),
+  organizeSession: (ownerScope: AgentOwnerScope, libraryId: number, sessionId: string, organization: AgentSessionOrganizationInput): Promise<AgentSessionSummary> =>
+    ipcRenderer.invoke('agent:session:organize', { ownerScope, libraryId, sessionId, organization }),
+  archiveSession: (ownerScope: AgentOwnerScope, libraryId: number, sessionId: string, archived: boolean, revision: number): Promise<AgentSessionSummary> =>
+    ipcRenderer.invoke('agent:session:archive', { ownerScope, libraryId, sessionId, archived, revision }),
   deleteSession: (
     ownerScope: AgentOwnerScope,
     libraryId: number,

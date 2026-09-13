@@ -26,6 +26,8 @@
 
 工具准备/执行中的加载圈使用 OutlineIcon 的 LoaderCircle，统一16px与1.25px实际描边，900ms匀速旋转；只有加载圈旋转，文档/完成/失败图标保持静止，reduced-motion下停用。
 
+Agent 工具摘要与展开记录共用 `AgentToolIcon`，由同一份 ToolActivity 派生图标：读取使用 BookOpen，编辑/重命名使用 FilePenLine，搜索使用 Search，Shell 使用 SquareTerminal，删除/移动/复制使用 Trash2/FolderInput/Copy。失败、中断和待确认也使用同套轮廓状态图标，进行中的写操作保留加载圈。图形沿用 OutlineIcon 的 `16px / 1.25px` 规格；外层与内部行均使用 `20px` 图标槽、`7px` 图文间距及 `20px` 文字行高，不通过额外缩放或层级缩进调整位置。
+
 刷新（文件/库列表/浏览器）统一为 RotateCw；浏览器前进/后退为 ArrowRight/ArrowLeft，收藏、资源捕获面板、设置复用 Star/Activity/Settings。均经 OutlineIcon 使用16px、1.25px实际描边，收藏保持空心并以主题色和 aria-pressed 表达选中，不因旧 Semi 星标画布不同缩小。
 
 资料库导航与侧栏展开按钮的当前态统一使用局部 --workspace-nav-accent：亮色 #7850b8、暗色 #bd9af2。普通图标保持中性灰，悬停即时提亮，不再混用青色与绿色；该调整不改变全局成功/错误状态或索引玫瑰色语义。
@@ -34,7 +36,7 @@
 
 同组轻量图标范围扩展至仓库卡片收藏星标、仓库首页资源监测/设置、资料库工具入口。星标两态保持同一空心轮廓，收藏时使用主题强调色并提供 aria-pressed，不再切换成实心填充；沿用即时 hover、16px 尺寸和 1.25px 实际描边。
 
-2026-09-09 用户确认的轻量操作图标：Agent 代码/回答复制、右上角历史/长期记忆/新建，以及资料库侧栏底部首页/上传/回收站/设置统一使用 `components/ui/outline-icon.tsx` 的 Lucide 空心轮廓。最终槽位为 16px，实际描边 1.25px，子图形使用 non-scaling-stroke；没有 transform 缩放或透明度淡化。局部明确覆盖 SVG 尺寸、fill:none 与 color:inherit，避免原 15px 工具栏规则和全局 body * color 重置导致模糊、填白或状态色丢失。按钮热区保持原大小。
+用户确认的轻量操作图标：Agent代码/回答复制、会话目录历史图标及底部长期记忆书签，以及资料库侧栏底部首页/上传/回收站/设置统一使用 `components/ui/outline-icon.tsx` 的Lucide空心轮廓。Agent顶栏不再保留历史/长期记忆/新建操作；会话目录底部的“会话管理”“新建会话”只用文字，不加搜索或加号图标。最终图形槽位为16px，实际描边1.25px，子图形使用non-scaling-stroke；没有transform缩放或透明度淡化。局部明确覆盖SVG尺寸、fill:none与color:inherit，避免原15px工具栏规则和全局body * color重置导致模糊、填白或状态色丢失。按钮热区保持原大小。
 
 该组细描边是用户对这批操作图标的显式偏好，不替换目录树、文件类型和其他模块的图标基线。1.25px 在 1x 显示器仍会有正常抗锯齿，不能承诺所有 DPI 下完全无灰边；需按实际 100% 显示尺寸和亮暗背景验收，不以放大图代替。
 

@@ -1,4 +1,9 @@
 import { mkdir } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { normalizeAgentSessionGroupInput, normalizeAgentSessionPermissionMode,
+  type AgentSessionGroup, type AgentSessionGroupInput, type AgentSessionDirectorySummary,
+  type AgentSessionListFilter, type AgentSessionOrganizationInput, type AgentLibraryAccessSnapshot,
+} from '../../../src/shared/agent/agent-session-management';
 import { normalizeAgentContextUsage, type AgentContextUsageSnapshot } from '../../../src/shared/agent/agent-context-usage';
 import path from 'node:path';
 import sqlite3 from 'sqlite3';
@@ -843,6 +848,8 @@ const TOOL_RUNTIME_COLUMNS = [
 ] as const;
 
 const RUN_RUNTIME_COLUMNS = [
+  ['library_access_json', 'TEXT'],
+  ['resumes_run_id', 'TEXT'],
   ['attachments_json', 'TEXT'],
   ['context_usage_json', 'TEXT'],
   ['capability_identity', "TEXT NOT NULL DEFAULT 'legacy'"],
@@ -900,6 +907,10 @@ const CONTEXT_CHECKPOINT_TABLE_SQL = `
 `;
 
 interface SessionRow {
+  group_id: string | null;
+  permission_mode: 'ask' | 'group' | 'full-access';
+  archived_at: string | null;
+  metadata_revision: number;
   created_at: string;
   id: string;
   last_message_preview: string;
@@ -908,6 +919,19 @@ interface SessionRow {
   message_count: number;
   title: string;
   updated_at: string;
+}
+
+interface GroupRow {
+  id: string; library_id: number; name: string; directories_json: string; access: 'read' | 'read-write';
+  revision: number; policy_revision: number; session_count: number; created_at: string; updated_at: string;
+}
+
+function toGroup(row: GroupRow): AgentSessionGroup {
+  const value = normalizeAgentSessionGroupInput({ id: row.id, revision: row.revision, name: row.name,
+    directories: JSON.parse(row.directories_json), access: row.access });
+  return { id: row.id, libraryId: row.library_id, name: value.name, directories: value.directories, access: value.access,
+    revision: row.revision, policyRevision: row.policy_revision, sessionCount: Number(row.session_count || 0),
+    createdAt: row.created_at, updatedAt: row.updated_at };
 }
 
 interface MessageRow {
@@ -929,6 +953,8 @@ interface MessageRow {
 }
 
 interface RunRow {
+  library_access_json: string | null;
+  resumes_run_id: string | null;
   context_usage_json: string | null;
   capability_identity: string;
   created_at: string;
@@ -1001,6 +1027,8 @@ interface RunStatementResult {
 }
 
 export interface CreateAgentSessionInput {
+  groupId?: string | null;
+  permissionMode?: 'ask' | 'group' | 'full-access';
   appContext: AgentAppContext;
   id: string;
   now: string;
@@ -1009,6 +1037,8 @@ export interface CreateAgentSessionInput {
 }
 
 export interface CreateAgentRunInput {
+  libraryAccess?: AgentLibraryAccessSnapshot;
+  resumesRunId?: string;
   attachments?: import('../../../src/shared/agent/agent-attachments').AgentAttachment[];
   capabilityIdentity?: string;
   id: string;
@@ -1157,6 +1187,12 @@ export interface AgentAssistantRunTerminalResult {
 }
 
 export interface AgentSessionStore {
+  listGroups: (owner: AgentOwnerScope, libraryId: number) => Promise<AgentSessionDirectorySummary>;
+  getGroup: (owner: AgentOwnerScope, libraryId: number, id: string) => Promise<AgentSessionGroup | null>;
+  saveGroup: (owner: AgentOwnerScope, libraryId: number, input: AgentSessionGroupInput, now: string) => Promise<AgentSessionGroup>;
+  deleteGroup: (owner: AgentOwnerScope, libraryId: number, id: string, revision: number) => Promise<boolean>;
+  organizeSession: (id: string, owner: AgentOwnerScope, libraryId: number, input: AgentSessionOrganizationInput, now: string) => Promise<AgentSessionSummary>;
+  archiveSession: (id: string, owner: AgentOwnerScope, libraryId: number, archived: boolean, revision: number, now: string) => Promise<AgentSessionSummary>;
   appendMessage: (message: AgentNonAssistantMessage) => Promise<void>;
   beginContextCheckpoint: (
     input: BeginAgentContextCheckpointInput,
@@ -1188,11 +1224,13 @@ export interface AgentSessionStore {
     sessionId: string,
     ownerScope: AgentOwnerScope,
     libraryId: number,
+    archivedOnly?: boolean,
   ) => Promise<boolean>;
   getSession: (
     sessionId: string,
     ownerScope: AgentOwnerScope,
     libraryId: number,
+    includeArchived?: boolean,
   ) => Promise<AgentSessionSnapshot | null>;
   failContextCheckpoint: (
     id: string,
@@ -1213,6 +1251,7 @@ export interface AgentSessionStore {
     libraryId: number,
     query?: string,
     cursor?: AgentSessionCursor,
+    filter?: AgentSessionListFilter,
   ) => Promise<AgentSessionPage>;
   renameSession: (
     sessionId: string,
@@ -1221,6 +1260,15 @@ export interface AgentSessionStore {
     title: string,
     now: string,
   ) => Promise<AgentSessionSummary>;
+  setGeneratedSessionTitle: (input: {
+    sessionId: string;
+    runId: string;
+    ownerScope: AgentOwnerScope;
+    libraryId: number;
+    expectedTitle: string;
+    expectedUpdatedAt: string;
+    title: string;
+  }) => Promise<boolean>;
   readContextCheckpointState: (
     sessionId: string,
     ownerScope: AgentOwnerScope,
@@ -1432,6 +1480,10 @@ function escapeLikePattern(value: string): string {
 
 function toSessionSummary(row: SessionRow): AgentSessionSummary {
   return {
+    groupId: row.group_id || null,
+    permissionMode: row.permission_mode || 'ask',
+    revision: Number(row.metadata_revision || 1),
+    ...(row.archived_at ? { archivedAt: row.archived_at } : {}),
     createdAt: row.created_at,
     id: row.id,
     lastMessagePreview: row.last_message_preview,
@@ -1494,6 +1546,8 @@ function toRunSnapshot(row: RunRow): AgentRunSnapshot {
   const plan = parseStoredAgentRunPlan(row.plan_json);
   const contextUsage = row.context_usage_json ? normalizeAgentContextUsage(parseStoredJson(row.context_usage_json, null)) : undefined;
   return {
+    ...(row.library_access_json ? { libraryAccess: JSON.parse(row.library_access_json) as AgentLibraryAccessSnapshot } : {}),
+    ...(row.resumes_run_id ? { resumesRunId: row.resumes_run_id } : {}),
     ...(contextUsage ? { contextUsage } : {}),
     capabilityIdentity: row.capability_identity,
     createdAt: row.created_at,
@@ -1651,6 +1705,7 @@ function toContextCheckpoint(row: ContextCheckpointRow): AgentContextCheckpoint 
 
 const SESSION_SELECT = `
   SELECT
+    sessions.group_id, sessions.permission_mode, sessions.archived_at, sessions.metadata_revision,
     sessions.id,
     sessions.library_id,
     sessions.title,
@@ -1674,6 +1729,72 @@ const SESSION_SELECT = `
   FROM agent_sessions AS sessions
   LEFT JOIN agent_messages AS messages ON messages.session_id = sessions.id
 `;
+
+const GROUP_SELECT = `SELECT groups.*, COUNT(sessions.id) AS session_count
+  FROM agent_session_groups AS groups LEFT JOIN agent_sessions AS sessions
+    ON sessions.group_id = groups.id AND sessions.archived_at IS NULL`;
+
+async function ensureSessionOrganizationSchema(database: sqlite3.Database): Promise<void> {
+  await exec(database, `CREATE TABLE IF NOT EXISTS agent_session_groups (
+    id TEXT PRIMARY KEY, backend_scope TEXT NOT NULL, account_scope TEXT NOT NULL, library_id INTEGER NOT NULL,
+    name TEXT NOT NULL, name_key TEXT NOT NULL, directories_json TEXT NOT NULL DEFAULT '[]',
+    access TEXT NOT NULL CHECK (access IN ('read', 'read-write')),
+    revision INTEGER NOT NULL DEFAULT 1, policy_revision INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+    UNIQUE(backend_scope, account_scope, library_id, name_key)
+  );`);
+  const columns = new Set((await all<{ name: string }>(database, 'PRAGMA table_info(agent_sessions)')).map(row => row.name));
+  for (const [name, definition] of [
+    ['group_id', 'TEXT REFERENCES agent_session_groups(id)'],
+    ['permission_mode', "TEXT NOT NULL DEFAULT 'ask' CHECK(permission_mode IN ('ask', 'group', 'full-access'))"],
+    ['metadata_revision', 'INTEGER NOT NULL DEFAULT 1'],
+  ]) if (!columns.has(name)) await exec(database, `ALTER TABLE agent_sessions ADD COLUMN ${name} ${definition}`);
+  await exec(database, `
+    CREATE INDEX IF NOT EXISTS agent_sessions_group_idx ON agent_sessions(group_id, archived_at, updated_at DESC, id DESC);
+    DROP TRIGGER IF EXISTS agent_sessions_validate_group_insert;
+    DROP TRIGGER IF EXISTS agent_sessions_validate_group_update;
+    DROP TRIGGER IF EXISTS agent_sessions_organization_idle;
+    DROP TRIGGER IF EXISTS agent_session_groups_policy_idle;
+    DROP TRIGGER IF EXISTS agent_session_groups_delete;
+    DROP TRIGGER IF EXISTS agent_runs_require_active_session;
+    DROP TRIGGER IF EXISTS agent_runs_library_access_immutable;
+    CREATE TRIGGER agent_sessions_validate_group_insert BEFORE INSERT ON agent_sessions BEGIN
+      SELECT CASE WHEN NEW.permission_mode = 'group' AND NEW.group_id IS NULL
+        THEN RAISE(ABORT, 'Group access requires a session group') END;
+      SELECT CASE WHEN NEW.group_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM agent_session_groups
+        WHERE id = NEW.group_id AND backend_scope = NEW.backend_scope AND account_scope = NEW.account_scope AND library_id = NEW.library_id)
+        THEN RAISE(ABORT, 'Session group owner mismatch') END;
+    END;
+    CREATE TRIGGER agent_sessions_validate_group_update BEFORE UPDATE OF group_id, permission_mode ON agent_sessions BEGIN
+      SELECT CASE WHEN NEW.permission_mode = 'group' AND NEW.group_id IS NULL
+        THEN RAISE(ABORT, 'Group access requires a session group') END;
+      SELECT CASE WHEN NEW.group_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM agent_session_groups
+        WHERE id = NEW.group_id AND backend_scope = NEW.backend_scope AND account_scope = NEW.account_scope AND library_id = NEW.library_id)
+        THEN RAISE(ABORT, 'Session group owner mismatch') END;
+    END;
+    CREATE TRIGGER agent_sessions_organization_idle BEFORE UPDATE OF group_id, permission_mode, archived_at ON agent_sessions
+    WHEN EXISTS (SELECT 1 FROM agent_runs WHERE session_id = OLD.id AND status IN ('running','preparing','awaiting_approval','awaiting_interaction'))
+    BEGIN SELECT RAISE(ABORT, 'Agent session is running'); END;
+    CREATE TRIGGER agent_session_groups_policy_idle BEFORE UPDATE OF directories_json, access ON agent_session_groups
+    WHEN (NEW.directories_json <> OLD.directories_json OR NEW.access <> OLD.access)
+      AND EXISTS (SELECT 1 FROM agent_sessions AS s JOIN agent_runs AS r ON r.session_id = s.id
+        WHERE s.group_id = OLD.id AND r.status IN ('running','preparing','awaiting_approval','awaiting_interaction'))
+    BEGIN SELECT RAISE(ABORT, 'Agent group is running'); END;
+    CREATE TRIGGER agent_session_groups_delete BEFORE DELETE ON agent_session_groups BEGIN
+      SELECT CASE WHEN EXISTS (SELECT 1 FROM agent_sessions AS s JOIN agent_runs AS r ON r.session_id = s.id
+        WHERE s.group_id = OLD.id AND r.status IN ('running','preparing','awaiting_approval','awaiting_interaction'))
+        THEN RAISE(ABORT, 'Agent group is running') END;
+      UPDATE agent_sessions SET group_id = NULL, permission_mode = CASE WHEN permission_mode = 'group' THEN 'ask' ELSE permission_mode END,
+        metadata_revision = metadata_revision + 1 WHERE group_id = OLD.id;
+    END;
+    CREATE TRIGGER agent_runs_require_active_session BEFORE INSERT ON agent_runs
+    WHEN NOT EXISTS (SELECT 1 FROM agent_sessions WHERE id = NEW.session_id AND archived_at IS NULL)
+    BEGIN SELECT RAISE(ABORT, 'Cannot run an archived session'); END;
+    CREATE TRIGGER agent_runs_library_access_immutable BEFORE UPDATE OF library_access_json ON agent_runs
+    WHEN NEW.library_access_json IS NOT OLD.library_access_json
+    BEGIN SELECT RAISE(ABORT, 'Agent Run directory policy is immutable'); END;
+  `);
+}
 
 const CONTEXT_CHECKPOINT_SELECT = `
   SELECT
@@ -1720,6 +1841,26 @@ async function ensureRunColumns(database: sqlite3.Database): Promise<void> {
       await exec(database, `ALTER TABLE agent_runs ADD COLUMN ${name} ${definition}`);
     }
   }
+  await exec(database, `
+    DROP TRIGGER IF EXISTS agent_runs_validate_continuation;
+    DROP TRIGGER IF EXISTS agent_runs_continuation_immutable;
+    CREATE TRIGGER agent_runs_validate_continuation
+    BEFORE INSERT ON agent_runs WHEN NEW.resumes_run_id IS NOT NULL
+    BEGIN
+      SELECT CASE WHEN NOT EXISTS (
+        SELECT 1 FROM agent_runs AS previous
+        WHERE previous.id = NEW.resumes_run_id AND previous.session_id = NEW.session_id
+          AND previous.status = 'cancelled' AND previous.user_prompt = NEW.user_prompt
+          AND previous.rowid = (SELECT MAX(rowid) FROM agent_runs WHERE session_id = NEW.session_id)
+      ) THEN RAISE(ABORT, 'Agent continuation requires the latest cancelled run in the same session') END;
+    END;
+    CREATE TRIGGER agent_runs_continuation_immutable
+    BEFORE UPDATE OF resumes_run_id ON agent_runs
+    WHEN NEW.resumes_run_id IS NOT OLD.resumes_run_id
+    BEGIN
+      SELECT RAISE(ABORT, 'Agent continuation identity is immutable');
+    END;
+  `);
 }
 
 async function ensureMessageAssistantSchema(
@@ -3031,6 +3172,7 @@ export async function initializeAgentSessionDatabaseSchema(
   }
 
   await ensureRunColumns(database);
+  await ensureSessionOrganizationSchema(database);
   await ensureMessageAssistantSchema(database, manageTransactions);
   await ensureToolRunColumns(database);
   await ensureToolPreparationTriggers(database, manageTransactions);
@@ -3091,6 +3233,7 @@ export async function createSQLiteAgentSessionStore(
     sessionId: string,
     ownerScope: AgentOwnerScope,
     libraryId: number,
+    includeArchived = false,
   ): Promise<AgentSessionSummary | null> {
     const scope = normalizeAgentOwnerScope(ownerScope);
     const row = await get<SessionRow>(database, `${SESSION_SELECT}
@@ -3098,15 +3241,24 @@ export async function createSQLiteAgentSessionStore(
         AND sessions.backend_scope = ?
         AND sessions.account_scope = ?
         AND sessions.library_id = ?
-        AND sessions.archived_at IS NULL
+        AND (? = 1 OR sessions.archived_at IS NULL)
       GROUP BY sessions.id
     `, [
       sessionId,
       scope.backendScope,
       scope.accountScope,
       normalizeLibraryId(libraryId),
+      includeArchived ? 1 : 0,
     ]);
     return row ? toSessionSummary(row) : null;
+  }
+
+  async function readGroup(owner: AgentOwnerScope, libraryId: number, id: string) {
+    const scope = normalizeAgentOwnerScope(owner);
+    const row = await get<GroupRow>(database, `${GROUP_SELECT} WHERE groups.id = ? AND groups.backend_scope = ?
+      AND groups.account_scope = ? AND groups.library_id = ? GROUP BY groups.id`,
+    [id, scope.backendScope, scope.accountScope, normalizeLibraryId(libraryId)]);
+    return row ? toGroup(row) : null;
   }
 
   async function readRun(runId: string): Promise<AgentRunSnapshot> {
@@ -3114,6 +3266,8 @@ export async function createSQLiteAgentSessionStore(
       SELECT
         id,
         session_id,
+        resumes_run_id,
+        library_access_json,
         capability_identity,
         status,
         user_prompt,
@@ -3430,8 +3584,8 @@ export async function createSQLiteAgentSessionStore(
         INSERT INTO agent_runs (
           id, session_id, capability_identity, status, user_prompt, profile_id, model,
           reasoning_effort, skill_catalog_revision, tool_catalog_revision,
-          current_step, created_at, updated_at, attachments_json
-        ) VALUES (?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, '请求 AI 服务', ?, ?, ?)
+          current_step, created_at, updated_at, attachments_json, resumes_run_id, library_access_json
+        ) VALUES (?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, '请求 AI 服务', ?, ?, ?, ?, ?)
       `, [
         input.id,
         input.sessionId,
@@ -3445,8 +3599,93 @@ export async function createSQLiteAgentSessionStore(
         input.now,
         input.now,
         input.attachments?.length ? JSON.stringify(input.attachments) : null,
+        input.resumesRunId || null,
+        input.libraryAccess ? JSON.stringify(input.libraryAccess) : null,
       ]);
       return readRun(input.id);
+    },
+
+    async listGroups(owner, libraryId) {
+      const scope = normalizeAgentOwnerScope(owner);
+      const id = normalizeLibraryId(libraryId);
+      const rows = await all<GroupRow>(database, `${GROUP_SELECT} WHERE groups.backend_scope = ?
+        AND groups.account_scope = ? AND groups.library_id = ? GROUP BY groups.id ORDER BY groups.created_at, groups.id`,
+      [scope.backendScope, scope.accountScope, id]);
+      const totals = await get<{ total: number; ungrouped: number; archived: number }>(database, `SELECT
+        COALESCE(SUM(archived_at IS NULL), 0) AS total,
+        COALESCE(SUM(archived_at IS NULL AND group_id IS NULL), 0) AS ungrouped,
+        COALESCE(SUM(archived_at IS NOT NULL), 0) AS archived
+        FROM agent_sessions WHERE backend_scope = ? AND account_scope = ? AND library_id = ?`,
+      [scope.backendScope, scope.accountScope, id]);
+      return { groups: rows.map(toGroup), total: Number(totals?.total || 0),
+        ungroupedCount: Number(totals?.ungrouped || 0), archivedCount: Number(totals?.archived || 0) };
+    },
+
+    getGroup: readGroup,
+
+    async saveGroup(owner, libraryId, rawInput, now) {
+      const scope = normalizeAgentOwnerScope(owner);
+      const id = normalizeLibraryId(libraryId);
+      const input = normalizeAgentSessionGroupInput(rawInput);
+      const groupId = input.id || randomUUID();
+      const directories = JSON.stringify(input.directories);
+      try {
+        if (input.id) {
+          const result = await run(database, `UPDATE agent_session_groups SET name = ?, name_key = ?,
+            policy_revision = policy_revision + CASE WHEN directories_json <> ? OR access <> ? THEN 1 ELSE 0 END,
+            directories_json = ?, access = ?, revision = revision + 1, updated_at = ?
+            WHERE id = ? AND backend_scope = ? AND account_scope = ? AND library_id = ? AND revision = ?`,
+          [input.name, input.name.normalize('NFKC').toLowerCase(), directories, input.access, directories, input.access,
+            now, groupId, scope.backendScope, scope.accountScope, id, input.revision]);
+          if (!result.changes) throw new Error('会话组已变化或不存在，请刷新后重试');
+        } else {
+          const result = await run(database, `INSERT INTO agent_session_groups
+            (id, backend_scope, account_scope, library_id, name, name_key, directories_json, access, created_at, updated_at)
+            SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE
+            (SELECT COUNT(*) FROM agent_session_groups WHERE backend_scope = ? AND account_scope = ? AND library_id = ?) < 100`,
+          [groupId, scope.backendScope, scope.accountScope, id, input.name, input.name.normalize('NFKC').toLowerCase(),
+            directories, input.access, now, now, scope.backendScope, scope.accountScope, id]);
+          if (!result.changes) throw new Error('当前资料库最多创建100个会话组');
+        }
+      } catch (error) {
+        if (String(error).includes('UNIQUE')) throw new Error('当前资料库已存在同名会话组');
+        throw error;
+      }
+      const group = await readGroup(scope, id, groupId);
+      if (!group) throw new Error('会话组不存在');
+      return group;
+    },
+
+    async deleteGroup(owner, libraryId, id, revision) {
+      const scope = normalizeAgentOwnerScope(owner);
+      const result = await run(database, `DELETE FROM agent_session_groups WHERE id = ? AND backend_scope = ?
+        AND account_scope = ? AND library_id = ? AND revision = ?`,
+      [id, scope.backendScope, scope.accountScope, normalizeLibraryId(libraryId), revision]);
+      if (!result.changes) throw new Error('会话组已变化或不存在，请刷新后重试');
+      return true;
+    },
+
+    async organizeSession(sessionId, owner, libraryId, input, now) {
+      const scope = normalizeAgentOwnerScope(owner);
+      const mode = normalizeAgentSessionPermissionMode(input.permissionMode);
+      if (input.groupId !== null && (typeof input.groupId !== 'string' || !input.groupId || input.groupId.length > 200)) throw new Error('会话组无效');
+      if (!Number.isSafeInteger(input.revision) || input.revision < 1) throw new Error('会话版本无效');
+      const result = await run(database, `UPDATE agent_sessions SET group_id = ?, permission_mode = ?,
+        metadata_revision = metadata_revision + 1, updated_at = ?
+        WHERE id = ? AND backend_scope = ? AND account_scope = ? AND library_id = ? AND archived_at IS NULL AND metadata_revision = ?`,
+      [input.groupId, mode, now, sessionId, scope.backendScope, scope.accountScope, normalizeLibraryId(libraryId), input.revision]);
+      if (!result.changes) throw new Error('会话已变化、归档或不存在，请刷新后重试');
+      return (await readSummary(sessionId, scope, libraryId))!;
+    },
+
+    async archiveSession(sessionId, owner, libraryId, archived, revision, now) {
+      const scope = normalizeAgentOwnerScope(owner);
+      if (typeof archived !== 'boolean' || !Number.isSafeInteger(revision) || revision < 1) throw new Error('归档参数无效');
+      const result = await run(database, `UPDATE agent_sessions SET archived_at = ?, updated_at = ?, metadata_revision = metadata_revision + 1
+        WHERE id = ? AND backend_scope = ? AND account_scope = ? AND library_id = ? AND metadata_revision = ?`,
+      [archived ? now : null, now, sessionId, scope.backendScope, scope.accountScope, normalizeLibraryId(libraryId), revision]);
+      if (!result.changes) throw new Error('会话已变化或不存在，请刷新后重试');
+      return (await readSummary(sessionId, scope, libraryId, true))!;
     },
 
     async createSession(input) {
@@ -3454,8 +3693,8 @@ export async function createSQLiteAgentSessionStore(
       const ownerScope = normalizeAgentOwnerScope(input.ownerScope);
       await run(database, `
         INSERT INTO agent_sessions (
-          id, backend_scope, account_scope, library_id, title, context_json, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          id, backend_scope, account_scope, library_id, title, context_json, created_at, updated_at, group_id, permission_mode
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `, [
         input.id,
         ownerScope.backendScope,
@@ -3465,6 +3704,8 @@ export async function createSQLiteAgentSessionStore(
         JSON.stringify(input.appContext),
         input.now,
         input.now,
+        input.groupId || null,
+        normalizeAgentSessionPermissionMode(input.permissionMode || (input.groupId ? 'group' : 'ask')),
       ]);
       const created = await readSummary(input.id, ownerScope, libraryId);
       if (!created) throw new Error('Agent 会话创建失败');
@@ -3568,16 +3809,18 @@ export async function createSQLiteAgentSessionStore(
       return readToolActivity(id);
     },
 
-    async deleteSession(sessionId, ownerScope, libraryId) {
+    async deleteSession(sessionId, ownerScope, libraryId, archivedOnly = false) {
       const scope = normalizeAgentOwnerScope(ownerScope);
       const result = await run(database, `
         DELETE FROM agent_sessions
         WHERE id = ? AND backend_scope = ? AND account_scope = ? AND library_id = ?
+          AND (? = 0 OR archived_at IS NOT NULL)
       `, [
         sessionId,
         scope.backendScope,
         scope.accountScope,
         normalizeLibraryId(libraryId),
+        archivedOnly ? 1 : 0,
       ]);
       return result.changes > 0;
     },
@@ -3819,8 +4062,8 @@ export async function createSQLiteAgentSessionStore(
       };
     },
 
-    async getSession(sessionId, ownerScope, libraryId) {
-      const summary = await readSummary(sessionId, ownerScope, libraryId);
+    async getSession(sessionId, ownerScope, libraryId, includeArchived = false) {
+      const summary = await readSummary(sessionId, ownerScope, libraryId, includeArchived);
       if (!summary) return null;
       const rows = await all<MessageRow>(database, `
         SELECT ${MESSAGE_SELECT_COLUMNS}
@@ -3832,6 +4075,8 @@ export async function createSQLiteAgentSessionStore(
         SELECT
           id,
           session_id,
+          resumes_run_id,
+          library_access_json,
           capability_identity,
           status,
           user_prompt,
@@ -3930,12 +4175,15 @@ export async function createSQLiteAgentSessionStore(
       };
     },
 
-    async listSessions(ownerScope, libraryId, query = '', cursorInput) {
+    async listSessions(ownerScope, libraryId, query = '', cursorInput, filter = {}) {
       const scope = normalizeAgentOwnerScope(ownerScope);
       const normalizedLibraryId = normalizeLibraryId(libraryId);
       const normalizedQuery = String(query || '').trim().slice(0, MAX_SEARCH_LENGTH);
       const searchPattern = `%${escapeLikePattern(normalizedQuery)}%`;
       const cursor = normalizeSessionCursor(cursorInput);
+      const archivedClause = filter.archived ? 'IS NOT NULL' : 'IS NULL';
+      const hasGroup = Object.prototype.hasOwnProperty.call(filter, 'groupId');
+      const groupClause = hasGroup ? 'AND sessions.group_id IS ?' : '';
       const cursorClause = cursor
         ? 'AND (sessions.updated_at < ? OR (sessions.updated_at = ? AND sessions.id < ?))'
         : '';
@@ -3943,7 +4191,8 @@ export async function createSQLiteAgentSessionStore(
         WHERE sessions.backend_scope = ?
           AND sessions.account_scope = ?
           AND sessions.library_id = ?
-          AND sessions.archived_at IS NULL
+          AND sessions.archived_at ${archivedClause}
+          ${groupClause}
           AND (? = '' OR sessions.title LIKE ? ESCAPE '\\' OR sessions.last_message_preview LIKE ? ESCAPE '\\')
           ${cursorClause}
         GROUP BY sessions.id
@@ -3953,6 +4202,7 @@ export async function createSQLiteAgentSessionStore(
         scope.backendScope,
         scope.accountScope,
         normalizedLibraryId,
+        ...(hasGroup ? [filter.groupId || null] : []),
         normalizedQuery,
         searchPattern,
         searchPattern,
@@ -3964,12 +4214,14 @@ export async function createSQLiteAgentSessionStore(
         WHERE backend_scope = ?
           AND account_scope = ?
           AND library_id = ?
-          AND archived_at IS NULL
+          AND archived_at ${archivedClause}
+          ${hasGroup ? 'AND group_id IS ?' : ''}
           AND (? = '' OR title LIKE ? ESCAPE '\\' OR last_message_preview LIKE ? ESCAPE '\\')
       `, [
         scope.backendScope,
         scope.accountScope,
         normalizedLibraryId,
+        ...(hasGroup ? [filter.groupId || null] : []),
         normalizedQuery,
         searchPattern,
         searchPattern,
@@ -3986,11 +4238,24 @@ export async function createSQLiteAgentSessionStore(
       };
     },
 
+    async setGeneratedSessionTitle(input) {
+      const scope = normalizeAgentOwnerScope(input.ownerScope);
+      const result = await run(database, `
+        UPDATE agent_sessions SET title = ?
+        WHERE id = ? AND backend_scope = ? AND account_scope = ? AND library_id = ?
+          AND archived_at IS NULL AND title = ? AND updated_at = ?
+          AND EXISTS (SELECT 1 FROM agent_runs WHERE id = ? AND session_id = agent_sessions.id AND status = 'completed')
+          AND NOT EXISTS (SELECT 1 FROM agent_runs WHERE session_id = agent_sessions.id AND id <> ?)
+      `, [normalizeSessionTitle(input.title), input.sessionId, scope.backendScope, scope.accountScope,
+        normalizeLibraryId(input.libraryId), input.expectedTitle, input.expectedUpdatedAt, input.runId, input.runId]);
+      return result.changes > 0;
+    },
+
     async renameSession(sessionId, ownerScope, libraryId, title, now) {
       const scope = normalizeAgentOwnerScope(ownerScope);
       const result = await run(database, `
         UPDATE agent_sessions
-        SET title = ?, updated_at = ?
+        SET title = ?, updated_at = ?, metadata_revision = metadata_revision + 1
         WHERE id = ?
           AND backend_scope = ?
           AND account_scope = ?

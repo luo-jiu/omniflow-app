@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import type { AgentLibraryAccessSnapshot } from '../../../src/shared/agent/agent-session-management';
 
 import type { AgentToolResult } from '@/shared/agent/agent.types';
 import type {
@@ -71,6 +72,7 @@ function stableSerialize(value: unknown): string {
 }
 
 function createSnapshotIdentity(input: {
+  libraryAccess?: AgentLibraryAccessSnapshot;
   modelAdapterIdentity?: string;
   capabilitySnapshot: AgentCapabilitySnapshot;
   omittedSkillCount: number;
@@ -115,6 +117,7 @@ function createSnapshotIdentity(input: {
       }
     : null;
   const payload = stableSerialize({
+    ...(input.libraryAccess ? { libraryAccess: input.libraryAccess } : {}),
     capabilityIdentity: input.capabilitySnapshot.identity,
     omittedSkillCount: input.omittedSkillCount,
     shellPermissionMode: input.shellPermissionMode,
@@ -169,6 +172,7 @@ function createEffectiveSkillSnapshot(
 }
 
 export interface AgentRunCapabilitySnapshotOptions {
+  readonly libraryAccess?: AgentLibraryAccessSnapshot;
   readonly modelAdapterIdentity?: string;
   readonly capabilitySnapshot?: AgentCapabilitySnapshot;
   readonly shellPermissionMode?: AgentShellPermissionMode;
@@ -178,6 +182,7 @@ export interface AgentRunCapabilitySnapshotOptions {
 }
 
 export interface AgentRunCapabilitySnapshot {
+  readonly libraryAccess?: AgentLibraryAccessSnapshot;
   readonly capabilitySnapshot: AgentCapabilitySnapshot;
   readonly shellProviderSnapshot: AgentShellProviderRegistrySnapshot | null;
   readonly skillSnapshot: AgentSkillSnapshotV1;
@@ -407,6 +412,8 @@ export function createAgentRunCapabilitySnapshot(
   }
 
   const snapshot: AgentRunCapabilitySnapshot = {
+    ...(options.libraryAccess ? { libraryAccess: Object.freeze({ ...options.libraryAccess,
+      directories: Object.freeze(options.libraryAccess.directories.map(item => Object.freeze({ ...item }))) as unknown as AgentLibraryAccessSnapshot['directories'] }) } : {}),
     capabilitySnapshot,
     defaultShellProviderId,
     defaultShellProviderRegistrationIdentity,
@@ -435,6 +442,7 @@ export function createAgentRunCapabilitySnapshot(
     getToolKind: name => kindByName.get(normalizeId(name)) || null,
     getToolReadiness: name => toolReadiness.get(normalizeId(name)) || null,
     identity: createSnapshotIdentity({
+      libraryAccess: options.libraryAccess,
       modelAdapterIdentity: options.modelAdapterIdentity,
       capabilitySnapshot,
       omittedSkillCount: options.skillSnapshot.omittedSkillCount,

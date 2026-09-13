@@ -1,6 +1,5 @@
 import React from 'react';
 import { AgentAttachmentStrip } from './components/AgentAttachmentStrip';
-import { createPortal } from 'react-dom';
 import OutlineIcon from '@/components/ui/outline-icon';
 import { Toast } from '@douyinfe/semi-ui';
 import styled, { css } from 'styled-components';
@@ -10,6 +9,8 @@ import { openCompactConfirm } from '@/components/ui/compact-confirm';
 import { workspaceScrollbarStyles } from '@/components/ui/workspace-scrollbar';
 import type { SelectedTreeNode } from '@/features/file-explorer';
 import { locateNodeInDirectoryTree } from '@/features/file-explorer/services/tree-locate';
+import { AgentFileLinkContext } from './agent-file-link-context';
+import type { AgentFileLink } from '@/shared/agent/agent-file-link';
 import {
   fetchActiveAIServiceModels,
   fetchAIServiceProfiles,
@@ -22,8 +23,9 @@ import type {
   AgentSessionCursor,
   AgentSessionSummary,
 } from '@/shared/agent/agent.types';
-import type { AgentShellPermissionMode } from '@/shared/agent/shell/agent-shell.types';
+import type { AgentSessionGroup, AgentSessionGroupInput, AgentSessionPermissionMode } from '@/shared/agent/agent-session-management';
 import { serializeAgentOwnerScope } from '@/shared/agent/agent-owner-scope';
+import { buildFileFullName } from '@/utils/fileTreeSettings';
 import AgentMemoryManager, {
   type AgentMemoryDeleteInput,
   type AgentMemoryUpdateInput,
@@ -33,6 +35,18 @@ import AgentTimeline from './components/AgentTimeline';
 import AgentSubmitButton from './components/AgentSubmitButton';
 import AgentPermissionControl from './components/AgentPermissionControl';
 import AgentSessionPeek from './components/AgentSessionPeek';
+import AgentSessionGroupEditor from './components/AgentSessionGroupEditor';
+import AgentSessionGroupPicker from './components/AgentSessionGroupPicker';
+import { useAgentSessionGroups } from './hooks/useAgentSessionGroups';
+import {
+  AGENT_CHAT_INDEX_INSET,
+  AGENT_CHAT_MAX_WIDTH,
+  AGENT_CHAT_MIN_WIDTH,
+  AGENT_DIRECTORY_BREAKPOINT,
+  AGENT_DIRECTORY_BUBBLE_RESERVED_WIDTH,
+  AGENT_DIRECTORY_LAYOUT_MS,
+  AGENT_DIRECTORY_RESERVED_WIDTH,
+} from './agent-session-directory-layout';
 import { createAgentCompositionGuard, shouldSubmitAgentComposer } from './agent-composer-keyboard';
 import AgentConversationIndex from './components/AgentConversationIndex';
 import {
@@ -53,10 +67,13 @@ import { useAgentSessionResume } from './hooks/useAgentSessionResume';
 import { loadAgentSessionSelection, saveAgentSessionSelection } from './agent-session-selection';
 import {
   deleteAgentSession,
-  getAgentShellSettings,
+  getAgentSession,
+  archiveAgentSession,
+  organizeAgentSession,
+  saveAgentSessionGroup,
+  deleteAgentSessionGroup,
   listAgentSessions,
   renameAgentSession,
-  updateAgentShellPermissionMode,
 } from './services/agent.api';
 
 const AgentRoot = styled.section`
@@ -84,17 +101,35 @@ const AgentScroll = styled.div`
   padding: 24px 16px 18px;
   padding-bottom: var(--agent-dock-space, 18px);
   scroll-padding-bottom: var(--agent-dock-space, 18px);
-  @container (max-width: 720px) { padding-left: 52px; }
   display: flex;
   flex-direction: column;
+
+  &[data-directory-visible='true'] {
+    transition: padding-right ${AGENT_DIRECTORY_LAYOUT_MS}ms cubic-bezier(0.22, 1, 0.36, 1);
+    padding-left: ${AGENT_CHAT_INDEX_INSET}px;
+    padding-right: ${AGENT_DIRECTORY_RESERVED_WIDTH}px;
+  }
+
+  @container (max-width: ${AGENT_DIRECTORY_BREAKPOINT}px) {
+    &[data-directory-visible='true'] {
+      padding-right: ${AGENT_DIRECTORY_BUBBLE_RESERVED_WIDTH}px;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    &[data-directory-visible='true'] { transition: none; }
+  }
 `;
 
 const agentColumnStyles = css`
-  width: clamp(560px, 72%, 900px);
-  max-width: 100%;
-  min-width: min(560px, 100%);
+  /* Keep text width independent of the directory's animated reservation. */
+  width: min(${AGENT_CHAT_MAX_WIDTH}px, max(${AGENT_CHAT_MIN_WIDTH}px, calc(
+    100cqw - ${AGENT_CHAT_INDEX_INSET + AGENT_DIRECTORY_BUBBLE_RESERVED_WIDTH}px
+    - var(--agent-scrollbar-width, 8px)
+  )));
+  max-width: none;
+  min-width: ${AGENT_CHAT_MIN_WIDTH}px;
+  flex-shrink: 0;
   margin-inline: auto;
-  @container (min-width: 900px) { transform: translateX(-24px); }
 `;
 
 const AgentContent = styled.div`
@@ -102,6 +137,18 @@ const AgentContent = styled.div`
   display: flex;
   flex-direction: column;
   gap: 14px;
+`;
+
+const ArchiveHeader = styled.header`
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 32px;
+  font-size: 14px;
+  .archive-title { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 28px; padding: 0 6px;
+    border: 0; border-radius: 5px; background: transparent; color: var(--app-text-secondary); font-size: 12px; cursor: pointer; }
+  button:hover, button:focus-visible { background: var(--semi-color-fill-1); color: var(--app-text); }
 `;
 
 const RecoveryNotice = styled.div`
@@ -149,8 +196,12 @@ const ComposerFrame = styled.div`
   left: 0;
   right: var(--agent-scrollbar-width, 8px);
   min-width: 0;
-  padding: 0 16px 18px;
-  @container (max-width: 720px) { padding-left: 52px; }
+  padding: 0 ${AGENT_DIRECTORY_RESERVED_WIDTH}px 18px ${AGENT_CHAT_INDEX_INSET}px;
+  transition: padding-right ${AGENT_DIRECTORY_LAYOUT_MS}ms cubic-bezier(0.22, 1, 0.36, 1);
+  @container (max-width: ${AGENT_DIRECTORY_BREAKPOINT}px) {
+    padding-right: ${AGENT_DIRECTORY_BUBBLE_RESERVED_WIDTH}px;
+  }
+  @media (prefers-reduced-motion: reduce) { transition: none; }
   pointer-events: none;
 
   &::before {
@@ -166,7 +217,7 @@ const Composer = styled.form`
   position: relative;
   pointer-events: auto;
   border: 1px solid var(--app-border-strong);
-  border-radius: 12px;
+  border-radius: 20px;
   background: var(--app-bg-elevated);
   box-shadow: var(--app-shadow);
   overflow: hidden;
@@ -239,6 +290,7 @@ const Composer = styled.form`
   .agent-submit.stop {
     background: #e58b32;
   }
+  .agent-submit .app-outline-icon { color: inherit; }
 
   .agent-submit:disabled {
     cursor: default;
@@ -251,7 +303,7 @@ const Composer = styled.form`
 `;
 
 type AgentWorkspaceProps = {
-  toolbarTarget?: HTMLDivElement | null;
+  onOpenFileLink?: (link: AgentFileLink) => void;
   libraryId: number;
   onRefreshDirectory?: (directoryId: number) => Promise<void> | void;
   ownerScope: AgentOwnerScope | null;
@@ -286,7 +338,7 @@ function buildAppContext(
 }
 
 export default function AgentWorkspace({
-  toolbarTarget,
+  onOpenFileLink,
   libraryId,
   onRefreshDirectory,
   ownerScope,
@@ -308,15 +360,23 @@ export default function AgentWorkspace({
   const composerFrameRef = React.useRef<HTMLDivElement>(null);
   const [composerDockHeight, setComposerDockHeight] = React.useState(0);
   const [scrollbarWidth, setScrollbarWidth] = React.useState(8);
-  const [shellPermissionMode, setShellPermissionMode] = React.useState<AgentShellPermissionMode>('ask');
-  const [shellSettingsLoading, setShellSettingsLoading] = React.useState(true);
+  const [draftGroupId, setDraftGroupId] = React.useState<string | null>(null);
+  const [draftPermissionMode, setDraftPermissionMode] = React.useState<AgentSessionPermissionMode>('ask');
+  const [permissionsSaving, setPermissionsSaving] = React.useState(false);
+  const [sessionMutationBusy, setSessionMutationBusy] = React.useState(false);
+  const [groupEditor, setGroupEditor] = React.useState<AgentSessionGroup | null | undefined>();
+  const [groupPicker, setGroupPicker] = React.useState<{ kind: 'new' | 'move'; session?: AgentSessionSummary } | null>(null);
+  const [revealGroupId, setRevealGroupId] = React.useState<string | null>(null);
+  const [archivedPreview, setArchivedPreview] = React.useState<import('@/shared/agent/agent.types').AgentSessionSnapshot | null>(null);
+  const archivePreviewRequest = React.useRef<symbol>();
   const [sessions, setSessions] = React.useState<AgentSessionSummary[]>([]);
   const [sessionsLoading, setSessionsLoading] = React.useState(true);
   const [sessionsLoadingMore, setSessionsLoadingMore] = React.useState(false);
   const [sessionsNextCursor, setSessionsNextCursor] = React.useState<AgentSessionCursor | null>(null);
   const [sessionsTotal, setSessionsTotal] = React.useState(0);
-  const [managerMode, setManagerMode] = React.useState<'memories' | 'sessions' | null>(null);
+  const [managerMode, setManagerMode] = React.useState<'memories' | 'sessions' | 'archives' | null>(null);
   const [sessionQuery, setSessionQuery] = React.useState('');
+  const [managerGroupFilter, setManagerGroupFilter] = React.useState('all');
   const scrollRef = React.useRef<HTMLDivElement | null>(null);
   const scrollFrameRef = React.useRef<number | null>(null);
   const shouldFollowScrollRef = React.useRef(true);
@@ -326,6 +386,12 @@ export default function AgentWorkspace({
   const sessionScopeKey = `${ownerScopeKey}\u0000${libraryId}`;
   const currentSessionScopeKeyRef = React.useRef(sessionScopeKey);
   currentSessionScopeKeyRef.current = sessionScopeKey;
+  React.useEffect(() => {
+    currentSessionScopeKeyRef.current = sessionScopeKey;
+    return () => { currentSessionScopeKeyRef.current = ''; };
+  }, [sessionScopeKey]);
+  const groupDirectory = useAgentSessionGroups(ownerScope, libraryId);
+  const refreshGroups = groupDirectory.refresh;
   const appContext = React.useMemo(
     () => buildAppContext(libraryId, rootNodeId, selectedTreeNode),
     [libraryId, rootNodeId, selectedTreeNode],
@@ -353,6 +419,8 @@ export default function AgentWorkspace({
   const loadSessions = React.useCallback(async (
     query = '',
     cursor?: AgentSessionCursor,
+    archived = false,
+    groupFilter = 'all',
   ): Promise<AgentSessionSummary[]> => {
     if (!ownerScope || !ownerScopeKey) {
       setSessions([]);
@@ -369,7 +437,9 @@ export default function AgentWorkspace({
     if (cursor) setSessionsLoadingMore(true);
     else setSessionsLoading(true);
     try {
-      const page = await listAgentSessions(ownerScope, requestedLibraryId, query, cursor);
+      const page = await listAgentSessions(ownerScope, requestedLibraryId, query, cursor, {
+        archived, ...(groupFilter === 'all' ? {} : { groupId: groupFilter === '__ungrouped' ? null : groupFilter }),
+      });
       if (
         sessionsRequestIdRef.current !== requestId
         || currentSessionScopeKeyRef.current !== requestedScopeKey
@@ -399,13 +469,21 @@ export default function AgentWorkspace({
   }, [libraryId, ownerScope, ownerScopeKey, sessionScopeKey]);
   const handleSessionChanged = React.useCallback((id: string) => {
     saveAgentSessionSelection(sessionScopeKey, id);
-    void loadSessions();
-  }, [loadSessions, sessionScopeKey]);
+    void loadSessions(managerMode === 'sessions' || managerMode === 'archives' ? sessionQuery : '', undefined, managerMode === 'archives', managerMode ? managerGroupFilter : 'all');
+    void refreshGroups();
+  }, [loadSessions, managerGroupFilter, managerMode, refreshGroups, sessionQuery, sessionScopeKey]);
+  const handleSessionTitleChanged = React.useCallback(() => {
+    void loadSessions(managerMode === 'sessions' || managerMode === 'archives' ? sessionQuery : '', undefined, managerMode === 'archives', managerMode ? managerGroupFilter : 'all');
+    void refreshGroups();
+  }, [loadSessions, managerGroupFilter, managerMode, refreshGroups, sessionQuery]);
   const session = useAgentSession({
+    groupId: draftGroupId,
+    permissionMode: draftPermissionMode,
     appContext,
     model: modelPreferences.model,
     onRefreshDirectory,
     onSessionChanged: handleSessionChanged,
+    onSessionTitleChanged: handleSessionTitleChanged,
     ownerScope,
     profileId: aiServices?.activeProfileId || '',
     reasoningEffort: modelPreferences.reasoningEffort,
@@ -418,8 +496,12 @@ export default function AgentWorkspace({
     restore: restoreSession,
   });
   const selectSession = resume.select;
-  const sessionBusy = session.isBusy || resume.loading;
+  const sessionBusy = session.isBusy || resume.loading || permissionsSaving || sessionMutationBusy;
   const currentSessionId = session.sessionId;
+  const activeSessionIdRef = React.useRef(currentSessionId);
+  activeSessionIdRef.current = currentSessionId;
+  const currentGroupId = currentSessionId ? session.sessionInfo?.groupId || null : draftGroupId;
+  const permissionMode = currentSessionId ? session.sessionInfo?.permissionMode || 'ask' : draftPermissionMode;
 
   const loadConfig = React.useCallback(async () => {
     setLoadingConfig(true);
@@ -442,36 +524,28 @@ export default function AgentWorkspace({
   }, [loadConfig]);
 
   React.useEffect(() => {
-    let active = true;
-    setShellSettingsLoading(true);
-    void getAgentShellSettings().then((settings) => {
-      if (active) setShellPermissionMode(settings.permissionMode);
-    }).catch((error) => {
-      if (active) {
-        Toast.error(error instanceof Error ? error.message : '读取 Agent 权限模式失败');
-      }
-    }).finally(() => {
-      if (active) setShellSettingsLoading(false);
-    });
-    return () => { active = false; };
-  }, []);
-
-  React.useEffect(() => {
     setSessions([]);
     setSessionsNextCursor(null);
     setSessionsTotal(0);
     setManagerMode(null);
     setSessionQuery('');
-    void loadSessions();
+    setManagerGroupFilter('all');
+    setDraftGroupId(null);
+    setDraftPermissionMode('ask');
+    setGroupEditor(undefined);
+    setGroupPicker(null);
+    setArchivedPreview(null);
+    setPermissionsSaving(false);
+    setSessionMutationBusy(false);
   }, [loadSessions, sessionScopeKey]);
 
   React.useEffect(() => {
-    if (managerMode !== 'sessions') return;
+    if (managerMode === 'memories') return;
     const timer = window.setTimeout(() => {
-      void loadSessions(sessionQuery);
-    }, 160);
+      void loadSessions(managerMode === 'sessions' || managerMode === 'archives' ? sessionQuery : '', undefined, managerMode === 'archives', managerMode ? managerGroupFilter : 'all');
+    }, managerMode ? 160 : 0);
     return () => window.clearTimeout(timer);
-  }, [loadSessions, managerMode, sessionQuery]);
+  }, [loadSessions, managerGroupFilter, managerMode, sessionQuery]);
 
   React.useEffect(() => {
     const scroll = scrollRef.current;
@@ -577,31 +651,41 @@ export default function AgentWorkspace({
     }
   }, [activeProfile, modelPreferences, persistModelPreferences]);
 
-  const handleShellPermissionModeChange = React.useCallback(async (
-    permissionMode: AgentShellPermissionMode,
+  const handlePermissionModeChange = async (
+    nextMode: AgentSessionPermissionMode,
   ) => {
-    if (permissionMode === shellPermissionMode || shellSettingsLoading) return;
-    setShellSettingsLoading(true);
+    if (nextMode === permissionMode || permissionsSaving || sessionBusy) return;
+    if (!currentSessionId) { setDraftPermissionMode(nextMode); return; }
+    if (!ownerScope || !session.sessionInfo) return;
+    setPermissionsSaving(true);
     try {
-      const settings = await updateAgentShellPermissionMode(permissionMode);
-      setShellPermissionMode(settings.permissionMode);
-      if (session.isBusy) Toast.info('权限模式将在下一次 Agent 任务中生效');
+      const updated = await organizeAgentSession(ownerScope, libraryId, currentSessionId, {
+        revision: session.sessionInfo.revision || 1, groupId: currentGroupId, permissionMode: nextMode,
+      });
+      if (currentSessionScopeKeyRef.current !== sessionScopeKey) return;
+      session.updateSessionInfo(updated);
+      void refreshGroups();
     } catch (error) {
-      Toast.error(error instanceof Error ? error.message : '更新 Agent 权限模式失败');
+      if (currentSessionScopeKeyRef.current === sessionScopeKey) Toast.error(error instanceof Error ? error.message : '更新会话权限失败');
     } finally {
-      setShellSettingsLoading(false);
+      if (currentSessionScopeKeyRef.current === sessionScopeKey) setPermissionsSaving(false);
     }
-  }, [session.isBusy, shellPermissionMode, shellSettingsLoading]);
+  };
 
-  const contextLabel = selectedTreeNode
-    ? `当前上下文：${selectedTreeNode.name}`
+  const selectedNodeLabel = selectedTreeNode
+    ? selectedTreeNode.type === 'file'
+      ? buildFileFullName(selectedTreeNode.name, selectedTreeNode.ext)
+      : selectedTreeNode.name
     : rootNodeId
-      ? '当前上下文：资料库根目录'
-      : '当前上下文：未选择文件';
+      ? '资料库根目录'
+      : '未选择文件';
+  const contextLabel = `选中：${selectedNodeLabel}`;
   const canSubmit = Boolean(
     ownerScope && (session.draft.trim() || session.attachments.entries.length) && session.attachments.ready && modelPreferences.model && activeProfile && !loadingConfig
     && !resume.loading && !resume.failed,
   );
+  const showResume = Boolean(session.resumableRunId && !session.draft.trim() && !session.attachments.entries.length);
+  const canResume = Boolean(ownerScope && modelPreferences.model && activeProfile && !loadingConfig && !resume.loading && !resume.failed);
   const workspaceError = ownerScope
     ? configError
     : '当前账号身份不完整，Agent 会话暂不可用';
@@ -646,19 +730,24 @@ export default function AgentWorkspace({
       selectSession(target.id);
       shouldFollowScrollRef.current = true;
       setManagerMode(null);
+      return true;
     }
+    return false;
   }, [restoreSession, selectSession]);
 
-  const handleNewSession = React.useCallback(() => {
-    if (sessionBusy) {
-      Toast.warning('请先停止当前 Agent 任务');
-      return;
-    }
+  const resetToGroup = React.useCallback((groupId: string | null) => {
     resetSession();
     selectSession(null);
     setSessionQuery('');
+    setDraftGroupId(groupId);
+    setDraftPermissionMode(groupId ? 'group' : 'ask');
     setManagerMode(null);
-  }, [resetSession, sessionBusy, selectSession]);
+  }, [resetSession, selectSession]);
+  const startNewSession = (groupId: string | null) => {
+    if (sessionBusy) { Toast.warning('请先等待当前操作结束'); return; }
+    resetToGroup(groupId);
+  };
+  const handleNewSession = () => { if (!sessionBusy) setGroupPicker({ kind: 'new' }); };
 
   const handleRenameSession = React.useCallback(async (
     target: AgentSessionSummary,
@@ -666,36 +755,134 @@ export default function AgentWorkspace({
   ): Promise<boolean> => {
     if (!ownerScope) return false;
     try {
-      await renameAgentSession(ownerScope, libraryId, target.id, title);
-      await loadSessions(sessionQuery);
+      const updated = await renameAgentSession(ownerScope, libraryId, target.id, title);
+      if (currentSessionScopeKeyRef.current !== sessionScopeKey) return false;
+      session.updateSessionInfo(updated);
+      await refreshGroups();
+      await loadSessions(sessionQuery, undefined, false, managerGroupFilter);
       return true;
     } catch (error) {
       Toast.error(error instanceof Error ? error.message : 'Agent 会话重命名失败');
       return false;
     }
-  }, [libraryId, loadSessions, ownerScope, sessionQuery]);
+  }, [libraryId, loadSessions, managerGroupFilter, ownerScope, refreshGroups, session, sessionQuery, sessionScopeKey]);
 
   const handleDeleteSession = React.useCallback((target: AgentSessionSummary) => {
     openCompactConfirm({
       cancelText: '取消',
-      content: `确定删除“${target.title}”吗？该会话和工具运行记录将从本机移除。`,
+      content: `永久删除“${target.title}”及其聊天和工具记录？此操作无法撤销，已生成到资料库的文件不会删除。`,
       okButtonProps: { type: 'danger' },
       okText: '删除',
       onOk: async () => {
         if (!ownerScope) return;
         try {
           await deleteAgentSession(ownerScope, libraryId, target.id);
-          if (currentSessionId === target.id) { resetSession(); selectSession(null); }
+          if (currentSessionScopeKeyRef.current !== sessionScopeKey) return;
+          if (activeSessionIdRef.current === target.id) { resetSession(); selectSession(null); }
           else if (loadAgentSessionSelection(sessionScopeKey) === target.id) selectSession(null);
-          await loadSessions(sessionQuery);
+          setArchivedPreview(null);
+          await loadSessions(sessionQuery, undefined, true, managerGroupFilter);
+          await refreshGroups();
         } catch (error) {
           Toast.error(error instanceof Error ? error.message : 'Agent 会话删除失败');
           throw error;
         }
       },
-      title: '删除 Agent 会话',
+      title: '永久删除会话',
     });
-  }, [currentSessionId, libraryId, loadSessions, ownerScope, resetSession, sessionQuery, selectSession, sessionScopeKey]);
+  }, [libraryId, loadSessions, managerGroupFilter, ownerScope, refreshGroups, resetSession, sessionQuery, selectSession, sessionScopeKey]);
+
+  const handleArchiveSession = async (target: AgentSessionSummary, archived = true) => {
+    if (!ownerScope) return;
+    if (target.id === activeSessionIdRef.current && (session.draft.trim() || session.attachments.entries.length)) {
+      Toast.warning('当前会话还有未发送内容，请先处理输入框中的草稿'); return;
+    }
+    const switching = archived && target.id === activeSessionIdRef.current;
+    let committed = false;
+    if (switching) setSessionMutationBusy(true);
+    try {
+      const archivedSession = await archiveAgentSession(ownerScope, libraryId, target.id, archived, target.revision || 1);
+      committed = true;
+      if (currentSessionScopeKeyRef.current !== sessionScopeKey) return;
+      if (archived && activeSessionIdRef.current === target.id) {
+        selectSession(null);
+        const next = await listAgentSessions(ownerScope, libraryId, '', undefined, { groupId: archivedSession.groupId || null });
+        if (currentSessionScopeKeyRef.current !== sessionScopeKey || activeSessionIdRef.current !== target.id) return;
+        const opened = next.sessions[0] ? await handleOpenSession(next.sessions[0]) : false;
+        if (currentSessionScopeKeyRef.current !== sessionScopeKey) return;
+        if (!opened) resetToGroup(archivedSession.groupId || null);
+      }
+      if (!archived) setArchivedPreview(null);
+      await refreshGroups();
+      await loadSessions(sessionQuery, undefined, managerMode === 'archives', managerMode ? managerGroupFilter : 'all');
+    } catch (error) {
+      if (currentSessionScopeKeyRef.current === sessionScopeKey) {
+        if (committed && switching && activeSessionIdRef.current === target.id) resetToGroup(null);
+        Toast.error(error instanceof Error ? error.message : '归档操作失败');
+      }
+    } finally {
+      if (switching && currentSessionScopeKeyRef.current === sessionScopeKey) setSessionMutationBusy(false);
+    }
+  };
+
+  const handleSaveGroup = async (input: AgentSessionGroupInput) => {
+    if (!ownerScope) throw new Error('当前账号不可用');
+    const saved = await saveAgentSessionGroup(ownerScope, libraryId, input);
+    if (currentSessionScopeKeyRef.current !== sessionScopeKey) return;
+    await refreshGroups();
+    if (currentSessionScopeKeyRef.current !== sessionScopeKey) return;
+    setRevealGroupId(saved.id);
+    setGroupEditor(undefined);
+  };
+  const handleDeleteGroup = (group: AgentSessionGroup) => {
+    openCompactConfirm({ title: '删除会话组', content: `删除“${group.name}”？会话将移到未分组，组内自动授权失效，文件不会删除。`,
+      okText: '删除组', cancelText: '取消', okButtonProps: { type: 'danger' }, onOk: async () => {
+        if (!ownerScope) return;
+        await deleteAgentSessionGroup(ownerScope, libraryId, group.id, group.revision);
+        if (currentSessionScopeKeyRef.current !== sessionScopeKey) return;
+        setGroupEditor(undefined);
+        if (managerGroupFilter === group.id) setManagerGroupFilter('all');
+        if (draftGroupId === group.id) { setDraftGroupId(null); setDraftPermissionMode('ask'); }
+        if (activeSessionIdRef.current) {
+          const fresh = await getAgentSession(ownerScope, libraryId, activeSessionIdRef.current);
+          if (currentSessionScopeKeyRef.current === sessionScopeKey) session.updateSessionInfo(fresh);
+        }
+        await refreshGroups();
+        await loadSessions(sessionQuery, undefined, managerMode === 'archives', managerGroupFilter === group.id ? 'all' : managerGroupFilter);
+      } });
+  };
+  const handleChooseGroup = async (groupId: string | null) => {
+    if (groupPicker?.kind === 'new') {
+      if (sessionBusy) throw new Error('请先停止当前任务');
+      startNewSession(groupId);
+    } else if (groupPicker?.session && ownerScope) {
+      const target = groupPicker.session;
+      const updated = await organizeAgentSession(ownerScope, libraryId, target.id, {
+        revision: target.revision || 1, groupId,
+        permissionMode: target.permissionMode === 'full-access' ? 'full-access' : groupId ? 'group' : 'ask',
+      });
+      if (currentSessionScopeKeyRef.current !== sessionScopeKey) return;
+      session.updateSessionInfo(updated);
+      await refreshGroups();
+      await loadSessions(sessionQuery, undefined, false, managerGroupFilter);
+    }
+    if (currentSessionScopeKeyRef.current === sessionScopeKey) setGroupPicker(null);
+  };
+  const openArchives = () => {
+    setSessionQuery(''); setSessionsLoading(true); setArchivedPreview(null); setManagerMode('archives');
+  };
+  const openArchivedSession = async (target: AgentSessionSummary) => {
+    if (!ownerScope) return;
+    const request = Symbol(target.id);
+    archivePreviewRequest.current = request;
+    try {
+      const snapshot = await getAgentSession(ownerScope, libraryId, target.id, true);
+      if (archivePreviewRequest.current === request && currentSessionScopeKeyRef.current === sessionScopeKey) setArchivedPreview(snapshot);
+    } catch (error) { if (currentSessionScopeKeyRef.current === sessionScopeKey) Toast.error(error instanceof Error ? error.message : '读取归档失败'); }
+  };
+  React.useEffect(() => {
+    if (managerMode !== 'archives') { archivePreviewRequest.current = undefined; setArchivedPreview(null); }
+  }, [managerMode]);
 
   const handleUpdateMemory = React.useCallback(async (
     input: AgentMemoryUpdateInput,
@@ -735,38 +922,40 @@ export default function AgentWorkspace({
       '--agent-dock-space': managerMode ? '18px' : `${composerDockHeight + 18}px`,
       '--agent-scrollbar-width': `${scrollbarWidth}px`,
     } as React.CSSProperties}>
-      {toolbarTarget ? createPortal(<>
-            <AgentSessionPeek sessions={sessions} total={sessionsTotal} activeSessionId={currentSessionId}
-              loading={sessionsLoading} onOpen={target => { void handleOpenSession(target); }} onManage={() => {
-                setSessionQuery('');
-                setSessionsLoading(true);
-                setManagerMode('sessions');
-              }} onNew={handleNewSession} />
-            <button
-              aria-label="管理 Agent 长期记忆"
-              className="toolbar-action-btn"
-              disabled={sessionBusy || !ownerScope}
-              onClick={() => {
-                setMemoryQuery('');
-                setManagerMode('memories');
-              }}
-              title="长期记忆"
-              type="button"
-            >
-              <OutlineIcon name="bookmark" />
-            </button>
-              <button
-                aria-label="新建 Agent 会话"
-                disabled={sessionBusy}
-                className="toolbar-action-btn"
-                onClick={handleNewSession}
-                title="新建会话"
-                type="button"
-              >
-                <OutlineIcon name="plus" />
-              </button>
-      </>, toolbarTarget) : null}
+      {!managerMode ? <AgentSessionPeek
+        key={sessionScopeKey}
+        sessions={sessions}
+        total={groupDirectory.summary.total}
+        activeSessionId={currentSessionId}
+        loading={groupDirectory.loading}
+        busy={sessionBusy || !ownerScope}
+        onOpen={target => { void handleOpenSession(target); }}
+        onManage={() => {
+          setSessionQuery('');
+          setSessionsLoading(true);
+          setManagerMode('sessions');
+        }}
+        onNew={handleNewSession}
+        directory={groupDirectory.summary}
+        pages={groupDirectory.pages}
+        currentGroupId={currentGroupId}
+        revealGroupId={revealGroupId}
+        storageKey={`agent-group-collapse:v1:${encodeURIComponent(sessionScopeKey)}`}
+        error={groupDirectory.error}
+        onRetry={() => { void refreshGroups(); }}
+        onLoadGroup={(id, more) => { void groupDirectory.loadGroup(id, more); }}
+        onCreateGroup={() => setGroupEditor(null)}
+        onEditGroup={group => { if (!sessionMutationBusy) setGroupEditor(group); }}
+        onNewInGroup={startNewSession}
+        onArchive={target => { void handleArchiveSession(target); }}
+        onArchives={openArchives}
+        onMemories={() => {
+          setMemoryQuery('');
+          setManagerMode('memories');
+        }}
+      /> : null}
       <AgentScroll
+        data-directory-visible={!managerMode ? true : undefined}
         onWheel={() => { indexNavigationRef.current = false; }}
         onPointerDown={() => { indexNavigationRef.current = false; }}
         onKeyDown={event => {
@@ -781,8 +970,24 @@ export default function AgentWorkspace({
         }}
         ref={scrollRef}
       >
-        {managerMode === 'sessions' ? (
+        {managerMode === 'archives' && archivedPreview ? <AgentContent>
+          <ArchiveHeader>
+            <button type="button" onClick={() => setArchivedPreview(null)} title="返回归档" aria-label="返回归档"><OutlineIcon name="back" /></button>
+            <span className="archive-title" title={archivedPreview.title}>{archivedPreview.title}</span>
+            <button type="button" onClick={() => { void handleArchiveSession(archivedPreview, false); }}><OutlineIcon name="archive-restore" />恢复会话</button>
+          </ArchiveHeader>
+          <AgentTimeline approvalBusyIds={new Set()} interactionBusyIds={new Set()} libraryId={libraryId}
+            ownerScope={ownerScope} messages={archivedPreview.messages} runs={archivedPreview.runs} toolActivities={archivedPreview.toolActivities}
+            onResolveApproval={() => undefined} />
+        </AgentContent> : managerMode === 'sessions' || managerMode === 'archives' ? (
           <AgentSessionManager
+            groupFilter={managerGroupFilter}
+            onGroupFilterChange={setManagerGroupFilter}
+            archived={managerMode === 'archives'}
+            groups={groupDirectory.summary.groups}
+            onArchive={target => { void handleArchiveSession(target); }}
+            onRestore={target => { void handleArchiveSession(target, false); }}
+            onMove={target => setGroupPicker({ kind: 'move', session: target })}
             activeSessionId={session.sessionId}
             hasMore={Boolean(sessionsNextCursor)}
             loading={sessionsLoading}
@@ -794,9 +999,9 @@ export default function AgentWorkspace({
             onDelete={handleDeleteSession}
             onNew={handleNewSession}
             onLoadMore={() => {
-              if (sessionsNextCursor) void loadSessions(sessionQuery, sessionsNextCursor);
+              if (sessionsNextCursor) void loadSessions(sessionQuery, sessionsNextCursor, managerMode === 'archives', managerGroupFilter);
             }}
-            onOpen={target => { void handleOpenSession(target); }}
+            onOpen={target => { if (managerMode === 'archives') void openArchivedSession(target); else void handleOpenSession(target); }}
             onQueryChange={setSessionQuery}
             onRename={handleRenameSession}
             query={sessionQuery}
@@ -832,7 +1037,7 @@ export default function AgentWorkspace({
           </AgentEmpty>
         ) : (
           <AgentContent>
-            <AgentTimeline
+            <AgentFileLinkContext.Provider value={onOpenFileLink}><AgentTimeline
               approvalBusyIds={session.approvalBusyIds}
               interactionBusyIds={session.interactionBusyIds}
               libraryId={libraryId}
@@ -845,7 +1050,7 @@ export default function AgentWorkspace({
               }}
               runs={session.runs}
               toolActivities={session.toolActivities}
-            />
+            /></AgentFileLinkContext.Provider>
             {workspaceError ? <div role="alert">{workspaceError}</div> : null}
             {session.warning ? <div role="status">{session.warning}</div> : null}
             {session.error ? <div role="alert">{session.error}</div> : null}
@@ -873,20 +1078,21 @@ export default function AgentWorkspace({
       /> : null}
         {!managerMode ? <ComposerFrame ref={composerFrameRef}>
           <Composer onDragOver={event => { if (event.dataTransfer.types.includes('Files')) event.preventDefault(); }}
-            onDrop={event => { if (event.dataTransfer.files.length) { event.preventDefault(); session.attachments.add(Array.from(event.dataTransfer.files)); } }}
+            onDrop={event => { if (!sessionMutationBusy && event.dataTransfer.files.length) { event.preventDefault(); session.attachments.add(Array.from(event.dataTransfer.files)); } }}
             onSubmit={(event) => {
             event.preventDefault();
-            if (resume.loading || resume.failed) return;
+            if (resume.loading || resume.failed || sessionMutationBusy) return;
             shouldFollowScrollRef.current = true;
             void session.submit();
           }}>
           <AgentAttachmentStrip entries={session.attachments.entries} onRemove={session.attachments.remove}
             scope={ownerScope ? { ownerScope, libraryId } : null} />
           {session.attachments.error && <div role="alert">{session.attachments.error}</div>}
-          <input ref={attachmentInputRef} type="file" multiple hidden aria-label="选择图片或文本文件"
+          <input ref={attachmentInputRef} type="file" multiple hidden disabled={sessionMutationBusy} aria-label="选择图片或文本文件"
             onChange={event => { session.attachments.add(Array.from(event.target.files || [])); event.target.value = ''; }} />
           <textarea
             ref={textareaRef}
+            disabled={sessionMutationBusy}
             aria-label="Agent 输入"
             onPaste={event => { const files = Array.from(event.clipboardData.files); if (files.length) { event.preventDefault(); session.attachments.add(files); } }}
             onCompositionStart={() => compositionGuard.current.start()}
@@ -908,6 +1114,7 @@ export default function AgentWorkspace({
           />
           <div className="agent-composer-footer">
             <button type="button" aria-label="添加图片或文本文件" title="添加图片或文本文件"
+              disabled={sessionMutationBusy}
               onClick={() => attachmentInputRef.current?.click()}
               style={{ display: 'grid', placeItems: 'center', width: 28, height: 28, flexShrink: 0, border: 0, background: 'transparent', cursor: 'pointer' }}>
               <OutlineIcon name="plus" />
@@ -930,13 +1137,20 @@ export default function AgentWorkspace({
                 reasoningEffort,
               })}
             />
-            <AgentPermissionControl value={shellPermissionMode} disabled={shellSettingsLoading}
-              onChange={mode => { void handleShellPermissionModeChange(mode); }} />
+            <AgentPermissionControl value={permissionMode} grouped={Boolean(currentGroupId)} disabled={sessionBusy}
+              onChange={mode => { void handlePermissionModeChange(mode); }} />
             <AgentSubmitButton streaming={session.isStreaming} busy={sessionBusy}
-              canSubmit={canSubmit} onStop={() => { void session.stop(); }} />
+              canSubmit={canSubmit} onStop={() => { void session.stop(); }}
+              resumable={showResume} canResume={canResume} onResume={() => { void session.continueTask(); }} />
           </div>
           </Composer>
         </ComposerFrame> : null}
+      {groupEditor !== undefined ? <AgentSessionGroupEditor key={groupEditor?.id || `new:${sessionScopeKey}`}
+        group={groupEditor || undefined} libraryId={libraryId} onSave={handleSaveGroup} onCancel={() => setGroupEditor(undefined)}
+        onDelete={groupEditor ? () => handleDeleteGroup(groupEditor) : undefined} /> : null}
+      {groupPicker ? <AgentSessionGroupPicker key={`${groupPicker.kind}:${groupPicker.session?.id || sessionScopeKey}`}
+        title={groupPicker.kind === 'new' ? '新建会话' : '移动会话到组'} groups={groupDirectory.summary.groups}
+        initialGroupId={groupPicker.kind === 'move' ? groupPicker.session?.groupId || null : currentGroupId} onChoose={handleChooseGroup} onCancel={() => setGroupPicker(null)} /> : null}
     </AgentRoot>
   );
 }

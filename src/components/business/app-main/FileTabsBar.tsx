@@ -1,5 +1,7 @@
 import React, { useLayoutEffect } from 'react';
 import styled from 'styled-components';
+import { FileQuestion } from 'lucide-react';
+import { LOCAL_PREVIEW_PREFIX } from '@/features/file-viewer/services/local-preview';
 import type { FileViewerTab } from '@/contexts/file-viewer.context';
 import {
   getDirectoryBuiltInIcon,
@@ -50,7 +52,8 @@ const TAB_TOP_SCROLLBAR_HIDE_DELAY_MS = 900;
 const TAB_TOP_SCROLLBAR_HIDE_DELAY_ON_LEAVE_MS = 260;
 const TAB_DEFAULT_WIDTH = 168;
 const TAB_MIN_WIDTH = 96;
-const TAB_OVERFLOW_BUTTON_WIDTH = 32;
+// Match the toolbar's right inset (7 + 4) and half of its 28px refresh button.
+const TAB_OVERFLOW_BUTTON_WIDTH = 50;
 const TAB_OVERFLOW_GAP = 4;
 const TAB_MEMORY_SAMPLE_DELAY_MS = 900;
 const TAB_MEMORY_MAX_STALE_MS = 120_000;
@@ -191,6 +194,7 @@ const TabsWrapper = styled.div`
 `;
 
 const TabButton = styled.div<{
+  $external?: boolean;
   $active: boolean;
   $dropBefore?: boolean;
   $dropAfter?: boolean;
@@ -226,6 +230,12 @@ const TabButton = styled.div<{
     opacity 0.15s ease;
   user-select: none;
   position: relative;
+
+  ${({ $external, $active }) => $external ? `
+    background: color-mix(in srgb, #ed8b24 ${$active ? '32%' : '18%'}, var(--app-bg-elevated));
+    border-color: ${$active ? '#ed8b24' : 'color-mix(in srgb, #ed8b24 55%, var(--app-border))'};
+    &:hover { border-color: #ed8b24; }
+  ` : ''}
 
   &:hover {
     border-color: var(--semi-color-primary);
@@ -368,6 +378,12 @@ function isDirectoryLikeTab(tab: FileViewerTab): boolean {
 }
 
 function getFileTabIcon(tab: FileViewerTab): React.ReactNode {
+  if (tab.fileUrl.startsWith(LOCAL_PREVIEW_PREFIX)) {
+    const ext = getFileExtFromTab(tab);
+    const icon = getFileNodeIcon(ext, ext ? undefined : tab.fileName ?? undefined);
+    return React.isValidElement<{ alt?: string }>(icon) && icon.props.alt === 'file'
+      ? <FileQuestion size={16} strokeWidth={1.5} aria-label="未知文件类型" /> : icon;
+  }
   if (isDirectoryLikeTab(tab)) {
     const builtInType = getBuiltInTypeFromTab(tab);
     const archiveMode = tab.fileType?.endsWith('_archive') ? 1 : 0;
@@ -422,9 +438,9 @@ const OverflowSlot = styled.div`
 const OverflowTrigger = styled.button<{ $open: boolean; $disabled: boolean }>`
   width: 24px;
   height: 24px;
-  border: 1px solid ${({ $open }) => ($open ? 'var(--semi-color-primary)' : 'var(--app-border)')};
-  border-radius: 7px;
-  background: ${({ $open }) => ($open ? 'var(--semi-color-primary-light-default)' : 'var(--app-bg-elevated)')};
+  border: 0;
+  border-radius: var(--app-radius-medium);
+  background: transparent;
   color: ${({ $disabled }) => ($disabled ? 'var(--app-text-faint)' : 'var(--app-text-muted)')};
   cursor: ${({ $disabled }) => ($disabled ? 'default' : 'pointer')};
   opacity: ${({ $disabled }) => ($disabled ? 0.72 : 1)};
@@ -434,7 +450,7 @@ const OverflowTrigger = styled.button<{ $open: boolean; $disabled: boolean }>`
   pointer-events: auto;
 
   &:hover {
-    border-color: ${({ $disabled }) => ($disabled ? 'var(--app-border)' : 'var(--semi-color-primary)')};
+    background: ${({ $disabled }) => ($disabled ? 'transparent' : 'var(--app-bg-elevated)')};
     color: ${({ $disabled }) => ($disabled ? 'var(--app-text-faint)' : 'var(--app-text)')};
   }
 
@@ -1534,6 +1550,7 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
             role="button"
             tabIndex={0}
             $active={tab.id === activeTabId}
+            $external={tab.fileUrl.startsWith(LOCAL_PREVIEW_PREFIX)}
             $dropBefore={isDropBefore}
             $dropAfter={isDropAfter}
             $dragging={draggingTabId === tab.id}

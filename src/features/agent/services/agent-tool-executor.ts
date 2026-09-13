@@ -25,6 +25,7 @@ import { readAgentMediaError } from '@/shared/agent/agent-media-error';
 import { normalizeAgentLibraryDirectoryPath } from '@/shared/agent/agent-library-path';
 import { readAgentLibraryNode } from './agent-library.api';
 import { executeAgentFileWrite } from './agent-file-write';
+import { verifyAgentToolAccess } from './agent.api';
 import { executeAgentFileDelete } from './agent-file-delete';
 import { executeAgentLibraryAction, executeAgentRecycleList, type AgentLibraryActionDependencies } from './agent-library-actions';
 import { executeAgentTagTool } from './agent-tag-tools';
@@ -286,6 +287,15 @@ export async function executeAgentRendererTool(
   dependencies: AgentRendererToolExecutorDependencies = {},
 ): Promise<AgentRendererToolOutcome> {
   throwIfAborted(dependencies.signal);
+  if (request.requireAccessCheck) {
+    const beforeCommit = dependencies.beforeCommit;
+    dependencies = { ...dependencies, beforeCommit: async () => {
+      throwIfAborted(dependencies.signal);
+      if (beforeCommit) await beforeCommit();
+      await verifyAgentToolAccess(request);
+    } };
+    await dependencies.beforeCommit!();
+  }
   if (request.toolName === 'file.write') return executeAgentFileWrite(request, dependencies);
   if (request.toolName === 'file.delete') return executeAgentFileDelete(request, dependencies);
   if ((AGENT_LIBRARY_MUTATION_TOOLS as readonly string[]).includes(request.toolName)) return executeAgentLibraryAction(request, dependencies);

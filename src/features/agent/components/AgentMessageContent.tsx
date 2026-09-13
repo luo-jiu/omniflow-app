@@ -6,6 +6,8 @@ import { Toast } from '@douyinfe/semi-ui';
 import styled from 'styled-components';
 import { resolveCodeFenceLanguage } from '@/components/code/language';
 import { highlightCodeText } from '@/components/code/highlight';
+import { parseAgentFileLink } from '@/shared/agent/agent-file-link';
+import { AgentFileLinkContext } from '../agent-file-link-context';
 
 const Content = styled.div`
   min-width: 0;
@@ -45,6 +47,8 @@ const Content = styled.div`
   button { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px;
     border: 0; border-radius: 4px; background: transparent; color: var(--app-text-muted); cursor: pointer; }
   button:hover { background: var(--app-bg); color: var(--app-text); }
+  button.agent-file-link { display: inline; width: auto; height: auto; padding: 0; font: inherit; color: var(--semi-color-primary); text-align: left; overflow-wrap: anywhere; }
+  button.agent-file-link:hover { text-decoration: underline; }
   button:focus-visible { outline: 2px solid var(--semi-color-primary); }
   > :first-child { margin-top: 0; }
   > :last-child { margin-bottom: 0; }
@@ -77,15 +81,23 @@ const AgentCodeBlock = React.memo(function AgentCodeBlock({ children }: { childr
 });
 
 const components: React.ComponentProps<typeof Markdown>['components'] = {
-  a: ({ children }) => <span>{children}</span>,
+  a: ({ children, href }) => <FileLink href={href}>{children}</FileLink>,
   img: ({ alt }) => <span>{alt}</span>,
   table: ({ children }) => <div className="agent-table"><table>{children}</table></div>,
   pre: ({ children }) => <AgentCodeBlock>{children}</AgentCodeBlock>,
 };
 
+function FileLink({ href, children }: { href?: string; children?: React.ReactNode }) {
+  const open = React.useContext(AgentFileLinkContext);
+  const link = parseAgentFileLink(href || '');
+  return link && open ? <button className="agent-file-link" type="button" title={link.path}
+    onClick={() => open(link)}>{children}</button> : <span>{children}</span>;
+}
+
 const AgentMessageContent = React.memo(function AgentMessageContent({ content, showCopy = true }: { content: string; showCopy?: boolean }) {
   return <Content>
     <Markdown skipHtml remarkPlugins={[remarkGfm]} components={components}
+      urlTransform={url => parseAgentFileLink(url) ? url : ''}
       allowedElements={['p', 'br', 'hr', 'strong', 'em', 'del', 'blockquote', 'ul', 'ol', 'li',
         'pre', 'code', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'table', 'thead', 'tbody', 'tr', 'th', 'td', 'a', 'img']}>
       {content}

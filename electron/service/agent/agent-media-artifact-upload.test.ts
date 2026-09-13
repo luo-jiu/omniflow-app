@@ -44,6 +44,17 @@ const TARGET = {
 };
 
 describe('Agent media artifact main-owned upload transaction', () => {
+  it('aborts an upload when directory authorization changes before commit', async () => {
+    const { manager, input, controlPlane } = await fixture();
+    const beforeCommit = vi.fn(async () => { throw new Error('Directory moved outside authorized roots'); });
+    const onSettlementStarted = vi.fn();
+    await expect(manager.upload({ ...input, beforeCommit, onSettlementStarted })).resolves.toEqual({ commitState: 'uncommitted' });
+    expect(beforeCommit).toHaveBeenCalledOnce();
+    expect(controlPlane.complete).not.toHaveBeenCalled();
+    expect(controlPlane.abort).toHaveBeenCalledOnce();
+    expect(onSettlementStarted).not.toHaveBeenCalled();
+  });
+
   const roots: string[] = [];
 
   afterEach(async () => {

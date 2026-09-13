@@ -55,6 +55,7 @@ interface AgentToolBrokerOptions {
 }
 
 interface PrepareRendererExecutionInput {
+  verifyAccess?: () => Promise<void>;
   appContext: AgentAppContext;
   executionInput: unknown;
   ownerScope: AgentOwnerScope;
@@ -69,6 +70,7 @@ interface PrepareRendererExecutionInput {
 }
 
 interface PendingRendererExecution {
+  verifyAccess?: () => Promise<void>;
   beginCriticalSettlement: () => void;
   cancel: () => void;
   claimedCapabilities: Set<string>;
@@ -286,6 +288,7 @@ export function createAgentToolBroker(options: AgentToolBrokerOptions = {}) {
         },
         cancel: handleAbort,
         claimedCapabilities: new Set(),
+        verifyAccess: input.verifyAccess,
         executionInput: input.executionInput,
         libraryId: Number(input.appContext.libraryId),
         ownerScope: input.ownerScope,
@@ -316,6 +319,7 @@ export function createAgentToolBroker(options: AgentToolBrokerOptions = {}) {
     return {
       outcome,
       request: {
+        ...(input.verifyAccess ? { requireAccessCheck: true } : {}),
         appContext: input.appContext,
         executionId,
         input: input.executionInput,
@@ -453,6 +457,17 @@ export function createAgentToolBroker(options: AgentToolBrokerOptions = {}) {
     return true;
   }
 
+  async function verifyRendererAccess(ownerWebContentsId: number, input: Omit<AgentToolExecutionCommit, 'result'>): Promise<boolean> {
+    const pending = pendingExecutions.get(input.executionId);
+    if (!pending || pending.ownerWebContentsId !== ownerWebContentsId || pending.libraryId !== input.libraryId
+      || pending.runId !== input.runId || pending.sessionId !== input.sessionId
+      || !sameOwnerScope(pending.ownerScope, normalizeAgentOwnerScope(input.ownerScope))) throw new Error('文件访问校验请求已失效');
+    pending.signal.throwIfAborted();
+    await pending.verifyAccess?.();
+    pending.signal.throwIfAborted();
+    return true;
+  }
+
   function releaseOwner(ownerWebContentsId: number): void {
     pendingExecutions.forEach((pending) => {
       if (pending.ownerWebContentsId === ownerWebContentsId) pending.cancel();
@@ -460,6 +475,7 @@ export function createAgentToolBroker(options: AgentToolBrokerOptions = {}) {
   }
 
   return {
+    verifyRendererAccess,
     claimRendererCapability,
     completeRendererExecution,
     executeMain,

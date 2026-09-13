@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   resolveCapabilitySnapshot: vi.fn(),
   streamAgentProviderTurn: vi.fn(),
   streamAIServiceProfile: vi.fn(),
+  createAgentLibraryAccessGuard: vi.fn(),
 }));
 
 vi.mock('./agent-provider-client', () => ({
@@ -20,6 +21,14 @@ vi.mock('./agent-provider-client', () => ({
 }));
 vi.mock('../aiServiceClient', () => ({
   streamAIServiceProfile: mocks.streamAIServiceProfile,
+}));
+vi.mock('./agent-session-title', async (importOriginal) => ({
+  ...await importOriginal<typeof import('./agent-session-title')>(),
+  generateAgentSessionTitle: vi.fn(async () => null),
+}));
+vi.mock('./agent-library-access', async (importOriginal) => ({
+  ...await importOriginal<typeof import('./agent-library-access')>(),
+  createAgentLibraryAccessGuard: mocks.createAgentLibraryAccessGuard,
 }));
 vi.mock('./agent-transport-retry', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./agent-transport-retry')>();
@@ -104,7 +113,8 @@ async function waitForCompletedFinal(
   await vi.waitFor(() => {
     const events = webContents.send.mock.calls.map(call => call[1]);
     expect(events).toContainEqual(expect.objectContaining({
-      ...expected,
+      ...(expected.runId ? { runId: expected.runId } : {}),
+      ...(expected.sessionId ? { sessionId: expected.sessionId } : {}),
       item: expect.objectContaining({
         assistantItem: expect.objectContaining({
           phase: 'final',
@@ -115,7 +125,8 @@ async function waitForCompletedFinal(
       type: 'assistant-item-finished',
     }));
     expect(events).toContainEqual(expect.objectContaining({
-      ...expected,
+      ...(expected.runId ? { runId: expected.runId } : {}),
+      ...(expected.sessionId ? { sessionId: expected.sessionId } : {}),
       type: 'completed',
     }));
     const finalIndex = events.findIndex(event => (
@@ -222,6 +233,7 @@ describe('Agent orchestrator', () => {
     ));
     mocks.streamAgentProviderTurn.mockReset();
     mocks.streamAIServiceProfile.mockReset();
+    mocks.createAgentLibraryAccessGuard.mockReset();
     store = await createSQLiteAgentSessionStore(':memory:');
   });
 
@@ -772,6 +784,177 @@ describe('Agent orchestrator', () => {
       skillCatalogRevision: expect.any(Number),
       toolCatalogRevision: expect.any(Number),
     });
+  });
+
+  it('generates the first session title in the background without delaying completion', async () => {
+    let finishTitle!: (value: string | null) => void;
+    const generateSessionTitle = vi.fn(() => new Promise<string | null>(resolve => { finishTitle = resolve; }));
+    mocks.streamAgentProviderTurn.mockImplementationOnce(async (_connection, _input, delta) => {
+      delta('当前目录包含测试文件。');
+      return { content: '当前目录包含测试文件。', toolCalls: [] };
+    });
+    const webContents = sender();
+    const orchestrator = createOrchestrator({ generateSessionTitle });
+    const started = await orchestrator.start(webContents as never, request());
+    await waitForCompletedFinal(webContents, '当前目录包含测试文件。', started);
+    await vi.waitFor(() => expect(generateSessionTitle).toHaveBeenCalledOnce());
+    expect((await store.getSession(started.sessionId, OWNER_SCOPE, 3))?.title).toBe(request().userPrompt);
+
+    finishTitle('查看当前目录');
+    await vi.waitFor(() => expect(webContents.send).toHaveBeenCalledWith('agent:chat:event', expect.objectContaining({
+      type: 'session-title-updated', sessionId: started.sessionId, ownerScope: OWNER_SCOPE, libraryId: 3,
+    })));
+    expect((await store.getSession(started.sessionId, OWNER_SCOPE, 3))?.title).toBe('查看当前目录');
+    expect(await orchestrator.shutdown()).toBe(true);
+  });
+
+  it.each(['rename', 'release-owner', 'generation-failure'] as const)(
+    'preserves the fallback or manual title when title generation is interrupted by %s', async reason => {
+      let finishTitle!: (value: string | null) => void;
+      let titleSignal!: AbortSignal;
+      const generateSessionTitle = vi.fn((input: { signal: AbortSignal }) => {
+        titleSignal = input.signal;
+        if (reason === 'generation-failure') return Promise.reject(new Error('Title service unavailable'));
+        return new Promise<string | null>(resolve => { finishTitle = resolve; });
+      });
+      mocks.streamAgentProviderTurn.mockImplementationOnce(async (_connection, _input, delta) => {
+        delta('完成。'); return { content: '完成。', toolCalls: [] };
+      });
+      const webContents = sender();
+      const orchestrator = createOrchestrator({ generateSessionTitle });
+      const started = await orchestrator.start(webContents as never, request());
+      await waitForCompletedFinal(webContents, '完成。', started);
+      await vi.waitFor(() => expect(generateSessionTitle).toHaveBeenCalledOnce());
+      if (reason === 'rename') await orchestrator.renameSession(started.sessionId, OWNER_SCOPE, 3, '手动标题');
+      if (reason === 'release-owner') orchestrator.releaseOwner(webContents.id);
+      if (reason !== 'generation-failure') {
+        expect(titleSignal.aborted).toBe(true);
+        finishTitle('不能覆盖的标题');
+      }
+      expect(await orchestrator.shutdown()).toBe(true);
+      expect((await store.getSession(started.sessionId, OWNER_SCOPE, 3))?.title)
+        .toBe(reason === 'rename' ? '手动标题' : request().userPrompt);
+      expect(webContents.send.mock.calls.some(call => call[1]?.type === 'session-title-updated')).toBe(false);
+    },
+  );
+
+  it.each([
+    { toolName: 'file.list', continuing: true },
+    { toolName: 'test.continuation-write', continuing: true },
+    { toolName: 'file.list', continuing: false },
+  ])(
+    'starts after stopping with $toolName results preserved (continuing: $continuing)', async ({ toolName, continuing }) => {
+    const execute = vi.fn(async () => ({ ok: true, data: { committed: true }, message: '写入已提交' }));
+    if (toolName === 'test.continuation-write') agentToolRegistry.register({
+      name: toolName, description: 'Continuation write fixture', risk: 'write',
+      inputSchema: { type: 'object' }, assess: () => ({ behavior: 'allow', risk: 'write' }), execute,
+    });
+    const webContents = sender();
+    const orchestrator = createOrchestrator({ getPermissionMode: () => 'full-access' });
+    mocks.streamAgentProviderTurn
+      .mockResolvedValueOnce({ content: '', toolCalls: [{ id: 'already-done', name: toolName, input: {} }] })
+      .mockImplementationOnce(async () => {
+        orchestrator.stop(started.sessionId, webContents.id);
+        const error = new Error('Stopped by user');
+        error.name = 'AbortError';
+        throw error;
+      })
+      .mockImplementationOnce(async (_connection, input, delta) => {
+        if (continuing) {
+          expect(input.messages.at(-1).content).toContain('[OmniFlow task continuation]');
+          expect(input.messages.at(-1).content).toContain('不得重复执行');
+        } else expect(input.messages.at(-1).content).toBe('新的问题');
+        expect(JSON.stringify(input.messages)).toContain(toolName === 'file.list' ? 'movie.mp4' : '写入已提交');
+        delta('剩余任务已完成。');
+        return { content: '剩余任务已完成。', toolCalls: [] };
+      });
+    const started = await orchestrator.start(webContents as never, request());
+    await vi.waitFor(() => expect(webContents.send).toHaveBeenCalledWith('agent:chat:event', expect.objectContaining({
+      type: 'cancelled', runId: started.runId,
+    })));
+    const before = (await store.getSession(started.sessionId, OWNER_SCOPE, 3))!;
+    expect(before.toolActivities).toHaveLength(1);
+    expect(before.toolActivities[0].status).toBe('completed');
+    const resumed = await orchestrator.start(webContents as never, {
+      ...request(), sessionId: started.sessionId,
+      ...(continuing ? { resumeRunId: started.runId, userPrompt: '' } : { userPrompt: '新的问题' }),
+    });
+    expect(resumed.sessionId).toBe(started.sessionId);
+    expect(resumed.runId).not.toBe(started.runId);
+    await waitForCompletedFinal(webContents, '剩余任务已完成。', resumed);
+    const after = (await store.getSession(started.sessionId, OWNER_SCOPE, 3))!;
+    expect(after.runs.map(run => run.status)).toEqual(['cancelled', 'completed']);
+    expect(after.runs[1].resumesRunId).toBe(continuing ? started.runId : undefined);
+    expect(after.runs[1].userPrompt).toBe(continuing ? request().userPrompt : '新的问题');
+    expect(after.toolActivities).toEqual(before.toolActivities);
+    if (toolName === 'test.continuation-write') expect(execute).toHaveBeenCalledOnce();
+    await expect(orchestrator.start(webContents as never, {
+      ...request(), sessionId: started.sessionId, resumeRunId: started.runId, userPrompt: '',
+    })).rejects.toThrow();
+    expect(mocks.streamAgentProviderTurn).toHaveBeenCalledTimes(3);
+    expect(await orchestrator.shutdown()).toBe(true);
+  });
+
+  it.each(['ask', 'group'] as const)('enforces %s directory access before exposing file content', async mode => {
+    const actual = await vi.importActual<typeof import('./agent-library-access')>('./agent-library-access');
+    mocks.createAgentLibraryAccessGuard.mockImplementation(actual.createAgentLibraryAccessGuard);
+    const nodes = [
+      { id: 1, parentId: 0, libraryId: 3, type: 'dir' as const, name: 'root', path: '/' },
+      { id: 10, parentId: 1, libraryId: 3, type: 'dir' as const, name: 'docs', path: '/docs' },
+      { id: 11, parentId: 10, libraryId: 3, type: 'file' as const, name: 'a.txt', path: '/docs/a.txt' },
+    ];
+    const readLibraryMetadata = vi.fn(async input => {
+      const query = input.operation.query;
+      const node = query.path ? nodes.find(item => item.path === query.path) : nodes.find(item => item.id === (query.nodeId || query.directoryId));
+      if (!node) throw new Error('Missing node');
+      return query.kind === 'list' ? { libraryId: 3, directory: node, entries: nodes.filter(item => item.parentId === node.id) }
+        : { libraryId: 3, node };
+    });
+    const readLibraryText = vi.fn(async () => Buffer.from('authorized file content'));
+    const group = mode === 'group' ? await store.saveGroup(OWNER_SCOPE, 3, { name: '文档组', directories: [{ nodeId: 10, name: '/docs' }], access: 'read-write' }, new Date().toISOString()) : null;
+    mocks.streamAgentProviderTurn.mockImplementationOnce(async (_connection, input) => {
+      expect(input.systemPrompt).not.toContain('movie.mp4');
+      return { content: '', toolCalls: [{ id: 'scope-read', name: 'file.read', input: { path: '/docs/a.txt' } }] };
+    }).mockImplementationOnce(async (_connection, input, delta) => {
+      expect(JSON.stringify(input.messages)).toContain('authorized file content');
+      delta('读取完成。'); return { content: '读取完成。', toolCalls: [] };
+    });
+    const webContents = sender();
+    const orchestrator = createOrchestrator({ readLibraryMetadata, readLibraryText });
+    const started = await orchestrator.start(webContents as never, { ...request(), groupId: group?.id || null, permissionMode: mode });
+    if (mode === 'ask') {
+      await vi.waitFor(() => expect(webContents.send).toHaveBeenCalledWith('agent:chat:event', expect.objectContaining({ type: 'tool-approval-required' })));
+      expect(readLibraryText).not.toHaveBeenCalled();
+      const approval = webContents.send.mock.calls.map(call => call[1]).find(event => event.type === 'tool-approval-required').approval;
+      expect(approval.call.name).toBe('agent.access.request');
+      await orchestrator.resolveToolApproval(webContents.id, { approvalId: approval.approvalId, approved: true,
+        libraryId: 3, ownerScope: OWNER_SCOPE, runId: started.runId, sessionId: started.sessionId });
+    }
+    await waitForCompletedFinal(webContents, '读取完成。', started);
+    expect(readLibraryText).toHaveBeenCalledOnce();
+    if (mode === 'group') expect(webContents.send.mock.calls.some(call => call[1]?.type === 'tool-approval-required')).toBe(false);
+    const snapshot = (await store.getSession(started.sessionId, OWNER_SCOPE, 3))!;
+    expect(snapshot.runs[0].libraryAccess).toMatchObject({ mode, groupId: group?.id || null });
+    expect(await orchestrator.shutdown()).toBe(true);
+  });
+
+  it('requires archive before purge and restores grouped history through the owner-bound API', async () => {
+    const orchestrator = createOrchestrator();
+    const group = await orchestrator.saveGroup(OWNER_SCOPE, 3, { name: '本地资料', directories: [], access: 'read' });
+    const session = await store.createSession({ id: 'archive-flow', title: '归档流程', groupId: group.id,
+      ownerScope: OWNER_SCOPE, appContext: { libraryId: 3, platform: 'darwin', selectedNodeIds: [] }, now: new Date().toISOString() });
+    await expect(orchestrator.deleteSession(session.id, OWNER_SCOPE, 3)).rejects.toThrow('先归档');
+    const archived = await orchestrator.archiveSession(session.id, OWNER_SCOPE, 3, true, session.revision!);
+    await expect(orchestrator.getSession(session.id, OWNER_SCOPE, 3)).rejects.toThrow('不存在');
+    await expect(orchestrator.getSession(session.id, OWNER_SCOPE, 4, true)).rejects.toThrow('不存在');
+    expect((await orchestrator.getSession(session.id, OWNER_SCOPE, 3, true)).groupId).toBe(group.id);
+    await expect(orchestrator.start(sender() as never, { ...request(), sessionId: session.id })).rejects.toThrow('不存在');
+    const restored = await orchestrator.archiveSession(session.id, OWNER_SCOPE, 3, false, archived.revision!);
+    expect(restored.archivedAt).toBeFalsy();
+    await orchestrator.archiveSession(session.id, OWNER_SCOPE, 3, true, restored.revision!);
+    await expect(orchestrator.deleteSession(session.id, OWNER_SCOPE, 3)).resolves.toBe(true);
+    expect((await orchestrator.listGroups(OWNER_SCOPE, 3)).archivedCount).toBe(0);
+    expect(await orchestrator.shutdown()).toBe(true);
   });
 
   it('executes a read tool and persists the complete run', async () => {
@@ -5591,6 +5774,7 @@ describe('Agent orchestrator', () => {
 
     orchestrator.releaseOwner(webContents.id);
     await abortObserved;
+    orchestrator.stop(started.sessionId, webContents.id);
     await expect(orchestrator.start(webContents as never, {
       ...request(),
       sessionId: started.sessionId,

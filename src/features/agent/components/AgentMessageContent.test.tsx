@@ -1,11 +1,24 @@
 import TestRenderer, { act } from 'react-test-renderer';
 import { describe, expect, it, vi } from 'vitest';
 import AgentMessageContent from './AgentMessageContent';
+import { AgentFileLinkContext } from '../agent-file-link-context';
 
 vi.mock('@douyinfe/semi-ui', () => ({ Toast: { error: vi.fn() } }));
 vi.mock('@douyinfe/semi-icons', () => ({ IconCopy: () => null }));
 
 describe('Agent message Markdown', () => {
+  it('opens only explicit file references on click, including space-containing paths', () => {
+    const open = vi.fn();
+    const renderer = TestRenderer.create(<AgentFileLinkContext.Provider value={open}>
+      <AgentMessageContent content={'[a](<omniflow-local:/Users/me/My Project/a.md>) [b](omniflow-library:/文档/b.txt) [unsafe](javascript:alert(1))'} />
+    </AgentFileLinkContext.Provider>);
+    const links = renderer.root.findAllByProps({ className: 'agent-file-link' });
+    expect(links).toHaveLength(2);
+    expect(open).not.toHaveBeenCalled();
+    act(() => links[0].props.onClick());
+    expect(open).toHaveBeenCalledWith({ scope: 'local', path: '/Users/me/My Project/a.md' });
+    renderer.unmount();
+  });
   it.each([['cpp', 'C++', 'int main() { return 42; }'], ['json', 'JSON', '{"name":"中文","n":42}']])(
     'labels and highlights %s fenced blocks without making an editor', (language, label, code) => {
       const renderer = TestRenderer.create(<AgentMessageContent content={'```' + language + '\n' + code + '\n```'} />);

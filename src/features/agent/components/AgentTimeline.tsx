@@ -1,5 +1,6 @@
 import React from 'react';
-import { IconAlertCircle, IconShrink } from '@douyinfe/semi-icons';
+import { IconShrink } from '@douyinfe/semi-icons';
+import OutlineIcon from '@/components/ui/outline-icon';
 import styled from 'styled-components';
 
 import type {
@@ -21,7 +22,8 @@ import AgentMessageContent from './AgentMessageContent';
 import { AgentMessageAttachments } from './AgentAttachmentStrip';
 import AgentActivityText from './AgentActivityText';
 import { selectAgentLiveStatus } from '../agent-live-status';
-import { canCollapseAgentProcess, isAgentRunActive, shouldAutoCollapseAgentProcess, timelineItemRunId } from '../agent-run-presentation';
+import { canCollapseAgentProcess, isAgentRunActive, projectAgentContinuationElapsed, shouldAutoCollapseAgentProcess, timelineItemRunId } from '../agent-run-presentation';
+import { buildAgentRunContinuationGroups } from '@/shared/agent/agent-run-continuation';
 import { serializeAgentOwnerScope } from '@/shared/agent/agent-owner-scope';
 import { useAgentProcessExpansion } from '../hooks/useAgentProcessExpansion';
 import type { AgentTimelineItem } from '../agent-timeline';
@@ -213,9 +215,20 @@ export default function AgentTimeline({
     () => prepareAgentTimelineProjection(messages, runs, toolActivities),
     [messages, runs, toolActivities],
   );
+  const continuation = React.useMemo(() => buildAgentRunContinuationGroups(runs), [runs]);
   const items = React.useMemo(
-    () => buildAgentTimelineItemsFromProjection(messages, prepared),
-    [messages, prepared],
+    () => {
+      const resumedIds = new Set(runs.filter(run => run.resumesRunId).map(run => run.id));
+      return buildAgentTimelineItemsFromProjection(messages, prepared).filter(item => {
+        if (item.type === 'message' && item.message.role === 'user' && resumedIds.has(item.message.runId || '')) return false;
+        if (item.type === 'run-status') {
+          const root = continuation.rootById.get(item.run.id) || item.run.id;
+          return continuation.groups.get(root)?.at(-1)?.id === item.run.id;
+        }
+        return true;
+      });
+    },
+    [continuation, messages, prepared, runs],
   );
   const liveStatus = selectAgentLiveStatus(runs, messages, toolActivities);
   const expansionScope = JSON.stringify([serializeAgentOwnerScope(ownerScope), libraryId, messages[0]?.sessionId || runs[0]?.sessionId || '']);
@@ -226,29 +239,31 @@ export default function AgentTimeline({
     items.forEach(item => {
       const id = timelineItemRunId(item);
       if (!id) return;
-      const group = byRun.get(id) || [];
+      const root = continuation.rootById.get(id) || id;
+      const group = byRun.get(root) || [];
       group.push(item);
-      byRun.set(id, group);
+      byRun.set(root, group);
     });
-    return new Map(runs.map(run => {
-      const group = byRun.get(run.id) || [];
+    return new Map([...continuation.groups].map(([root, attempts]) => {
+      const run = projectAgentContinuationElapsed(attempts);
+      const group = byRun.get(root) || [];
       const autoCollapse = restoredRuns.current.has(run.id) || shouldAutoCollapseAgentProcess(run, group);
-      return [run.id, {
+      return [root, {
         run,
         autoCollapse,
-        expansionKey: run.id,
+        expansionKey: root,
         firstKey: group[0]?.key,
         collapsible: canCollapseAgentProcess(run, group) && group.some(item => item.layer !== 'conversation'),
       }];
     }));
-  }, [items, runs]);
+  }, [continuation, items]);
 
   const renderItem = (item: AgentTimelineItem) => {
         if (item.type === 'run-status') {
           const labels: Record<string, string> = { failed: '执行失败', cancelled: '已停止', interrupted: '任务已中断' };
           return (
             <AssistantItemSurface data-status={item.run.status} data-variant="work" key={item.key}>
-              <span className="agent-work-item-icon"><IconAlertCircle aria-hidden="true" /></span>
+              <span className="agent-work-item-icon"><OutlineIcon name="alert" /></span>
               <span className="agent-work-item-content">
                 {item.run.error || labels[item.run.status]}
               </span>
@@ -328,7 +343,7 @@ export default function AgentTimeline({
     <Timeline>
       {items.map(item => {
         const runId = timelineItemRunId(item);
-        const presentation = runId ? runPresentations.get(runId) : undefined;
+        const presentation = runId ? runPresentations.get(continuation.rootById.get(runId) || runId) : undefined;
         const user = item.type === 'message' && item.message.role === 'user';
         const expanded = presentation
           ? expandedRuns.get(presentation.expansionKey) ?? !presentation.autoCollapse : true;

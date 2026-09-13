@@ -134,6 +134,100 @@ function run(
 }
 
 describe('Agent timeline projection', () => {
+  it('groups consecutive completed internal operations in one run', () => {
+    const base = {
+      createdAt: '2026-09-12T00:00:00.000Z', id: 'run-internal', ordinal: 1,
+      permissionBehavior: 'allow' as const, revision: 1, runId: 'run-internal', sessionId: 'session-internal',
+      status: 'completed' as const,
+    };
+    const activities: AgentToolActivitySnapshot[] = [
+      { ...base, id: 'move-1', call: { id: 'move-1', name: 'file.move', input: {} }, toolMetadata: { kind: 'business', risk: 'write' } },
+      { ...base, id: 'move-2', ordinal: 2, call: { id: 'move-2', name: 'file.move', input: {} }, toolMetadata: { kind: 'business', risk: 'write' } },
+      { ...base, id: 'delete-1', ordinal: 3, call: { id: 'delete-1', name: 'file.delete', input: {} }, toolMetadata: { kind: 'business', risk: 'destructive' } },
+    ];
+    const items = buildAgentTimelineItemsFromProjection([], prepareAgentTimelineProjection([], [], activities));
+    const groups = items.filter(item => item.type === 'tool-group');
+    expect(groups).toHaveLength(1);
+    expect(groups[0].type === 'tool-group' && groups[0].groupKind).toBe('internal-operation');
+    expect(groups[0].type === 'tool-group' && groups[0].activities.map(item => item.id)).toEqual(['move-1', 'move-2', 'delete-1']);
+  });
+
+  it.each(['allow', 'ask', 'deny'] as const)(
+    'keeps consecutive failed internal operations in the group after an %s decision', permissionBehavior => {
+      const activities: AgentToolActivitySnapshot[] = [
+        activity('first', 1),
+        activity('failed', 2, { status: 'failed', permissionBehavior }),
+        activity('failed-again', 3, { status: 'failed', permissionBehavior }),
+        activity('last', 4),
+      ].map(item => ({
+        ...item,
+        call: { ...item.call, name: 'file.delete' },
+        toolMetadata: { kind: 'business', risk: 'write' },
+        ...(item.status === 'failed' ? {
+          result: { ok: false, message: '目标节点不存在' },
+          ...(permissionBehavior === 'ask' ? {
+            approval: {
+              approvalId: `approval-${item.id}`,
+              preview: { title: '移入回收站', description: '删除选中文件', risk: 'write' as const },
+              status: 'approved' as const,
+            },
+          } : {}),
+        } : {}),
+      }));
+
+      const items = buildAgentTimelineItems([], [], activities);
+
+      expect(items).toHaveLength(1);
+      expect(items[0]).toMatchObject({
+        type: 'tool-group',
+        groupKind: 'internal-operation',
+        key: 'activity-group:first',
+        activities,
+      });
+    },
+  );
+
+  it('keeps a failed read between successful reads in the same group', () => {
+    const failed = {
+      ...activity('failed', 2, { status: 'failed', permissionBehavior: 'deny' }),
+      result: { ok: false, message: '无法读取文件' },
+    };
+    const activities = [activity('first', 1), failed, activity('last', 3)];
+
+    expect(buildAgentTimelineItems([], [], activities)).toMatchObject([{
+      type: 'tool-group',
+      groupKind: 'resource-read',
+      key: 'activity-group:first',
+      activities,
+    }]);
+  });
+
+  it.each(['approval', 'interaction'] as const)(
+    'keeps a pending %s outside the group even when a failed snapshot arrives', pendingKind => {
+      const pending: AgentToolActivitySnapshot = {
+        ...activity('pending', 2, { status: 'failed', permissionBehavior: 'deny' }),
+        result: { ok: false, message: '执行失败' },
+        ...(pendingKind === 'approval' ? {
+          approval: {
+            approvalId: 'approval-pending',
+            preview: { title: '读取文件', description: '确认读取', risk: 'read' as const },
+            status: 'pending' as const,
+          },
+        } : {
+          interaction: {
+            interactionId: 'interaction-pending',
+            request: { kind: 'choice' as const, prompt: '选择文件', options: [{ id: 'file', label: '文件' }] },
+            status: 'pending' as const,
+          },
+        }),
+      };
+
+      const items = buildAgentTimelineItems([], [], [activity('first', 1), pending, activity('last', 3)]);
+
+      expect(items.map(item => item.type)).toEqual(['tool-group', 'tool-activity', 'tool-group']);
+      expect(items[1]).toMatchObject({ activity: pending });
+    },
+  );
   it('retains an empty failed run after restoring canonical history', () => {
     const items = buildAgentTimelineItems([
       user('question', '2026-09-07T00:00:00Z'),
@@ -293,7 +387,6 @@ describe('Agent timeline projection', () => {
 
   it.each([
     'commentary',
-    'failure',
     'approval',
     'unknown',
   ] as const)('breaks a read group at a %s boundary', (boundary) => {
@@ -308,10 +401,6 @@ describe('Agent timeline projection', () => {
         content: '调整读取方向。',
         phase: 'commentary',
       }));
-    } else if (boundary === 'failure') {
-      const failed = activity('failed', 2, { callId: 'call-failed', status: 'failed' });
-      messages.push(toolMessage('tool-failed', '2026-08-23T00:00:02.000Z', 'call-failed'));
-      activities.push(failed);
     } else if (boundary === 'approval') {
       const approved = {
         ...activity('approved', 2, { callId: 'call-approved' }),

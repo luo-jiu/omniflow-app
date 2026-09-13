@@ -1,12 +1,7 @@
 import React from 'react';
-import {
-  IconAlertCircle,
-  IconFile,
-  IconFolder,
-  IconTickCircle,
-} from '@douyinfe/semi-icons';
 import styled from 'styled-components';
 import OutlineIcon from '@/components/ui/outline-icon';
+import AgentToolIcon from './AgentToolIcon';
 
 import { workspaceScrollbarStyles } from '@/components/ui/workspace-scrollbar';
 import { normalizeAgentPreparedActionPublic } from '@/shared/agent/agent-prepared-action';
@@ -93,19 +88,12 @@ const ActivityCard = styled.article`
     color: var(--agent-tool-record-color);
   }
 
-  .agent-activity-spinner { display: inline-flex; align-items: center; justify-content: center; line-height: 0; }
-  &[data-status='preparing'] .agent-activity-spinner svg,
-  &[data-status='running'] .agent-activity-spinner svg {
-    transform-origin: center;
-    animation: agent-activity-spin 900ms linear infinite;
-  }
-
   .agent-activity-title {
     min-width: 0;
     flex: 1;
     margin: 0;
     font-size: 13px;
-    line-height: 1.4;
+    line-height: 20px;
     font-weight: 400;
     color: var(--agent-tool-record-color);
     display: flex;
@@ -300,10 +288,6 @@ const ActivityCard = styled.article`
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .agent-activity-status-icon svg {
-      animation: none !important;
-    }
-
     .agent-activity-expand {
       transition: none;
     }
@@ -315,9 +299,6 @@ const ActivityCard = styled.article`
     }
   }
 
-  @keyframes agent-activity-spin {
-    to { transform: rotate(360deg); }
-  }
 `;
 
 const ShellActivity = styled.section`
@@ -335,7 +316,7 @@ const ShellActivity = styled.section`
   .agent-shell-summary {
     width: 100%;
     min-width: 0;
-    min-height: 28px;
+    min-height: 23px;
     display: flex;
     align-items: center;
     gap: 7px;
@@ -547,14 +528,6 @@ const STATUS_LABELS: Record<AgentToolActivitySnapshot['status'], string> = {
   running: '执行中',
 };
 
-function ActivityStatusIcon({ status }: { status: AgentToolActivitySnapshot['status'] }) {
-  if (status === 'completed') return <IconTickCircle aria-hidden="true" />;
-  if (status === 'failed' || status === 'cancelled' || status === 'interrupted') {
-    return <IconAlertCircle aria-hidden="true" />;
-  }
-  return <span className="agent-activity-spinner"><OutlineIcon name="loading" /></span>;
-}
-
 function renderBlock(
   block: AgentPresentationBlock,
   index: number,
@@ -623,8 +596,8 @@ function renderBlock(
       <div className="agent-activity-artifact" key={`artifact:${block.artifact.id}`}>
         <span className="agent-activity-artifact-icon">
           {block.artifact.kind === 'directory'
-            ? <IconFolder aria-hidden="true" />
-            : <IconFile aria-hidden="true" />}
+            ? <OutlineIcon name="folder" />
+            : <OutlineIcon name="file" />}
         </span>
         <span className="agent-activity-artifact-name" title={block.artifact.name}>
           {block.artifact.name}
@@ -786,6 +759,7 @@ function AgentShellActivity({ activity, libraryId, onExpand, ownerScope }: Agent
 
   const summaryContent = (
     <>
+      <AgentToolIcon activity={activity} />
       <span className="agent-shell-summary-label">{activity.status === 'running' || activity.status === 'preparing'
         ? <AgentActivityText $active>{SHELL_ACTIVITY_LABELS[activity.status]}</AgentActivityText>
         : SHELL_ACTIVITY_LABELS[activity.status]}</span>
@@ -910,7 +884,7 @@ export default function AgentToolActivityCard({
   const nameOnlyRead = ['file.read', 'attachment.read'].includes(activity.call.name) && (activity.status === 'completed' || active);
   const blocks = nameOnlyRead ? [] : buildAgentToolPresentation(activity, libraryId);
   const summary = buildAgentToolSummary(activity, libraryId);
-  const forcedBody = activity.status === 'failed' || activity.status === 'interrupted'
+  const forcedBody = activity.status === 'interrupted'
     || activity.status === 'cancelled' || Boolean(activity.interaction)
     || (activity.status === 'running' && Boolean(activity.progress));
   const expandable = blocks.length > 0 && !forcedBody;
@@ -929,8 +903,7 @@ export default function AgentToolActivityCard({
         onClick={expandable ? toggleExpanded : undefined}
       >
         <span className="agent-activity-status-icon">
-          {(activity.status === 'completed' || active) && (activity.toolMetadata?.risk === 'read' || activity.call.name === 'file.read')
-            ? <IconFile aria-hidden="true" /> : <ActivityStatusIcon status={activity.status} />}
+          <AgentToolIcon activity={activity} />
         </span>
         <div className="agent-activity-title">
           {active ? <span className="agent-activity-live-label"><AgentActivityText $active>{summary.label}{summary.subject ? ` ${summary.subject}` : ''}</AgentActivityText></span> : <>

@@ -1,4 +1,5 @@
 import React from 'react';
+import { LOCAL_PREVIEW_PREFIX, readLocalPreview } from '../../services/local-preview';
 import { Spin } from "@douyinfe/semi-ui";
 import ImageViewer from "../image-viewer";
 import VideoViewer from "../video-viewer";
@@ -102,6 +103,8 @@ const FileDispatcher: React.FC<FileDispatcherProps> = ({
   contentRevision,
   tabId,
 }) => {
+  if (fileUrl?.startsWith(LOCAL_PREVIEW_PREFIX)) return <LocalFilePreview
+    source={fileUrl} tabId={tabId} active={active} reloadToken={reloadToken} />;
   if (loading) {
     return (
       <DispatcherWrapper>
@@ -329,5 +332,23 @@ const FileDispatcher: React.FC<FileDispatcherProps> = ({
       );
   }
 };
+
+function LocalFilePreview({ source, tabId, active, reloadToken }: { source: string; tabId: string; active: boolean; reloadToken: number }) {
+  const [result, setResult] = React.useState<Awaited<ReturnType<typeof readLocalPreview>> | null>(null);
+  const [error, setError] = React.useState('');
+  React.useEffect(() => {
+    let cancelled = false;
+    setResult(null); setError('');
+    void readLocalPreview(source).then(value => { if (!cancelled) setResult(value); }, () => {
+      if (!cancelled) setError('无法预览本机文件：文件不存在、不可读、格式不支持或超过 32 MiB。');
+    });
+    return () => { cancelled = true; };
+  }, [source, reloadToken]);
+  if (error) return <div role="alert">{error}</div>;
+  if (!result) return <Spin tip="正在读取本机文件" />;
+  return <FileDispatcher accountScope={null} libraryId={null} nodeId={null} fileUrl={result.dataUrl}
+    fileName={result.name} fileType={result.type} contentRevision={null} tabId={tabId}
+    active={active} reloadToken={reloadToken} loading={false} />;
+}
 
 export default FileDispatcher;

@@ -175,6 +175,7 @@ function sessionSnapshot(): AgentSessionSnapshot {
 function renderSessionHook(onRefreshDirectory?: (id: number) => Promise<void> | void) {
   let current: ReturnType<typeof useAgentSession> | null = null;
   const onSessionChanged = vi.fn();
+  const onSessionTitleChanged = vi.fn();
   function Harness() {
     current = useAgentSession({
       appContext: {
@@ -185,6 +186,7 @@ function renderSessionHook(onRefreshDirectory?: (id: number) => Promise<void> | 
       },
       model: 'model-a',
       onSessionChanged,
+      onSessionTitleChanged,
       onRefreshDirectory,
       ownerScope: OWNER_SCOPE,
       profileId: 'profile-a',
@@ -203,11 +205,60 @@ function renderSessionHook(onRefreshDirectory?: (id: number) => Promise<void> | 
       return current;
     },
     onSessionChanged,
+    onSessionTitleChanged,
     unmount: () => act(() => renderer.unmount()),
   };
 }
 
 describe('useAgentSession event coordination', () => {
+  it.each(['accepted', 'rejected'] as const)('continues a stopped task without adding another question: %s', async outcome => {
+    apiMocks.getAgentSession.mockResolvedValue({ ...sessionSnapshot(), lastRunStatus: 'cancelled',
+      runs: [run(2, 'cancelled')], toolActivities: [] });
+    const hook = renderSessionHook();
+    try {
+      await act(async () => { await hook.current.restore('session-1'); });
+      expect(hook.current.resumableRunId).toBe('run-1');
+      if (outcome === 'accepted') apiMocks.startAgentChat.mockImplementationOnce(async () => {
+        listener?.({ type: 'started', sessionId: 'session-1', runId: 'run-2',
+          run: { ...run(1, 'running'), id: 'run-2', resumesRunId: 'run-1' } });
+        return { sessionId: 'session-1', runId: 'run-2' };
+      });
+      else apiMocks.startAgentChat.mockRejectedValueOnce(new Error('暂时无法继续'));
+      await act(async () => { await hook.current.continueTask(); });
+      expect(apiMocks.startAgentChat).toHaveBeenCalledWith(expect.objectContaining({
+        sessionId: 'session-1', resumeRunId: 'run-1', userPrompt: '',
+      }));
+      expect(hook.current.messages).toHaveLength(1);
+      expect(hook.current.draft).toBe('');
+      expect(hook.current.isStreaming).toBe(outcome === 'accepted');
+      expect(hook.current.resumableRunId).toBe(outcome === 'accepted' ? undefined : 'run-1');
+    } finally { hook.unmount(); }
+  });
+
+  it('refreshes a generated title only in its owner scope without restarting the finished run', async () => {
+    apiMocks.getAgentSession.mockResolvedValue({ ...sessionSnapshot(), lastRunStatus: 'completed',
+      runs: [run(2, 'completed')], toolActivities: [] });
+    const hook = renderSessionHook();
+    try {
+      await act(async () => { await hook.current.restore('session-1'); });
+      hook.onSessionChanged.mockClear();
+      const event: AgentChatStreamEvent = { type: 'session-title-updated', sessionId: 'session-1', runId: 'run-1',
+        ownerScope: OWNER_SCOPE, libraryId: 3 };
+      act(() => listener?.({ ...event, ownerScope: { ...OWNER_SCOPE, accountScope: 'user:8' } }));
+      act(() => listener?.({ ...event, libraryId: 4 }));
+      expect(hook.onSessionTitleChanged).not.toHaveBeenCalled();
+      act(() => listener?.(event));
+      expect(hook.onSessionTitleChanged).toHaveBeenCalledOnce();
+      act(() => listener?.({ ...event, sessionId: 'another-session' }));
+      expect(hook.onSessionTitleChanged).toHaveBeenCalledTimes(2);
+      expect(hook.onSessionChanged).not.toHaveBeenCalled();
+      expect(hook.current.sessionId).toBe('session-1');
+      expect(hook.current.isStreaming).toBe(false);
+      expect(hook.current.runs[0].status).toBe('completed');
+      expect(hook.current.messages).toHaveLength(1);
+    } finally { hook.unmount(); }
+  });
+
   it('refreshes a committed publication on restoration and does not repeat it for duplicate events', async () => {
     const published: AgentToolActivitySnapshot = {
       ...activity(2, 'completed'), call: { id: 'publish-call', name: 'file.publish', input: {} },

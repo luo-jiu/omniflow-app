@@ -471,7 +471,9 @@ const PdfViewer: React.FC<PdfViewerProps> = ({
 
   useEffect(() => {
     let active = true;
-    const loadingTask = getDocument(url);
+    const loadingTask = getDocument(url.startsWith('data:application/pdf;base64,')
+      ? { data: Uint8Array.from(atob(url.slice(url.indexOf(',') + 1)), char => char.charCodeAt(0)) }
+      : url);
 
     setErrorMessage(null);
     setIsDocumentLoading(true);

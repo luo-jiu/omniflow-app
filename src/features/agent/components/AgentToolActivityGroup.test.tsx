@@ -76,7 +76,7 @@ describe('AgentToolActivityGroup', () => {
 
     const toggle = renderer.root.findByProps({ className: 'agent-activity-group-toggle' });
     expect(toggle.props['aria-expanded']).toBe(false);
-    expect(textContent(toggle)).toBe('读取了 2 项');
+    expect(textContent(toggle)).toBe('已完成 搜索资料库');
     expect(textContent(renderer.root)).not.toContain('搜索 1');
     expect(renderer.root.findByProps({ className: 'agent-activity-group-collapse' }).props['aria-hidden'])
       .toBe(true);

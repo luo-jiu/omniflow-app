@@ -24,7 +24,7 @@
 
 资料库目标现在支持 `directoryPath` / `parentId`，可直接保存到非当前 UI 目录。准备和执行分别校验目标身份与规范路径，详情见 [Agent 资料库目录发现](agent-library-discovery.md)。目录查询只读元数据，不依赖存储在线；内容处理仍必须检查实际源可读性。
 
-现有 `ask / auto / full-access` 设置继续在 Run 启动时冻结，沿用当前存储和 IPC 名称，不新增另一份权限 owner。
+Agent会话现使用本机SQLite的 `ask / group / full-access`，在Run启动时冻结。组内媒体源和目标按目录读写授权校验，组外询问；组策略不扩大本机访问。Shell内部保留原 `ask / auto / full-access` 引擎，但Agent输入区不再修改全局设置。媒体上传在complete前再次检查目录权限，检查失败走未提交取消路径。详见 [会话组与访问](agent-session-groups-and-access.md)。
 
 `full-access` 下，已通过原有校验的非破坏性内置操作可以自动授权：
 
@@ -32,7 +32,7 @@
 - `media.extractAudio`，但不包括 `replace`
 - `file.stage / file.publish / file.upload`，沿用只允许失败或重命名的冲突策略
 
-权限调整发生在 prepared action 封装和签发前；运行记录真实保存 `permissionBehavior=allow`，不伪造用户 approval。prepare、目标验证、不可变绑定、一次性能力、提交状态和审计不跳过。`ask / auto` 的内置写入确认行为保持不变。明确 deny、未知 Tool、破坏性风险、媒体覆盖和 `memory.propose` 不因本规则自动放行；Shell 继续使用自己的 Policy Engine。
+权限调整发生在 prepared action 封装和签发前；运行记录真实保存 `permissionBehavior=allow`，不伪造用户 approval。prepare、目标验证、不可变绑定、一次性能力、提交状态和审计不跳过。询问模式保持写入确认，组内自动仅放行已验证范围和等级的普通操作。明确 deny、未知 Tool、破坏性风险、媒体覆盖和 `memory.propose` 不因完全访问规则自动放行；Shell 继续使用自己的 Policy Engine。
 
 Save As 的位置选择、覆盖提示和缺少必要信息的交互不是重复授权，仍可能出现。界面切换权限只影响新 Run，不反向放宽在途动作。
 
@@ -40,7 +40,7 @@ Save As 的位置选择、覆盖提示和缺少必要信息的交互不是重复
 
 文件读取、媒体检查、Skill 加载和一般工具过程使用无边框紧凑行；读取结果显示“已读取 + 文件名”，文件名只通过既有 `tree.revealNode` 中心 action 定位，不生成任意链接。已生成的目录或音频结果同样显示文件名与受控定位动作。
 
-成功详情默认收起，用户可展开；失败、取消、中断和正在等待的交互保持可见。审批与交互使用无框内联表单，仍只有一个可编辑实例，保留 busy、防重入、稳定 key 和恢复语义。工具组件历史文件名中的 `Card` 不再表示 UI 带有卡片外观。
+成功和失败的工具详情均默认收起，用户可手动展开；连续内部失败也进入原工具分组，不把错误正文逐条铺开。取消、中断和正在等待的交互保持可见。审批与交互使用无框内联表单，仍只有一个可编辑实例，保留 busy、防重入、稳定 key 和恢复语义。工具组件历史文件名中的 `Card` 不再表示 UI 带有卡片外观。
 
 本机目标可以切回资料库目录选择；初始目标不代表其他目标不可用。没有合法目录 ID 时不能批准，最终可写性由 main 重新 prepare 验证，不由 UI 猜测。
 

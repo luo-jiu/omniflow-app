@@ -1,7 +1,4 @@
 import React from 'react';
-import {
-  IconSearch,
-} from '@douyinfe/semi-icons';
 import styled from 'styled-components';
 
 import { workspaceScrollbarStyles } from '@/components/ui/workspace-scrollbar';
@@ -14,6 +11,9 @@ import type {
 } from '@/shared/agent/agent.types';
 import AgentToolActivityCard from './AgentToolActivityCard';
 import AgentDisclosureChevron from './AgentDisclosureChevron';
+import AgentActivityText from './AgentActivityText';
+import { buildAgentToolSummary } from '../agent-tool-presentation';
+import AgentToolIcon from './AgentToolIcon';
 
 const ActivityGroup = styled.section`
   --agent-tool-record-color: color-mix(
@@ -39,6 +39,7 @@ const ActivityGroup = styled.section`
     background: transparent;
     color: var(--agent-tool-record-color);
     cursor: pointer;
+    font: inherit;
     text-align: left;
   }
 
@@ -79,14 +80,18 @@ const ActivityGroup = styled.section`
   .agent-activity-group-title {
     min-width: 0;
     height: 20px;
-    flex: none;
-    display: inline-flex;
-    align-items: center;
+    flex: 0 1 auto;
+    display: block;
     color: var(--agent-tool-record-color);
     -webkit-text-fill-color: var(--agent-tool-record-color);
     font-size: 13px;
     font-weight: 400;
     line-height: 20px;
+  }
+  .agent-activity-group-live {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .agent-activity-group-chevron {
@@ -155,12 +160,12 @@ const ActivityGroup = styled.section`
 
   .agent-activity-group-items .agent-activity-header {
     min-height: 23px;
-    gap: 5px;
+    gap: 7px;
   }
 
   .agent-activity-group-items .agent-activity-status-icon {
-    width: 18px;
-    height: 18px;
+    width: 20px;
+    height: 20px;
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -219,12 +224,14 @@ export default function AgentToolActivityGroup({
   ...props
 }: AgentToolActivityGroupProps) {
   const [open, setOpen] = React.useState(false);
-  if (activities.length === 1) return activityCard(activities[0], props);
-
   const toggleOpen = () => {
     if (!open) props.onExpand?.();
     setOpen(current => !current);
   };
+  const latest = activities[activities.length - 1];
+  if (!latest) return null;
+  const latestSummary = buildAgentToolSummary(latest, props.libraryId);
+  const latestIsActive = latest.status === 'running' || latest.status === 'preparing';
 
   return (
     <ActivityGroup>
@@ -234,8 +241,11 @@ export default function AgentToolActivityGroup({
         onClick={toggleOpen}
         type="button"
       >
-        <span className="agent-activity-group-icon"><IconSearch aria-hidden="true" /></span>
-        <span className="agent-activity-group-title">读取了 {activities.length} 项</span>
+        <span className="agent-activity-group-icon"><AgentToolIcon activity={latest} /></span>
+        <span className="agent-activity-group-title agent-activity-group-live">
+          {latestIsActive ? <AgentActivityText $active>{latestSummary.label}{latestSummary.subject ? ` ${latestSummary.subject}` : ''}</AgentActivityText>
+            : `${latestSummary.label}${latestSummary.subject ? ` ${latestSummary.subject}` : ''}`}
+        </span>
         <span className="agent-activity-group-chevron">
           <AgentDisclosureChevron expanded={open} />
         </span>
