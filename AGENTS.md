@@ -26,6 +26,8 @@
 - 前端交接说明：`.agent-docs/frontend-handoff.md`
 - 前端文档规范：`.agent-docs/frontend-documentation-standard.md`
 - 前端架构基线：`docs/frontend-architecture-baseline.md`
+- 插件系统与主题扩展方针（长期方向、阶段路线与验收标准，非已实现能力）：`docs/plugin-system-and-theming-policy.md`
+- 插件化实施计划（调研依据、批次依赖、迁移与验收门槛；推进时核对批次状态）：`docs/plugin-system-implementation-plan.md`
 - 当前部署拓扑与运维交接：`docs/current-deployment-topology.md`
 - 桌面平台适配专题：`docs/desktop-platform-architecture.md`
 - 桌面自动更新专题：`docs/desktop-auto-update.md`

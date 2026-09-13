@@ -1,6 +1,6 @@
 # OmniFlow App 前端交接索引
 
-更新时间：2026-08-31
+更新时间：2026-09-13
 
 适用对象：继续维护 `omniflow-app` 前端、Electron 主进程、IPC、桌面交互和前端文档的开发者或 Coding Agent。
 
@@ -59,6 +59,9 @@
 
 - 总体分层、状态 owner、IPC / Electron 边界：
   - `docs/frontend-architecture-baseline.md`
+- 插件系统与主题扩展的长期方针、阶段路线和合格标准：
+  - [插件系统与主题扩展方针](../docs/plugin-system-and-theming-policy.md)（目标设计，非当前已实现能力）
+  - [插件化实施计划](../docs/plugin-system-implementation-plan.md)（代码调研、批次依赖、兼容与验收；实现尚未开始，下一批 A0）
 - 当前云端、Tailscale、多 MinIO 和发布方式：
   - `docs/current-deployment-topology.md`
 - macOS / Windows 窗口策略、平台 bridge 和构建验证：
