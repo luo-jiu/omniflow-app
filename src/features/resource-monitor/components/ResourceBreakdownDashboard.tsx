@@ -1,5 +1,6 @@
 import React from 'react';
 import { Button, Empty, Spin } from '@douyinfe/semi-ui';
+import OutlineIcon from '@/components/ui/outline-icon';
 import {
   IconAlertTriangle,
   IconArchive,
@@ -7,7 +8,6 @@ import {
   IconLayers,
   IconLink,
   IconPieChartStroked,
-  IconPulse,
 } from '@douyinfe/semi-icons';
 import styled from 'styled-components';
 import type {
@@ -337,7 +337,7 @@ const ResourceBreakdownDashboard: React.FC<ResourceBreakdownDashboardProps> = ({
       <div className="dashboard-header">
         <div>
           <div className="dashboard-title">
-            <IconPulse />
+          <OutlineIcon name="activity" />
             <span>资源统计仪表盘</span>
           </div>
           <div className="dashboard-meta">
@@ -346,6 +346,7 @@ const ResourceBreakdownDashboard: React.FC<ResourceBreakdownDashboardProps> = ({
         </div>
         <div className="dashboard-badge">
           {snapshot.summary.multiRefObjectCount > 0 ? '存在多引用' : '对象去重'}
+          {onRetry ? <button type="button" aria-label="刷新资源统计" title="刷新" onClick={onRetry}><OutlineIcon name="refresh" /></button> : null}
         </div>
       </div>
 

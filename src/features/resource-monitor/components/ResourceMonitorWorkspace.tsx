@@ -1,12 +1,10 @@
 import React from 'react';
 import { Button, Empty, Spin, Toast } from '@douyinfe/semi-ui';
 import {
-  IconArrowRight,
-  IconDelete,
-  IconRefresh,
   IconSave,
   IconSetting,
 } from '@douyinfe/semi-icons';
+import OutlineIcon from '@/components/ui/outline-icon';
 import styled from 'styled-components';
 import type { SystemWorkspaceViewProps } from '@/features/system-workspace/types';
 import {
@@ -58,7 +56,6 @@ function storageBreakdown(item: ResourceMonitorStorageItem): string {
 
 const ResourceMonitorWorkspace: React.FC<SystemWorkspaceViewProps> = ({
   libraryId,
-  onOpenLegacyRoute,
   onOpenView,
   onSettingsSectionChange,
 }) => {
@@ -155,22 +152,10 @@ const ResourceMonitorWorkspace: React.FC<SystemWorkspaceViewProps> = ({
   const probes = probeRuntime.snapshot?.probes || [];
   const distributionError = distributionSnapshot?.distributionError || '';
   const storage = distributionSnapshot?.storage || [];
-  const isRefreshing = distributionLoading || dashboardLoading || probeRuntime.loading;
-  const canOpenRecycleBin = libraryId > 0;
   const openStorageSettings = React.useCallback(() => {
     onSettingsSectionChange?.('storage');
     onOpenView('settings');
   }, [onOpenView, onSettingsSectionChange]);
-  const openMigrationCenter = React.useCallback(() => {
-    onOpenLegacyRoute('/transfer-center?tab=migration');
-  }, [onOpenLegacyRoute]);
-  const openRecycleBin = React.useCallback(() => {
-    if (!canOpenRecycleBin) {
-      Toast.info('进入具体资料库后可以查看回收站');
-      return;
-    }
-    onOpenView('recycle-bin');
-  }, [canOpenRecycleBin, onOpenView]);
   const captureSample = React.useCallback(async () => {
     setSampling(true);
     try {
@@ -202,30 +187,8 @@ const ResourceMonitorWorkspace: React.FC<SystemWorkspaceViewProps> = ({
           </div>
         </div>
         <div className="monitor-toolbar-actions">
-          <Button
-            icon={<IconSetting />}
-            onClick={openStorageSettings}
-            size="small"
-            theme="borderless"
-          >
+          <Button icon={<OutlineIcon name="settings" />} onClick={openStorageSettings} size="small" theme="borderless">
             存储设置
-          </Button>
-          <Button
-            icon={<IconArrowRight />}
-            onClick={openMigrationCenter}
-            size="small"
-            theme="borderless"
-          >
-            迁移任务
-          </Button>
-          <Button
-            icon={<IconDelete />}
-            onClick={openRecycleBin}
-            size="small"
-            theme="borderless"
-            title={canOpenRecycleBin ? '打开当前资料库回收站' : '进入具体资料库后可以查看回收站'}
-          >
-            回收站
           </Button>
           <Button
             icon={<IconSave />}
@@ -235,15 +198,6 @@ const ResourceMonitorWorkspace: React.FC<SystemWorkspaceViewProps> = ({
             theme="borderless"
           >
             记录样本
-          </Button>
-          <Button
-            icon={<IconRefresh />}
-            loading={isRefreshing}
-            onClick={loadSnapshot}
-            size="small"
-            theme="borderless"
-          >
-            刷新
           </Button>
         </div>
       </div>

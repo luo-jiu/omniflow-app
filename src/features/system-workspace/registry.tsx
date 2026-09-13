@@ -1,8 +1,6 @@
 import {
   IconApps,
-  IconDelete,
   IconPulse,
-  IconSetting,
   IconUpload,
   IconUser,
 } from '@douyinfe/semi-icons';
@@ -18,6 +16,7 @@ import UploadsWorkspace from './views/uploads';
 import RecycleBinWorkspace from './views/recycle-bin';
 import ProfileWorkspace from './views/profile';
 import ResourceMonitorWorkspace from './views/resource-monitor';
+import OutlineIcon from '@/components/ui/outline-icon';
 
 export const systemWorkspaceMeta: Record<SystemWorkspaceView, SystemWorkspaceViewMeta> = {
   overview: {
@@ -28,7 +27,7 @@ export const systemWorkspaceMeta: Record<SystemWorkspaceView, SystemWorkspaceVie
   settings: {
     title: '设置',
     description: '调整当前客户端的常用偏好',
-    icon: <IconSetting />,
+    icon: <OutlineIcon name="settings" />,
   },
   uploads: {
     title: '上传中心',
@@ -38,7 +37,7 @@ export const systemWorkspaceMeta: Record<SystemWorkspaceView, SystemWorkspaceVie
   'recycle-bin': {
     title: '回收站',
     description: '恢复或清理当前资料库的已删除文件',
-    icon: <IconDelete />,
+    icon: <OutlineIcon name="trash" />,
   },
   profile: {
     title: '主页',

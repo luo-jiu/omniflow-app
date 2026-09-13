@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import styled from 'styled-components';
 import { Button, Empty, Progress, Tag, Toast } from '@douyinfe/semi-ui';
-import { IconChevronDown, IconChevronRight, IconDelete } from '@douyinfe/semi-icons';
+import { IconChevronDown, IconChevronRight } from '@douyinfe/semi-icons';
+import OutlineIcon from '@/components/ui/outline-icon';
 import { uploadManager } from '@/utils/uploadManager';
 import type { UploadTask } from '@/modules/upload-center/model/upload-task.types';
 import type { UploadTaskSummary } from '@/modules/upload-center/model/upload-task.store';
@@ -890,7 +891,7 @@ const UploadCenterBody: React.FC = () => {
             aria-label="清空已结束记录"
             className="toolbar-icon-button"
             disabled={removableRecordCount === 0}
-            icon={<IconDelete />}
+            icon={<OutlineIcon name="trash" />}
             theme="borderless"
             type="danger"
             onClick={handleClearRecords}
@@ -1001,7 +1002,7 @@ const UploadCenterBody: React.FC = () => {
                       aria-label="删除记录"
                       className="row-icon-button"
                       disabled={removeDisabled}
-                      icon={<IconDelete />}
+                      icon={<OutlineIcon name="trash" />}
                       size="default"
                       theme="borderless"
                       type="danger"

@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import styled from 'styled-components';
 import { Button, Empty, Tag, Toast, Typography } from '@douyinfe/semi-ui';
-import { IconChevronLeft, IconDelete, IconRefresh } from '@douyinfe/semi-icons';
+import { IconChevronLeft } from '@douyinfe/semi-icons';
+import OutlineIcon from '@/components/ui/outline-icon';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   fetchRecycleBinItems,
@@ -76,7 +77,7 @@ const Page = styled.div`
     margin-bottom: 15px;
     max-width: 480px;
     color: var(--semi-color-text-2);
-    font-size: 11px;
+    font-size: 12px;
     line-height: 1.55;
   }
 
@@ -85,7 +86,7 @@ const Page = styled.div`
     min-height: 27px;
     padding: 0 9px;
     border-radius: 7px;
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 600;
   }
 
@@ -111,7 +112,7 @@ const Page = styled.div`
   }
 
   .row.header-row {
-    font-size: 10px;
+    font-size: 12px;
     color: var(--semi-color-text-2);
     background: var(--semi-color-fill-0);
     font-weight: 600;
@@ -129,7 +130,7 @@ const Page = styled.div`
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 500;
   }
 
@@ -141,7 +142,7 @@ const Page = styled.div`
     text-overflow: ellipsis;
     white-space: nowrap;
     margin-top: 4px;
-    font-size: 10px;
+    font-size: 12px;
     color: var(--semi-color-text-2);
   }
 
@@ -158,13 +159,13 @@ const Page = styled.div`
     background: transparent;
     color: var(--semi-color-primary);
     cursor: pointer;
-    font-size: 10px;
+    font-size: 12px;
     line-height: 1.3;
   }
 
   .size,
   .time {
-    font-size: 10px;
+    font-size: 12px;
     color: var(--semi-color-text-2);
   }
 
@@ -423,17 +424,17 @@ const RecycleBin: React.FC = () => {
           </div>
           <div className="header-right">
             <Button
-              icon={<IconDelete />}
+              icon={<OutlineIcon name="trash" />}
               theme="borderless"
               type="danger"
               disabled={items.length === 0 || loading}
               onClick={() => void handleClearRecycleBin()}
               className="toolbar-button"
             >
-              清空回收站
+              清空
             </Button>
             <Button
-              icon={<IconRefresh />}
+              icon={<OutlineIcon name="refresh" />}
               theme="borderless"
               loading={loading}
               onClick={() => void loadItems()}
@@ -514,7 +515,6 @@ const RecycleBin: React.FC = () => {
                     size="default"
                     theme="borderless"
                     type="danger"
-                    icon={<IconDelete />}
                     className="row-action-button"
                     onClick={() => openHardDeleteConfirm(item)}
                   >

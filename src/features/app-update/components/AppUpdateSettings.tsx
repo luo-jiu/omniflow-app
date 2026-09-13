@@ -1,6 +1,7 @@
 import React from 'react';
 import { Button, Toast } from '@douyinfe/semi-ui';
-import { IconDownload, IconRefresh, IconRestart } from '@douyinfe/semi-icons';
+import { IconDownload, IconRestart } from '@douyinfe/semi-icons';
+import OutlineIcon from '@/components/ui/outline-icon';
 
 import {
   checkForAppUpdate,
@@ -103,7 +104,7 @@ const AppUpdateSettings: React.FC = () => {
     ? <IconDownload />
     : snapshot.status === 'downloaded'
       ? <IconRestart />
-      : <IconRefresh />;
+      : <OutlineIcon name="refresh" />;
 
   return (
     <div className="setting-item app-update-setting">
