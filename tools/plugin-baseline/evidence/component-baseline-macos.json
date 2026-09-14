@@ -1,0 +1,1404 @@
+{
+  "schemaVersion": 1,
+  "measuredAt": "2026-09-13T14:39:17.201Z",
+  "commit": "460c6dd54784dbbe2aad8acee163521187053259",
+  "scope": "Hidden isolated component fixture; fresh userData each run; no network/auth/backend. Not full application startup, native overlay or virtualized workspace performance. Two animation frames after each synchronous React update.",
+  "summary": {
+    "spawnToReadyMs": {
+      "min": 347.21245799999815,
+      "median": 351.05283300000156,
+      "max": 370.58837500000027
+    },
+    "operationsMs": {
+      "expand20Folders": {
+        "min": 26.099999994039536,
+        "median": 31.100000001490116,
+        "max": 50.399999998509884
+      },
+      "scrollTree": {
+        "min": 2.2999999970197678,
+        "median": 12.699999995529652,
+        "max": 13.5
+      },
+      "open2000LineEditor": {
+        "min": 18.5,
+        "median": 23.200000002980232,
+        "max": 40.600000001490116
+      },
+      "switchEditor": {
+        "min": 14.899999998509884,
+        "median": 22.100000001490116,
+        "max": 32.80000000447035
+      },
+      "themeDark": {
+        "min": 12.300000004470348,
+        "median": 59.79999999701977,
+        "max": 76.10000000149012
+      },
+      "themeLight": {
+        "min": 56.899999998509884,
+        "median": 72.69999999552965,
+        "max": 102.5
+      },
+      "menuMount": {
+        "min": 36.899999998509884,
+        "median": 60.70000000298023,
+        "max": 103.60000000149012
+      },
+      "closeViews": {
+        "min": 7.899999998509884,
+        "median": 13.099999994039536,
+        "max": 35.899999998509884
+      }
+    }
+  },
+  "runs": [
+    {
+      "spawnToReadyMs": 370.58837500000027,
+      "ready": {
+        "type": "ready",
+        "rendererReadyMs": 126.5,
+        "hostToReadyMs": 228.45995799999997
+      },
+      "result": {
+        "type": "result",
+        "nodeCount": 1050,
+        "textLines": 2000,
+        "cycles": 10,
+        "measurementsMs": {
+          "expand20Folders": [
+            42.600000001490116,
+            37.79999999701977,
+            30.899999998509884,
+            41.20000000298023,
+            38,
+            30,
+            33.100000001490116,
+            26.899999998509884,
+            31,
+            31.799999997019768
+          ],
+          "scrollTree": [
+            7.399999998509884,
+            11,
+            12.800000004470348,
+            2.2999999970197678,
+            13.300000004470348,
+            13,
+            11.299999997019768,
+            12.200000002980232,
+            13.199999995529652,
+            12.899999998509884
+          ],
+          "open2000LineEditor": [
+            35.100000001490116,
+            25.400000005960464,
+            22.19999999552965,
+            19.399999998509884,
+            23.799999997019768,
+            25.5,
+            22.80000000447035,
+            19.599999994039536,
+            23.200000002980232,
+            29.30000000447035
+          ],
+          "switchEditor": [
+            20.700000002980232,
+            25.099999994039536,
+            21.400000005960464,
+            20.5,
+            21.700000002980232,
+            32.80000000447035,
+            14.899999998509884,
+            24.100000001490116,
+            22.5,
+            19.899999998509884
+          ],
+          "themeDark": [
+            12.5,
+            60.70000000298023,
+            60,
+            53.70000000298023,
+            57.19999999552965,
+            73.79999999701977,
+            51.5,
+            59.80000000447035,
+            56.600000001490116,
+            71.19999999552965
+          ],
+          "themeLight": [
+            62.400000005960464,
+            73.20000000298023,
+            75.70000000298023,
+            73.5,
+            71.89999999850988,
+            64.5,
+            80.10000000149012,
+            69.89999999850988,
+            72.09999999403954,
+            68.70000000298023
+          ],
+          "menuMount": [
+            73.09999999403954,
+            59.599999994039536,
+            64.89999999850988,
+            59,
+            57.20000000298023,
+            62.100000001490116,
+            36.899999998509884,
+            57,
+            57.30000000447035,
+            70.60000000149012
+          ],
+          "closeViews": [
+            21.600000001490116,
+            12.900000005960464,
+            17.80000000447035,
+            11.199999995529652,
+            12,
+            14.799999997019768,
+            35.899999998509884,
+            13.600000001490116,
+            16.399999998509884,
+            8.600000001490116
+          ]
+        },
+        "finalRegistry": {
+          "estimatedBytes": 0,
+          "liveInstanceCount": 0,
+          "snapshotCount": 0
+        },
+        "remainingEditors": 0
+      },
+      "samples": [
+        {
+          "phase": "idle",
+          "elapsedMs": 1232.203917,
+          "processCount": 4,
+          "workingSetKiB": 361904,
+          "cpuPercent": 0
+        },
+        {
+          "phase": "idle",
+          "elapsedMs": 2236.7660830000004,
+          "processCount": 4,
+          "workingSetKiB": 361776,
+          "cpuPercent": 0.027760293197078838
+        },
+        {
+          "phase": "idle",
+          "elapsedMs": 3240.3266249999997,
+          "processCount": 4,
+          "workingSetKiB": 361776,
+          "cpuPercent": 0.010857066965914092
+        },
+        {
+          "phase": "idle",
+          "elapsedMs": 4244.219208,
+          "processCount": 4,
+          "workingSetKiB": 361808,
+          "cpuPercent": 0.029362587220566366
+        },
+        {
+          "phase": "measuring",
+          "elapsedMs": 5244.0310420000005,
+          "processCount": 4,
+          "workingSetKiB": 368000,
+          "cpuPercent": 0.3476060234603591
+        },
+        {
+          "phase": "measuring",
+          "elapsedMs": 6247.193208000001,
+          "processCount": 4,
+          "workingSetKiB": 625872,
+          "cpuPercent": 14.877267839778897
+        },
+        {
+          "phase": "measuring",
+          "elapsedMs": 7249.5022500000005,
+          "processCount": 4,
+          "workingSetKiB": 649280,
+          "cpuPercent": 16.04404597496997
+        }
+      ],
+      "cycles": [
+        {
+          "cycle": 1,
+          "phase": "measuring",
+          "elapsedMs": 5506.647333,
+          "processCount": 4,
+          "workingSetKiB": 455248,
+          "cpuPercent": 18.668497149636096
+        },
+        {
+          "cycle": 2,
+          "phase": "measuring",
+          "elapsedMs": 5812.462792,
+          "processCount": 4,
+          "workingSetKiB": 538048,
+          "cpuPercent": 14.523780307071316
+        },
+        {
+          "cycle": 3,
+          "phase": "measuring",
+          "elapsedMs": 6118.480083,
+          "processCount": 4,
+          "workingSetKiB": 621408,
+          "cpuPercent": 15.163332253571358
+        },
+        {
+          "cycle": 4,
+          "phase": "measuring",
+          "elapsedMs": 6399.68525,
+          "processCount": 4,
+          "workingSetKiB": 626208,
+          "cpuPercent": 12.301250309545814
+        },
+        {
+          "cycle": 5,
+          "phase": "measuring",
+          "elapsedMs": 6694.699542,
+          "processCount": 4,
+          "workingSetKiB": 635072,
+          "cpuPercent": 12.339280049418381
+        },
+        {
+          "cycle": 6,
+          "phase": "measuring",
+          "elapsedMs": 7011.493875,
+          "processCount": 4,
+          "workingSetKiB": 649856,
+          "cpuPercent": 14.186410134769815
+        },
+        {
+          "cycle": 7,
+          "phase": "measuring",
+          "elapsedMs": 7298.192417,
+          "processCount": 4,
+          "workingSetKiB": 649840,
+          "cpuPercent": 12.08705083550846
+        },
+        {
+          "cycle": 8,
+          "phase": "measuring",
+          "elapsedMs": 7581.495917,
+          "processCount": 4,
+          "workingSetKiB": 651232,
+          "cpuPercent": 12.239420332408988
+        },
+        {
+          "cycle": 9,
+          "phase": "measuring",
+          "elapsedMs": 7874.621417,
+          "processCount": 4,
+          "workingSetKiB": 653504,
+          "cpuPercent": 12.262932202283432
+        },
+        {
+          "cycle": 10,
+          "phase": "measuring",
+          "elapsedMs": 8187.6479580000005,
+          "processCount": 4,
+          "workingSetKiB": 653632,
+          "cpuPercent": 15.632780426064283
+        }
+      ],
+      "after": {
+        "phase": "measuring",
+        "elapsedMs": 8211.052125,
+        "processCount": 4,
+        "workingSetKiB": 654160,
+        "cpuPercent": 3.1826565545946544
+      },
+      "electron": "30.5.1",
+      "chrome": "124.0.6367.243",
+      "platform": "darwin",
+      "arch": "arm64",
+      "viewport": [
+        1120,
+        692
+      ],
+      "zoom": 1,
+      "visible": false
+    },
+    {
+      "spawnToReadyMs": 351.05283300000156,
+      "ready": {
+        "type": "ready",
+        "rendererReadyMs": 123.19999999552965,
+        "hostToReadyMs": 222.86345799999998
+      },
+      "result": {
+        "type": "result",
+        "nodeCount": 1050,
+        "textLines": 2000,
+        "cycles": 10,
+        "measurementsMs": {
+          "expand20Folders": [
+            50.399999998509884,
+            38.70000000298023,
+            29.799999997019768,
+            28.599999994039536,
+            30.600000001490116,
+            31.100000001490116,
+            32.399999998509884,
+            32.30000000447035,
+            39.5,
+            32.29999999701977
+          ],
+          "scrollTree": [
+            3.600000001490116,
+            11.199999995529652,
+            13.5,
+            11.800000004470348,
+            12.799999997019768,
+            13.399999998509884,
+            10,
+            11,
+            7.600000001490116,
+            12.200000002980232
+          ],
+          "open2000LineEditor": [
+            40.600000001490116,
+            32.399999998509884,
+            19.80000000447035,
+            20.69999999552965,
+            24.399999998509884,
+            25.799999997019768,
+            27.399999998509884,
+            36.69999999552965,
+            19.600000001490116,
+            21.799999997019768
+          ],
+          "switchEditor": [
+            22.099999994039536,
+            20.80000000447035,
+            23.899999998509884,
+            23.200000002980232,
+            23,
+            23.899999998509884,
+            26.299999997019768,
+            30.30000000447035,
+            18.899999998509884,
+            22.100000001490116
+          ],
+          "themeDark": [
+            12.300000004470348,
+            56.19999999552965,
+            61.899999998509884,
+            58.5,
+            65.20000000298023,
+            62.80000000447035,
+            67.5,
+            72.69999999552965,
+            54.5,
+            59.5
+          ],
+          "themeLight": [
+            56.899999998509884,
+            74,
+            73.60000000149012,
+            72.69999999552965,
+            79.79999999701977,
+            80.09999999403954,
+            81.10000000149012,
+            102.5,
+            69.60000000149012,
+            70.29999999701977
+          ],
+          "menuMount": [
+            60,
+            73.60000000149012,
+            59.899999998509884,
+            59,
+            103.60000000149012,
+            64.80000000447035,
+            65.60000000149012,
+            68.89999999850988,
+            57.899999998509884,
+            59.399999998509884
+          ],
+          "closeViews": [
+            16.5,
+            9.899999998509884,
+            14.100000001490116,
+            10.200000002980232,
+            16.299999997019768,
+            12,
+            13.700000002980232,
+            21.900000005960464,
+            10,
+            10.5
+          ]
+        },
+        "finalRegistry": {
+          "estimatedBytes": 0,
+          "liveInstanceCount": 0,
+          "snapshotCount": 0
+        },
+        "remainingEditors": 0
+      },
+      "samples": [
+        {
+          "phase": "idle",
+          "elapsedMs": 1230.074833,
+          "processCount": 4,
+          "workingSetKiB": 361232,
+          "cpuPercent": 0
+        },
+        {
+          "phase": "idle",
+          "elapsedMs": 2234.834291,
+          "processCount": 4,
+          "workingSetKiB": 361104,
+          "cpuPercent": 0.024178932261642017
+        },
+        {
+          "phase": "idle",
+          "elapsedMs": 3236.556958,
+          "processCount": 4,
+          "workingSetKiB": 361104,
+          "cpuPercent": 0.014152625223801
+        },
+        {
+          "phase": "idle",
+          "elapsedMs": 4241.818833,
+          "processCount": 4,
+          "workingSetKiB": 361152,
+          "cpuPercent": 0.04170689127925413
+        },
+        {
+          "phase": "measuring",
+          "elapsedMs": 5246.546291000001,
+          "processCount": 4,
+          "workingSetKiB": 367424,
+          "cpuPercent": 0.5126549602188237
+        },
+        {
+          "phase": "measuring",
+          "elapsedMs": 6250.893166,
+          "processCount": 4,
+          "workingSetKiB": 591392,
+          "cpuPercent": 13.152944435076586
+        },
+        {
+          "phase": "measuring",
+          "elapsedMs": 7253.829041,
+          "processCount": 4,
+          "workingSetKiB": 745680,
+          "cpuPercent": 12.617786183129938
+        },
+        {
+          "phase": "measuring",
+          "elapsedMs": 8253.97375,
+          "processCount": 4,
+          "workingSetKiB": 825168,
+          "cpuPercent": 12.13493710315479
+        }
+      ],
+      "cycles": [
+        {
+          "cycle": 1,
+          "phase": "measuring",
+          "elapsedMs": 5487.111333,
+          "processCount": 4,
+          "workingSetKiB": 451712,
+          "cpuPercent": 17.449501620875935
+        },
+        {
+          "cycle": 2,
+          "phase": "measuring",
+          "elapsedMs": 5804.137833,
+          "processCount": 4,
+          "workingSetKiB": 499136,
+          "cpuPercent": 17.511462623704432
+        },
+        {
+          "cycle": 3,
+          "phase": "measuring",
+          "elapsedMs": 6100.624708,
+          "processCount": 4,
+          "workingSetKiB": 550528,
+          "cpuPercent": 13.10767627316257
+        },
+        {
+          "cycle": 4,
+          "phase": "measuring",
+          "elapsedMs": 6385.664583,
+          "processCount": 4,
+          "workingSetKiB": 628352,
+          "cpuPercent": 12.367260082090585
+        },
+        {
+          "cycle": 5,
+          "phase": "measuring",
+          "elapsedMs": 6741.676583,
+          "processCount": 4,
+          "workingSetKiB": 704336,
+          "cpuPercent": 15.056636580118887
+        },
+        {
+          "cycle": 6,
+          "phase": "measuring",
+          "elapsedMs": 7055.832958,
+          "processCount": 4,
+          "workingSetKiB": 707024,
+          "cpuPercent": 12.367059628171626
+        },
+        {
+          "cycle": 7,
+          "phase": "measuring",
+          "elapsedMs": 7380.097291,
+          "processCount": 4,
+          "workingSetKiB": 759760,
+          "cpuPercent": 12.131039116233845
+        },
+        {
+          "cycle": 8,
+          "phase": "measuring",
+          "elapsedMs": 7756.478916,
+          "processCount": 4,
+          "workingSetKiB": 824064,
+          "cpuPercent": 14.901382464324922
+        },
+        {
+          "cycle": 9,
+          "phase": "measuring",
+          "elapsedMs": 8034.974,
+          "processCount": 4,
+          "workingSetKiB": 824400,
+          "cpuPercent": 13.071303992371508
+        },
+        {
+          "cycle": 10,
+          "phase": "measuring",
+          "elapsedMs": 8322.59825,
+          "processCount": 4,
+          "workingSetKiB": 825824,
+          "cpuPercent": 12.244767623674946
+        }
+      ],
+      "after": {
+        "phase": "measuring",
+        "elapsedMs": 8336.4645,
+        "processCount": 4,
+        "workingSetKiB": 826352,
+        "cpuPercent": 6.078550623103283
+      },
+      "electron": "30.5.1",
+      "chrome": "124.0.6367.243",
+      "platform": "darwin",
+      "arch": "arm64",
+      "viewport": [
+        1120,
+        692
+      ],
+      "zoom": 1,
+      "visible": false
+    },
+    {
+      "spawnToReadyMs": 347.21245799999815,
+      "ready": {
+        "type": "ready",
+        "rendererReadyMs": 125,
+        "hostToReadyMs": 221.443709
+      },
+      "result": {
+        "type": "result",
+        "nodeCount": 1050,
+        "textLines": 2000,
+        "cycles": 10,
+        "measurementsMs": {
+          "expand20Folders": [
+            37.29999999701977,
+            37.79999999701977,
+            31.100000001490116,
+            30.400000005960464,
+            31.5,
+            30.700000002980232,
+            29.700000002980232,
+            30.19999999552965,
+            34.600000001490116,
+            29.200000002980232
+          ],
+          "scrollTree": [
+            7.100000001490116,
+            11.100000001490116,
+            12.699999995529652,
+            13.299999997019768,
+            12.700000002980232,
+            12.899999998509884,
+            12.899999998509884,
+            13.399999998509884,
+            9.299999997019768,
+            13.399999998509884
+          ],
+          "open2000LineEditor": [
+            39.600000001490116,
+            31.5,
+            20,
+            22.200000002980232,
+            25,
+            21.799999997019768,
+            23.399999998509884,
+            27.100000001490116,
+            23.399999998509884,
+            20.799999997019768
+          ],
+          "switchEditor": [
+            18.799999997019768,
+            19,
+            23.80000000447035,
+            21.599999994039536,
+            22.799999997019768,
+            21.900000005960464,
+            22.30000000447035,
+            32.600000001490116,
+            15.300000004470348,
+            21.899999998509884
+          ],
+          "themeDark": [
+            16.5,
+            56.399999998509884,
+            63.599999994039536,
+            60,
+            66.5,
+            56.79999999701977,
+            62.600000001490116,
+            75.79999999701977,
+            53.19999999552965,
+            59.900000005960464
+          ],
+          "themeLight": [
+            57.100000001490116,
+            73.70000000298023,
+            71.60000000149012,
+            73.39999999850988,
+            86.70000000298023,
+            69.69999999552965,
+            71.79999999701977,
+            66.20000000298023,
+            72.60000000149012,
+            70.59999999403954
+          ],
+          "menuMount": [
+            61.70000000298023,
+            73.69999999552965,
+            58.5,
+            60.100000001490116,
+            79.89999999850988,
+            58.100000001490116,
+            60.70000000298023,
+            56.20000000298023,
+            61.899999998509884,
+            56.30000000447035
+          ],
+          "closeViews": [
+            18.899999998509884,
+            8.600000001490116,
+            12.700000002980232,
+            12,
+            12.600000001490116,
+            10.200000002980232,
+            15.699999995529652,
+            9.599999994039536,
+            19.30000000447035,
+            13.5
+          ]
+        },
+        "finalRegistry": {
+          "estimatedBytes": 0,
+          "liveInstanceCount": 0,
+          "snapshotCount": 0
+        },
+        "remainingEditors": 0
+      },
+      "samples": [
+        {
+          "phase": "idle",
+          "elapsedMs": 1226.692667,
+          "processCount": 4,
+          "workingSetKiB": 359920,
+          "cpuPercent": 0
+        },
+        {
+          "phase": "idle",
+          "elapsedMs": 2231.652625,
+          "processCount": 4,
+          "workingSetKiB": 359792,
+          "cpuPercent": 0.030272864394870057
+        },
+        {
+          "phase": "idle",
+          "elapsedMs": 3234.227667,
+          "processCount": 4,
+          "workingSetKiB": 359792,
+          "cpuPercent": 0.010609486448557002
+        },
+        {
+          "phase": "idle",
+          "elapsedMs": 4238.357042000001,
+          "processCount": 4,
+          "workingSetKiB": 359824,
+          "cpuPercent": 0.03366000259454209
+        },
+        {
+          "phase": "measuring",
+          "elapsedMs": 5239.353667,
+          "processCount": 4,
+          "workingSetKiB": 368016,
+          "cpuPercent": 0.4368627773089819
+        },
+        {
+          "phase": "measuring",
+          "elapsedMs": 6241.374875,
+          "processCount": 4,
+          "workingSetKiB": 591760,
+          "cpuPercent": 13.101660899135847
+        },
+        {
+          "phase": "measuring",
+          "elapsedMs": 7245.053834,
+          "processCount": 4,
+          "workingSetKiB": 705344,
+          "cpuPercent": 12.30081865736648
+        }
+      ],
+      "cycles": [
+        {
+          "cycle": 1,
+          "phase": "measuring",
+          "elapsedMs": 5479.755292,
+          "processCount": 4,
+          "workingSetKiB": 449616,
+          "cpuPercent": 17.12948514926128
+        },
+        {
+          "cycle": 2,
+          "phase": "measuring",
+          "elapsedMs": 5791.696,
+          "processCount": 4,
+          "workingSetKiB": 498160,
+          "cpuPercent": 17.31786247934261
+        },
+        {
+          "cycle": 3,
+          "phase": "measuring",
+          "elapsedMs": 6085.85425,
+          "processCount": 4,
+          "workingSetKiB": 549552,
+          "cpuPercent": 12.983610783896628
+        },
+        {
+          "cycle": 4,
+          "phase": "measuring",
+          "elapsedMs": 6379.448667000001,
+          "processCount": 4,
+          "workingSetKiB": 628224,
+          "cpuPercent": 12.10468680712343
+        },
+        {
+          "cycle": 5,
+          "phase": "measuring",
+          "elapsedMs": 6717.0226250000005,
+          "processCount": 4,
+          "workingSetKiB": 703040,
+          "cpuPercent": 14.786166120981665
+        },
+        {
+          "cycle": 6,
+          "phase": "measuring",
+          "elapsedMs": 6999.277042000001,
+          "processCount": 4,
+          "workingSetKiB": 704880,
+          "cpuPercent": 12.2385747415219
+        },
+        {
+          "cycle": 7,
+          "phase": "measuring",
+          "elapsedMs": 7298.690834,
+          "processCount": 4,
+          "workingSetKiB": 705760,
+          "cpuPercent": 11.888963578942118
+        },
+        {
+          "cycle": 8,
+          "phase": "measuring",
+          "elapsedMs": 7610.226084,
+          "processCount": 4,
+          "workingSetKiB": 707056,
+          "cpuPercent": 13.995125640046933
+        },
+        {
+          "cycle": 9,
+          "phase": "measuring",
+          "elapsedMs": 7900.068542,
+          "processCount": 4,
+          "workingSetKiB": 706640,
+          "cpuPercent": 16.30474147787127
+        },
+        {
+          "cycle": 10,
+          "phase": "measuring",
+          "elapsedMs": 8185.898542,
+          "processCount": 4,
+          "workingSetKiB": 706992,
+          "cpuPercent": 12.10931128268998
+        }
+      ],
+      "after": {
+        "phase": "measuring",
+        "elapsedMs": 8198.119499999999,
+        "processCount": 4,
+        "workingSetKiB": 707536,
+        "cpuPercent": 6.116240757432639
+      },
+      "electron": "30.5.1",
+      "chrome": "124.0.6367.243",
+      "platform": "darwin",
+      "arch": "arm64",
+      "viewport": [
+        1120,
+        692
+      ],
+      "zoom": 1,
+      "visible": false
+    },
+    {
+      "spawnToReadyMs": 349.0244160000002,
+      "ready": {
+        "type": "ready",
+        "rendererReadyMs": 124,
+        "hostToReadyMs": 222.04220800000002
+      },
+      "result": {
+        "type": "result",
+        "nodeCount": 1050,
+        "textLines": 2000,
+        "cycles": 10,
+        "measurementsMs": {
+          "expand20Folders": [
+            37.399999998509884,
+            38.69999999552965,
+            30.200000002980232,
+            33.70000000298023,
+            30.899999998509884,
+            26.099999994039536,
+            29.400000005960464,
+            31,
+            27.19999999552965,
+            31.19999999552965
+          ],
+          "scrollTree": [
+            9.600000001490116,
+            10.300000004470348,
+            12.699999995529652,
+            10.899999998509884,
+            12.799999997019768,
+            13,
+            11.099999994039536,
+            12.600000001490116,
+            9.900000005960464,
+            12.700000002980232
+          ],
+          "open2000LineEditor": [
+            39.70000000298023,
+            21.299999997019768,
+            21.899999998509884,
+            19.600000001490116,
+            21.700000002980232,
+            19.5,
+            24.400000005960464,
+            25.200000002980232,
+            18.5,
+            21.299999997019768
+          ],
+          "switchEditor": [
+            19.19999999552965,
+            22.399999998509884,
+            21.600000001490116,
+            19.200000002980232,
+            22.599999994039536,
+            21.200000002980232,
+            22.299999997019768,
+            26.799999997019768,
+            20.399999998509884,
+            22.200000002980232
+          ],
+          "themeDark": [
+            15.600000001490116,
+            62.100000001490116,
+            60.600000001490116,
+            55,
+            56.900000005960464,
+            54.5,
+            57.70000000298023,
+            68.89999999850988,
+            56.399999998509884,
+            61
+          ],
+          "themeLight": [
+            60.70000000298023,
+            73.30000000447035,
+            73,
+            72.29999999701977,
+            76.90000000596046,
+            81.89999999850988,
+            72.69999999552965,
+            96.5,
+            67.39999999850988,
+            81.39999999850988
+          ],
+          "menuMount": [
+            68.60000000149012,
+            61.29999999701977,
+            74.39999999850988,
+            58.20000000298023,
+            70.5,
+            61.899999998509884,
+            60.600000001490116,
+            57.30000000447035,
+            57.899999998509884,
+            85.89999999850988
+          ],
+          "closeViews": [
+            34,
+            10.399999998509884,
+            17.200000002980232,
+            12.099999994039536,
+            24.19999999552965,
+            14.400000005960464,
+            12,
+            12.699999995529652,
+            10.700000002980232,
+            15.5
+          ]
+        },
+        "finalRegistry": {
+          "estimatedBytes": 0,
+          "liveInstanceCount": 0,
+          "snapshotCount": 0
+        },
+        "remainingEditors": 0
+      },
+      "samples": [
+        {
+          "phase": "idle",
+          "elapsedMs": 1229.046791,
+          "processCount": 4,
+          "workingSetKiB": 360832,
+          "cpuPercent": 0
+        },
+        {
+          "phase": "idle",
+          "elapsedMs": 2231.9779160000003,
+          "processCount": 4,
+          "workingSetKiB": 360704,
+          "cpuPercent": 0.025665193103705665
+        },
+        {
+          "phase": "idle",
+          "elapsedMs": 3234.681666,
+          "processCount": 4,
+          "workingSetKiB": 360704,
+          "cpuPercent": 0.008495521078024157
+        },
+        {
+          "phase": "idle",
+          "elapsedMs": 4234.729665999999,
+          "processCount": 4,
+          "workingSetKiB": 360784,
+          "cpuPercent": 0.040924203924415425
+        },
+        {
+          "phase": "measuring",
+          "elapsedMs": 5240.340999999999,
+          "processCount": 4,
+          "workingSetKiB": 369936,
+          "cpuPercent": 0.39800959583357004
+        },
+        {
+          "phase": "measuring",
+          "elapsedMs": 6244.832415999999,
+          "processCount": 4,
+          "workingSetKiB": 617008,
+          "cpuPercent": 13.136921158496584
+        },
+        {
+          "phase": "measuring",
+          "elapsedMs": 7248.356124999999,
+          "processCount": 4,
+          "workingSetKiB": 633328,
+          "cpuPercent": 12.695281531213295
+        }
+      ],
+      "cycles": [
+        {
+          "cycle": 1,
+          "phase": "measuring",
+          "elapsedMs": 5509.446833,
+          "processCount": 4,
+          "workingSetKiB": 456080,
+          "cpuPercent": 17.952345038874352
+        },
+        {
+          "cycle": 2,
+          "phase": "measuring",
+          "elapsedMs": 5809.510541,
+          "processCount": 4,
+          "workingSetKiB": 534160,
+          "cpuPercent": 14.533191145100373
+        },
+        {
+          "cycle": 3,
+          "phase": "measuring",
+          "elapsedMs": 6121.433166,
+          "processCount": 4,
+          "workingSetKiB": 614736,
+          "cpuPercent": 15.781225795181573
+        },
+        {
+          "cycle": 4,
+          "phase": "measuring",
+          "elapsedMs": 6402.939791,
+          "processCount": 4,
+          "workingSetKiB": 617824,
+          "cpuPercent": 12.44272570788958
+        },
+        {
+          "cycle": 5,
+          "phase": "measuring",
+          "elapsedMs": 6719.615666,
+          "processCount": 4,
+          "workingSetKiB": 618576,
+          "cpuPercent": 14.815888610234254
+        },
+        {
+          "cycle": 6,
+          "phase": "measuring",
+          "elapsedMs": 7012.191916,
+          "processCount": 4,
+          "workingSetKiB": 620720,
+          "cpuPercent": 12.223715268778223
+        },
+        {
+          "cycle": 7,
+          "phase": "measuring",
+          "elapsedMs": 7302.82075,
+          "processCount": 4,
+          "workingSetKiB": 639344,
+          "cpuPercent": 12.454012900255963
+        },
+        {
+          "cycle": 8,
+          "phase": "measuring",
+          "elapsedMs": 7634.2195409999995,
+          "processCount": 4,
+          "workingSetKiB": 681680,
+          "cpuPercent": 14.310274569313993
+        },
+        {
+          "cycle": 9,
+          "phase": "measuring",
+          "elapsedMs": 7902.838583,
+          "processCount": 4,
+          "workingSetKiB": 683104,
+          "cpuPercent": 12.707205988811513
+        },
+        {
+          "cycle": 10,
+          "phase": "measuring",
+          "elapsedMs": 8234.194458,
+          "processCount": 4,
+          "workingSetKiB": 686656,
+          "cpuPercent": 16.168884617462034
+        }
+      ],
+      "after": {
+        "phase": "measuring",
+        "elapsedMs": 8247.863291,
+        "processCount": 4,
+        "workingSetKiB": 687616,
+        "cpuPercent": 8.1208474490606
+      },
+      "electron": "30.5.1",
+      "chrome": "124.0.6367.243",
+      "platform": "darwin",
+      "arch": "arm64",
+      "viewport": [
+        1120,
+        692
+      ],
+      "zoom": 1,
+      "visible": false
+    },
+    {
+      "spawnToReadyMs": 364.42987500000163,
+      "ready": {
+        "type": "ready",
+        "rendererReadyMs": 129,
+        "hostToReadyMs": 234.859167
+      },
+      "result": {
+        "type": "result",
+        "nodeCount": 1050,
+        "textLines": 2000,
+        "cycles": 10,
+        "measurementsMs": {
+          "expand20Folders": [
+            37.400000005960464,
+            38.5,
+            30.5,
+            30.69999999552965,
+            30.899999998509884,
+            30.19999999552965,
+            31.100000001490116,
+            31.19999999552965,
+            34.100000001490116,
+            30.400000005960464
+          ],
+          "scrollTree": [
+            3.899999998509884,
+            11.299999997019768,
+            13.399999998509884,
+            13.5,
+            13.299999997019768,
+            13.399999998509884,
+            12.799999997019768,
+            12.300000004470348,
+            9.899999998509884,
+            13
+          ],
+          "open2000LineEditor": [
+            38.5,
+            33.30000000447035,
+            20.100000001490116,
+            21.700000002980232,
+            24.100000001490116,
+            22.100000001490116,
+            22.700000002980232,
+            26.599999994039536,
+            22.19999999552965,
+            19.399999998509884
+          ],
+          "switchEditor": [
+            19.600000001490116,
+            21.799999997019768,
+            22.899999998509884,
+            21.5,
+            22.600000001490116,
+            21.5,
+            22.19999999552965,
+            31,
+            15.400000005960464,
+            24.19999999552965
+          ],
+          "themeDark": [
+            16.799999997019768,
+            68.70000000298023,
+            63.20000000298023,
+            59.79999999701977,
+            67.59999999403954,
+            56.399999998509884,
+            59.400000005960464,
+            76.10000000149012,
+            53,
+            59.600000001490116
+          ],
+          "themeLight": [
+            58.399999998509884,
+            84.69999999552965,
+            75.60000000149012,
+            74.60000000149012,
+            85.70000000298023,
+            68,
+            73.79999999701977,
+            64.89999999850988,
+            70.59999999403954,
+            69.70000000298023
+          ],
+          "menuMount": [
+            62.100000001490116,
+            73.79999999701977,
+            59.599999994039536,
+            58.899999998509884,
+            79.70000000298023,
+            56.30000000447035,
+            60.600000001490116,
+            62.20000000298023,
+            68.80000000447035,
+            57.69999999552965
+          ],
+          "closeViews": [
+            17.700000002980232,
+            9.900000005960464,
+            14.399999998509884,
+            12.700000002980232,
+            13.699999995529652,
+            13.099999994039536,
+            11.299999997019768,
+            12.799999997019768,
+            7.899999998509884,
+            13.200000002980232
+          ]
+        },
+        "finalRegistry": {
+          "estimatedBytes": 0,
+          "liveInstanceCount": 0,
+          "snapshotCount": 0
+        },
+        "remainingEditors": 0
+      },
+      "samples": [
+        {
+          "phase": "idle",
+          "elapsedMs": 1241.880209,
+          "processCount": 4,
+          "workingSetKiB": 359536,
+          "cpuPercent": 0
+        },
+        {
+          "phase": "idle",
+          "elapsedMs": 2246.9235,
+          "processCount": 4,
+          "workingSetKiB": 359424,
+          "cpuPercent": 0.018866366227186758
+        },
+        {
+          "phase": "idle",
+          "elapsedMs": 3249.846834,
+          "processCount": 4,
+          "workingSetKiB": 359424,
+          "cpuPercent": 0.010338336795349084
+        },
+        {
+          "phase": "idle",
+          "elapsedMs": 4253.123834,
+          "processCount": 4,
+          "workingSetKiB": 359472,
+          "cpuPercent": 0.02954160322433611
+        },
+        {
+          "phase": "measuring",
+          "elapsedMs": 5257.825959000001,
+          "processCount": 4,
+          "workingSetKiB": 369056,
+          "cpuPercent": 0.5094193886450906
+        },
+        {
+          "phase": "measuring",
+          "elapsedMs": 6259.31,
+          "processCount": 4,
+          "workingSetKiB": 587728,
+          "cpuPercent": 12.819003767063727
+        },
+        {
+          "phase": "measuring",
+          "elapsedMs": 7262.295125000001,
+          "processCount": 4,
+          "workingSetKiB": 704256,
+          "cpuPercent": 12.35940747322485
+        }
+      ],
+      "cycles": [
+        {
+          "cycle": 1,
+          "phase": "measuring",
+          "elapsedMs": 5491.392667,
+          "processCount": 4,
+          "workingSetKiB": 450352,
+          "cpuPercent": 17.54010031243272
+        },
+        {
+          "cycle": 2,
+          "phase": "measuring",
+          "elapsedMs": 5833.935625,
+          "processCount": 4,
+          "workingSetKiB": 497808,
+          "cpuPercent": 16.72458347076561
+        },
+        {
+          "cycle": 3,
+          "phase": "measuring",
+          "elapsedMs": 6134.106917,
+          "processCount": 4,
+          "workingSetKiB": 550192,
+          "cpuPercent": 13.325170455143034
+        },
+        {
+          "cycle": 4,
+          "phase": "measuring",
+          "elapsedMs": 6427.756959,
+          "processCount": 4,
+          "workingSetKiB": 627088,
+          "cpuPercent": 12.19026419560436
+        },
+        {
+          "cycle": 5,
+          "phase": "measuring",
+          "elapsedMs": 6765.659084000001,
+          "processCount": 4,
+          "workingSetKiB": 701856,
+          "cpuPercent": 14.936984055552298
+        },
+        {
+          "cycle": 6,
+          "phase": "measuring",
+          "elapsedMs": 7047.319584000001,
+          "processCount": 4,
+          "workingSetKiB": 702976,
+          "cpuPercent": 12.273668598966916
+        },
+        {
+          "cycle": 7,
+          "phase": "measuring",
+          "elapsedMs": 7341.250292000001,
+          "processCount": 4,
+          "workingSetKiB": 704784,
+          "cpuPercent": 12.667330669886937
+        },
+        {
+          "cycle": 8,
+          "phase": "measuring",
+          "elapsedMs": 7658.6632500000005,
+          "processCount": 4,
+          "workingSetKiB": 705456,
+          "cpuPercent": 14.128159177699114
+        },
+        {
+          "cycle": 9,
+          "phase": "measuring",
+          "elapsedMs": 7940.812417,
+          "processCount": 4,
+          "workingSetKiB": 705616,
+          "cpuPercent": 16.746761331213797
+        },
+        {
+          "cycle": 10,
+          "phase": "measuring",
+          "elapsedMs": 8228.413875,
+          "processCount": 4,
+          "workingSetKiB": 706656,
+          "cpuPercent": 12.205976024110011
+        }
+      ],
+      "after": {
+        "phase": "measuring",
+        "elapsedMs": 8247.054,
+        "processCount": 4,
+        "workingSetKiB": 707184,
+        "cpuPercent": 4.136165794457304
+      },
+      "electron": "30.5.1",
+      "chrome": "124.0.6367.243",
+      "platform": "darwin",
+      "arch": "arm64",
+      "viewport": [
+        1120,
+        692
+      ],
+      "zoom": 1,
+      "visible": false
+    }
+  ]
+}

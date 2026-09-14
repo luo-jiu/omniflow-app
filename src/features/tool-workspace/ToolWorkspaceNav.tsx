@@ -16,13 +16,10 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { IconMusic } from '@douyinfe/semi-icons';
 import { Tooltip } from '@douyinfe/semi-ui';
-
-import claudeIconUrl from '@/assets/icons/ai-providers/claude.svg';
-import subtitleIconUrl from '@/assets/icons/material/subtitles.svg';
-import resourceGrabIconUrl from '@/assets/icons/material/resource-grab.svg';
-import videoIconUrl from '@/assets/icons/material/video.svg';
+import { toolRegistry } from './tool-registry';
+import type { ToolContribution } from './tool-contribution.types';
+import { mergeVisibleToolOrder, projectAvailableToolOrder } from './tool-workspace.layout';
 import type { ToolWorkspaceToolId } from './types';
 import { ToolNav } from './styles';
 
@@ -43,40 +40,10 @@ const COLLAPSED_TOOLTIP_STYLE: React.CSSProperties = {
   padding: '6px 8px',
 };
 
-const TOOL_ITEMS: Array<{ icon: React.ReactNode; id: ToolWorkspaceToolId; title: string }> = [
-  {
-    icon: <img className="tool-static-icon" src={claudeIconUrl} alt="" draggable={false} />,
-    id: 'ai-services',
-    title: 'AI 服务配置',
-  },
-  {
-    icon: <img className="tool-static-icon" src={subtitleIconUrl} alt="" draggable={false} />,
-    id: 'subtitle-translation',
-    title: 'AI 字幕翻译',
-  },
-  {
-    icon: <IconMusic />,
-    id: 'qqmusic-lyrics',
-    title: 'QQ 音乐歌词',
-  },
-  {
-    icon: <img className="tool-static-icon" src={videoIconUrl} alt="" draggable={false} />,
-    id: 'media-file-processing',
-    title: '媒体文件处理',
-  },
-  {
-    icon: <img className="tool-static-icon" src={resourceGrabIconUrl} alt="" draggable={false} />,
-    id: 'media-processing',
-    title: '资源捕获处理',
-  },
-];
-
-const TOOL_ITEM_BY_ID = new Map(TOOL_ITEMS.map((item) => [item.id, item]));
-
 type SortableToolItemProps = {
   active: boolean;
   collapsed: boolean;
-  item: (typeof TOOL_ITEMS)[number];
+  item: ToolContribution;
   onSelect: () => void;
 };
 
@@ -149,19 +116,20 @@ const ToolWorkspaceNav: React.FC<ToolWorkspaceNavProps> = ({
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
-  const orderedItems = order
-    .map((toolId) => TOOL_ITEM_BY_ID.get(toolId))
-    .filter((item): item is (typeof TOOL_ITEMS)[number] => Boolean(item));
+  const contributions = React.useSyncExternalStore(toolRegistry.subscribe, toolRegistry.getSnapshot);
+  const visibleOrder = React.useMemo(() => projectAvailableToolOrder(order, contributions.map(item => item.id)), [order, contributions]);
+  const byId = new Map(contributions.map(item => [item.id, item]));
+  const orderedItems = visibleOrder.map(id => byId.get(id)!);
 
   const handleDragEnd = React.useCallback((event: DragEndEvent) => {
     const activeId = event.active.id as ToolWorkspaceToolId;
     const overId = event.over?.id as ToolWorkspaceToolId | undefined;
     if (!overId || activeId === overId) return;
-    const fromIndex = order.indexOf(activeId);
-    const toIndex = order.indexOf(overId);
+    const fromIndex = visibleOrder.indexOf(activeId);
+    const toIndex = visibleOrder.indexOf(overId);
     if (fromIndex < 0 || toIndex < 0) return;
-    onOrderChange(arrayMove(order, fromIndex, toIndex));
-  }, [onOrderChange, order]);
+    onOrderChange(mergeVisibleToolOrder(order, arrayMove(visibleOrder, fromIndex, toIndex)));
+  }, [onOrderChange, order, visibleOrder]);
 
   return (
     <ToolNav className={collapsed ? 'is-collapsed' : undefined}>
@@ -171,7 +139,7 @@ const ToolWorkspaceNav: React.FC<ToolWorkspaceNavProps> = ({
         sensors={sensors}
         onDragEnd={handleDragEnd}
       >
-        <SortableContext items={order} strategy={verticalListSortingStrategy}>
+        <SortableContext items={visibleOrder} strategy={verticalListSortingStrategy}>
           <div className="tool-list">
             {orderedItems.map((item) => (
               <SortableToolItem

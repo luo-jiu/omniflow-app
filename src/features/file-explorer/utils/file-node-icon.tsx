@@ -1,3 +1,5 @@
+import ThemedDirectoryIcon from '@/features/appearance/ThemedDirectoryIcon';
+import { resolveDirectoryIconSemantic } from '@/features/appearance/icon-theme';
 import React from 'react';
 import { resolveNodeFileIdentity, type FileIdentityPreviewKind } from '@/features/file-identity';
 
@@ -464,52 +466,16 @@ export function getDirectoryBuiltInIcon(
   archiveMode?: number,
   expanded?: boolean,
 ): React.ReactNode | undefined {
+  const semantic = resolveDirectoryIconSemantic({ builtInType, archiveMode, expanded });
+  if (semantic.warnings.includes('invalid-default-archive')) return undefined;
   const normalized = String(builtInType || 'DEF').toUpperCase();
-  const normalizedArchiveMode = Number(archiveMode ?? 0) === 1 ? 1 : 0;
-  if (normalizedArchiveMode === 1 && normalized === 'DEF') {
-    return undefined;
-  }
-  if (normalized === 'DEF') {
-    return createIconNode(
-      getMaterialIconUrl(expanded ? 'folder-base-open' : 'folder-base') || '',
-      'default-folder',
-    );
-  }
-  if (normalized === 'COMIC') {
-    const iconName = normalizedArchiveMode === 1
-      ? (expanded ? 'folder-comic-archive-open' : 'folder-comic-archive')
-      : (expanded ? 'folder-comic-open' : 'folder-comic');
-    return createIconNode(getMaterialIconUrl(iconName) || getMaterialIconUrl('folder-comic') || '', 'comic-folder');
-  }
-  if (normalized === 'ASMR') {
-    const iconName = normalizedArchiveMode === 1
-      ? (expanded ? 'folder-asmr-archive-open' : 'folder-asmr-archive')
-      : (expanded ? 'folder-asmr-open' : 'folder-asmr');
-    return createIconNode(getMaterialIconUrl(iconName) || getMaterialIconUrl('folder-asmr') || '', 'asmr-folder');
-  }
-  if (normalized === 'VIDEO') {
-    const iconName = normalizedArchiveMode === 1
-      ? (expanded ? 'folder-video-archive-open' : 'folder-video-archive')
-      : (expanded ? 'folder-video-open' : 'folder-video');
-    return createIconNode(getMaterialIconUrl(iconName) || getMaterialIconUrl('video') || '', 'video-folder');
-  }
-  if (normalized === 'AUDIO') {
-    const iconName = normalizedArchiveMode === 1
-      ? (expanded ? 'folder-audio-archive-open' : 'folder-audio-archive')
-      : (expanded ? 'folder-audio-open' : 'folder-audio');
-    return createIconNode(
-      getMaterialIconUrl(iconName) || getMaterialIconUrl('audio') || '',
-      'audio-folder',
-    );
-  }
-  if (normalized === 'GALLERY') {
-    const iconName = normalizedArchiveMode === 1
-      ? (expanded ? 'folder-gallery-archive-open' : 'folder-gallery-archive')
-      : (expanded ? 'folder-gallery-open' : 'folder-gallery');
-    return createIconNode(
-      getMaterialIconUrl(iconName) || getMaterialIconUrl('image') || '',
-      'gallery-folder',
-    );
-  }
-  return createWarningIconNode(`未知内置类型: ${normalized}`);
+  if (semantic.warnings.includes('unknown-type')) return createWarningIconNode(`未知内置类型: ${normalized}`);
+  const kind = normalized === 'DEF' ? 'base' : normalized.toLowerCase();
+  const assetName = `folder-${kind}${semantic.key.endsWith('.archive') ? '-archive' : ''}${expanded ? '-open' : ''}`;
+  const fallback = normalized === 'VIDEO' ? 'video' : normalized === 'AUDIO' ? 'audio' : normalized === 'GALLERY' ? 'image' : `folder-${kind}`;
+  return React.createElement(ThemedDirectoryIcon, {
+    assetName,
+    src: getMaterialIconUrl(assetName) || getMaterialIconUrl(fallback) || '',
+    alt: normalized === 'DEF' ? 'default-folder' : `${kind}-folder`,
+  });
 }

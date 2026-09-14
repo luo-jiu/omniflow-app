@@ -1,0 +1,1 @@
+{"formatVersion":1,"id":"author.viewer","version":"0.1.0","sdkVersion":1,"minHostVersion":"0.2.2","platforms":["darwin"],"entry":"index.html","activation":["viewer:author.viewer.main"],"permissions":["resource.read"],"viewers":[{"id":"author.viewer.main","title":"只读查看器模板","extensions":["txt"]}]}

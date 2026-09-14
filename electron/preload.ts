@@ -917,3 +917,43 @@ contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
     return () => ipcRenderer.removeListener('embedded-browser:credential-autofilled', wrapped);
   },
 });
+
+contextBridge.exposeInMainWorld('electronAppearance', {
+  claim: (epoch: string) => ipcRenderer.invoke('appearance:claim', epoch),
+  publish: (view: unknown) => ipcRenderer.invoke('appearance:publish', view),
+  get: () => ipcRenderer.invoke('appearance:get'),
+  subscribe: (listener: (view: import('../src/features/appearance/theme-view').ThemeView) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, view: import('../src/features/appearance/theme-view').ThemeView) => listener(view);
+    ipcRenderer.on('appearance:changed', handler);
+    return () => ipcRenderer.removeListener('appearance:changed', handler);
+  },
+});
+
+contextBridge.exposeInMainWorld('electronPluginViewer', {
+  available: process.platform === 'darwin',
+  open: (input: import('../src/shared/plugin-viewer').PluginViewerOpen) => ipcRenderer.invoke('plugin-viewer:open', input),
+  close: (id: string) => ipcRenderer.invoke('plugin-viewer:close', id),
+  release: () => ipcRenderer.invoke('plugin-viewer:release'),
+  layout: (id: string, bounds: Electron.Rectangle | null) => ipcRenderer.invoke('plugin-viewer:layout', id, bounds),
+  theme: (id: string, theme: import('../packages/plugin-sdk/index.js').ThemeSnapshot) => ipcRenderer.invoke('plugin-viewer:theme', id, theme),
+  subscribe: (listener: (event: import('../src/shared/plugin-viewer').PluginViewerEvent) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, value: import('../src/shared/plugin-viewer').PluginViewerEvent) => listener(value);
+    ipcRenderer.on('plugin-viewer:event', handler);
+    return () => ipcRenderer.removeListener('plugin-viewer:event', handler);
+  },
+});
+
+contextBridge.exposeInMainWorld('electronPluginManagement', {
+  catalog: () => ipcRenderer.invoke('plugin-management:catalog'),
+  repairSettings: () => ipcRenderer.invoke('plugin-management:repair-settings'),
+  choosePackage: () => ipcRenderer.invoke('plugin-management:choose'),
+  commit: (ticket: string) => ipcRenderer.invoke('plugin-management:commit', ticket),
+  discard: (ticket: string) => ipcRenderer.invoke('plugin-management:discard', ticket),
+  action: (id: string, action: string) => ipcRenderer.invoke('plugin-management:action', id, action),
+  safeMode: (enabled: boolean) => ipcRenderer.invoke('plugin-management:safe-mode', enabled),
+  subscribe: (listener: (catalog: import('../src/shared/plugin-management').PluginCatalog) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, catalog: import('../src/shared/plugin-management').PluginCatalog) => listener(catalog);
+    ipcRenderer.on('plugin-management:changed', handler);
+    return () => ipcRenderer.removeListener('plugin-management:changed', handler);
+  },
+});

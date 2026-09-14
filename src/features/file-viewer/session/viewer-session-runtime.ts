@@ -37,7 +37,7 @@ export class ViewerSessionRuntime {
 
   constructor(
     private readonly registry: ViewerSessionRegistry = viewerSessionRegistry,
-    private readonly coldRuntime?: Pick<ViewerSessionColdRuntime, 'deleteResources'>,
+    private readonly coldRuntime?: Pick<ViewerSessionColdRuntime, 'deleteResources'> & Partial<Pick<ViewerSessionColdRuntime, 'deleteNodes'>>,
   ) {}
 
   start = () => {
@@ -89,11 +89,17 @@ export class ViewerSessionRuntime {
       });
       return identity ? [identity] : [];
     }));
+    const knownKeys = new Set(identities.map(serializeViewerResourceKey));
+    for (const identity of this.registry.getResourceIdentitiesForNodes(accountScope, libraryId, nodeIds)) {
+      const key = serializeViewerResourceKey(identity);
+      if (!knownKeys.has(key)) { identities.push(identity); knownKeys.add(key); }
+    }
     identities.forEach((identity) => {
       this.registry.disposeResource(identity, 'node-deleted');
       this.resourceReloadTokens.delete(serializeViewerResourceKey(identity));
     });
     await this.coldRuntime?.deleteResources(identities);
+    await this.coldRuntime?.deleteNodes?.(accountScope, libraryId, nodeIds);
   }
 
   createLiveInstanceKey(options: { libraryId: number; tabId: string }) {

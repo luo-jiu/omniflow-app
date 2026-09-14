@@ -10,15 +10,9 @@ import type {
 } from '@/features/embedded-browser/resources/model/embedded-browser-mpd-manifest';
 import type { EmbeddedBrowserCapturedResource } from '@/features/embedded-browser/resources/types';
 
-export const TOOL_WORKSPACE_TOOL_IDS = [
-  'ai-services',
-  'qqmusic-lyrics',
-  'subtitle-translation',
-  'media-file-processing',
-  'media-processing',
-] as const;
-
-export type ToolWorkspaceToolId = typeof TOOL_WORKSPACE_TOOL_IDS[number];
+export { TOOL_WORKSPACE_TOOL_IDS } from './tool-definitions';
+export type { ToolWorkspaceToolId } from './tool-definitions';
+import type { ToolWorkspaceToolId } from './tool-definitions';
 
 export type ToolWorkspaceMediaMode = 'resources' | 'hls-download' | 'mpd-download';
 

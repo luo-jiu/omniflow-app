@@ -1,3 +1,4 @@
+import { resourceViewerId } from '@/shared/viewer-contribution-id';
 import {
   isViewerLiveInstanceKey,
   isViewerResourceKey,
@@ -219,6 +220,35 @@ export class ViewerSessionRegistry {
     };
   }
 
+  captureTab(libraryId: number, tabId: string): ViewerLiveInstanceKey[] {
+    const captured: ViewerLiveInstanceKey[] = [];
+    for (const entry of this.liveEntries.values()) {
+      if (entry.registration.key.libraryId !== libraryId || entry.registration.key.tabId !== tabId) continue;
+      this.captureLiveInstance(entry.registration.key);
+      captured.push(entry.registration.key);
+    }
+    return captured;
+  }
+
+  detachCapturedInstances(keys: ViewerLiveInstanceKey[]): void {
+    keys.forEach(key => this.removeLiveEntry(serializeViewerLiveInstanceKey(key), 'viewer-replaced'));
+  }
+
+  captureAndDetachTab(libraryId: number, tabId: string): void {
+    this.detachCapturedInstances(this.captureTab(libraryId, tabId));
+  }
+
+  getResourceIdentitiesForNodes(accountScope: string, libraryId: number, nodeIds: number[]): ViewerResourceKey[] {
+    const nodes = new Set(nodeIds.map(id => `node:${id}`));
+    const identities = new Map<string, ViewerResourceKey>();
+    const add = (identity: ViewerResourceKey) => {
+      if (identity.accountScope === accountScope && identity.libraryId === libraryId && nodes.has(identity.resourceIdentity)) identities.set(serializeViewerResourceKey(identity), identity);
+    };
+    this.snapshots.forEach(entry => add(entry.snapshot.identity));
+    this.liveEntries.forEach(entry => add(entry.registration.identity));
+    return [...identities.values()];
+  }
+
   getLiveRetentionProjections(): ViewerLiveRetentionProjection[] {
     return Array.from(this.liveEntries.values()).map(({ registration }) => {
       const { pinReasons, projectionReliable } = readLivePinProjection(registration);
@@ -226,6 +256,7 @@ export class ViewerSessionRegistry {
         libraryId: registration.key.libraryId,
         tabId: registration.key.tabId,
         viewerKind: registration.identity.viewerKind,
+        ...(registration.identity.viewerId ? { viewerId: registration.identity.viewerId } : {}),
         hotCostUnits: readLiveHotCostProjection(registration),
         pinReasons,
         pinProjectionReliable: projectionReliable,
@@ -260,6 +291,9 @@ export class ViewerSessionRegistry {
         reason: 'viewer-kind-mismatch',
         pinReasons: [],
       };
+    }
+    if (resourceViewerId(entry.registration.identity.viewerId, target.viewerKind) !== resourceViewerId(target.viewerId, target.viewerKind)) {
+      return { status: 'blocked', reason: 'viewer-id-mismatch', pinReasons: [] };
     }
     const pinProjection = readLivePinProjection(entry.registration);
     if (!pinProjection.projectionReliable) {
@@ -309,6 +343,7 @@ export class ViewerSessionRegistry {
       registration.key.libraryId === target.libraryId
       && registration.key.tabId === target.tabId
       && registration.identity.viewerKind === target.viewerKind
+      && resourceViewerId(registration.identity.viewerId, target.viewerKind) === resourceViewerId(target.viewerId, target.viewerKind)
     ));
     if (!entry) return false;
     const storedSnapshot = this.snapshots.get(

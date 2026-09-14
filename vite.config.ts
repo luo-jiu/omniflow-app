@@ -87,11 +87,13 @@ export default defineConfig(({ mode }) => {
     react(),
     electron({
       main: {
+        onstart({ startup }) { startup(['.']); },
         // Shortcut of `build.lib.entry`.
         entry: { main: 'electron/main.ts', 'agent-document-worker': 'electron/service/agent/documents/document-worker.ts' },
         vite: {
           define: {
             __OMNIFLOW_API_BASE_URL__: JSON.stringify(apiBaseUrl),
+            __OMNIFLOW_STORAGE_ORIGINS__: JSON.stringify(parseHttpOrigins(env.VITE_STORAGE_ORIGINS || 'http://localhost:9000 http://127.0.0.1:9000', 'VITE_STORAGE_ORIGINS')),
             __OMNIFLOW_UPDATE_BASE_URL__: JSON.stringify(updateBaseUrl),
           },
           build: {
@@ -108,6 +110,7 @@ export default defineConfig(({ mode }) => {
         // Shortcut of `build.rollupOptions.input`.
         // Preload scripts may contain Web assets, so use the `build.rollupOptions.input` instead `build.lib.entry`.
         input: path.join(__dirname, 'electron/preload.ts'),
+        vite: { build: { rollupOptions: { output: { format: 'cjs', entryFileNames: 'preload.cjs' } } } },
       },
       // Ployfill the Electron and Node.js API for Renderer process.
       // If you want use Node.js in Renderer process, the `nodeIntegration` needs to be enabled in the Main process.

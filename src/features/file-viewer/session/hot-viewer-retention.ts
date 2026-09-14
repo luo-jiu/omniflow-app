@@ -1,5 +1,6 @@
+import { resourceViewerId } from '@/shared/viewer-contribution-id';
 import type { FileViewerFileType } from '@/shared/file-viewer-types';
-import { viewerSessionPolicies } from './viewer-session-policies';
+import { getViewerSessionPolicy } from './viewer-session-policies';
 import type {
   ViewerHotEvictionBlockReason,
   ViewerHotEvictionPreparationResult,
@@ -26,6 +27,7 @@ export interface ViewerHotRetentionTabProjection {
   libraryId: number | null;
   tabId: string;
   viewerKind: FileViewerFileType | null;
+  viewerId?: string;
 }
 
 export interface ViewerHotRetentionBudget {
@@ -110,11 +112,11 @@ function resolveBudgetPressure(
   return 'none';
 }
 
-export function resolveDefaultViewerHotProfile(viewerKind: FileViewerFileType): {
+export function resolveDefaultViewerHotProfile(viewerKind: FileViewerFileType, viewerId?: string): {
   costUnits: number;
   evictable: boolean;
 } {
-  const policy = viewerSessionPolicies[viewerKind];
+  const policy = getViewerSessionPolicy(viewerKind, viewerId);
   return {
     costUnits: VIEWER_HOT_COST_UNITS[policy.defaultHotCost],
     evictable: policy.warm === 'memory',
@@ -126,16 +128,16 @@ export function buildViewerHotRetentionCandidates(
   liveProjections: ViewerLiveRetentionProjection[],
 ): ViewerHotRetentionCandidate[] {
   const liveBySlot = new Map(liveProjections.map((projection) => [
-    JSON.stringify([projection.libraryId, projection.tabId, projection.viewerKind]),
+    JSON.stringify([projection.libraryId, projection.tabId, projection.viewerKind, resourceViewerId(projection.viewerId, projection.viewerKind)]),
     projection,
   ]));
 
   return tabs.map((tab) => {
     const profile = tab.viewerKind
-      ? resolveDefaultViewerHotProfile(tab.viewerKind)
+      ? resolveDefaultViewerHotProfile(tab.viewerKind, tab.viewerId)
       : { costUnits: VIEWER_HOT_COST_UNITS.light, evictable: false };
     const liveProjection = tab.libraryId != null && tab.viewerKind
-      ? liveBySlot.get(JSON.stringify([tab.libraryId, tab.tabId, tab.viewerKind]))
+      ? liveBySlot.get(JSON.stringify([tab.libraryId, tab.tabId, tab.viewerKind, resourceViewerId(tab.viewerId, tab.viewerKind)]))
       : undefined;
     const pinReasons = new Set<ViewerSessionPinReason>(liveProjection?.pinReasons ?? []);
     if (tab.active) pinReasons.add('active');
@@ -246,6 +248,7 @@ export function prepareViewerHotEvictions(
         libraryId: tab.libraryId,
         tabId,
         viewerKind: tab.viewerKind,
+        ...(tab.viewerId ? { viewerId: tab.viewerId } : {}),
       });
     } catch {
       blocked.push({ tabId, reason: 'preparation-failed' });
@@ -256,6 +259,7 @@ export function prepareViewerHotEvictions(
         libraryId: tab.libraryId,
         tabId,
         viewerKind: tab.viewerKind,
+        ...(tab.viewerId ? { viewerId: tab.viewerId } : {}),
       });
       return;
     }

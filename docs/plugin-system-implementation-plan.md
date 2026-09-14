@@ -1,10 +1,10 @@
 # OmniFlow App 插件化实施计划
 
-更新时间：2026-09-13
+更新时间：2026-09-14
 
 适用范围：`omniflow-app` 的外观协议、贡献入口、桌面插件宿主和只读查看器 SDK。
 
-状态：**首轮静态调研完成，实施待开始，运行方案尚未验收。** 本文作为后续工程推进依据；这里提出的目录、字段、接口和状态均为待实现设计，不代表已经存在。
+状态：**A0 macOS 基础基线、A1 内置外观、B1 内置贡献入口及 B2 查看器状态兼容已完成，C1 最小 SDK 与隔离实验、C2 第一方 CSV 完整链路已通过 macOS 验收；D1 本地安装、管理与恢复已完成 macOS 验证；D2 第二样板与独立开发交付已完成，本轮 macOS 只读插件工程收口。** 当前事实见 [外观系统](appearance-system.md)，已验证与剩余项见 [A1 验收记录](plugin-system-a1-acceptance.md)。本地受限只读包的安装/执行已在 macOS 验证，发行包及其他平台未验收。C1 当前契约与证据见 [SDK 与隔离实验](plugin-system-c1-sdk-isolation.md)。
 
 上位方针：[插件系统与主题扩展方针](plugin-system-and-theming-policy.md)。本文细化方针第 1～3 阶段；写入与高级扩展只记录进入条件，不提前宣称可用。本文不规划内置 Agent 的开发或迁移。
 
@@ -36,12 +36,12 @@
 | styled-components 在主入口注入静态 theme 对象 | [main.tsx](../src/main.tsx)、[旧主题对象](../src/assets/theme/index.ts) | 旧对象转为解析结果适配，不发布为 SDK |
 | overlay 自行通过 localStorage 和 matchMedia 解析主题 | [OverlayThemeBridge](../src/overlay/OverlayThemeBridge.tsx) | 需要初始快照、订阅、版本和重连；不能作为隔离插件的同步方案直接复用 |
 | 图标集中选择，但语义、包内 SVG URL 和 React 渲染耦合；归档标签借用 success 色 | [节点图标](../src/features/file-explorer/utils/file-node-icon.tsx)、[目录树样式](../src/features/file-explorer/components/directory-tree/style.ts) | 分开事实、资产和宿主装饰；增加归档独立 token |
-| 工具 ID、导航项和渲染分支各自固定 | [工具类型](../src/features/tool-workspace/types.ts)、[导航](../src/features/tool-workspace/ToolWorkspaceNav.tsx)、[工具壳](../src/features/tool-workspace/index.tsx) | 抽取贡献描述及加载入口，保留现有工具业务 owner |
-| 工具状态白名单与排序归一化会过滤未知 ID | [工具状态](../src/features/tool-workspace/tool-workspace.state.ts)、[工具布局](../src/features/tool-workspace/tool-workspace.layout.ts) | 注册表改造必须同时处理恢复和排序，不能只改渲染 |
-| 系统视图是固定联合类型对应组件表；目录菜单经字符串动作回传 | [系统注册表](../src/features/system-workspace/registry.tsx)、[目录菜单](../src/features/file-explorer/components/directory-tree/context-menu/DirectoryContextMenu.tsx) | 可复用声明式入口思想，但内部 React 组件及中文动作字符串不能成为公共 SDK |
+| 工具导航和渲染已订阅同一内置贡献 registry，旧工具 ID 保留 | [工具类型](../src/features/tool-workspace/types.ts)、[导航](../src/features/tool-workspace/ToolWorkspaceNav.tsx)、[工具壳](../src/features/tool-workspace/index.tsx) | B1 已接入；仍保留现有工具业务 owner，非第三方 SDK |
+| 工具状态与排序已保留合法 namespaced ID，只渲染已注册贡献 | [工具状态](../src/features/tool-workspace/tool-workspace.state.ts)、[工具布局](../src/features/tool-workspace/tool-workspace.layout.ts) | B1 已验证隐藏排序保留、刷新恢复和不可用视图回退 |
+| 系统视图仍为固定组件表；目录基础动作已用稳定命令 ID，动态类型/排序动作兼容保留 | [系统注册表](../src/features/system-workspace/registry.tsx)、[目录菜单](../src/features/file-explorer/components/directory-tree/context-menu/DirectoryContextMenu.tsx) | 可复用声明式入口思想，但内部 React 组件及中文动作字符串不能成为公共 SDK |
 | 文件事实由统一 resolver 判定，dispatcher 接收 fileType 后分发，另有本地预览分支 | [文件识别](../src/features/file-identity/resolver.ts)、[分发器](../src/features/file-viewer/components/file-dispatcher/index.tsx) | 匹配插件位于事实识别之后；首期只接入获准的资料库文件，本地预览维持既有链路 |
-| tab 记录 fileType，没有独立查看器贡献 ID | [预览上下文类型](../src/contexts/file-viewer.context.ts)、[预览 owner](../src/contexts/FileViewerContext.tsx) | 分离文件事实与查看器身份，保留同一文件单 tab 默认行为 |
-| Session key、校验、冷热策略和关闭行为都绑定内置 viewerKind | [Session 类型](../src/features/file-viewer/session/viewer-session.types.ts)、[身份校验](../src/features/file-viewer/session/viewer-session-identity.ts)、[策略](../src/features/file-viewer/session/viewer-session-policies.ts)、[Cold 存储](../src/features/file-viewer/session/viewer-session-cold-store.ts) | 需要身份与旧数据兼容适配，不能只把联合类型改成 string |
+| tab 已分别记录 fileType、可选 viewerId 和 viewerGeneration | [预览上下文类型](../src/contexts/file-viewer.context.ts)、[预览 owner](../src/contexts/FileViewerContext.tsx) | B2 已接入，保留同一文件单 tab 默认行为 |
+| Session 保留严格 viewerKind，额外贡献增加 viewerId 命名空间，旧内置 key 保持 | [Session 类型](../src/features/file-viewer/session/viewer-session.types.ts)、[身份校验](../src/features/file-viewer/session/viewer-session-identity.ts)、[策略](../src/features/file-viewer/session/viewer-session-policies.ts)、[Cold 存储](../src/features/file-viewer/session/viewer-session-cold-store.ts) | B2 已补齐 Warm/Cold、回退清理和旧数据兼容；第三方执行仍未开放 |
 | 已有按 tab、资料库、session 释放的路径；Text draft 独立持久化 | [统一释放](../src/features/workspace-resource-release/index.ts)、[关闭策略](../src/features/file-viewer/session/viewer-session-close.ts)、[草稿存储](../src/features/file-viewer/session/viewer-draft-store.ts) | 插件句柄接入统一清理，不能因停用或迁移误删用户草稿 |
 | preload 暴露通用 IPC、本机读写和通用请求；TextViewer 使用宿主 fetch 读取正文 | [preload](../electron/preload.ts)、[TextViewer](../src/features/file-viewer/components/text-viewer/index.tsx) | 插件必须有专用受限通道，不能复用主 preload 或直接传出认证/签名链接 |
 | 当前构建统一处理应用 renderer/main/preload，带内部 alias 与网络 CSP | [Vite 配置](../vite.config.ts) | 插件需独立构建与资源策略，不继承宿主 alias、依赖和 CSP |
@@ -79,16 +79,20 @@
 | 批次 | 对应方针阶段 | 依赖 | 交付和退出门槛 | 当前状态 |
 | --- | --- | --- | --- | --- |
 | R0 静态调研与实施计划 | 准备 | 无 | 代码入口、风险、边界、批次和验收可追踪 | 静态部分完成；运行基线待 A0 |
-| A0 基线与契约清单 | 1 | R0 | 记录原行为、运行基线、token 清单、兼容 fixture 和首批接口决策 | 未开始 |
-| A1 主题与图标 | 1 | A0 | 统一主题结果；内置配色/图标独立切换与回退；跨窗口一致 | 未开始 |
-| B1 命令与菜单入口 | 1 | A0 | 稳定命令 ID、声明式入口、内置适配及恢复兼容 | 未开始 |
-| B2 查看器贡献与恢复身份 | 1 | B1 | 匹配与选择策略、独立 viewerId、旧 tab/Session 兼容及内置兜底 | 未开始 |
-| C1 SDK 与隔离样板实验 | 2 | A1、B2 | 独立构建、最小消息契约、隔离方案与强制停止实证 | 未开始 |
-| C2 第一方 CSV 完整链路 | 2 | C1 | SDK 读取、呈现、主题、恢复、关闭和异常回退全部贯通 | 未开始 |
-| D1 安装与第三方只读边界 | 3 | C2 | 手动安装/更新/停用、授权、恢复入口及恶意 fixture 验证 | 未开始 |
-| D2 第二样板与外部交付 | 3 | D1 | 第二功能无宿主专用分支；独立开发验收；支持范围可发布 | 未开始 |
+| A0 基线与契约清单 | 1 | R0 | 记录原行为、运行基线、token 清单、兼容 fixture 和首批接口决策 | 已验证完成（macOS 基础范围），见 A0 基线记录 |
+| A1 主题与图标 | 1 | A0（运行接入前） | 统一主题结果；内置配色/图标独立切换与回退；跨窗口一致 | 已验证完成（macOS 内置外观范围），见 [验收记录](plugin-system-a1-acceptance.md) |
+| B1 命令与菜单入口 | 1 | A0 | 稳定命令 ID、声明式入口、内置适配及恢复兼容 | 已验证完成（内置贡献范围），见 [贡献入口与验收](plugin-system-b1-contributions.md) |
+| B2 查看器贡献与状态恢复标识 | 1 | B1 | 匹配与选择策略、独立 viewerId、旧 tab/Session 兼容及内置兜底 | 已验证完成（可信宿主/macOS 范围），见 [实现与验收](plugin-system-b2-viewers.md) |
+| C1 SDK 与隔离样板实验 | 2 | A1、B2 | 独立构建、最小消息契约、隔离方案与强制停止实证 | 已完成（macOS），见 [C1](plugin-system-c1-sdk-isolation.md) |
+| C2 第一方 CSV 完整链路 | 2 | C1 | SDK 读取、呈现、主题、恢复、关闭和异常回退全部贯通 | 已完成（macOS 第一方开发预览），见 [C2](plugin-system-c2-csv-viewer.md) |
+| D1 安装与第三方只读边界 | 3 | C2 | 手动安装/更新/停用、授权、恢复入口及恶意 fixture 验证 | 已完成（macOS 本地只读范围），见 [D1](plugin-system-d1-management.md) |
+| D2 第二样板与外部交付 | 3 | D1 | 第二功能无宿主专用分支；独立开发验收；支持范围可发布 | 已完成（macOS 技术验证），见 [D2](plugin-system-d2-external-development.md) |
 
 推荐实际执行顺序：A0 → A1 → B1 → B2 → C1 → C2 → D1 → D2。每批可拆为多个小改动；不为一次提交跨越多个状态 owner 大规模重构。
+
+当前推进：真实主程序隔离加载/空闲资源与 80 轮组件趋势补测已完成，A0 按明确的 macOS 基础范围收口；实际业务 I/O 和插件样板性能继续在 C1 度量。A1 已接入 owner、存储、设置、编辑器、目录图标和原生 overlay，不能再按“仅有纯模型”理解。末轮桌面验收已完成，原外观和验收现场已恢复；Windows/Linux 与第三方包仍按后续阶段单独验证。
+
+当前实现与维护边界见 [外观系统](appearance-system.md)，内部契约详见 [主题事务、快照与图标契约](plugin-system-a1-state-and-icons.md)。
 
 ### 4.1 A0：运行基线与最小决策
 
@@ -175,6 +179,8 @@
 
 ### 4.7 D1：安装、授权与恢复
 
+- 在现有宿主「设置」内交付「插件管理」页面：本地包安装、插件列表/详情、版本与兼容状态、启用/停用、权限查看与撤销、本地包更新、卸载及失败日志入口。列表为空、加载中、失败、被阻止、运行中与操作进行中必须有明确状态；状态来自宿主，不由页面另建安装事实源。
+- 「外观设置」独立于插件管理，承接 A1 的颜色主题/图标包选择、预览、取消与恢复默认；同包外观可用不代表代码获准执行。C1 先交付最小开发加载与诊断入口，D1 形成用户管理闭环；商城不在首期范围。
 - 支持本地包手动安装，安装先进入 staging，验证清单、SDK/平台、重复身份、完整性、包内路径、符号链接、大小及解包边界后发布；不执行安装脚本。
 - 安装记录和实例状态分离。安装/启用外观贡献不自动激活同包代码或授予读取权限；授权展示真实用途、范围和新增权限。
 - 授权取原用户权限 ∩ 插件授权 ∩ 当前资源范围；每次调用复验。切账号销毁旧实例与能力；切库关闭旧库句柄和实例绑定，保留由现有 owner 管理的合法工作区恢复信息。
@@ -183,7 +189,7 @@
 - 卸载默认保留用户文件和插件持久数据；单独提供明确的数据清理操作。失效 UI snapshot 可按既有配额清理，不把草稿当缓存删除。
 - 提供无需成功激活第三方即可进入的恢复入口：禁用第三方代码启动、查看失败原因、停用坏插件、恢复内置主题/图标；损坏外观不能遮蔽恢复界面。
 
-退出：安装失败不留下半注册贡献；更新失败可恢复；越界请求全部失败；死循环可停止；未启用插件不执行代码；重启后状态一致。
+退出：管理页面中的安装、权限、启停、更新、卸载和失败恢复可操作且与宿主状态一致；坏插件无法阻止进入管理/恢复界面；安装失败不留下半注册贡献；更新失败可恢复；越界请求全部失败；死循环可停止；未启用插件不执行代码；重启后状态一致。
 
 ### 4.8 D2：复用与外部开发验收
 
@@ -229,7 +235,7 @@
 | V07 | DOM/IPC/文件/网络旁路、导航、新窗口、包资源越界 | C1、D1 | Electron 实测；不能仅以 mock SDK 通过替代 |
 | V08 | 挂死、崩溃、超时、关闭、停用、切库/账号、迟到回包 | C2、D1 | 主壳可用，实例/句柄/订阅/请求清零或回到明确基线 |
 | V09 | CSV 边界、超限、取消、编码与版本变化 | C2 | 合成数据测试、可见错误和内容完整性结果 |
-| V10 | 坏包、重复 ID、解包攻击、升级失败、缺失和恢复启动 | D1 | 无半安装/残留贡献，原版本和文件可用 |
+| V10 | 管理页安装/权限/启停/更新/卸载闭环；坏包、重复 ID、解包攻击、升级失败、缺失和恢复启动 | D1 | UI 与宿主状态一致，无半安装/残留贡献，原版本和文件可用 |
 | V11 | 启动、空闲、目录浏览、切 tab、连续开关资源趋势 | A0、C1、D2 | 同方法前后测量、明确预算与结果；无持续泄漏 |
 | V12 | 100% 缩放、标题栏、overlay 遮挡、窗口重建和 DPI | A1、C1、D2 | 按平台记录，不把未验证写成支持 |
 
@@ -258,8 +264,8 @@
 
 ## 8. 推进与维护规则
 
-- 后续任务以批次 ID 指定范围；默认下一项是 **A0**。开工读取本文、上位方针、项目必读规范及涉及的专题。
-- 每批先更新必要契约决策，再实施与验证；状态只能写“未开始/进行中/已验证完成/受阻”，并注明证据和未完成项。当前本计划通过静态自检，不代表 A0 或任何实现批次完成。
+- 后续任务以批次 ID 指定范围；**A0～D2 已按 macOS 范围收口**；跨平台、发行和高级能力另行确定范围。开工读取本文、上位方针、项目必读规范及涉及的专题。
+- 每批先更新必要契约决策，再实施与验证；状态只能写“未开始/进行中/已验证完成/受阻”，并注明证据和未完成项。阶段状态以本表及链接的验收记录为准，不以代码量或单元测试数代替运行验收。
 - 能力真正落地后更新上位方针第 2 节当前事实，并同步主题、工作区、Viewer、overlay、平台及验证专题中实际受影响的内容。
 - 如果第二插件仍需要专用主壳分支、通用 preload 扩权或私有 SDK，暂停扩大功能，回到公共边界调整；新增通用能力需写清使用场景、权限、清理和兼容价值。
 - 全阶段完成后将本文收敛为当前结论、已冻结契约入口、验收证据和剩余项，不长期积累逐日流水账。

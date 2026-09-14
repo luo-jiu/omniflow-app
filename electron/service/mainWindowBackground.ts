@@ -1,5 +1,11 @@
 import { nativeTheme, type BrowserWindow } from 'electron'
 import { getMainWindowPlatformOptions } from '../platform'
+const appearanceBackgrounds = new WeakMap<BrowserWindow, string>()
+
+export function applyMainWindowAppearanceBackground(win: BrowserWindow, color: string): void {
+  appearanceBackgrounds.set(win, color)
+  if (!win.isDestroyed()) win.setBackgroundColor(getMainWindowPlatformOptions().vibrancy ? '#00000000' : color)
+}
 
 // Vibrant sidebars need a transparent canvas; solid windows match --app-bg.
 export function getMainWindowBackgroundColor(): string {
@@ -9,7 +15,7 @@ export function getMainWindowBackgroundColor(): string {
 
 export function syncMainWindowBackground(win: BrowserWindow): void {
   const update = () => {
-    if (!win.isDestroyed()) win.setBackgroundColor(getMainWindowBackgroundColor())
+    if (!win.isDestroyed()) win.setBackgroundColor(getMainWindowPlatformOptions().vibrancy ? '#00000000' : appearanceBackgrounds.get(win) ?? getMainWindowBackgroundColor())
   }
   update()
   nativeTheme.on('updated', update)

@@ -1,0 +1,112 @@
+{
+  "platform": "darwin",
+  "versions": {
+    "node": "20.16.0",
+    "acorn": "8.11.3",
+    "ada": "2.8.0",
+    "ares": "1.31.0",
+    "base64": "0.5.2",
+    "brotli": "1.0.9",
+    "cjs_module_lexer": "1.2.2",
+    "cldr": "43.0",
+    "icu": "73.1",
+    "llhttp": "8.1.2",
+    "modules": "123",
+    "napi": "9",
+    "nghttp2": "1.61.0",
+    "openssl": "0.0.0",
+    "simdutf": "5.2.8",
+    "tz": "2024a",
+    "undici": "6.19.2",
+    "unicode": "15.0",
+    "uv": "1.46.0",
+    "uvwasi": "0.0.21",
+    "v8": "12.4.254.20-electron.0",
+    "zlib": "1.3.0.1-motley",
+    "electron": "30.5.1",
+    "chrome": "124.0.6367.243"
+  },
+  "checks": {
+    "network-control-reaches-server": true,
+    "independent-csv-renders-text": true,
+    "synthetic-session-separated": true,
+    "no-host-preload-node-or-dom": true,
+    "theme-isolated-and-monotonic": true,
+    "activity-resumes": true,
+    "distinct-renderer-pids": true,
+    "network-fetch-websocket-image-media-form-popup-download-denied": true,
+    "navigation-denied": true,
+    "cross-instance-handle-denied": true,
+    "reading-state-instance-isolation": true,
+    "settings-plugin-namespace-separated": true,
+    "unregistered-source-denied": true,
+    "notification-permission-denied": true,
+    "file-scheme-fetch-denied": true,
+    "preload-subscription-quota": true,
+    "same-id-source-conflict-denied": true,
+    "deadloop-watchdog-stops-only-offender": true,
+    "reading-state-restored-after-reload": true,
+    "nested-frame-terminates-instance": true,
+    "startup-timeout-stops-unready-instance": true,
+    "repeated-load-stop-zero-bindings-and-views": true,
+    "iframe-dom-sandbox-denies-parent": true
+  },
+  "csvReadyMs": 127,
+  "pids": {
+    "host": 17206,
+    "csv": 17209,
+    "attack": 17210
+  },
+  "memoryKiB": [
+    {
+      "pid": 17206,
+      "workingSetSize": 82368
+    },
+    {
+      "pid": 17209,
+      "workingSetSize": 87008
+    },
+    {
+      "pid": 17210,
+      "workingSetSize": 88784
+    }
+  ],
+  "hangStopMs": 3347,
+  "stopMs": 0,
+  "startupStopMs": 5009,
+  "iframe": {
+    "mainProcessId": 15,
+    "childProcessId": 15,
+    "hostRespondedDuringHang": false
+  },
+  "completed": true,
+  "date": "2026-09-14",
+  "manualValidation": {
+    "status": "passed",
+    "date": "2026-09-14",
+    "platform": "macOS",
+    "fixture": "isolated synthetic CSV; temporary Electron bundle with distinct application identity",
+    "checks": [
+      "initial-denial-grant-revoke-regrant",
+      "light-dark-text-and-style-isolation",
+      "compact-setting-restored-on-reload",
+      "pause-resume",
+      "native-window-zoom-and-restore",
+      "modal-overlay-nested-content-and-input",
+      "tab-escape-focus-return-and-space-toggle",
+      "stop-removes-view-and-reload-restores",
+      "bounded-diagnostic-output"
+    ],
+    "fix": "Development modal handles Escape and returns focus to the live plugin view"
+  },
+  "verification": {
+    "lint": "passed",
+    "testFilesPassed": 366,
+    "testsPassed": 2543,
+    "testFilesSkipped": 3,
+    "testsSkipped": 7,
+    "build": "passed",
+    "rerunAfterManualFix": "lint, 2543 tests and build passed"
+  },
+  "diagnosticCount": 38
+}

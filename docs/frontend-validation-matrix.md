@@ -78,6 +78,13 @@
 
 ## 2. 通用基线
 
+查看器贡献的同 tab 切换、旧恢复 key、不同 viewerId 的 Warm/Cold 隔离、缺失回退及节点清理见 [B2 验收](plugin-system-b2-viewers.md)。文件写入权限仍未开放；第三方隔离候选已通过 C1 开发实验自动验证及 macOS 原生交互验收，见 [C1 SDK 与隔离实验](plugin-system-c1-sdk-isolation.md)。
+
+第一方 CSV 的真实授权、206 行分页、撤权销毁、关闭重开恢复、工具区往返、亮暗主题和原文件属性 overlay 已在第三个 win 资料库的本机 MinIO 验证，见 [C2 验收](plugin-system-c2-csv-viewer.md)。自动回归覆盖跨库/撤权/版本/迟到回包，不使用第一个资料库；保留合成 CSV 供复测。
+
+
+外观系统的配色/目录图标组合、预览取消、账号隔离、保存恢复、CodeMirror 与 overlay 快照检查见 [A1 验收记录](plugin-system-a1-acceptance.md)；实际未完成项不能被单元测试结果替代。
+
 只要涉及 `omniflow-app` 代码，默认先做：
 
 ```bash
@@ -782,3 +789,11 @@ macOS 系统 Zsh 探测成功后，生产 Service Runtime 会动态注册 `shell
 - 已经出现多次“明明测过但漏了同类边界”的问题
 
 这份文档的目标不是越来越长，而是长期代表“当前前端最值得优先验证的真实风险面”。
+
+## 本地插件管理（D1）
+
+管理页面、安装预检/过期拒绝、启用与读取批准分离、真实 CSV 打开、更新、回滚、恢复模式、停用后内置回退及卸载保留说明已在 macOS 验证。仅使用第三个 win 资料库的既有合成 CSV；测试本地包已从实际 profile 移除，设置/阅读快照保留。恶意 ZIP、死循环、内存限额、本机文件选择拦截、70 次 session 复用和持久化恢复在临时宿主自动验收。详见 [D1](plugin-system-d1-management.md)。
+
+## 独立插件开发交付（D2）
+
+JSON 树、工程生成器、仓库外离线构建/ZIP、独立更新及同格式 CSV 候选已验证，宿主未添加专属分支。实际验收仅用第三个 win 的合成 JSON（759 节点）及既有 CSV，覆盖精确数字、节点详情、展开/分页恢复与默认选择；测试插件已移除，用户数据保留。结果和平台限制见 [D2](plugin-system-d2-external-development.md)。

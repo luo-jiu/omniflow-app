@@ -1,0 +1,137 @@
+import { app, BrowserWindow, session } from 'electron';
+import { PluginDevelopmentHost, registerPluginScheme } from '../../electron/service/extensions/isolated-view.ts';
+import { writeFile, readFile, cp } from 'node:fs/promises';
+import { createServer } from 'node:http';
+import path from 'node:path';
+import assert from 'node:assert/strict';
+const work = process.env.OMNIFLOW_LAB_WORK;
+const sample = process.env.OMNIFLOW_LAB_SAMPLE;
+app.setPath('userData', path.join(work, 'profile'));
+registerPluginScheme();
+const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+async function until(check, timeout = 6500) { const start = Date.now(); while (!await check()) { if (Date.now() - start > timeout) throw new Error('Condition timeout'); await pause(50); } }
+const results = { platform: process.platform, versions: process.versions, checks: {} };
+function check(name, value) { assert.ok(value, name); results.checks[name] = true; console.log('PASS ' + name); }
+const theme = { schemaVersion: 1, revision: 1, mode: 'light', colors: { 'surface.app': '#ffffff', 'text.primary': '#222222' } };
+const bytes = Buffer.from('name,value\r\n"synthetic,<b>",42\r\n');
+const authority = { accountScope: 'synthetic-account', libraryId: 3, nodeId: 999999, name: 'fixture.csv', size: bytes.length, revision: 'v1', authorize: async () => true, currentRevision: async () => 'v1', readRange: async (offset, length) => bytes.subarray(offset, offset + length) };
+async function main() {
+let host; let parent; let server;
+try {
+  await app.whenReady();
+  let networkHits = 0;
+  server = createServer((_req, res) => { networkHits++; res.setHeader('Access-Control-Allow-Origin', '*'); res.end('synthetic'); });
+  server.on('upgrade', (_req, socket) => { networkHits++; socket.destroy(); });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const url = `http://127.0.0.1:${server.address().port}`;
+  await session.defaultSession.cookies.set({ url, name: 'synthetic_host_marker', value: 'not-a-real-token' });
+  parent = new BrowserWindow({ width: 900, height: 650, show: false, webPreferences: { sandbox: true, contextIsolation: true, backgroundThrottling: false } });
+  await parent.loadURL('data:text/html,<body style="background:rgb(31,41,55)"><h1 id="host">Synthetic isolation host</h1><script>window.ticks=0;setInterval(()=>window.ticks++,50)</script>');
+  await parent.webContents.executeJavaScript(`fetch(${JSON.stringify(url)}).then(r=>r.text())`);
+  check('network-control-reaches-server', networkHits === 1); networkHits = 0;
+  host = new PluginDevelopmentHost(parent, path.join(work, 'preload.cjs'));
+  const startLoad = Date.now();
+  const csv = await host.load(sample, authority, theme, true);
+  await until(async () => (await csv.view.webContents.executeJavaScript('document.querySelectorAll("td").length')) === 4);
+  results.csvReadyMs = Date.now() - startLoad;
+  check('independent-csv-renders-text', await csv.view.webContents.executeJavaScript('document.querySelectorAll("td")[2].textContent === "synthetic,<b>" && !document.querySelector("table b")'));
+  check('synthetic-session-separated', (await csv.view.webContents.session.cookies.get({ url })).length === 0);
+  const globals = await csv.view.webContents.executeJavaScript(`({node:typeof process, require:typeof require, buffer:typeof Buffer, ipc:typeof electronAPI, bridge:Object.keys(omniflowTransport).sort().join(','), host:!!document.getElementById('host')})`);
+  check('no-host-preload-node-or-dom', globals.node === 'undefined' && globals.require === 'undefined' && globals.buffer === 'undefined' && globals.ipc === 'undefined' && !globals.host && globals.bridge === 'exchange,subscribe');
+  csv.setTheme({ ...theme, revision: 2, mode: 'dark', colors: { 'surface.app': '#112233', 'text.primary': '#eeeeee' } });
+  await until(async () => await csv.view.webContents.executeJavaScript('getComputedStyle(document.documentElement).getPropertyValue("--background").trim() === "#112233"'));
+  csv.setTheme(theme);
+  check('theme-isolated-and-monotonic', await csv.view.webContents.executeJavaScript('getComputedStyle(document.documentElement).getPropertyValue("--background").trim() === "#112233"') && await parent.webContents.executeJavaScript('getComputedStyle(document.body).backgroundColor === "rgb(31, 41, 55)"'));
+  csv.setActive(false);
+  await until(async () => await csv.view.webContents.executeJavaScript('document.getElementById("status").textContent === "已暂停"'));
+  csv.setActive(true);
+  await until(async () => await csv.view.webContents.executeJavaScript('document.querySelectorAll("td").length === 4'));
+  check('activity-resumes', true);
+  const attackDir = path.join(work, 'attack'); await cp(sample, attackDir, { recursive: true });
+  const manifest = JSON.parse(await readFile(path.join(attackDir, 'manifest.json'), 'utf8'));
+  manifest.id = 'example.attack'; manifest.viewers[0].id = 'example.attack.table'; manifest.activation = ['viewer:example.attack.table'];
+  await writeFile(path.join(attackDir, 'manifest.json'), JSON.stringify(manifest));
+  const attack = await host.load(attackDir, authority, theme, true);
+  await until(() => attack.broker.isReady);
+  results.pids = { host: parent.webContents.getOSProcessId(), csv: csv.view.webContents.getOSProcessId(), attack: attack.view.webContents.getOSProcessId() };
+  check('distinct-renderer-pids', new Set(Object.values(results.pids)).size === 3);
+  await attack.view.webContents.executeJavaScript(`(() => {
+    const u=${JSON.stringify(url)};
+    fetch(u+'/fetch').catch(()=>{}); try { new WebSocket(u.replace('http:', 'ws:')+'/socket'); } catch {}
+    const img=new Image(); img.src=u+'/image'; document.body.append(img);
+    const video=document.createElement('video'); video.src=u+'/video'; video.autoplay=true; document.body.append(video);
+    const form=document.createElement('form'); form.action=u+'/form'; form.method='POST'; document.body.append(form); form.submit();
+    window.open(u+'/popup');
+    const a=document.createElement('a'); a.href=u+'/download'; a.download='test'; document.body.append(a); a.click();
+  })()`);
+  await pause(400);
+  check('network-fetch-websocket-image-media-form-popup-download-denied', networkHits === 0);
+  await attack.view.webContents.executeJavaScript(`location.href=${JSON.stringify(url + '/navigation')}`);
+  await pause(200);
+  check('navigation-denied', networkHits === 0 && attack.view.webContents.getURL().startsWith('omniflow-extension:'));
+  results.memoryKiB = app.getAppMetrics().filter(item => Object.values(results.pids).includes(item.pid)).map(item => ({ pid: item.pid, workingSetSize: item.memory.workingSetSize }));
+  const rpc = (instance, method, params) => instance.view.webContents.executeJavaScript(`omniflowTransport.exchange(${JSON.stringify(JSON.stringify({ version: 1, id: crypto.randomUUID(), method, params }))}).then(JSON.parse)`);
+  check('cross-instance-handle-denied', (await rpc(attack, 'resource.read', { handle: csv.broker.handle, offset: 0, length: 1 })).error.code === 'FORBIDDEN');
+  const beforeCheckpoint = await rpc(csv, 'state.get', {});
+  const checkpointWrite = await rpc(csv, 'state.set', { value: { scrollTop: 120 }, expectedRevision: beforeCheckpoint.value?.revision ?? 0, schemaVersion: 1 });
+  assert.ok(checkpointWrite.ok, 'Checkpoint CAS must succeed before checking restoration');
+  check('reading-state-instance-isolation', (await rpc(attack, 'state.get', {})).value === null);
+  await rpc(csv, 'settings.set', { key: 'isolation', value: 'synthetic', expectedRevision: 0, schemaVersion: 1 });
+  check('settings-plugin-namespace-separated', (await rpc(attack, 'settings.get', { key: 'isolation' })).value === null);
+  const outsider = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true, preload: path.join(work, 'preload.cjs') } });
+  await outsider.loadURL('data:text/html,unbound');
+  const unbound = await rpc({view: {webContents: outsider.webContents}}, 'context.get', {});
+  check('unregistered-source-denied', unbound.error.code === 'FORBIDDEN'); outsider.destroy();
+  const permission = await attack.view.webContents.executeJavaScript(`Promise.race([Notification.requestPermission(),new Promise(resolve=>setTimeout(()=>resolve('timeout'),1500))])`);
+  check('notification-permission-denied', permission === 'denied');
+  const fileRead = await attack.view.webContents.executeJavaScript(`fetch('file:///synthetic-does-not-exist').then(()=>false,()=>true)`);
+  check('file-scheme-fetch-denied', fileRead);
+  const subscriptions = await attack.view.webContents.executeJavaScript(`(() => {const off=[];let denied=false;try{for(let i=0;i<9;i++)off.push(omniflowTransport.subscribe(()=>{}))}catch{denied=true}off.forEach(fn=>{fn();fn()});return denied})()`);
+  check('preload-subscription-quota', subscriptions);
+  const duplicateDir = path.join(work, 'duplicate'); await cp(sample, duplicateDir, { recursive: true });
+  await assert.rejects(host.load(duplicateDir, authority, theme), /another source/); check('same-id-source-conflict-denied', true);
+  const ticksBefore = await parent.webContents.executeJavaScript('ticks'); const hungAt = Date.now();
+  void attack.view.webContents.executeJavaScript('while(true){}').catch(() => undefined);
+  await until(() => !attack.broker.alive, 8000);
+  results.hangStopMs = Date.now() - hungAt;
+  check('deadloop-watchdog-stops-only-offender', host.size === 1 && await parent.webContents.executeJavaScript('ticks') > ticksBefore && await csv.view.webContents.executeJavaScript('document.querySelectorAll("td").length === 4'));
+  const stopStart = Date.now(); csv.stop(); results.stopMs = Date.now() - stopStart;
+  const nested = await host.load(sample, authority, theme, true);
+  await until(() => nested.broker.isReady);
+  check('reading-state-restored-after-reload', (await rpc(nested, 'state.get', {})).value.value.scrollTop === 120);
+  void nested.view.webContents.executeJavaScript(`document.body.append(document.createElement('iframe'))`).catch(()=>undefined);
+  await until(() => !nested.broker.alive);
+  check('nested-frame-terminates-instance', host.size === 0);
+  // No ready signal: a package which never starts must not live indefinitely.
+  const silentDir = path.join(work, 'silent'); await cp(attackDir, silentDir, { recursive: true });
+  manifest.id = 'example.silent'; manifest.viewers[0].id = 'example.silent.table'; manifest.activation = ['viewer:example.silent.table'];
+  await writeFile(path.join(silentDir, 'manifest.json'), JSON.stringify(manifest));
+  await writeFile(path.join(silentDir, 'index.html'), '<p>never ready</p>');
+  const silentAt = Date.now(); const silent = await host.load(silentDir, authority, theme);
+  await until(() => !silent.broker.alive);
+  results.startupStopMs = Date.now() - silentAt;
+  check('startup-timeout-stops-unready-instance', host.size === 0);
+  for (let i = 0; i < 3; i++) { const instance = await host.load(sample, authority, theme, true); instance.stop(); }
+  check('repeated-load-stop-zero-bindings-and-views', host.size === 0 && parent.contentView.children.length === 0);
+  const frameWindow = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true, backgroundThrottling: false } });
+  await frameWindow.loadURL('data:text/html,<script>window.ticks=0;window.report=null;setInterval(()=>ticks++,50);onmessage=e=>report=e.data</script><body>iframe host</body>');
+  const frameSource = `<script>let denied=false;try{parent.document.body}catch{denied=true}parent.postMessage({denied,node:typeof process},'*');onmessage=()=>{while(true){}}</script>`;
+  await frameWindow.webContents.executeJavaScript(`{const f=document.createElement('iframe');f.sandbox='allow-scripts';f.srcdoc=${JSON.stringify(frameSource)};document.body.append(f)}`);
+  await until(async () => Boolean(await frameWindow.webContents.executeJavaScript('report')));
+  const frameReport = await frameWindow.webContents.executeJavaScript('report'); check('iframe-dom-sandbox-denies-parent', frameReport.denied && frameReport.node === 'undefined');
+  results.iframe = { mainProcessId: frameWindow.webContents.mainFrame.processId, childProcessId: frameWindow.webContents.mainFrame.frames[0]?.processId };
+  await frameWindow.webContents.executeJavaScript(`document.querySelector('iframe').contentWindow.postMessage('hang','*')`);
+  await pause(100);
+  results.iframe.hostRespondedDuringHang = await Promise.race([frameWindow.webContents.executeJavaScript('ticks').then(() => true).catch(() => false), pause(1200).then(() => false)]);
+  frameWindow.webContents.forcefullyCrashRenderer(); frameWindow.destroy();
+  results.diagnostics = host.diagnostics;
+  results.completed = true;
+} catch (error) { results.completed = false; results.failure = String(error?.stack ?? error); console.error(results.failure); }
+finally {
+  host?.dispose(); parent?.destroy(); server?.close();
+  await writeFile(path.join(work, 'results.json'), JSON.stringify(results, null, 2));
+  console.log(JSON.stringify({ completed: results.completed, results: path.join(work, 'results.json') }));
+  app.exit(results.completed ? 0 : 1);
+}
+}
+void main();

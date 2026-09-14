@@ -1,3 +1,7 @@
+import PluginManagement from '@/features/plugin-management/PluginManagement';
+import { useContext as useAppearanceContext } from 'react';
+import { AppearanceControlContext } from '@/features/appearance/appearance.context';
+import AppearanceSettings from '@/features/appearance/AppearanceSettings';
 import React, { useEffect, useRef, useState } from 'react';
 import styled, { createGlobalStyle } from 'styled-components';
 import { Button, Divider, Input, Select, Switch, Toast, Typography } from '@douyinfe/semi-ui';
@@ -341,6 +345,8 @@ const SettingsWorkspace: React.FC<SystemWorkspaceViewProps> = ({
 }) => {
   const { Title, Text } = Typography;
   const { theme, toggleTheme } = useTheme();
+  const [pluginsOpen, setPluginsOpen] = useState(false);
+  const appearanceControls = useAppearanceContext(AppearanceControlContext);
   const { user, setUserInfo } = useAuth();
   const userRef = useRef(user);
   const userExtRef = useRef<string | undefined>(user?.ext);
@@ -463,6 +469,8 @@ const SettingsWorkspace: React.FC<SystemWorkspaceViewProps> = ({
     onSettingsSectionChange?.('home');
   };
 
+  if (pluginsOpen) return <PluginManagement onBack={() => setPluginsOpen(false)} />;
+
   if (settingsSection === 'tags') {
     return <TagManagement embedded onBack={goHome} />;
   }
@@ -478,6 +486,8 @@ const SettingsWorkspace: React.FC<SystemWorkspaceViewProps> = ({
   return (
     <SettingsWrapper>
       <SettingsDropdownStyle />
+      <div className="setting-item"><div><div className="setting-title">插件管理</div><div className="setting-desc">安装本地插件、管理读取能力、停用和恢复</div></div><button className="settings-action-btn manage" onClick={() => setPluginsOpen(true)}>管理插件</button></div>
+      <AppearanceSettings />
       <div className="setting-item">
         <div>
           <div className="setting-title">界面主题</div>
@@ -490,7 +500,7 @@ const SettingsWorkspace: React.FC<SystemWorkspaceViewProps> = ({
             data-mode={theme}
             onClick={() => {
               const nextTheme = toggleTheme();
-              void persistPreferences({ theme: nextTheme });
+              if (appearanceControls?.phase !== 'preview') void persistPreferences({ theme: nextTheme });
             }}
             aria-label={`切换主题，当前为${THEME_LABEL_MAP[theme]}`}
             title={`当前主题：${THEME_LABEL_MAP[theme]}`}

@@ -66,6 +66,8 @@ floatingVideoService.releaseForTab(tabId);
 
 ### 1.5 跨路由保活
 
+B2 在同一 tab 显式切换查看器时，也由 FileViewerContext 捕获旧阅读状态并调用同一 releaseForTab 链；不会让新增 viewer 自己注册 MediaHub。额外贡献当前不匹配媒体/归档，相关播放器 owner 保持。
+
 离开 `/libraries/:id` 时：
 
 - 视频：`VideoViewer` cleanup 调 `floatingVideoService.handoffToFloating()`，`<video>` 元素永远停留在 connected document，从 inline host appendChild 到 floating host。**禁止**改成 `setTimeout(0)` + `parkGlobalVideoElement` —— 中间脱离 document 的那一拍会触发 Chromium 自动暂停。

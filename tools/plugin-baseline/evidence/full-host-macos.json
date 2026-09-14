@@ -1,0 +1,714 @@
+{
+  "runs": [
+    {
+      "readyMs": 403.28766600000006,
+      "samples": [
+        [
+          {
+            "type": "Browser",
+            "rssKiB": 253520,
+            "cpu": 0
+          },
+          {
+            "type": "GPU",
+            "rssKiB": 89488,
+            "cpu": 0
+          },
+          {
+            "type": "Utility",
+            "rssKiB": 45008,
+            "cpu": 0
+          },
+          {
+            "type": "Tab",
+            "rssKiB": 123488,
+            "cpu": 0
+          },
+          {
+            "type": "Tab",
+            "rssKiB": 92064,
+            "cpu": 0
+          }
+        ],
+        [
+          {
+            "type": "Browser",
+            "rssKiB": 253568,
+            "cpu": 0.21986288250035915
+          },
+          {
+            "type": "GPU",
+            "rssKiB": 89296,
+            "cpu": 1.7451594561433261
+          },
+          {
+            "type": "Utility",
+            "rssKiB": 45056,
+            "cpu": 0.0016458787196859067
+          },
+          {
+            "type": "Tab",
+            "rssKiB": 123552,
+            "cpu": 0.7123520234927044
+          },
+          {
+            "type": "Tab",
+            "rssKiB": 92064,
+            "cpu": 0.0002294159071005221
+          }
+        ],
+        [
+          {
+            "type": "Browser",
+            "rssKiB": 253568,
+            "cpu": 0.007864378738935435
+          },
+          {
+            "type": "GPU",
+            "rssKiB": 89312,
+            "cpu": 0.06976605454418915
+          },
+          {
+            "type": "Utility",
+            "rssKiB": 45056,
+            "cpu": 0
+          },
+          {
+            "type": "Tab",
+            "rssKiB": 123552,
+            "cpu": 0.026237194578773226
+          },
+          {
+            "type": "Tab",
+            "rssKiB": 92064,
+            "cpu": 0
+          }
+        ],
+        [
+          {
+            "type": "Browser",
+            "rssKiB": 253568,
+            "cpu": 0.02124186436594784
+          },
+          {
+            "type": "GPU",
+            "rssKiB": 89344,
+            "cpu": 0.023900654843956013
+          },
+          {
+            "type": "Utility",
+            "rssKiB": 45056,
+            "cpu": 0
+          },
+          {
+            "type": "Tab",
+            "rssKiB": 123552,
+            "cpu": 0.0015194621104129137
+          },
+          {
+            "type": "Tab",
+            "rssKiB": 92064,
+            "cpu": 0.00126957469247802
+          }
+        ],
+        [
+          {
+            "type": "Browser",
+            "rssKiB": 253584,
+            "cpu": 0.013530017481261526
+          },
+          {
+            "type": "GPU",
+            "rssKiB": 89328,
+            "cpu": 0.003811317818010572
+          },
+          {
+            "type": "Utility",
+            "rssKiB": 45088,
+            "cpu": 0.0012172210842646238
+          },
+          {
+            "type": "Tab",
+            "rssKiB": 123552,
+            "cpu": 0.00039908370381603833
+          },
+          {
+            "type": "Tab",
+            "rssKiB": 92064,
+            "cpu": 0.0010176492302780577
+          }
+        ]
+      ],
+      "electron": "30.5.1",
+      "scope": "Actual compiled app, fresh appData/userData, logged-out load event; no login or library access"
+    },
+    {
+      "readyMs": 416.060041,
+      "samples": [
+        [
+          {
+            "type": "Browser",
+            "rssKiB": 253472,
+            "cpu": 0
+          },
+          {
+            "type": "GPU",
+            "rssKiB": 87664,
+            "cpu": 0
+          },
+          {
+            "type": "Utility",
+            "rssKiB": 45200,
+            "cpu": 0
+          },
+          {
+            "type": "Tab",
+            "rssKiB": 122080,
+            "cpu": 0
+          },
+          {
+            "type": "Tab",
+            "rssKiB": 91520,
+            "cpu": 0
+          }
+        ],
+        [
+          {
+            "type": "Browser",
+            "rssKiB": 253440,
+            "cpu": 0.018697922895985326
+          },
+          {
+            "type": "GPU",
+            "rssKiB": 87632,
+            "cpu": 0.003628606176605459
+          },
+          {
+            "type": "Utility",
+            "rssKiB": 45200,
+            "cpu": 0
+          },
+          {
+            "type": "Tab",
+            "rssKiB": 122080,
+            "cpu": 0.0464769439664712
+          },
+          {
+            "type": "Tab",
+            "rssKiB": 91520,
+            "cpu": 0.000488496895053919
+          }
+        ],
+        [
+          {
+            "type": "Browser",
+            "rssKiB": 253440,
+            "cpu": 0.01459678134001639
+          },
+          {
+            "type": "GPU",
+            "rssKiB": 87648,
+            "cpu": 0.05060344836168473
+          },
+          {
+            "type": "Utility",
+            "rssKiB": 45200,
+            "cpu": 0
+          },
+          {
+            "type": "Tab",
+            "rssKiB": 122080,
+            "cpu": 0
+          },
+          {
+            "type": "Tab",
+            "rssKiB": 91520,
+            "cpu": 0
+          }
+        ],
+        [
+          {
+            "type": "Browser",
+            "rssKiB": 253440,
+            "cpu": 0.032522267005025626
+          },
+          {
+            "type": "GPU",
+            "rssKiB": 87680,
+            "cpu": 0.04478779542527504
+          },
+          {
+            "type": "Utility",
+            "rssKiB": 45200,
+            "cpu": 0
+          },
+          {
+            "type": "Tab",
+            "rssKiB": 122080,
+            "cpu": 0.003882064860345205
+          },
+          {
+            "type": "Tab",
+            "rssKiB": 91520,
+            "cpu": 0.0031255879141279556
+          }
+        ],
+        [
+          {
+            "type": "Browser",
+            "rssKiB": 253344,
+            "cpu": 0.019644700169024195
+          },
+          {
+            "type": "GPU",
+            "rssKiB": 87664,
+            "cpu": 0.006112993651661079
+          },
+          {
+            "type": "Utility",
+            "rssKiB": 45232,
+            "cpu": 0.001595460913700522
+          },
+          {
+            "type": "Tab",
+            "rssKiB": 122080,
+            "cpu": 0.0004985661238278711
+          },
+          {
+            "type": "Tab",
+            "rssKiB": 91520,
+            "cpu": 0.001356082278297997
+          }
+        ]
+      ],
+      "electron": "30.5.1",
+      "scope": "Actual compiled app, fresh appData/userData, logged-out load event; no login or library access"
+    },
+    {
+      "readyMs": 417.339791,
+      "samples": [
+        [
+          {
+            "type": "Browser",
+            "rssKiB": 253472,
+            "cpu": 0
+          },
+          {
+            "type": "GPU",
+            "rssKiB": 88480,
+            "cpu": 0
+          },
+          {
+            "type": "Utility",
+            "rssKiB": 45024,
+            "cpu": 0
+          },
+          {
+            "type": "Tab",
+            "rssKiB": 123152,
+            "cpu": 0
+          },
+          {
+            "type": "Tab",
+            "rssKiB": 91344,
+            "cpu": 0
+          }
+        ],
+        [
+          {
+            "type": "Browser",
+            "rssKiB": 253456,
+            "cpu": 0.033998651194528384
+          },
+          {
+            "type": "GPU",
+            "rssKiB": 88304,
+            "cpu": 0.009300826530135175
+          },
+          {
+            "type": "Utility",
+            "rssKiB": 45024,
+            "cpu": 0
+          },
+          {
+            "type": "Tab",
+            "rssKiB": 122992,
+            "cpu": 0.04986027781287274
+          },
+          {
+            "type": "Tab",
+            "rssKiB": 91344,
+            "cpu": 0.0006566086164957992
+          }
+        ],
+        [
+          {
+            "type": "Browser",
+            "rssKiB": 253456,
+            "cpu": 0.012922287214993434
+          },
+          {
+            "type": "GPU",
+            "rssKiB": 88304,
+            "cpu": 0.009072352007257882
+          },
+          {
+            "type": "Utility",
+            "rssKiB": 45024,
+            "cpu": 0
+          },
+          {
+            "type": "Tab",
+            "rssKiB": 122992,
+            "cpu": 0
+          },
+          {
+            "type": "Tab",
+            "rssKiB": 91344,
+            "cpu": 0
+          }
+        ],
+        [
+          {
+            "type": "Browser",
+            "rssKiB": 253456,
+            "cpu": 0.030038732577335248
+          },
+          {
+            "type": "GPU",
+            "rssKiB": 88352,
+            "cpu": 0.08440134106795777
+          },
+          {
+            "type": "Utility",
+            "rssKiB": 45024,
+            "cpu": 0
+          },
+          {
+            "type": "Tab",
+            "rssKiB": 122992,
+            "cpu": 0.0023587805104760837
+          },
+          {
+            "type": "Tab",
+            "rssKiB": 91344,
+            "cpu": 0.0018491974483074345
+          }
+        ],
+        [
+          {
+            "type": "Browser",
+            "rssKiB": 253472,
+            "cpu": 0.017271105410680714
+          },
+          {
+            "type": "GPU",
+            "rssKiB": 88336,
+            "cpu": 0.005763786638004231
+          },
+          {
+            "type": "Utility",
+            "rssKiB": 45088,
+            "cpu": 0.0028369332751295847
+          },
+          {
+            "type": "Tab",
+            "rssKiB": 122992,
+            "cpu": 0.00040954826826010914
+          },
+          {
+            "type": "Tab",
+            "rssKiB": 91344,
+            "cpu": 0.000988875648387783
+          }
+        ]
+      ],
+      "electron": "30.5.1",
+      "scope": "Actual compiled app, fresh appData/userData, logged-out load event; no login or library access"
+    },
+    {
+      "readyMs": 418.840291,
+      "samples": [
+        [
+          {
+            "type": "Browser",
+            "rssKiB": 253424,
+            "cpu": 0
+          },
+          {
+            "type": "GPU",
+            "rssKiB": 87696,
+            "cpu": 0
+          },
+          {
+            "type": "Utility",
+            "rssKiB": 45088,
+            "cpu": 0
+          },
+          {
+            "type": "Tab",
+            "rssKiB": 124672,
+            "cpu": 0
+          },
+          {
+            "type": "Tab",
+            "rssKiB": 91744,
+            "cpu": 0
+          }
+        ],
+        [
+          {
+            "type": "Browser",
+            "rssKiB": 253392,
+            "cpu": 0.016576531981928485
+          },
+          {
+            "type": "GPU",
+            "rssKiB": 87664,
+            "cpu": 0.004780830367355412
+          },
+          {
+            "type": "Utility",
+            "rssKiB": 45088,
+            "cpu": 0
+          },
+          {
+            "type": "Tab",
+            "rssKiB": 124672,
+            "cpu": 0.0279591423201197
+          },
+          {
+            "type": "Tab",
+            "rssKiB": 91744,
+            "cpu": 0.0004791409003656444
+          }
+        ],
+        [
+          {
+            "type": "Browser",
+            "rssKiB": 253392,
+            "cpu": 0.008694076077647162
+          },
+          {
+            "type": "GPU",
+            "rssKiB": 87664,
+            "cpu": 0.0058364731766250245
+          },
+          {
+            "type": "Utility",
+            "rssKiB": 45088,
+            "cpu": 0
+          },
+          {
+            "type": "Tab",
+            "rssKiB": 124672,
+            "cpu": 0
+          },
+          {
+            "type": "Tab",
+            "rssKiB": 91744,
+            "cpu": 0
+          }
+        ],
+        [
+          {
+            "type": "Browser",
+            "rssKiB": 253392,
+            "cpu": 0.030274139197347182
+          },
+          {
+            "type": "GPU",
+            "rssKiB": 87712,
+            "cpu": 0.07315866933216843
+          },
+          {
+            "type": "Utility",
+            "rssKiB": 45088,
+            "cpu": 0
+          },
+          {
+            "type": "Tab",
+            "rssKiB": 124672,
+            "cpu": 0.004039668349198484
+          },
+          {
+            "type": "Tab",
+            "rssKiB": 91744,
+            "cpu": 0.001920281455553444
+          }
+        ],
+        [
+          {
+            "type": "Browser",
+            "rssKiB": 253360,
+            "cpu": 0.016044049841254647
+          },
+          {
+            "type": "GPU",
+            "rssKiB": 87696,
+            "cpu": 0.0046067555777140725
+          },
+          {
+            "type": "Utility",
+            "rssKiB": 45120,
+            "cpu": 0.0008375551764399717
+          },
+          {
+            "type": "Tab",
+            "rssKiB": 124672,
+            "cpu": 0.00037888343053022746
+          },
+          {
+            "type": "Tab",
+            "rssKiB": 91744,
+            "cpu": 0.0009870575813499957
+          }
+        ]
+      ],
+      "electron": "30.5.1",
+      "scope": "Actual compiled app, fresh appData/userData, logged-out load event; no login or library access"
+    },
+    {
+      "readyMs": 441.86375000000004,
+      "samples": [
+        [
+          {
+            "type": "Browser",
+            "rssKiB": 253008,
+            "cpu": 0
+          },
+          {
+            "type": "GPU",
+            "rssKiB": 87840,
+            "cpu": 0
+          },
+          {
+            "type": "Utility",
+            "rssKiB": 45104,
+            "cpu": 0
+          },
+          {
+            "type": "Tab",
+            "rssKiB": 122896,
+            "cpu": 0
+          },
+          {
+            "type": "Tab",
+            "rssKiB": 91904,
+            "cpu": 0
+          }
+        ],
+        [
+          {
+            "type": "Browser",
+            "rssKiB": 253008,
+            "cpu": 0.01904116072529422
+          },
+          {
+            "type": "GPU",
+            "rssKiB": 87808,
+            "cpu": 0.0020084514044245586
+          },
+          {
+            "type": "Utility",
+            "rssKiB": 45104,
+            "cpu": 0
+          },
+          {
+            "type": "Tab",
+            "rssKiB": 122896,
+            "cpu": 0.02248062400882919
+          },
+          {
+            "type": "Tab",
+            "rssKiB": 91904,
+            "cpu": 0.0003082255455343587
+          }
+        ],
+        [
+          {
+            "type": "Browser",
+            "rssKiB": 253008,
+            "cpu": 0.007397766153032339
+          },
+          {
+            "type": "GPU",
+            "rssKiB": 87824,
+            "cpu": 0.016523469888908994
+          },
+          {
+            "type": "Utility",
+            "rssKiB": 45104,
+            "cpu": 0
+          },
+          {
+            "type": "Tab",
+            "rssKiB": 122896,
+            "cpu": 0
+          },
+          {
+            "type": "Tab",
+            "rssKiB": 91904,
+            "cpu": 0
+          }
+        ],
+        [
+          {
+            "type": "Browser",
+            "rssKiB": 253040,
+            "cpu": 0.11281717345840166
+          },
+          {
+            "type": "GPU",
+            "rssKiB": 90848,
+            "cpu": 1.0718495403019903
+          },
+          {
+            "type": "Utility",
+            "rssKiB": 45104,
+            "cpu": 0
+          },
+          {
+            "type": "Tab",
+            "rssKiB": 123296,
+            "cpu": 0.38951451538947957
+          },
+          {
+            "type": "Tab",
+            "rssKiB": 91904,
+            "cpu": 0.0011687926372057663
+          }
+        ],
+        [
+          {
+            "type": "Browser",
+            "rssKiB": 252992,
+            "cpu": 0.25072662495015796
+          },
+          {
+            "type": "GPU",
+            "rssKiB": 91792,
+            "cpu": 2.9045321359789935
+          },
+          {
+            "type": "Utility",
+            "rssKiB": 45136,
+            "cpu": 0.0004374466240553887
+          },
+          {
+            "type": "Tab",
+            "rssKiB": 123952,
+            "cpu": 1.2053230578354648
+          },
+          {
+            "type": "Tab",
+            "rssKiB": 91904,
+            "cpu": 0.0008350797103466376
+          }
+        ]
+      ],
+      "electron": "30.5.1",
+      "scope": "Actual compiled app, fresh appData/userData, logged-out load event; no login or library access"
+    }
+  ]
+}

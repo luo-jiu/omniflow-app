@@ -26,7 +26,9 @@
     "signing:setup:mac": "bash tools/setup-local-mac-signing.sh",
     "release:mac": "node tools/release-mac.mjs",
     "update:serve": "node tools/serve-update-feed.mjs",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "predev": "node tools/plugin-isolation/prepare-first-party.mjs",
+    "prebuild": "node tools/plugin-isolation/prepare-first-party.mjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.1",

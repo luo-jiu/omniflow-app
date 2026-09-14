@@ -32,7 +32,7 @@ export class ViewerSessionColdRuntime {
     private readonly store: Pick<
       ViewerSessionColdStore,
       'deleteLibrary' | 'deleteResources' | 'writeSnapshot'
-    >,
+    > & Partial<Pick<ViewerSessionColdStore, 'deleteNodes'>>,
     options: ViewerSessionColdRuntimeOptions = {},
   ) {
     this.onError = options.onError ?? ((message, error) => {
@@ -78,13 +78,19 @@ export class ViewerSessionColdRuntime {
 
   async deleteResources(identities: ViewerResourceKey[]): Promise<void> {
     const deviceIdentities = identities.filter(identity => (
-      viewerPolicyUsesDeviceCold(identity.viewerKind)
+      viewerPolicyUsesDeviceCold(identity.viewerKind, identity.viewerId)
     ));
     const keys = new Set(deviceIdentities.map(serializeViewerResourceKey));
     this.cancelWhere((snapshot) => keys.has(serializeViewerResourceKey(snapshot.identity)));
     if (deviceIdentities.length > 0) {
       await this.store.deleteResources(deviceIdentities);
     }
+  }
+
+  async deleteNodes(accountScope: string, libraryId: number, nodeIds: number[]): Promise<void> {
+    const nodes = new Set(nodeIds.map(id => `node:${id}`));
+    this.cancelWhere(snapshot => snapshot.identity.accountScope === accountScope && snapshot.identity.libraryId === libraryId && nodes.has(snapshot.identity.resourceIdentity));
+    await this.store.deleteNodes?.(accountScope, libraryId, nodeIds);
   }
 
   flushAll(): Promise<void> {
@@ -96,7 +102,7 @@ export class ViewerSessionColdRuntime {
   }
 
   scheduleSnapshot(snapshot: ViewerSessionSnapshot): void {
-    if (!viewerPolicyUsesDeviceCold(snapshot.identity.viewerKind)) return;
+    if (!viewerPolicyUsesDeviceCold(snapshot.identity.viewerKind, snapshot.identity.viewerId)) return;
     const key = serializeViewerResourceKey(snapshot.identity);
     const previous = this.pendingWrites.get(key);
     if (previous) clearTimeout(previous.timer);

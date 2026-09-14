@@ -12,6 +12,7 @@ export interface ViewerResourceKey {
   libraryId: number;
   resourceIdentity: string;
   viewerKind: FileViewerFileType;
+  viewerId?: string;
 }
 
 export interface ViewerDraftKey extends ViewerResourceKey {
@@ -50,6 +51,7 @@ export interface ViewerLiveRetentionProjection {
   libraryId: number;
   tabId: string;
   viewerKind: FileViewerFileType;
+  viewerId?: string;
   hotCostUnits: number | null;
   pinReasons: ViewerSessionPinReason[];
   pinProjectionReliable: boolean;
@@ -59,11 +61,13 @@ export interface ViewerHotEvictionPreparationTarget {
   libraryId: number;
   tabId: string;
   viewerKind: FileViewerFileType;
+  viewerId?: string;
 }
 
 export type ViewerHotEvictionBlockReason =
   | 'live-instance-not-found'
   | 'viewer-kind-mismatch'
+  | 'viewer-id-mismatch'
   | 'pin-projection-unreliable'
   | 'pinned'
   | 'capture-empty'
@@ -93,6 +97,7 @@ export interface ViewerSessionDiagnosticEvent {
   key: string;
   libraryId: number;
   viewerKind: FileViewerFileType;
+  viewerId?: string;
   schemaVersion?: number;
   estimatedBytes?: number;
   reason?: string;

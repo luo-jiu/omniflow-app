@@ -61,6 +61,8 @@ renderer 的 `getDesktopPlatform()` 将其归一为：
 
 主窗口启用vibrancy时，`mainWindowBackground`保持透明底色`#00000000`，MainLayout与body也保持透明，让目录树原有半透明背景透出macOS毛玻璃。禁止为掩盖快速resize露底而给整个页面外壳或vibrancy窗口填充不透明聊天背景；实色`--app-bg`由右侧ContentArea和AgentRoot负责。未启用vibrancy的平台才使用与renderer一致的底色：暗色`#1e1e1e`、亮色`#f5f5f0`，Windows继续使用原有MainLayout实色。底色跟随nativeTheme更新，窗口关闭时清理监听；独立overlay仍透明。不承诺仅靠CSS消除macOS原生resize未绘制帧，保留目录树毛玻璃优先。
 
+A1 自定义配色由主窗口可信快照投影到非 vibrancy 窗口底色；mainWindowBackground 缓存该有限颜色投影，nativeTheme 更新时不会重新覆盖成硬编码默认色。vibrancy 主窗口与 overlay 保持透明。来源与 IPC 规则见 [外观系统](appearance-system.md)。
+
 Windows 的 `titleBarOverlay` 策略收敛在 `electron/platform/windows/mainWindow.ts`：标题栏透明，最小化、最大化和关闭仍由 Windows 原生绘制，符号色跟随 `nativeTheme`。首行工具栏使用 Window Controls Overlay 提供的 `titlebar-area-*` CSS 环境变量计算右侧安全区，不能用固定 padding 覆盖不同 DPI；不支持环境变量时才回退到三枚标准 caption button 的宽度。
 
 Windows 不模拟 macOS vibrancy：目录树侧栏和主内容圆角背板通过 `data-platform="windows"` 使用不透明的 `--app-bg-sidebar`，亮暗主题分别继承自己的实色 token，避免圆角露出 BrowserWindow 默认白底。侧栏折叠按钮位于左上角并显式使用 `no-drag`，其余顶部空白仍可拖动窗口。文件模式的刷新按钮位于“工具”和“网页”入口之间；浏览器模式继续使用地址栏左侧的网页刷新按钮。
@@ -178,3 +180,9 @@ macOS 应用内更新的状态 owner、更新源、签名要求与本地验证�
 - 平台差异开始影响共享业务契约
 
 平台目录只收纳真实系统差异。不要为了目录对称提前复制共享模块，也不要创建 macOS / Windows 两套业务实现。
+
+## 第一方插件开发运行（C2）
+
+macOS 第一方 CSV 已接入独立 sandboxed WebContentsView。开发启动显式移除 vite-plugin-electron 默认 `--no-sandbox`；主窗口/overlay/系统视频窗口共用的 preload 改为明确的 CommonJS `dist-electron/preload.cjs`，专用插件 preload 要求 `process.sandboxed`。未扩大 Windows/Linux 插件支持声明；完整验证范围见 [C2](plugin-system-c2-csv-viewer.md)。
+
+D1 增加 macOS 本地插件管理：私有 ZIP staging、版本 index、固定四个 session 槽位清理后复用、文件选择拦截、运行资源观测和恢复模式。安全启动支持 `OMNIFLOW_DISABLE_THIRD_PARTY=1` 或 `--disable-third-party-plugins`；不依赖第三方执行提供管理/恢复。平台限制与证据见 [D1](plugin-system-d1-management.md)。

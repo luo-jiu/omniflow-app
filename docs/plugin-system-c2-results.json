@@ -1,0 +1,49 @@
+{
+  "completed": true,
+  "checks": [
+    "real-ipc-to-http-authority-open",
+    "bounded-paged-csv-render",
+    "close-destroys-instance",
+    "restore-open",
+    "last-checkpoint-restored",
+    "server-revocation-no-stale-table",
+    "cross-library-open-denied",
+    "reopen-after-revocation",
+    "changed-object-etag-rejected",
+    "account-release-stops-all",
+    "credentials-never-sent-to-storage",
+    "main-window-recreation-rebinds-host"
+  ],
+  "electron": "30.5.1",
+  "platform": "darwin",
+  "date": "2026-09-14",
+  "verification": {
+    "lint": "passed",
+    "build": "passed",
+    "testFilesPassed": 369,
+    "testsPassed": 2565,
+    "testFilesSkipped": 3,
+    "testsSkipped": 7,
+    "targetedTests": 55,
+    "c1IsolationChecks": 23
+  },
+  "manual": {
+    "platform": "macOS",
+    "libraryOrdinal": 3,
+    "library": "win",
+    "storage": "local macOS MinIO",
+    "fixture": "/文档/omniflow-c2-qa-20260914.csv",
+    "rows": 206,
+    "checks": [
+      "explicit-viewer-choice-single-tab",
+      "grant-server-authorized-read",
+      "page-two-restored-after-close-reopen",
+      "compact-setting-restored",
+      "revoke-removes-native-view",
+      "tools-roundtrip-restores-page",
+      "light-dark-theme",
+      "existing-properties-overlay-and-escape"
+    ],
+    "cleanup": "test tabs closed; system theme restored; synthetic CSV retained"
+  }
+}

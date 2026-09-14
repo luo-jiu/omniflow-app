@@ -1,0 +1,1 @@
+{"formatVersion":1,"id":"example.json-tree","version":"0.1.0","sdkVersion":1,"minHostVersion":"0.2.2","platforms":["darwin"],"entry":"index.html","activation":["viewer:example.json-tree.tree"],"permissions":["resource.read"],"viewers":[{"id":"example.json-tree.tree","title":"JSON 树查看器","extensions":["json"]}]}

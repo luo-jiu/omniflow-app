@@ -1,0 +1,12 @@
+{
+  "formatVersion": 1,
+  "id": "example.csv",
+  "version": "0.1.0",
+  "sdkVersion": 1,
+  "minHostVersion": "0.2.2",
+  "platforms": ["darwin"],
+  "entry": "index.html",
+  "activation": ["viewer:example.csv.table"],
+  "permissions": ["resource.read"],
+  "viewers": [{ "id": "example.csv.table", "title": "CSV 开发样板", "extensions": ["csv"] }]
+}

@@ -1,3 +1,4 @@
+import { getDirectoryMenuCommands, isDirectoryMediaFile, type DirectoryMenuSlot } from '@/features/file-explorer/directory-commands';
 import React from 'react';
 import ContextMenu, { ContextMenuItem } from '@/components/ui/context-menu';
 import type { OverlayBoundaryRect } from '@/components/ui/context-menu/overlay';
@@ -98,39 +99,6 @@ function createTrailingBuiltInTypeLabel(
   );
 }
 
-function normalizeExt(ext?: string | null): string {
-  return String(ext || '').trim().toLowerCase().replace(/^\./, '');
-}
-
-function isMediaFileNode(node: any): boolean {
-  const mimeType = String(node?.mimeType || '').toLowerCase();
-  if (mimeType.startsWith('audio/') || mimeType.startsWith('video/')) {
-    return true;
-  }
-  const ext = normalizeExt(node?.ext || node?.data?.rawExt);
-  return [
-    'aac',
-    'aiff',
-    'avi',
-    'flac',
-    'flv',
-    'm4a',
-    'm4v',
-    'mkv',
-    'mov',
-    'mp3',
-    'mp4',
-    'ogg',
-    'opus',
-    'ts',
-    'wav',
-    'weba',
-    'webm',
-    'wma',
-    'wmv',
-  ].includes(ext);
-}
-
 /**
  * 目录树右键菜单
  * 使用通用的 ContextMenu 组件构建
@@ -144,30 +112,16 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
   submenuPreferredHorizontal = 'left',
   getPopupContainer: getPopupContainerProp,
 }) => {
+  const commandItems = (slot: DirectoryMenuSlot): ContextMenuItem[] => getDirectoryMenuCommands(slot, {
+    location: node === null ? 'root' : isFolder ? 'folder' : 'file',
+    isMediaFile: isDirectoryMediaFile(node),
+  }).map(command => ({ key: command.key, label: command.title, danger: command.danger, onClick: () => onAction(command.id, node) }));
   // 根目录菜单
   if (node === null) {
     const rootItems: ContextMenuItem[] = [
-      { 
-        key: 'new-file', 
-        label: '新建文件', 
-        onClick: () => onAction('新建文件', null) 
-      },
-      { 
-        key: 'new-folder', 
-        label: '新建文件夹', 
-        onClick: () => onAction('新建文件夹', null) 
-      },
+      ...commandItems('root.create'),
       { type: 'divider', key: 'root-divider-create-upload' },
-      {
-        key: 'upload-file',
-        label: '上传文件',
-        onClick: () => onAction('上传文件', null),
-      },
-      {
-        key: 'upload-folder',
-        label: '上传文件夹',
-        onClick: () => onAction('上传文件夹', null),
-      }
+      ...commandItems('root.upload')
     ];
     return (
       <ContextMenu
@@ -194,43 +148,10 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
 
   const items: ContextMenuItem[] = isFolder
     ? [
-      {
-        key: 'new-file',
-        label: '新建文件',
-        onClick: () => onAction('新建文件', node),
-      },
-      {
-        key: 'new-folder',
-        label: '新建文件夹',
-        onClick: () => onAction('新建文件夹', node),
-      },
+      ...commandItems('folder.create'),
     ]
     : [
-      {
-        key: 'rename',
-        label: '重命名',
-        onClick: () => onAction('重命名', node),
-      },
-      {
-        key: 'props',
-        label: '属性',
-        onClick: () => onAction('属性', node),
-      },
-      {
-        key: 'download',
-        label: '下载',
-        onClick: () => onAction('下载', node),
-      },
-      {
-        key: 'open-in-browser',
-        label: '在浏览器打开',
-        onClick: () => onAction('在浏览器打开', node),
-      },
-      ...(isMediaFileNode(node) ? [{
-        key: 'open-media-tool',
-        label: '在媒体工具打开',
-        onClick: () => onAction('在媒体工具打开', node),
-      }] : []),
+      ...commandItems('file.basic'),
     ];
 
   // 文件夹：基础信息组后加分隔线，再进入模式设置组
@@ -349,66 +270,31 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
   if (isFolder) {
     items.push(
       { type: 'divider', key: 'divider-rename-props' },
-      {
-        key: 'rename',
-        label: '重命名',
-        onClick: () => onAction('重命名', node),
-      },
-      {
-        key: 'props',
-        label: '属性',
-        onClick: () => onAction('属性', node),
-      },
+      ...commandItems('folder.info'),
       { type: 'divider', key: 'divider-upload' },
-      {
-        key: 'upload-file',
-        label: '上传文件',
-        onClick: () => onAction('上传文件', node),
-      },
-      {
-        key: 'upload-folder',
-        label: '上传文件夹',
-        onClick: () => onAction('上传文件夹', node),
-      },
-      {
-        key: 'download',
-        label: '下载',
-        onClick: () => onAction('下载', node),
-      }
+      ...commandItems('folder.upload'),
+      ...commandItems('folder.download')
     );
   }
 
   if (isFolder) {
     items.push(
       { type: 'divider', key: 'divider-refresh' },
-      {
-        key: 'refresh',
-        label: '刷新',
-        onClick: () => onAction('刷新', node),
-      },
+      ...commandItems('folder.refresh'),
     );
   }
 
   // 存储迁移：文件夹 / 文件都允许触发，把当前节点（含子树）迁到目标 provider。
   items.push(
     { type: 'divider', key: 'divider-migrate-storage' },
-    {
-      key: 'migrate-storage',
-      label: '迁移到其他存储...',
-      onClick: () => onAction('迁移到其他存储', node),
-    },
+    ...commandItems('common.migrate'),
   );
 
   // 危险操作分割线
   items.push({ type: 'divider', key: 'divider-delete' });
 
   // 删除操作（带二次确认）
-  items.push({
-    key: 'delete',
-    label: '删除',
-    danger: true,
-    onClick: () => onAction('delete', node),
-  });
+  items.push(...commandItems('common.delete'));
 
   return (
     <ContextMenu 

@@ -1,3 +1,4 @@
+import { isStoredToolId } from './tool-definitions';
 import type {
   SubtitleFileFormat,
   SubtitleSourceType,
@@ -110,15 +111,7 @@ function normalizeState(raw: any): ToolWorkspaceState {
   if (!raw || typeof raw !== 'object') {
     return fallback;
   }
-  const activeToolId: ToolWorkspaceToolId = (
-    raw.activeToolId === 'ai-services'
-    || raw.activeToolId === 'qqmusic-lyrics'
-    || raw.activeToolId === 'media-processing'
-    || raw.activeToolId === 'media-file-processing'
-    || raw.activeToolId === 'subtitle-translation'
-  )
-    ? raw.activeToolId
-    : fallback.activeToolId;
+  const activeToolId: ToolWorkspaceToolId = isStoredToolId(raw.activeToolId) ? raw.activeToolId : fallback.activeToolId;
   return {
     activeToolId,
     subtitleTranslationDraft: normalizeDraft(raw.subtitleTranslationDraft),

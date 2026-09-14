@@ -165,8 +165,9 @@ export const TextViewerWrapper = styled.div`
   }
 
   .editor-stage .cm-editor .cm-gutters {
+    color: var(--app-editor-gutter, var(--semi-color-text-2));
     border-right: 1px solid var(--semi-color-border);
-    background: var(--semi-color-bg-1);
+    background: var(--app-editor-bg, var(--semi-color-bg-1));
   }
 
   .editor-stage .cm-editor.cm-focused {

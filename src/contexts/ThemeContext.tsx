@@ -1,133 +1,100 @@
-import React, {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useState,
-  type ReactNode,
-} from 'react';
-import { ThemeContext, type ResolvedThemeMode, type ThemeMode } from './theme.context';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { ThemeProvider as StyledThemeProvider } from 'styled-components';
+import { ThemeContext, type ThemeMode } from './theme.context';
+import { createThemeSnapshot, createThemeState, transitionTheme, type ThemeAction, type ThemeOperationToken, type ThemeSelection } from '@/features/appearance/theme-state';
+import { AppearanceControlContext, AppearanceViewContext } from '@/features/appearance/appearance.context';
+import { defaultSelection, readAppearance, saveAppearance } from '@/features/appearance/appearance-storage';
+import { findBuiltInColorTheme } from '@/features/appearance/built-in-themes';
+import { toThemeView } from '@/features/appearance/theme-view';
+import { applyThemeView } from '@/features/appearance/theme-dom';
+import { publishAppearance } from '@/service/appearance/appearance.api';
+import legacyStyledTheme from '@/assets/theme';
 
-const THEME_STORAGE_KEY = 'app-theme';
-const THEME_TOGGLE_ANCHOR_STORAGE_KEY = 'app-theme-toggle-anchor';
 const SYSTEM_THEME_QUERY = '(prefers-color-scheme: dark)';
-
-function isThemeMode(value: string | null): value is ThemeMode {
-  return value === 'light' || value === 'system' || value === 'dark';
+function storedMode(): ThemeMode {
+  try { const mode = localStorage.getItem('app-theme'); if (mode === 'light' || mode === 'dark') return mode; } catch { /* default */ }
+  return 'system';
 }
-
-function isResolvedThemeMode(value: string | null): value is ResolvedThemeMode {
-  return value === 'light' || value === 'dark';
-}
-
-function resolveThemeMode(theme: ThemeMode, prefersDark: boolean): ResolvedThemeMode {
-  if (theme === 'system') {
-    return prefersDark ? 'dark' : 'light';
-  }
-  return theme;
-}
-
-function readStoredTheme(): ThemeMode {
-  if (typeof window === 'undefined') return 'system';
-  try {
-    const savedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
-    return isThemeMode(savedTheme) ? savedTheme : 'system';
-  } catch {
-    return 'system';
-  }
-}
-
-function readStoredToggleAnchor(): ResolvedThemeMode {
-  if (typeof window === 'undefined') return 'light';
-  try {
-    const savedToggleAnchor = window.localStorage.getItem(THEME_TOGGLE_ANCHOR_STORAGE_KEY);
-    return isResolvedThemeMode(savedToggleAnchor) ? savedToggleAnchor : 'light';
-  } catch {
-    return 'light';
-  }
-}
-
-function readSystemPrefersDark(): boolean {
-  return typeof window !== 'undefined'
-    && typeof window.matchMedia === 'function'
-    && window.matchMedia(SYSTEM_THEME_QUERY).matches;
-}
+function systemMode() { return window.matchMedia?.(SYSTEM_THEME_QUERY).matches ? 'dark' as const : 'light' as const; }
 
 export const ThemeProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
-  const [theme, setThemeState] = useState<ThemeMode>(readStoredTheme);
-  const [systemPrefersDark, setSystemPrefersDark] = useState(readSystemPrefersDark);
-  const [toggleAnchor, setToggleAnchor] = useState<ResolvedThemeMode>(readStoredToggleAnchor);
-
-  useEffect(() => {
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
-      return undefined;
+  const [state, setState] = useState(() => createThemeState({ ownerEpoch: crypto.randomUUID(), accountScope: 'anonymous', systemMode: systemMode(), selection: readAppearance('anonymous', defaultSelection(storedMode())) }));
+  const stateRef = useRef(state);
+  const anchor = useRef<'light' | 'dark'>(state.committed.mode === 'dark' ? 'dark' : 'light');
+  const previewAnchor = useRef<'light' | 'dark' | null>(null);
+  const dispatch = useCallback((action: ThemeAction) => {
+    const result = transitionTheme(stateRef.current, action);
+    stateRef.current = result.state;
+    let success = true;
+    if (result.write) {
+      try { saveAppearance(result.state.accountScope, result.write.selection); }
+      catch { success = false; }
+      stateRef.current = transitionTheme(result.state, { type: 'save-result', token: result.write.token, success }).state;
     }
-
-    const mediaQuery = window.matchMedia(SYSTEM_THEME_QUERY);
-    setSystemPrefersDark(mediaQuery.matches);
-
-    const handleChange = (event: MediaQueryListEvent) => {
-      setSystemPrefersDark(event.matches);
-    };
-
-    mediaQuery.addEventListener('change', handleChange);
-    return () => {
-      mediaQuery.removeEventListener('change', handleChange);
-    };
+    setState(stateRef.current);
+    return { ...result, success };
   }, []);
-
-  const resolvedTheme = useMemo(
-    () => resolveThemeMode(theme, systemPrefersDark),
-    [systemPrefersDark, theme],
-  );
-
-  useLayoutEffect(() => {
-    document.body.setAttribute('theme-mode', resolvedTheme);
-    document.body.setAttribute('theme-source', theme);
-  }, [resolvedTheme, theme]);
-
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(THEME_STORAGE_KEY, theme);
-      window.localStorage.setItem(THEME_TOGGLE_ANCHOR_STORAGE_KEY, toggleAnchor);
-    } catch {
-      // Theme remains active for this session when storage is unavailable.
-    }
-    if (window.electronWindow?.setThemeSource) {
-      window.electronWindow.setThemeSource(theme === 'system' ? 'system' : resolvedTheme);
-    }
-  }, [resolvedTheme, theme, toggleAnchor]);
-
-  const applyTheme = useCallback((mode: ThemeMode, nextToggleAnchor?: ResolvedThemeMode) => {
-    setThemeState(mode);
-    if (nextToggleAnchor) {
-      setToggleAnchor(nextToggleAnchor);
-    }
-  }, []);
-
-  const toggleTheme = useCallback(() => {
-    if (theme === 'light') {
-      applyTheme('system', 'light');
-      return 'system';
-    }
-
-    if (theme === 'dark') {
-      applyTheme('system', 'dark');
-      return 'system';
-    }
-
-    const nextTheme: ResolvedThemeMode = toggleAnchor === 'light' ? 'dark' : 'light';
-    applyTheme(nextTheme, nextTheme);
-    return nextTheme;
-  }, [applyTheme, theme, toggleAnchor]);
-
+  const preview = useCallback((selection: ThemeSelection) => {
+    if (!stateRef.current.preview) previewAnchor.current = anchor.current;
+    return dispatch({ type: 'preview', selection }).state.preview!.token;
+  }, [dispatch]);
+  const cancel = useCallback((token: ThemeOperationToken) => {
+    const wasPreviewing = Boolean(stateRef.current.preview);
+    const result = dispatch({ type: 'cancel', token });
+    if (wasPreviewing && !result.state.preview) { if (previewAnchor.current) anchor.current = previewAnchor.current; previewAnchor.current = null; }
+  }, [dispatch]);
+  const confirm = useCallback((token: ThemeOperationToken) => {
+    const result = dispatch({ type: 'confirm', token });
+    if (result.write) { if (!result.success && previewAnchor.current) anchor.current = previewAnchor.current; previewAnchor.current = null; }
+    return Boolean(result.write && result.success);
+  }, [dispatch]);
+  const bindAccount = useCallback((accountScope: string, mode: ThemeMode) => {
+    if (stateRef.current.accountScope === accountScope) return;
+    const selected = readAppearance(accountScope, defaultSelection(accountScope === 'anonymous' ? storedMode() : mode));
+    previewAnchor.current = null;
+    if (selected.mode !== 'system') anchor.current = selected.mode;
+    dispatch({ type: 'scope', accountScope, selection: selected });
+  }, [dispatch]);
   const setTheme = useCallback((mode: ThemeMode) => {
-    applyTheme(mode, mode === 'system' ? undefined : mode);
-  }, [applyTheme]);
-
-  return (
-    <ThemeContext.Provider value={{ theme, resolvedTheme, toggleTheme, setTheme }}>
-      {children}
-    </ThemeContext.Provider>
-  );
+    const previousAnchor = anchor.current;
+    if (mode !== 'system') anchor.current = mode;
+    if (stateRef.current.preview) {
+      const current = stateRef.current.preview;
+      dispatch({ type: 'update-preview', token: current.token, selection: { ...current.selection, mode } });
+      return;
+    }
+    const current = stateRef.current.committed;
+    const token = preview({ ...current, mode });
+    previewAnchor.current = previousAnchor;
+    confirm(token);
+  }, [confirm, preview, dispatch]);
+  const toggleTheme = useCallback((): ThemeMode => {
+    const current = stateRef.current.preview?.selection.mode ?? stateRef.current.committed.mode;
+    const next = current === 'system' ? (anchor.current === 'light' ? 'dark' : 'light') : 'system';
+    setTheme(next);
+    return stateRef.current.preview?.selection.mode ?? stateRef.current.committed.mode;
+  }, [setTheme]);
+  useEffect(() => {
+    const media = window.matchMedia?.(SYSTEM_THEME_QUERY);
+    if (!media) return;
+    const update = () => dispatch({ type: 'system', mode: media.matches ? 'dark' : 'light' });
+    update(); media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, [dispatch]);
+  const snapshot = useMemo(() => createThemeSnapshot(state, findBuiltInColorTheme), [state]);
+  const view = useMemo(() => toThemeView(snapshot), [snapshot]);
+  useLayoutEffect(() => { applyThemeView(view); }, [view]);
+  useEffect(() => { void publishAppearance(view).catch(() => undefined); }, [view]);
+  useEffect(() => {
+    if (state.accountScope !== 'anonymous') return;
+    try { localStorage.setItem('app-theme', state.committed.mode); } catch { /* selection remains usable */ }
+  }, [state.accountScope, state.committed]);
+  const styledTheme = useMemo(() => ({ ...legacyStyledTheme, color: { primary: view.colors['accent.default'], secondary: view.colors['accent.active'] } }), [view]);
+  return <ThemeContext.Provider value={{ theme: snapshot.requested.mode, resolvedTheme: snapshot.resolved.mode, toggleTheme, setTheme }}>
+    <AppearanceControlContext.Provider value={{ selection: snapshot.requested, phase: snapshot.phase, preview, cancel, confirm, bindAccount }}>
+      <AppearanceViewContext.Provider value={view}>
+        <StyledThemeProvider theme={styledTheme}>{children}</StyledThemeProvider>
+      </AppearanceViewContext.Provider>
+    </AppearanceControlContext.Provider>
+  </ThemeContext.Provider>;
 };

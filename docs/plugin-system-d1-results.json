@@ -1,0 +1,71 @@
+{
+  "completed": true,
+  "checks": [
+    "preflight-does-not-register-or-execute",
+    "install-default-disabled",
+    "unapproved-open-denied",
+    "enabled-alone-is-not-read-approval",
+    "managed-package-opens",
+    "read-only-view-is-muted",
+    "plugin-has-no-management-bridge",
+    "dialogs-cannot-block-host",
+    "disable-stops-instances",
+    "updated-version-settings-isolated",
+    "rollback-recovers-old-settings",
+    "native-file-picker-cannot-bypass-sdk",
+    "safe-mode-blocks-third-party",
+    "management-remains-available",
+    "seventy-activations-reuse-bounded-sessions",
+    "management-responsive-during-hang",
+    "hung-plugin-quarantined-with-host-alive",
+    "memory-budget-terminates-plugin",
+    "uninstall-removes-contribution",
+    "restart-retains-quarantine-and-install-state",
+    "unbound-management-source-denied"
+  ],
+  "platform": "darwin",
+  "electron": "30.5.1",
+  "date": "2026-09-14",
+  "verification": {
+    "lint": "passed",
+    "build": "passed",
+    "testFilesPassed": 372,
+    "testsPassed": 2582,
+    "testFilesSkipped": 3,
+    "testsSkipped": 7,
+    "c1ChecksPassed": 23,
+    "c2ChecksPassed": 12,
+    "d1ChecksPassed": 21
+  },
+  "runtimeEvidence": {
+    "activationCount": 70,
+    "sessionSlotsMaximum": 4,
+    "memoryFixtureMiB": 300,
+    "memoryBudgetMiB": 256,
+    "quarantineReasons": [
+      "file-picker-denied",
+      "heartbeat-timeout",
+      "memory-budget"
+    ]
+  },
+  "manual": {
+    "platform": "macOS",
+    "libraryOrdinal": 3,
+    "library": "win",
+    "fixture": "/文档/omniflow-c2-qa-20260914.csv",
+    "checks": [
+      "settings-entry-and-catalog",
+      "native-zip-preflight-and-expiry",
+      "disabled-and-unapproved-after-install",
+      "enable-and-read-approval-separated",
+      "installed-viewer-explicit-file-grant-and-206-row-read",
+      "update-1.0.0-to-1.0.1",
+      "rollback-1.0.1-to-1.0.0",
+      "safe-mode-and-bundled-availability",
+      "disabled-viewer-falls-back-with-file-retained",
+      "uninstall-confirmation-retention-message",
+      "bounded-operation-log"
+    ],
+    "cleanup": "local.csv test package removed through host store after stopping the application; user files, settings and reading snapshots retained; safe mode off"
+  }
+}

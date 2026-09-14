@@ -14,6 +14,10 @@ Agent发布后的目录刷新、根目录右键刷新及折叠分支缓存失效
 
 ## 1. 概述
 
+B1 的目录基础菜单通过稳定 omniflow.node.* 命令 ID 回传，DirectoryTree 使用宿主捕获的原节点上下文经注册表转回原 handleAction。旧类型/归档/排序动作保留兼容，确认与业务事务不变。参见 [B1 贡献入口](plugin-system-b1-contributions.md)。
+
+A1 目录图标由 ThemedDirectoryIcon 消费只读外观投影，可在彩色/线条两套内置资产间切换。节点事实、expanded owner、未知类型警告及 DEF+archive 的既有特殊行为不变；树数据不因外观切换重写。归档文字使用独立 token。详见 [外观系统](appearance-system.md)。
+
 OmniFlow 当前的文件浏览主链路不是一个模块完成的，而是 3 层配合：
 
 - `file-explorer`
@@ -109,25 +113,13 @@ OmniFlow 当前的文件浏览主链路不是一个模块完成的，而是 3 �
 
 ### 3.4 File Dispatcher
 
-`file-dispatcher/index.tsx` 的职责只有一个：
+B2 在既有内置分发器外接入贡献选择：fileType 仍由文件事实链决定，viewerId 单独表达打开方式。原 14 种内置类型继续使用原 BuiltInDispatcher；额外可信贡献经 registry 匹配，不为每个贡献增加主壳 switch。
 
-- 根据 `fileType` 把当前文件分发给对应 viewer
+多个候选时提供查看器选择与按格式关联；新贡献不会自动接管。FileViewerContext 是选择与 tab generation 的 owner，保持同一文件单 tab。贡献缺失或错误时保留原选择/恢复数据并回退内置；本机、外部 URL、媒体和归档暂不开放额外匹配。
 
-例如：
+分发器不拥有树、账号或文件事务，不在匹配时读取正文。契约、旧 key 兼容及清理见 [B2 查看器状态恢复标识](plugin-system-b2-viewers.md)。
 
-- `image -> ImageViewer`
-- `audio -> UnifiedAudioViewer` 的裸音频展开模式
-- `video -> VideoViewer`
-- `pdf -> PdfViewer`
-- `text -> TextViewer`
-- `comic / asmr / archive -> 对应 viewer`
-
-它不应该承担：
-
-- 文件树状态
-- tab 管理
-- 页面模式切换
-- 文件类型解析策略
+第一方 CSV 已通过 B2 打开方式接入隔离 View，显式授权当前文件后才加载；切换工作区/撤权/关闭时释放 native view，阅读快照仍复用 Viewer Session，详见 [C2](plugin-system-c2-csv-viewer.md)。
 
 ## 4. 文件打开链路
 

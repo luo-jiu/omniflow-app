@@ -1,3 +1,4 @@
+import { resourceViewerId } from '@/shared/viewer-contribution-id';
 import type { FileViewerFileType } from '@/shared/file-viewer-types';
 
 export interface ViewerSessionPolicy {
@@ -109,7 +110,11 @@ export const viewerSessionPolicies = {
   },
 } as const satisfies Record<FileViewerFileType, ViewerSessionPolicy>;
 
-export function viewerPolicyUsesDeviceCold(viewerKind: FileViewerFileType): boolean {
-  const cold = viewerSessionPolicies[viewerKind].cold;
+const CONTRIBUTION_POLICY: ViewerSessionPolicy = Object.freeze({ defaultHotCost: 'medium', warm: 'memory', cold: 'device', closeBehavior: 'retain-reading-position', hasDraft: false });
+export function getViewerSessionPolicy(viewerKind: FileViewerFileType, viewerId?: string): ViewerSessionPolicy {
+  return resourceViewerId(viewerId, viewerKind) ? CONTRIBUTION_POLICY : viewerSessionPolicies[viewerKind];
+}
+export function viewerPolicyUsesDeviceCold(viewerKind: FileViewerFileType, viewerId?: string): boolean {
+  const cold = getViewerSessionPolicy(viewerKind, viewerId).cold;
   return cold === 'device' || cold === 'device-and-remote';
 }

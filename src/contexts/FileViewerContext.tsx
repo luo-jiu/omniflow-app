@@ -1,3 +1,7 @@
+import { builtInViewerId, isViewerContributionId } from '@/shared/viewer-contribution-id';
+import { viewerRegistry, viewerMatches, resolveViewerContribution } from '@/features/file-viewer/contributions/viewer-registry';
+import { readViewerAssociation, saveViewerAssociation } from '@/features/file-viewer/contributions/viewer-associations';
+import { viewerSessionRegistry } from '@/features/file-viewer/session/viewer-session-runtime';
 import React, { useState, useEffect, ReactNode } from 'react';
 import {
   FileViewerContext,
@@ -160,6 +164,8 @@ function normalizeStoreState(
     contentRevision: normalizeContentRevision(tab.contentRevision),
     returnTarget: normalizeFileViewerReturnTarget(tab.returnTarget),
     videoAutoPlay: false,
+    viewerId: isViewerContributionId(tab.viewerId) ? tab.viewerId : undefined,
+    viewerGeneration: Number.isSafeInteger(tab.viewerGeneration) && Number(tab.viewerGeneration) >= 0 ? tab.viewerGeneration : 0,
   }));
   if (raw.activeTabId === null) {
     return {
@@ -357,6 +363,15 @@ export const FileViewerProvider: React.FC<{
 
     const tabId = resolveTabId(url, nodeId);
     const replaceTabId = options?.replaceTabId || null;
+    const association = viewerAccountScope && libraryId && nodeId
+      ? readViewerAssociation(viewerAccountScope, libraryId, { fileName, fileType, libraryId, nodeId }) : undefined;
+    const currentTab = tabsRef.current.find(tab => tab.id === tabId);
+    const requestedViewerId = isViewerContributionId(options?.viewerId) ? options.viewerId : currentTab?.viewerId ?? association;
+    const changesViewer = currentTab && (currentTab.viewerId ?? builtInViewerId(currentTab.fileType ?? 'other')) !== (requestedViewerId ?? builtInViewerId(fileType ?? 'other'));
+    if (changesViewer && currentTab.libraryId) {
+      viewerSessionRegistry.captureAndDetachTab(currentTab.libraryId, tabId);
+      releaseMediaForTab(tabId);
+    }
     if (replaceTabId && replaceTabId !== tabId) {
       releaseMediaForTab(replaceTabId);
     }
@@ -372,6 +387,8 @@ export const FileViewerProvider: React.FC<{
       const hasContentRevision = Boolean(
         options && Object.prototype.hasOwnProperty.call(options, 'contentRevision'),
       );
+      const nextViewerId = isViewerContributionId(options?.viewerId) ? options.viewerId : existingTab?.viewerId ?? association;
+      const generationChanged = existingTab && (existingTab.viewerId ?? builtInViewerId(existingTab.fileType ?? 'other')) !== (nextViewerId ?? builtInViewerId(fileType ?? 'other'));
       const nextTab: FileViewerTab = {
         id: tabId,
         libraryId: normalizePositiveId(libraryId),
@@ -379,6 +396,8 @@ export const FileViewerProvider: React.FC<{
         fileUrl: url,
         fileName,
         fileType,
+        viewerId: nextViewerId,
+        viewerGeneration: (baseTab?.viewerGeneration ?? 0) + (generationChanged ? 1 : 0),
         tabTypeLabel: options?.tabTypeLabel ?? null,
         returnTarget,
         videoSubtitleSources,
@@ -487,6 +506,12 @@ export const FileViewerProvider: React.FC<{
     });
   };
 
+  const closingViewerId = (tab: FileViewerTab | undefined): string | undefined => {
+    if (!tab) return undefined;
+    const live = viewerSessionRegistry.getLiveRetentionProjections().find(item => item.libraryId === tab.libraryId && item.tabId === tab.id);
+    return live ? live.viewerId : resolveViewerContribution(tab, tab.viewerId).selected?.id;
+  };
+
   const closeTab = (tabId: string) => {
     releaseMediaForTab(tabId);
     const tab = viewerState.tabs.find(item => item.id === tabId);
@@ -495,6 +520,7 @@ export const FileViewerProvider: React.FC<{
       libraryId: tab?.libraryId ?? null,
       nodeId: tab?.nodeId ?? null,
       viewerKind: tab?.fileType ?? null,
+      viewerId: closingViewerId(tab),
     });
     setViewerState(prev => closeTabInState(prev, tabId));
   };
@@ -513,6 +539,7 @@ export const FileViewerProvider: React.FC<{
         libraryId: tab.libraryId,
         nodeId: tab.nodeId,
         viewerKind: tab.fileType,
+        viewerId: closingViewerId(tab),
       }));
     setViewerState(prev => targetIds.reduce((state, tabId) => closeTabInState(state, tabId), prev));
   };
@@ -523,6 +550,25 @@ export const FileViewerProvider: React.FC<{
     if (event.accountScope !== viewerAccountScope || event.backendScope !== API_CONFIG.BASE_URL || event.libraryId !== libraryId) return;
     event.nodeIds.forEach(nodeId => closeDeletedNodeRef.current(nodeId));
   }), [libraryId, viewerAccountScope]);
+
+  const selectViewer = (tabId: string, viewerId: string, remember = false) => {
+    const tab = tabsRef.current.find(item => item.id === tabId);
+    const contribution = viewerRegistry.get(viewerId);
+    if (!tab || !contribution || !viewerMatches(contribution, tab)) throw new Error('Viewer unavailable');
+    const changesViewer = (tab.viewerId ?? builtInViewerId(tab.fileType ?? 'other')) !== viewerId;
+    const captured = changesViewer && tab.libraryId ? viewerSessionRegistry.captureTab(tab.libraryId, tabId) : [];
+    if (remember) {
+      if (!viewerAccountScope || !tab.libraryId || !tab.nodeId) throw new Error('No library scope');
+      saveViewerAssociation(viewerAccountScope, tab.libraryId, tab, viewerId);
+    }
+    if (!changesViewer) return;
+    viewerSessionRegistry.detachCapturedInstances(captured);
+    releaseMediaForTab(tabId);
+    setViewerState(previous => {
+      const tabs = previous.tabs.map(item => item.id === tabId ? { ...item, viewerId, viewerGeneration: (item.viewerGeneration ?? 0) + 1 } : item);
+      return { ...previous, tabs, fileState: toFileState(tabs.find(item => item.id === previous.activeTabId) ?? null) };
+    });
+  };
 
   const reloadActiveTab = () => {
     setViewerState(prev => {
@@ -585,6 +631,7 @@ export const FileViewerProvider: React.FC<{
         closeTab,
         closeTabByNodeId,
         reloadActiveTab,
+        selectViewer,
         reorderTabs,
       }}
     >

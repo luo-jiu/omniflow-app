@@ -33,7 +33,7 @@ const getViewerHotRetentionRevision = () => viewerSessionRegistry.getRetentionRe
  * 负责在“欢迎页”和“文件预览页”之间切换
  */
 const AppMain: FC<IProps> = ({ hideTabsBar = false, workspaceActive = true }) => {
-  const { fileState, tabs, activeTabId, activateTab, closeTab, reorderTabs } = useFileViewer();
+  const { fileState, tabs, activeTabId, activateTab, closeTab, reorderTabs, selectViewer } = useFileViewer();
   const { user } = useAuth();
   const hotRetentionRevision = React.useSyncExternalStore(
     subscribeViewerHotRetention,
@@ -104,16 +104,18 @@ const AppMain: FC<IProps> = ({ hideTabsBar = false, workspaceActive = true }) =>
         .map(item => [item.tabId, item.lastAccessOrder])
       ?? [],
     );
+    const liveProjections = viewerSessionRegistry.getLiveRetentionProjections();
     const tabProjections = keepAliveTabs.map(tab => ({
       active: tab.id === activeTabId,
       lastAccessOrder: accessOrders.get(tab.id) ?? null,
       libraryId: tab.libraryId,
       tabId: tab.id,
       viewerKind: tab.fileType,
+      viewerId: liveProjections.find(item => item.libraryId === tab.libraryId && item.tabId === tab.id)?.viewerId,
     }));
     const candidates = buildViewerHotRetentionCandidates(
       tabProjections,
-      viewerSessionRegistry.getLiveRetentionProjections(),
+      liveProjections,
     );
     const plan = planViewerHotRetention(candidates, DEFAULT_VIEWER_HOT_RETENTION_BUDGET);
     if (plan.evictions.length === 0) return;
@@ -172,7 +174,10 @@ const AppMain: FC<IProps> = ({ hideTabsBar = false, workspaceActive = true }) =>
                 aria-hidden={!isActive}
               >
                 <FileDispatcher
-                  key={`${tab.id}:${tab.reloadToken ?? 0}`}
+                  key={`${tab.id}:${tab.reloadToken ?? 0}:${tab.viewerGeneration ?? 0}`}
+                  viewerId={tab.viewerId}
+                  viewerGeneration={tab.viewerGeneration}
+                  onSelectViewer={(id, remember) => selectViewer(tab.id, id, remember)}
                   nodeId={tab.nodeId}
                   accountScope={accountScope}
                   libraryId={tab.libraryId}

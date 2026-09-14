@@ -61,7 +61,20 @@
   - `docs/frontend-architecture-baseline.md`
 - 插件系统与主题扩展的长期方针、阶段路线和合格标准：
   - [插件系统与主题扩展方针](../docs/plugin-system-and-theming-policy.md)（目标设计，非当前已实现能力）
-  - [插件化实施计划](../docs/plugin-system-implementation-plan.md)（代码调研、批次依赖、兼容与验收；实现尚未开始，下一批 A0）
+  - [插件化实施计划](../docs/plugin-system-implementation-plan.md)（代码调研、批次依赖、兼容与验收；A0 macOS 基础基线已收口，见 [基线记录](../docs/plugin-system-a0-baseline.md)）
+  - [A1 外观契约与纯解析](../docs/plugin-system-a1-color-contract.md)（已通过 macOS A1 验收；实现与验收见 [外观系统](../docs/appearance-system.md)）
+- 内置命令、目录菜单和工具贡献注册及排序兼容：
+  - [B1 贡献入口](../docs/plugin-system-b1-contributions.md)（内置贡献范围已验收）
+- 查看器贡献、打开方式和恢复 key 兼容：
+  - [B2 查看器状态恢复标识](../docs/plugin-system-b2-viewers.md)（已验收）
+- 独立 SDK、资源授权 broker、开发加载与隔离证据：
+  - [C1 SDK 与隔离实验](../docs/plugin-system-c1-sdk-isolation.md)（自动与 macOS 原生交互验收通过；后续本地安装状态见 D1）
+- 第一方独立 CSV、真实资源授权和 B2 阅读恢复：
+  - [C2 CSV 完整链路](../docs/plugin-system-c2-csv-viewer.md)（macOS 已验收；宿主 preload 改为 CJS，开发启动不再带 `--no-sandbox`）
+- 本地 ZIP 安装、插件管理、启停/权限、版本回滚与安全恢复：
+  - [D1 管理与恢复](../docs/plugin-system-d1-management.md)（macOS 已验证；设置按包指纹持久化、session 清理复用；后续独立开发见 D2）
+- 第二功能与可移交开发模板：
+  - [D2 独立开发交付](../docs/plugin-system-d2-external-development.md)（JSON 树、仓库外离线构建与开发包已验证；A0～D2 macOS 只读技术链路收口）
 - 当前云端、Tailscale、多 MinIO 和发布方式：
   - `docs/current-deployment-topology.md`
 - macOS / Windows 窗口策略、平台 bridge 和构建验证：

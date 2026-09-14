@@ -1,3 +1,8 @@
+import { PluginViewer } from '../plugin-viewer';
+import { installManagedViewerContributions } from '../../contributions/installed-viewers';
+import { viewerRegistry, resolveViewerContribution } from '../../contributions/viewer-registry';
+import { resourceViewerId } from '@/shared/viewer-contribution-id';
+import { ViewerContributionContext } from '../../session/viewer-contribution.context';
 import React from 'react';
 import { LOCAL_PREVIEW_PREFIX, readLocalPreview } from '../../services/local-preview';
 import { Spin } from "@douyinfe/semi-ui";
@@ -14,37 +19,16 @@ import GalleryArchiveViewer from "../../../archive-viewer/components/gallery-arc
 import VideoArchiveViewer from "../../../archive-viewer/components/video-archive-viewer";
 import UnifiedAudioViewer from "../../../audio-viewer/components/unified-audio-viewer";
 import styled from 'styled-components';
-import type { FileViewerFileType } from '@/shared/file-viewer-types';
-import type {
-  FileViewerReturnTarget,
-  FileViewerSubtitleSource,
-  FileViewerVideoPlaylist,
-} from '@/contexts/file-viewer.context';
-
-interface FileDispatcherProps {
-  accountScope: string | null;
-  libraryId: number | null;
-  nodeId: number | null;
-  fileUrl: string | null;
-  fileName: string | null;
-  fileType: FileViewerFileType | null;
-  returnTarget?: FileViewerReturnTarget | null;
-  videoSubtitleSources?: FileViewerSubtitleSource[];
-  videoPlaylist?: FileViewerVideoPlaylist | null;
-  videoAutoPlay?: boolean;
-  loading: boolean;
-  active?: boolean;
-  reloadToken?: number;
-  contentRevision: string | null;
-  tabId: string;
-}
-
+import type { FileDispatcherProps } from '../../contributions/viewer.types';
 const DispatcherWrapper = styled.div`
   width: 100%;
   height: 100%;
   display: flex;
   flex-direction: column;
 
+  .viewer-selector { padding: 4px 8px; display: flex; gap: 8px; align-items: center; font-size: 12px; }
+  .viewer-selector button, .viewer-selector select { min-height: 28px; border: 1px solid var(--app-border-strong); border-radius: var(--app-radius-small); color: var(--app-text); background: var(--app-panel); padding: 2px 8px; }
+  .viewer-selector button:focus-visible, .viewer-selector select:focus-visible { outline: 2px solid var(--app-focus-border); outline-offset: 2px; }
   .loading-container {
     flex: 1;
     display: flex;
@@ -86,7 +70,7 @@ const DispatcherWrapper = styled.div`
  * 文件分发器组件
  * 根据文件类型渲染对应的查看器 Feature
  */
-const FileDispatcher: React.FC<FileDispatcherProps> = ({
+const BuiltInDispatcher: React.FC<FileDispatcherProps> = ({
   accountScope,
   libraryId,
   nodeId,
@@ -331,6 +315,52 @@ const FileDispatcher: React.FC<FileDispatcherProps> = ({
         </DispatcherWrapper>
       );
   }
+};
+
+const disposeCsv = installManagedViewerContributions(PluginViewer);
+if (import.meta.hot) import.meta.hot.dispose(disposeCsv);
+const disposeBuiltIns = viewerRegistry.installBuiltIns(BuiltInDispatcher);
+if (import.meta.hot) import.meta.hot.dispose(disposeBuiltIns);
+
+class ViewerBoundary extends React.Component<React.PropsWithChildren<{ onError: () => void; fallback: React.ReactNode }>, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  componentDidCatch() { this.props.onError(); }
+  render() { return this.state.failed ? this.props.fallback : this.props.children; }
+}
+const FileDispatcher: React.FC<FileDispatcherProps> = props => {
+  React.useSyncExternalStore(viewerRegistry.subscribe, viewerRegistry.getSnapshot);
+  const [failedId, setFailedId] = React.useState<string | null>(null);
+  const [error, setError] = React.useState('');
+  const choice = resolveViewerContribution(props, props.viewerId);
+  const requested = choice.selected;
+  const failed = Boolean(requested && failedId === requested.id);
+  const selected = failed ? viewerRegistry.get(choice.fallbackId) : requested;
+  const effectiveId = selected?.id ?? choice.fallbackId;
+  const View = selected?.View ?? BuiltInDispatcher;
+  const unavailable = choice.missingRequested || failed;
+  const choose = (id: string, remember = false) => {
+    try { props.onSelectViewer?.(id, remember); setError(''); }
+    catch { setError('无法切换或保存打开方式，请重试。'); }
+  };
+  const fallback = <div role="alert">查看器无法显示此文件。<a href={props.fileUrl ?? undefined} target="_blank" rel="noopener noreferrer">访问原始文件</a></div>;
+  return <DispatcherWrapper>
+    {props.onSelectViewer && (choice.candidates.length > 1 || unavailable) && <div className="viewer-selector">
+      <label>查看器 <select aria-label="查看器打开方式" value={props.viewerId ?? choice.fallbackId} onChange={event => choose(event.target.value)}>
+        {choice.missingRequested && <option value={props.viewerId}>不可用的查看器</option>}
+        {choice.candidates.map(viewer => <option key={viewer.id} value={viewer.id}>{viewer.title}</option>)}
+      </select></label>
+      <button onClick={() => choose(effectiveId, true)}>设为此类文件默认</button>
+      {failed && <button onClick={() => setFailedId(null)}>重试查看器</button>}
+    </div>}
+    {unavailable && <div role="status">所选查看器不可用，已回退到内置查看器；原选择与恢复状态保留。</div>}
+    {error && <div role="alert">{error}</div>}
+    <ViewerContributionContext.Provider value={resourceViewerId(effectiveId, props.fileType ?? 'other') ?? undefined}>
+      <ViewerBoundary key={`${effectiveId}:${props.viewerGeneration ?? 0}`} fallback={fallback} onError={() => { if (effectiveId !== choice.fallbackId) setFailedId(effectiveId); }}>
+        <View {...props} />
+      </ViewerBoundary>
+    </ViewerContributionContext.Provider>
+  </DispatcherWrapper>;
 };
 
 function LocalFilePreview({ source, tabId, active, reloadToken }: { source: string; tabId: string; active: boolean; reloadToken: number }) {

@@ -1,0 +1,21 @@
+import { afterEach, expect, it, vi } from 'vitest';
+import { subscribeAppearance } from './appearance.api';
+import type { ThemeView } from '@/features/appearance/theme-view';
+afterEach(() => vi.unstubAllGlobals());
+it('does not let a delayed initial snapshot replace a newer event and removes subscriptions', async () => {
+  let reply!: (view: ThemeView) => void;
+  let incoming!: (view: ThemeView) => void;
+  const unsubscribe = vi.fn();
+  vi.stubGlobal('window', { electronAppearance: { get: () => new Promise<ThemeView>(resolve => { reply = resolve; }), subscribe: (fn: typeof incoming) => { incoming = fn; return unsubscribe; } } });
+  const listener = vi.fn();
+  const stop = subscribeAppearance(listener);
+  incoming({ ownerEpoch: 'new' } as ThemeView);
+  reply({ ownerEpoch: 'old' } as ThemeView);
+  await Promise.resolve();
+  expect(listener).toHaveBeenCalledTimes(1);
+  expect(listener).toHaveBeenCalledWith({ ownerEpoch: 'new' });
+  stop();
+  incoming({ ownerEpoch: 'later' } as ThemeView);
+  expect(listener).toHaveBeenCalledTimes(1);
+  expect(unsubscribe).toHaveBeenCalledOnce();
+});

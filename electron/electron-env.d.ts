@@ -28,6 +28,8 @@ declare namespace NodeJS {
 
 // Used in Renderer process, expose in `preload.ts`
 interface Window {
+  electronPluginManagement: import('../src/shared/plugin-management').PluginManagementBridge;
+  electronPluginViewer: import('../src/shared/plugin-viewer').PluginViewerBridge;
   ipcRenderer: import('electron').IpcRenderer
 
   electronAPI: {
@@ -383,6 +385,13 @@ interface Window {
     >>;
   };
 
+  electronAppearance?: {
+    claim: (epoch: string) => Promise<boolean>;
+    publish: (view: import('../src/features/appearance/theme-view').ThemeView) => Promise<boolean>;
+    get: () => Promise<import('../src/features/appearance/theme-view').ThemeView | null>;
+    subscribe: (listener: (view: import('../src/features/appearance/theme-view').ThemeView) => void) => () => void;
+  };
+
   electronWindow: {
     platform: 'darwin' | 'win32' | 'linux' | 'unknown';
     minimize: () => void;
@@ -544,6 +553,8 @@ type EmbeddedBrowserCatchToolkitState = {
 };
 
 interface Window {
+  electronPluginManagement: import('../src/shared/plugin-management').PluginManagementBridge;
+  electronPluginViewer: import('../src/shared/plugin-viewer').PluginViewerBridge;
   electronEmbeddedBrowser: {
     activateTab: (tabId: string | null) => Promise<void>;
     acknowledgeDownloadHandoff: (downloadId: string) => Promise<boolean>;

@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { AppearanceViewContext } from '@/features/appearance/appearance.context';
+import { editorAppearanceExtension } from '@/features/appearance/editor-theme';
+import { useContext, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Button, Input, Modal, Spin, Toast } from '@douyinfe/semi-ui';
 import CodeMirror from '@uiw/react-codemirror';
 import { Code2, Eye, Save, FilePlus2, Download } from 'lucide-react';
@@ -824,6 +826,8 @@ const TextViewer: React.FC<TextViewerProps> = ({
     [],
   );
 
+  const appearance = useContext(AppearanceViewContext);
+  const appearanceExtension = useMemo(() => appearance ? editorAppearanceExtension(appearance) : [], [appearance]);
   const fontTheme = useMemo(
     () => EditorView.theme({
       '&': {
@@ -892,7 +896,7 @@ const TextViewer: React.FC<TextViewerProps> = ({
           <CodeMirror
             value={content ?? ''}
             height="100%"
-            theme={resolvedTheme === 'dark' ? 'dark' : 'light'}
+            theme={appearance ? appearanceExtension : resolvedTheme === 'dark' ? 'dark' : 'light'}
             extensions={extensions}
             onChange={handleChange}
             onCreateEditor={handleEditorCreate}

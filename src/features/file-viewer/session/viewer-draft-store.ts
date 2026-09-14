@@ -3,7 +3,7 @@ import {
   isViewerResourceKey,
   serializeViewerResourceKey,
 } from './viewer-session-identity';
-import { viewerSessionPolicies } from './viewer-session-policies';
+import { getViewerSessionPolicy } from './viewer-session-policies';
 import type { ViewerDraftKey, ViewerResourceKey } from './viewer-session.types';
 
 const DRAFT_DATABASE_NAME = 'omniflow-viewer-drafts';
@@ -82,7 +82,7 @@ function estimateDraftBytes(content: string): number {
 }
 
 function isDraftCapableIdentity(identity: ViewerResourceKey): boolean {
-  return isViewerResourceKey(identity) && viewerSessionPolicies[identity.viewerKind].hasDraft;
+  return isViewerResourceKey(identity) && getViewerSessionPolicy(identity.viewerKind, identity.viewerId).hasDraft;
 }
 
 function parsePersistedRecord(value: unknown): ViewerDraftPersistenceRecord | null {

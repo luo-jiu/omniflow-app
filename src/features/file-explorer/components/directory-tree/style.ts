@@ -328,7 +328,7 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
   }
 
   .tree-node-text-archive {
-    color: color-mix(in srgb, var(--semi-color-success) 78%, var(--app-text) 22%);
+    color: var(--app-folder-archive-label, var(--app-text));
     font-weight: 600;
   }
 

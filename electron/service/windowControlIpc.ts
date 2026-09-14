@@ -30,8 +30,8 @@ export function registerWindowControlIpcHandlers(options: WindowControlIpcOption
     targetWindow?.close()
   })
 
-  ipcMain.on('window-set-theme-source', (_event, source: 'light' | 'dark' | 'system') => {
-    if (['light', 'dark', 'system'].includes(source)) {
+  ipcMain.on('window-set-theme-source', (event, source: 'light' | 'dark' | 'system') => {
+    if (event.sender === options.getMainWindow()?.webContents && event.senderFrame === event.sender.mainFrame && ['light', 'dark', 'system'].includes(source)) {
       nativeTheme.themeSource = source
     }
   })

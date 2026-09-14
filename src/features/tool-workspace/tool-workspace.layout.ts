@@ -1,3 +1,4 @@
+import { isStoredToolId } from './tool-definitions';
 import {
   TOOL_WORKSPACE_TOOL_IDS,
   type ToolWorkspaceToolId,
@@ -36,17 +37,12 @@ export function getToolNavCollapseButtonLeft(width: number, collapsed: boolean):
     : clampedWidth - TOOL_NAV_COLLAPSE_BUTTON_EXPANDED_OFFSET;
 }
 
-function isToolId(value: unknown): value is ToolWorkspaceToolId {
-  return typeof value === 'string'
-    && (TOOL_WORKSPACE_TOOL_IDS as readonly string[]).includes(value);
-}
-
 export function normalizeToolOrder(value: unknown): ToolWorkspaceToolId[] {
   const seen = new Set<ToolWorkspaceToolId>();
   const order: ToolWorkspaceToolId[] = [];
   if (Array.isArray(value)) {
     value.forEach((item) => {
-      if (isToolId(item) && !seen.has(item)) {
+      if (isStoredToolId(item) && !seen.has(item)) {
         seen.add(item);
         order.push(item);
       }
@@ -56,6 +52,20 @@ export function normalizeToolOrder(value: unknown): ToolWorkspaceToolId[] {
     if (!seen.has(toolId)) order.push(toolId);
   });
   return order;
+}
+
+export function projectAvailableToolOrder(stored: readonly ToolWorkspaceToolId[], available: readonly ToolWorkspaceToolId[]): ToolWorkspaceToolId[] {
+  const availableSet = new Set(available);
+  return [...new Set([...stored.filter(id => availableSet.has(id)), ...available])];
+}
+
+// Reorder only visible slots, retaining unavailable contributions in the saved order.
+export function mergeVisibleToolOrder(stored: readonly ToolWorkspaceToolId[], visible: readonly ToolWorkspaceToolId[]): ToolWorkspaceToolId[] {
+  const uniqueVisible = [...new Set(visible)];
+  const visibleSet = new Set(uniqueVisible);
+  let cursor = 0;
+  const result = [...new Set(stored)].map(id => visibleSet.has(id) ? uniqueVisible[cursor++] : id);
+  return [...result, ...uniqueVisible.slice(cursor)];
 }
 
 export function normalizeToolWorkspaceLayout(

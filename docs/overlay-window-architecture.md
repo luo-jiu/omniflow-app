@@ -69,6 +69,8 @@
 
 ### 2.3 主 renderer 侧 API
 
+目录菜单的基础动作已由 B1 改用稳定命令 ID，返回字段仍为现有 action 字符串；主 renderer 使用原节点上下文执行适配，不新增 IPC channel。旧动态模式/排序动作兼容规则见 [B1 贡献入口](plugin-system-b1-contributions.md)。
+
 `src/service/overlay/overlay.api.ts` 提供类型安全的唯一入口:
 
 ```ts
@@ -93,7 +95,7 @@ const result = await session.result;
 overlay.html
   ↓
 src/overlay/main.tsx
-  ├─ OverlayThemeBridge        (localStorage + matchMedia + 'storage' 事件同步主题)
+  ├─ OverlayThemeBridge        (可信主窗口快照初始化与订阅)
   └─ OverlayHost                (订阅 onShow / onDismissFromMain,查 registry,渲染)
        └─ registry.tsx          (type → component 映射)
              └─ UploadConfirmOverlayAdapter
@@ -104,14 +106,19 @@ src/overlay/main.tsx
                   └─ DirectoryContextMenu  (右键动作通过 result 回主 renderer 执行)
 ```
 
+C2 第一方 CSV 的 native view 沿用此 overlay 边界：已在真实 CSV 表格上验证文件属性弹框与遮罩覆盖、Escape 关闭。宿主窗口共享 preload 产物为 `preload.cjs`，开发启动不依赖全局 `--no-sandbox`；详情见 [C2](plugin-system-c2-csv-viewer.md)。
+
 ### 2.5 主题同步
 
-overlay 和主窗口是同 origin 的两个 renderer,`localStorage` 共享。主窗口 `ThemeContext`(`src/contexts/ThemeContext.tsx`)写 `app-theme` 时,`OverlayThemeBridge`:
+主题由主窗口 ThemeContext 唯一解析，overlay 通过 `electronAppearance` 获取并订阅 main 校验后的完整快照，不再订阅 localStorage 或自行持续解析系统主题。
 
-1. 初次 mount 从 `localStorage.getItem('app-theme')` 读取
-2. 订阅 `window.addEventListener('storage', ...)` 接收主窗口写入
-3. 订阅 `matchMedia('(prefers-color-scheme: dark)')` 接收系统主题变化
-4. 把 resolved theme 写到 `document.body[theme-mode]`,Semi UI CSS 变量自动更新
+1. 主窗口 main frame 通过 appearance:claim 建立 epoch，再用 appearance:publish 发布单调 revision 的有限视图。
+2. main 校验来源/frame、完整颜色与受限效果，缓存并广播 appearance:changed；overlay 只能读和订阅，不能发布。
+3. overlay 挂载先显示内置首帧兜底，同时订阅并调用 appearance:get。事件已到达后，迟到的 get 不得覆盖；同 epoch 只接受新 revision。
+4. 同一结果投影到 body CSS、AppearanceViewContext 和 styled-components。重建 overlay 重新握手；卸载清理订阅。
+5. 主窗口导航清除 claim/cache，旧 epoch 回包拒绝。单一 ThemeView 不包含账号凭据、资料库或本机路径。
+
+完整字段、应用与验证边界见 [外观系统](appearance-system.md)。首次默认值仅作加载兜底，不是第二个主题 owner。
 
 ---
 

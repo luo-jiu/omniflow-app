@@ -8,6 +8,8 @@
 
 执行入口：[插件化实施计划](plugin-system-implementation-plan.md)，记录第 1～3 阶段的代码调研、实施批次、兼容要求与验收门槛；实际进度以该计划及其验收记录为准。
 
+当前 C1 实验事实与限制见 [SDK 与隔离实验](plugin-system-c1-sdk-isolation.md)：已完成独立构建、自动隔离及 macOS 原生交互验证；[C2 第一方 CSV](plugin-system-c2-csv-viewer.md) 已通过 macOS 实际链路验收，[D1 本地管理与恢复](plugin-system-d1-management.md) 已验证 macOS 受限只读安装，[D2 第二功能与开发包](plugin-system-d2-external-development.md) 也已完成技术验证，本轮 macOS 只读链路收口；不代表完整第三方平台或其他平台已验收。
+
 ## 1. 目标与核心原则
 
 目标是让开发者能够独立制作、安装和维护插件，扩展文件处理、内容展示、工具流程和外观，而不必修改 OmniFlow 源码。核心系统提供稳定的数据与桌面能力，插件通过公开接口增加功能，主题通过独立外观协议改变样式。
@@ -34,11 +36,11 @@
 
 | 当前事实 | 代码入口 | 演进含义 |
 | --- | --- | --- |
-| 工具 ID 和系统视图主要是编译期配置 | [工具类型](../src/features/tool-workspace/types.ts)、[系统视图注册表](../src/features/system-workspace/registry.tsx) | 可以抽取贡献注册入口，尚无第三方安装与运行机制 |
-| 文件查看器通过固定类型与分支分发 | [FileDispatcher](../src/features/file-viewer/components/file-dispatcher/index.tsx) | 在文件事实识别之后增加查看器匹配，不让插件改写文件类型事实 |
+| 工具导航/渲染与目录基础命令已接入可信内置贡献注册；系统视图仍是静态配置 | [B1 贡献入口与验收](plugin-system-b1-contributions.md)、[系统视图注册表](../src/features/system-workspace/registry.tsx) | B1 已完成内置入口整理，尚无第三方安装与运行机制 |
+| 文件事实识别后已有可信贡献匹配和独立 viewerId；原内置查看器通过适配保留 | [B2 实现与验收](plugin-system-b2-viewers.md)、[FileDispatcher](../src/features/file-viewer/components/file-dispatcher/index.tsx) | 新贡献不自动接管；C1/C2 已验证第一方隔离与资源接入，D1 本地安装已验证，D2 JSON 与独立模板复用已验证 |
 | 已有查看器恢复、挂起和资源释放机制 | [Viewer Session 契约](../src/features/file-viewer/session/viewer-session.types.ts)、[工作区资源释放](../src/features/workspace-resource-release/index.ts) | 复用生命周期概念，插件接口通过消息适配，不暴露内部实例 |
 | 主应用 preload 提供通用 IPC 和本机读写能力 | [preload](../electron/preload.ts) | 第三方代码不能直接加载到主 renderer 或复用该 preload |
-| 主题已有部分 CSS 变量，仍存在硬编码和全局样式覆盖 | [主题上下文](../src/contexts/ThemeContext.tsx)、[全局样式](../src/assets/css/reset.less) | 补齐语义 token，统一组件库、编辑器与独立窗口的适配 |
+| 内置颜色/目录图标选择、账号本机存储及主窗口/编辑器/overlay 快照已接入；A1 已通过 macOS 内置外观验收 | [外观系统](appearance-system.md)、[A1 验收](plugin-system-a1-acceptance.md) | 其他平台与第三方包按后续阶段验证；不代表第三方外观包安装或 SDK 已开放 |
 | 文件夹图标集中按类型、归档和展开状态选择 | [节点图标](../src/features/file-explorer/utils/file-node-icon.tsx) | 保留语义解析，把资产选择交给图标主题 |
 | 后端节点 viewMeta 当前按整体 JSON 更新 | [NodeUseCase](../../omniflow-go/internal/usecase/node.go) | 公开插件写入前建立命名空间与版本保护，避免互相覆盖 |
 

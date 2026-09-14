@@ -1,3 +1,7 @@
+import { PluginManager } from './service/extensions/plugin-manager'
+import { registerPluginManagementIpc } from './service/extensions/plugin-management-ipc'
+import { registerPluginScheme } from './service/extensions/isolated-view'
+import { registerFirstPartyViewer } from './service/extensions/first-party-viewer'
 import { app, BrowserWindow, ipcMain, Menu, protocol, screen } from 'electron'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
@@ -5,6 +9,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import registerIpcHandlers from './ipc'
 import { createEmbeddedBrowserMainController } from './service/embeddedBrowserMainController'
 import { isDevToolsToggleShortcut } from './service/embeddedBrowserInputShortcuts'
+import { registerAppearanceIpc } from './service/appearanceIpc'
 import { registerWindowControlIpcHandlers } from './service/windowControlIpc'
 import { getMainWindowBackgroundColor, syncMainWindowBackground } from './service/mainWindowBackground'
 import { createOverlayWindowController } from './service/overlayWindowController'
@@ -245,14 +250,14 @@ const embeddedBrowserMainController = createEmbeddedBrowserMainController({
 
 const overlayWindowController = createOverlayWindowController({
   getMainWindow: () => mainWindow,
-  preloadPath: path.join(MAIN_DIST, 'preload.mjs'),
+  preloadPath: path.join(MAIN_DIST, 'preload.cjs'),
   rendererDist: RENDERER_DIST,
   devServerUrl: VITE_DEV_SERVER_URL,
 })
 
 const systemVideoWindowController = createSystemVideoWindowController({
   getMainWindow: () => mainWindow,
-  preloadPath: path.join(MAIN_DIST, 'preload.mjs'),
+  preloadPath: path.join(MAIN_DIST, 'preload.cjs'),
 })
 
 function createWindow() {
@@ -279,7 +284,7 @@ function createWindow() {
       ? { x: persistedWindowState.x, y: persistedWindowState.y }
       : {}),
     webPreferences: {
-      preload: path.join(MAIN_DIST, 'preload.mjs'),
+      preload: path.join(MAIN_DIST, 'preload.cjs'),
       devTools: true,
       navigateOnDragDrop: false,
     },
@@ -455,6 +460,8 @@ app.on('activate', () => {
   }
 })
 
+registerPluginScheme()
+
 app.whenReady().then(async () => {
   const appIconPath = getAppIconPath()
   if (appIconPath && process.platform === 'darwin') {
@@ -481,10 +488,17 @@ app.whenReady().then(async () => {
     console.error('[agent] media artifact sweep failed to start', error)
   })
   registerIpcHandlers({ getMainWindow: () => mainWindow })
+  if (process.platform === 'darwin') {
+    const manager = new PluginManager(path.join(app.getPath('userData'), 'plugins-v1'), path.join(process.env.APP_ROOT, 'dist-plugins/csv'), process.env.OMNIFLOW_DISABLE_THIRD_PARTY === '1' || app.commandLine.hasSwitch('disable-third-party-plugins'))
+    await manager.initialize()
+    registerPluginManagementIpc(manager, () => mainWindow)
+    registerFirstPartyViewer(() => mainWindow, { manager })
+  }
   registerWindowControlIpcHandlers({
     getMainWindow: () => mainWindow,
   })
   embeddedBrowserMainController.registerIpcHandlers()
+  registerAppearanceIpc({ getMainWindow: () => mainWindow, getOverlayWindow: () => overlayWindowController.getWindow() })
   registerOverlayWindowIpcHandlers(overlayWindowController)
   registerSystemVideoWindowIpcHandlers(systemVideoWindowController)
   registerAppUpdateIpcHandlers(ipcMain, appUpdateService)

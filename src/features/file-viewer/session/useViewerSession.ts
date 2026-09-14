@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { ViewerContributionContext } from './viewer-contribution.context';
+import { useContext, useCallback, useEffect, useMemo, useRef } from 'react';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 import { createViewerResourceKey } from './viewer-session-identity';
 import {
@@ -51,6 +52,7 @@ function isViewerContentInteraction(event: Event): boolean {
 export function useViewerSession<TPayload>(
   options: UseViewerSessionOptions<TPayload>,
 ): ViewerSessionHandle<TPayload> {
+  const viewerId = useContext(ViewerContributionContext);
   const activeRef = useRef(options.active);
   const hasRestorableSnapshotRef = useRef(false);
   const initialRestoreGateRef = useRef<ViewerSessionRestoreGate | null>(null);
@@ -65,6 +67,7 @@ export function useViewerSession<TPayload>(
       nodeId: options.nodeId,
       stableResourceId: options.stableResourceId,
       viewerKind: options.viewerKind,
+      viewerId,
     });
   }, [
     options.accountScope,
@@ -72,6 +75,7 @@ export function useViewerSession<TPayload>(
     options.nodeId,
     options.stableResourceId,
     options.viewerKind,
+    viewerId,
   ]);
 
   const capture = useCallback(() => {
@@ -142,7 +146,7 @@ export function useViewerSession<TPayload>(
       }
     } else if (
       options.coldRestoreReady === false
-      || !viewerPolicyUsesDeviceCold(identity.viewerKind)
+      || !viewerPolicyUsesDeviceCold(identity.viewerKind, identity.viewerId)
     ) {
       restoreGate.settle('none');
     } else {

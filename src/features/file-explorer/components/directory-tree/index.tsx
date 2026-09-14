@@ -1,3 +1,5 @@
+import { directoryCommands, isDirectoryMediaFile } from '@/features/file-explorer/directory-commands';
+import { isNamespacedContributionId } from '@/features/extensions/contribution-registry';
 import React, { ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { Tree, Toast, Input } from '@douyinfe/semi-ui';
 import { IconChevronRightStroked } from '@douyinfe/semi-icons';
@@ -2262,7 +2264,23 @@ export default function DirectoryTree({
         return;
       }
 
-      await handleAction(result.action, node);
+      try {
+        if (directoryCommands.get(result.action)) {
+          await directoryCommands.executeHost(result.action, undefined, {
+            location: node === null ? 'root' : isFolder ? 'folder' : 'file',
+            isMediaFile: isDirectoryMediaFile(node),
+            dispatchLegacyAction: action => handleAction(action, node),
+          });
+        } else if (isNamespacedContributionId(result.action)) {
+          throw new Error('此菜单命令当前不可用');
+        } else {
+          // Compatibility for existing mode/sort actions and older overlay bundles.
+          await handleAction(result.action, node);
+        }
+      } catch (error: any) {
+        runtimeLogger.error('执行目录菜单失败:', error);
+        Toast.error(error?.message || '执行菜单失败');
+      }
     })();
   };
 

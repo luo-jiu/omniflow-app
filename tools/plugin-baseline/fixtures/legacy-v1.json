@@ -1,0 +1,106 @@
+{
+  "baselineCommit": "460c6dd54784dbbe2aad8acee163521187053259",
+  "fixtureNow": 2000,
+  "themeExt": "{\"omniflowPreferencesV1\":{\"theme\":\"dark\",\"language\":\"zh-CN\"}}",
+  "layout": {
+    "navWidth": 180,
+    "toolOrder": [
+      "qqmusic-lyrics",
+      "subtitle-translation",
+      "ai-services",
+      "media-file-processing",
+      "media-processing"
+    ]
+  },
+  "toolState": {
+    "activeToolId": "subtitle-translation",
+    "subtitleTranslationDraft": {
+      "fileFormat": "srt",
+      "fileName": "fixture.srt",
+      "rows": [
+        {
+          "id": "cue-1",
+          "index": 1,
+          "startMs": 0,
+          "endMs": 1000,
+          "startTimestamp": "00:00:00,000",
+          "endTimestamp": "00:00:01,000",
+          "sourceText": "Synthetic subtitle",
+          "translatedText": "合成字幕",
+          "status": "translating"
+        }
+      ],
+      "sourceNode": null,
+      "sourceType": "local"
+    }
+  },
+  "tab": {
+    "id": "node:900099",
+    "libraryId": 900007,
+    "nodeId": 900099,
+    "fileUrl": "https://fixture.invalid/source.txt",
+    "fileName": "source.txt",
+    "fileType": "text",
+    "loading": false,
+    "contentRevision": "fixture:v1"
+  },
+  "snapshot": {
+    "schemaVersion": 1,
+    "identity": {
+      "accountScope": "user:900001",
+      "libraryId": 900007,
+      "resourceIdentity": "node:900099",
+      "viewerKind": "text"
+    },
+    "contentRevision": "fixture:v1",
+    "savedAt": 1000,
+    "payload": {
+      "selectionAnchor": 2,
+      "selectionHead": 4,
+      "topLine": 3,
+      "scrollLeft": 0
+    }
+  },
+  "resourceKey": "[\"user:900001\",900007,\"node:900099\",\"text\"]",
+  "coldRecord": {
+    "storageSchemaVersion": 1,
+    "resourceKey": "[\"user:900001\",900007,\"node:900099\",\"text\"]",
+    "accountScope": "user:900001",
+    "libraryId": 900007,
+    "expiresAt": 100000,
+    "estimatedBytes": 768,
+    "snapshot": {
+      "schemaVersion": 1,
+      "identity": {
+        "accountScope": "user:900001",
+        "libraryId": 900007,
+        "resourceIdentity": "node:900099",
+        "viewerKind": "text"
+      },
+      "contentRevision": "fixture:v1",
+      "savedAt": 1000,
+      "payload": {
+        "selectionAnchor": 2,
+        "selectionHead": 4,
+        "topLine": 3,
+        "scrollLeft": 0
+      }
+    }
+  },
+  "draftRecord": {
+    "schemaVersion": 1,
+    "key": {
+      "accountScope": "user:900001",
+      "libraryId": 900007,
+      "resourceIdentity": "node:900099",
+      "viewerKind": "text",
+      "contentRevision": "fixture:v1"
+    },
+    "savedAt": 1000,
+    "expiresAt": 100000,
+    "estimatedBytes": 549,
+    "content": "Synthetic unsaved draft\n中文草稿\n",
+    "resourceKey": "[\"user:900001\",900007,\"node:900099\",\"text\"]",
+    "accountScope": "user:900001"
+  }
+}

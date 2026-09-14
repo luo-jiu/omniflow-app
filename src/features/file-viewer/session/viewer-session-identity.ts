@@ -1,3 +1,4 @@
+import { resourceViewerId } from '@/shared/viewer-contribution-id';
 import type { FileViewerFileType } from '@/shared/file-viewer-types';
 import { viewerSessionPolicies } from './viewer-session-policies';
 import type {
@@ -99,6 +100,7 @@ export function createViewerResourceKey(options: {
   accountScope: string;
   libraryId: number;
   viewerKind: FileViewerFileType;
+  viewerId?: string;
   nodeId?: number | null;
   stableResourceId?: string | null;
 }): ViewerResourceKey | null {
@@ -110,6 +112,7 @@ export function createViewerResourceKey(options: {
     || libraryId == null
     || !resourceIdentity
     || !isViewerKind(options.viewerKind)
+    || resourceViewerId(options.viewerId, options.viewerKind) === null
   ) {
     return null;
   }
@@ -118,6 +121,7 @@ export function createViewerResourceKey(options: {
     libraryId,
     resourceIdentity,
     viewerKind: options.viewerKind,
+    ...(resourceViewerId(options.viewerId, options.viewerKind) ? { viewerId: options.viewerId } : {}),
   };
 }
 
@@ -126,7 +130,7 @@ export function createViewerDraftKey(
   contentRevision: string,
 ): ViewerDraftKey | null {
   const normalizedRevision = normalizeRequiredText(contentRevision, 512);
-  if (!isViewerResourceKey(identity) || !normalizedRevision) {
+  if (!isViewerResourceKey(identity) || resourceViewerId(identity.viewerId, identity.viewerKind) || !normalizedRevision) {
     return null;
   }
   return {
@@ -171,11 +175,13 @@ export function isViewerResourceKey(
     && typeof candidate.libraryId === 'number'
     && normalizePositiveInteger(candidate.libraryId) != null
     && isResourceIdentity(candidate.resourceIdentity)
-    && isViewerKind(candidate.viewerKind);
+    && isViewerKind(candidate.viewerKind)
+    && resourceViewerId(candidate.viewerId, candidate.viewerKind) !== null;
 }
 
 export function isViewerDraftKey(value: unknown): value is ViewerDraftKey {
   if (!isViewerResourceKey(value)) return false;
+  if (resourceViewerId(value.viewerId, value.viewerKind)) return false;
   const candidate = value as Partial<ViewerDraftKey>;
   return typeof candidate.contentRevision === 'string'
     && normalizeRequiredText(candidate.contentRevision, 512) === candidate.contentRevision;
@@ -206,6 +212,7 @@ export function serializeViewerResourceKey(identity: ViewerResourceKey): string 
     identity.libraryId,
     identity.resourceIdentity,
     identity.viewerKind,
+    ...(resourceViewerId(identity.viewerId, identity.viewerKind) ? [identity.viewerId] : []),
   ]);
 }
 
@@ -242,6 +249,7 @@ export function serializeViewerLiveDiagnosticKey(
     identity.libraryId,
     identity.resourceIdentity,
     identity.viewerKind,
+    ...(resourceViewerId(identity.viewerId, identity.viewerKind) ? [identity.viewerId] : []),
     key.mountGeneration,
   ]);
 }

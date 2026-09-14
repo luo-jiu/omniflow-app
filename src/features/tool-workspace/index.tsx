@@ -1,3 +1,6 @@
+import { toolCommands } from './tool-commands';
+import { Toast } from '@douyinfe/semi-ui';
+import { toolRegistry } from './tool-registry';
 import React from 'react';
 import { IconDoubleChevronLeft } from '@douyinfe/semi-icons';
 
@@ -14,12 +17,7 @@ import {
   saveToolWorkspaceState,
 } from './tool-workspace.state';
 import { isDisposingLibraryWorkspace } from '@/features/workspace-resource-release';
-import ToolWorkspaceSubtitle from './ToolWorkspaceSubtitle';
-import ToolWorkspaceMedia from './ToolWorkspaceMedia';
 import ToolWorkspaceNav from './ToolWorkspaceNav';
-import ToolWorkspaceQQMusicLyrics from './ToolWorkspaceQQMusicLyrics';
-import LibraryMediaTool from '@/features/media-tools/LibraryMediaTool';
-import AIServiceWorkspace from '@/features/ai-services/AIServiceWorkspace';
 import type {
   ToolWorkspaceLibraryMediaRequest,
   ToolWorkspaceMediaHlsRequest,
@@ -90,6 +88,8 @@ const ToolWorkspace: React.FC<ToolWorkspaceProps> = ({
 
   const draft = workspaceState.subtitleTranslationDraft;
   const activeToolId = workspaceState.activeToolId;
+  const contributions = React.useSyncExternalStore(toolRegistry.subscribe, toolRegistry.getSnapshot);
+  const ActiveTool = contributions.find(tool => tool.id === activeToolId)?.View;
   const patchDraft = React.useCallback((updater: (current: typeof draft) => typeof draft) => {
     setWorkspaceState((current) => ({
       ...current,
@@ -160,10 +160,13 @@ const ToolWorkspace: React.FC<ToolWorkspaceProps> = ({
   }, [libraryMediaProcessingRequest]);
 
   const openTool = React.useCallback((toolId: ToolWorkspaceState['activeToolId']) => {
-    setWorkspaceState((current) => ({
-      ...current,
-      activeToolId: toolId,
-    }));
+    try {
+      toolCommands.executeHost('omniflow.tools.open', toolId, {
+        open: id => setWorkspaceState(current => ({ ...current, activeToolId: id })),
+      });
+    } catch {
+      Toast.warning('此工具当前不可用，请选择其他工具');
+    }
   }, []);
 
   React.useEffect(() => {
@@ -349,73 +352,19 @@ const ToolWorkspace: React.FC<ToolWorkspaceProps> = ({
       />
 
       <WorkspaceMain>
-        {activeToolId === 'ai-services' ? <AIServiceWorkspace /> : null}
-
-        {activeToolId === 'qqmusic-lyrics' ? (
-          <ToolWorkspaceQQMusicLyrics
-            libraryId={libraryId}
-            onRefreshDirectory={onRefreshDirectory}
-            rootNodeId={rootNodeId}
-            selectedTreeNode={selectedTreeNode}
-          />
-        ) : null}
-
-        {activeToolId === 'media-processing' ? (
-          <ToolWorkspaceMedia
-            activeMode={mediaProcessingMode}
-            hlsRequest={mediaProcessingHlsRequest}
-            libraryId={libraryId}
-            mpdRequest={mediaProcessingMpdRequest}
-            onModeChange={setMediaProcessingMode}
-            onRefreshDirectory={onRefreshDirectory}
-            resources={mediaProcessingResources}
-          />
-        ) : null}
-
-        {activeToolId === 'media-file-processing' ? (
-          <LibraryMediaTool
-            libraryId={libraryId}
-            onRefreshDirectory={onRefreshDirectory}
-            request={libraryMediaRequest}
-          />
-        ) : null}
-
-        {activeToolId === 'subtitle-translation' ? (
-          <ToolWorkspaceSubtitle
-            activeServiceId={subtitleTranslation.activeServiceId}
-            activeRowId={subtitleTranslation.activeRowId}
-            availableModels={subtitleTranslation.availableModels}
-            config={subtitleTranslation.config}
-            deferredRows={subtitleTranslation.deferredRows}
-            draft={subtitleTranslation.draft}
-            editingRowId={subtitleTranslation.editingRowId}
-            effectiveActiveRowId={subtitleTranslation.effectiveActiveRowId}
-            importing={subtitleTranslation.importing}
-            isRunnerActive={subtitleTranslation.isRunnerActive}
-            librarySaveTarget={subtitleTranslation.librarySaveTarget}
-            loadedSubtitleIdentity={subtitleTranslation.loadedSubtitleIdentity}
-            loadingModels={subtitleTranslation.loadingModels}
-            runnerSnapshot={subtitleTranslation.runnerSnapshot}
-            savingLibrary={subtitleTranslation.savingLibrary}
-            savingLocal={subtitleTranslation.savingLocal}
-            selectedTreeNode={subtitleTranslation.selectedTreeNode}
-            untranslatedCount={subtitleTranslation.untranslatedCount}
-            onConfigChange={subtitleTranslation.handlers.onConfigChange}
-            onImportDroppedFile={subtitleTranslation.handlers.onImportDroppedFile}
-            onImportLocal={subtitleTranslation.handlers.onImportLocal}
-            onImportSelectedLibraryFile={subtitleTranslation.handlers.onImportSelectedLibraryFile}
-            onMergeAdjacentDuplicates={subtitleTranslation.handlers.onMergeAdjacentDuplicates}
-            onLoadModels={subtitleTranslation.handlers.onLoadModels}
-            onRetranslateAll={subtitleTranslation.handlers.onRetranslateAll}
-            onSaveLibrary={subtitleTranslation.handlers.onSaveLibrary}
-            onSaveLocal={subtitleTranslation.handlers.onSaveLocal}
-            onStartTranslation={subtitleTranslation.handlers.onStartTranslation}
-            onStopTranslation={subtitleTranslation.handlers.onStopTranslation}
-            onToggleEditingRow={subtitleTranslation.handlers.onToggleEditingRow}
-            onTranslateSingle={subtitleTranslation.handlers.onTranslateSingle}
-            onTranslationChange={subtitleTranslation.handlers.onTranslationChange}
-          />
-        ) : null}
+        {ActiveTool ? <ActiveTool
+          libraryId={libraryId}
+          rootNodeId={rootNodeId}
+          selectedTreeNode={selectedTreeNode}
+          onRefreshDirectory={onRefreshDirectory}
+          subtitleTranslation={subtitleTranslation}
+          mediaProcessingMode={mediaProcessingMode}
+          mediaProcessingHlsRequest={mediaProcessingHlsRequest}
+          mediaProcessingMpdRequest={mediaProcessingMpdRequest}
+          mediaProcessingResources={mediaProcessingResources}
+          setMediaProcessingMode={setMediaProcessingMode}
+          libraryMediaRequest={libraryMediaRequest}
+        /> : <div role="status">此工具当前不可用，请从左侧选择其他工具。</div>}
       </WorkspaceMain>
     </Wrapper>
   );

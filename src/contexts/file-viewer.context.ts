@@ -44,6 +44,7 @@ export interface FileViewerVideoPlaylist {
 }
 
 export interface FileViewerOpenOptions {
+  viewerId?: string;
   contentRevision?: string | null;
   tabTypeLabel?: string | null;
   returnTarget?: FileViewerReturnTarget | null;
@@ -72,6 +73,8 @@ export interface FileViewerState {
 }
 
 export interface FileViewerTab {
+  viewerId?: string;
+  viewerGeneration?: number;
   id: string;
   libraryId: number | null;
   nodeId: number | null;
@@ -108,6 +111,7 @@ export interface FileViewerContextType {
   closeTab: (tabId: string) => void;
   closeTabByNodeId: (nodeId: number) => void;
   reloadActiveTab: () => void;
+  selectViewer: (tabId: string, viewerId: string, remember?: boolean) => void;
   reorderTabs: (
     draggedTabId: string,
     targetTabId: string,

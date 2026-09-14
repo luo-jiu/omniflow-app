@@ -1,0 +1,65 @@
+{
+  "completed": true,
+  "checks": [
+    "kit-and-projects-built-outside-host",
+    "generated-starter-opens-with-existing-host",
+    "starter-renders-text-not-html",
+    "JSON-install-does-not-grant",
+    "JSON-opens-with-generic-existing-bridge",
+    "numbers-remain-exact",
+    "JSON-values-do-not-execute",
+    "tree-renders-a-bounded-page",
+    "JSON-tree-checkpoint-restored",
+    "JSON-consumes-existing-theme-events",
+    "disable-removes-JSON-instance",
+    "independent-update-runs-new-code",
+    "new-package-rejects-old-checkpoint",
+    "invalid-JSON-has-visible-error-no-stale-tree",
+    "same-format-contributions-keep-distinct-identities",
+    "CSV-alternative-uses-the-same-host-contract",
+    "external-packages-uninstall-cleanly"
+  ],
+  "platform": "darwin",
+  "electron": "30.5.1",
+  "date": "2026-09-14",
+  "externalBuild": {
+    "nodeVersion": "v25.5.0",
+    "independent": true,
+    "offline": true,
+    "artifacts": [
+      "generated starter",
+      "JSON 0.1.0",
+      "JSON 0.1.1 update",
+      "CSV alternative",
+      "portable SDK/template kit"
+    ],
+    "hostRuntimeSpecialCasesAdded": false
+  },
+  "verification": {
+    "lint": "passed",
+    "build": "passed",
+    "testFilesPassed": 374,
+    "testsPassed": 2602,
+    "testFilesSkipped": 3,
+    "testsSkipped": 7,
+    "electronChecksPassed": 17
+  },
+  "manual": {
+    "platform": "macOS",
+    "libraryOrdinal": 3,
+    "library": "win",
+    "fixture": "/文档/omniflow-d2-qa-20260914.json",
+    "nodes": 759,
+    "checks": [
+      "JSON-package-install-and-explicit-file-grant",
+      "large-number-and-exponent-preserved",
+      "tree-expand-pagination-and-full-value-path",
+      "committed-expanded-state-and-page-restored-after-close",
+      "display-setting-persisted",
+      "independent-update-default-disabled",
+      "CSV-alternative-does-not-change-default",
+      "same-format-candidates-have-distinct-identities"
+    ],
+    "cleanup": "test tabs closed; test plugin packages removed through the host store; synthetic files and plugin data retained"
+  }
+}

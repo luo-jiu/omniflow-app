@@ -1,0 +1,18 @@
+import { mkdtemp, cp, readFile, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
+import path from 'node:path';
+const root = fileURLToPath(new URL('../../', import.meta.url));
+const sampleName = process.argv[2] ?? 'csv-viewer';
+if (!['csv-viewer','json-tree-viewer'].includes(sampleName)) throw new Error('Unknown sample');
+const work = await mkdtemp(path.join(tmpdir(), 'omniflow-sdk-independent-'));
+await cp(path.join(root, 'packages/plugin-sdk'), path.join(work, 'sdk'), { recursive: true });
+const packed = JSON.parse(execFileSync('npm', ['pack', '--json', '--ignore-scripts'], { cwd: path.join(work, 'sdk'), encoding: 'utf8' }));
+await cp(path.join(root, `samples/${sampleName}`), path.join(work, 'sample'), { recursive: true });
+const manifest = JSON.parse(await readFile(path.join(work, 'sample/package.json'), 'utf8'));
+manifest.dependencies['@omniflow/plugin-sdk'] = `file:../sdk/${packed[0].filename}`;
+await writeFile(path.join(work, 'sample/package.json'), JSON.stringify(manifest, null, 2));
+execFileSync('npm', ['install', '--offline', '--ignore-scripts', '--no-audit', '--no-fund'], { cwd: path.join(work, 'sample'), stdio: 'pipe' });
+execFileSync('npm', ['run', 'build'], { cwd: path.join(work, 'sample'), stdio: 'pipe' });
+console.log(JSON.stringify({ work, packageDirectory: path.join(work, 'sample/dist'), sdkTarball: path.join(work, 'sdk', packed[0].filename), independent: true }));

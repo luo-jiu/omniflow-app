@@ -18,6 +18,7 @@
   "files": [
     "dist",
     "dist-electron",
+    "dist-plugins",
     "!dist-electron/agent-document-smoke*.mjs",
     "!dist-electron/agent-document-smoke*.cjs",
     {

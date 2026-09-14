@@ -73,7 +73,7 @@ function normalizePositiveBudget(value: number | undefined, fallback: number): n
 }
 
 function isDeviceColdCapable(identity: ViewerResourceKey): boolean {
-  return isViewerResourceKey(identity) && viewerPolicyUsesDeviceCold(identity.viewerKind);
+  return isViewerResourceKey(identity) && viewerPolicyUsesDeviceCold(identity.viewerKind, identity.viewerId);
 }
 
 function isPlainJson(value: unknown, seen = new WeakSet<object>()): boolean {
@@ -435,6 +435,19 @@ export class ViewerSessionColdStore {
       } catch (error) {
         throw createStorageError('Unable to delete viewer sessions for the library', error);
       }
+    });
+  }
+
+  async deleteNodes(accountScope: string, libraryId: number, nodeIds: number[]): Promise<void> {
+    if (!isViewerAccountScope(accountScope) || !Number.isSafeInteger(libraryId) || libraryId <= 0) return;
+    const nodes = new Set(nodeIds.filter(id => Number.isSafeInteger(id) && id > 0).map(id => `node:${id}`));
+    await this.enqueueMutation(async () => {
+      const records = await this.persistence.getAllByLibrary(accountScope, libraryId);
+      const keys = records.flatMap(raw => {
+        const record = parsePersistedRecord(raw);
+        return record && record.accountScope === accountScope && record.libraryId === libraryId && nodes.has(record.snapshot.identity.resourceIdentity) ? [record.resourceKey] : [];
+      });
+      await this.persistence.deleteMany(keys);
     });
   }
 

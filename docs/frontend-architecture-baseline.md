@@ -25,10 +25,9 @@
 
 ```text
 src/main.tsx
+  -> HashRouter
   -> App.tsx
-    -> ThemeProvider(styled-components)
-    -> HashRouter
-    -> contexts/ThemeContext
+    -> contexts/ThemeContext（唯一外观 owner，内部投影 styled-components）
     -> contexts/AuthContext
     -> features/user/preferences/UserPreferencesBootstrap
     -> layouts/MainLayout
@@ -226,7 +225,7 @@ views -> features -> components / hooks -> service / preload bridge -> electron 
 只放真正跨页面、跨业务域都需要共享的状态：
 
 - 认证状态：`contexts/AuthContext`
-- 主题状态：`contexts/ThemeContext`
+- 主题状态：`contexts/ThemeContext`，外观选择、预览、账号本机存储与跨窗口快照见 [外观系统](appearance-system.md)
 - 用户偏好初始化：`features/user/preferences`
   - `UserPreferencesBootstrap` 继续投影历史 `users.ext` 偏好。
   - `SyncedUserPreferencesProvider` 是 `user_preferences` 命名空间数据的应用级 owner，负责登录后加载、optimistic 投影、串行保存和账号切换清理。
@@ -327,6 +326,10 @@ AI 服务使用独立的 `window.electronAIService` bridge，且 main 只接受�
 Agent 长期记忆继续复用同一个 bridge，但由独立 `AgentMemoryStore` 持有 `agent_memories` 事实，renderer 不能接触 SQLite。用户明确要求记住时，`memory.propose` 必须先走现有 Tool 审批；批准后才保存，管理页的编辑 / 删除使用 `revision` 乐观锁。管理页临时投影只由 `useAgentMemories` 持有，按 owner、资料库和查询代次拒绝迟到结果；更新直接采用 main 返回的 authoritative row，删除只应用 main 已确认的成功结果，不通过写后全量重载维持第二份状态。管理列表通过 `AgentMemoryPage` 按 `updatedAt + memoryId` 每页 50 条游标读取，并返回当前搜索的真实 `total`；任一 owner 的“global + 当前资料库”可见集合最多 200 条，第 201 条由 SQLite trigger 拒绝，不同资料库不会互相占满配额。原地 schema 每次初始化都重建当前 quota trigger；开发期遗留超限数据保留管理和删除能力，但在清理到 200 条前不允许 Retriever 静默截取其中一部分。main 按 owner 与 global / 当前资料库 scope 召回最多 5 条、6,000 字符的候选，先完成规范近期历史投影，再只用剩余 token 预算注入低权限消息；记忆不进入 system role、不持久化回会话，也不形成 Tool 授权。当前结构化 Retriever 可被后续 FTS / 向量派生索引替换，SQLite row 仍是唯一事实源。
 
 QQ 音乐歌词使用独立的 `window.electronQQMusicLyrics` bridge，提供 `status/search/preview` 三个只读宿主操作。main 只接受主窗口 main frame 调用，返回稳定错误码；renderer 页面经 `qqmusic-lyrics.service.ts` 消费，不接触 SQLite、binary plist 或解密依赖。保存不进入该 bridge，而是复用通用文本 staging 和 `/v1/directory/upload`。
+
+第一方 CSV 使用独立 `electronPluginViewer` 可信宿主桥和专用隔离 preload；只允许主窗口 main frame 控制固定包，资源由 main 向后端重新验证。运行状态投影通过 B2 Session 保存设备快照，插件不获得通用 IPC/URL/凭据。详见 [C2 CSV](plugin-system-c2-csv-viewer.md)。
+
+插件安装事实由 `PluginManager/PluginInstallStore` 持有；renderer 通过 catalog 派生可用贡献与版本组件类型。D1 管理及恢复见 [本地插件管理](plugin-system-d1-management.md)，设置按包指纹/账号/库持久化，阅读快照继续由 B2 管理。
 
 ### 6.3 Electron Main
 
