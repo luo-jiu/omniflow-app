@@ -423,6 +423,12 @@ contextBridge.exposeInMainWorld('electronWindow', {
   close: () => ipcRenderer.send('window-close'),
   activate: (temporaryOnTop = false) => ipcRenderer.invoke('window-activate', temporaryOnTop),
   setThemeSource: (source: 'light' | 'dark' | 'system') => ipcRenderer.send('window-set-theme-source', source),
+  getFullScreen: (): Promise<boolean> => ipcRenderer.invoke('window-get-full-screen'),
+  onFullScreenChange: (listener: (fullScreen: boolean) => void) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, fullScreen: boolean) => listener(fullScreen === true);
+    ipcRenderer.on('window-full-screen-changed', wrapped);
+    return () => ipcRenderer.removeListener('window-full-screen-changed', wrapped);
+  },
 });
 
 contextBridge.exposeInMainWorld('electronOverlay', {

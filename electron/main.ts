@@ -316,11 +316,13 @@ function createWindow() {
     overlayWindowController.syncBoundsFromMain()
   })
   win.on('enter-full-screen', () => {
+    win.webContents.send('window-full-screen-changed', true)
     overlayWindowController.syncBoundsFromMain()
     // macOS fullscreen transition is animated; resync after it settles
     setTimeout(() => overlayWindowController.syncBoundsFromMain(), 300)
   })
   win.on('leave-full-screen', () => {
+    win.webContents.send('window-full-screen-changed', false)
     overlayWindowController.syncBoundsFromMain()
     setTimeout(() => overlayWindowController.syncBoundsFromMain(), 300)
   })

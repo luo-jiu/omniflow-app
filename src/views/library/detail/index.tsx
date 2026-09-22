@@ -1458,12 +1458,8 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   const openFileWorkspace = React.useCallback(() => {
     setBrowserModeOpen(false);
     void window.electronEmbeddedBrowser.deactivate();
-    if (activeTabId) {
-      setWorkspaceDisplayMode('file-viewer');
-      return;
-    }
-    showSearchHome();
-  }, [activeTabId, showSearchHome]);
+    setWorkspaceDisplayMode('file-viewer');
+  }, []);
 
   const openToolsWorkspace = React.useCallback(() => {
     setBrowserModeOpen(false);
@@ -1518,13 +1514,12 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
       void window.electronEmbeddedBrowser.deactivate();
       return;
     }
-    if (systemWorkspaceReturnMode === 'file-viewer' && activeTabId) {
+    if (systemWorkspaceReturnMode === 'file-viewer') {
       openFileWorkspace();
       return;
     }
     showSearchHome();
   }, [
-    activeTabId,
     browserTabs.length,
     openEmbeddedBrowser,
     openFileWorkspace,
@@ -2655,8 +2650,8 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                 type="button"
                 className="toolbar-action-btn"
                 onClick={openFileWorkspace}
-                title={activeTabId ? '打开文件模式' : '暂无打开的文件'}
-                disabled={!activeTabId}
+                title="打开文件模式"
+                aria-label="打开文件模式"
               >
                 <OutlineIcon name="folder" />
               </button>
@@ -2676,8 +2671,8 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                 type="button"
                 className={`toolbar-action-btn ${workspaceDisplayMode === 'file-viewer' ? 'is-active' : ''}`}
                 onClick={openFileWorkspace}
-                title={activeTabId ? '打开文件模式' : '暂无打开的文件'}
-                disabled={!activeTabId}
+                title="打开文件模式"
+                aria-label="打开文件模式"
               >
                 <OutlineIcon name="folder" selected={workspaceDisplayMode === 'file-viewer'} />
               </button>

@@ -1,5 +1,7 @@
 # Library Detail 工作区状态说明
 
+macOS原生全屏时，左上角目录树开关使用10px左边距，退出后恢复红绿灯预留位。CSS消费平台层的`data-window-fullscreen`，同时更新开关、拖拽热区和侧栏折叠后的工具栏安全留白；页面不保存第二份全屏状态。IPC与生命周期见 [桌面平台](desktop-platform-architecture.md)。
+
 更新时间：2026-08-26
 
 适用范围：`src/views/library/detail/` 页面中的工作区显示模式、浏览器 tab、搜索模式、地址栏、缓存恢复，以及和文件预览/内置浏览器之间的切换逻辑。
@@ -379,8 +381,8 @@ Agent模式的主工具栏隐藏刷新、长期记忆和新建入口，不再提
 
 - `setBrowserModeOpen(false)`
 - `deactivate()` 原生浏览器 view
-- 若当前有 active file，则切到 `file-viewer`
-- 否则回 `search-home`；括号中的旧 `searchMode` 只保留兼容数据，不改变当前 Agent 页面
+- 无论是否存在active file，都切到`file-viewer`；无文件时复用AppMain的WelcomeView空态，有文件时继续已有预览。
+- 顶部文件夹入口始终可点击，常态不因缺少文件tab而置灰，激活文件模式后才使用选中色；浏览器模式下的同一入口遵循相同行为。从文件空态打开并关闭系统视图时也返回文件空态，不跳回Agent。
 
 这说明“回到文件区”本质上是工作区级切换，而不是只把浏览器组件隐藏掉。
 

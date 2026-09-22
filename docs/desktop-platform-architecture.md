@@ -49,6 +49,8 @@ renderer 的 `getDesktopPlatform()` 将其归一为：
 
 ## 3. 主窗口策略
 
+macOS原生全屏时，目录树开关从窗口态的left=75px收回到10px，标题栏drag/no-drag区域与侧栏收起时的工具栏预留空间同步缩小；退出全屏恢复原值。使用BrowserWindow的enter-full-screen/leave-full-screen事件经`window-full-screen-changed`投影，不由窗口尺寸或DOM媒体全屏推断。preload提供只读getFullScreen/onFullScreenChange，初始读取`window-get-full-screen`仅允许主窗口主frame，重新加载时也能恢复全屏布局。`src/platform/runtime.ts`统一写入`html[data-window-fullscreen]`，晚到的初始读取不能覆盖新事件；HMR释放订阅。Windows原有安全区和macOS毛玻璃背景保持原策略。
+
 当前主窗口平台事实：
 
 | 平台 | 标题栏 | 平台效果 | 窗口控制 |

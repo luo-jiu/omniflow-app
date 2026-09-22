@@ -13,6 +13,8 @@ import {
   CONTENT_TOOLBAR_COLLAPSED_SAFE_SPACE,
   CONTENT_TOOLBAR_HEIGHT,
   DEFAULT_SIDE_PANEL_WIDTH,
+  FULLSCREEN_CONTENT_TOOLBAR_COLLAPSED_SAFE_SPACE,
+  FULLSCREEN_SIDE_PANEL_TOGGLE_VISUAL_LEFT,
   SIDE_PANEL_COLLAPSE_ANIMATION_MS,
   SIDE_PANEL_TOGGLE_LEFT,
   SIDE_PANEL_TOGGLE_SIZE,
@@ -82,6 +84,14 @@ export const DetailWrapper = styled.div`
     --side-panel-toggle-drag-after-left: ${WINDOWS_SIDE_PANEL_TOGGLE_VISUAL_LEFT + SIDE_PANEL_TOGGLE_SIZE + 8}px;
     --side-panel-toggle-guard-left: ${Math.max(0, WINDOWS_SIDE_PANEL_TOGGLE_VISUAL_LEFT - 6)}px;
     background: var(--app-bg-sidebar);
+  }
+
+  html[data-platform="macos"][data-window-fullscreen="true"] & {
+    --content-toolbar-collapsed-safe-space: ${FULLSCREEN_CONTENT_TOOLBAR_COLLAPSED_SAFE_SPACE}px;
+    --side-panel-toggle-visual-left: ${FULLSCREEN_SIDE_PANEL_TOGGLE_VISUAL_LEFT}px;
+    --side-panel-toggle-drag-before-width: ${Math.max(0, FULLSCREEN_SIDE_PANEL_TOGGLE_VISUAL_LEFT - 6)}px;
+    --side-panel-toggle-drag-after-left: ${FULLSCREEN_SIDE_PANEL_TOGGLE_VISUAL_LEFT + SIDE_PANEL_TOGGLE_SIZE + 8}px;
+    --side-panel-toggle-guard-left: ${Math.max(0, FULLSCREEN_SIDE_PANEL_TOGGLE_VISUAL_LEFT - 6)}px;
   }
 
   &.is-side-panel-resizing {

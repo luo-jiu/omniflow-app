@@ -9,7 +9,8 @@ import {HashRouter} from "react-router-dom";
 import { installDesktopPlatformDomState } from '@/platform';
 import { installAppInputModalityTracking } from '@/components/ui/input-modality';
 
-installDesktopPlatformDomState();
+const disposePlatformDomState = installDesktopPlatformDomState();
+import.meta.hot?.dispose(disposePlatformDomState);
 installAppInputModalityTracking();
 
 ReactDOM.createRoot(document.getElementById('root')!).render(

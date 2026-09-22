@@ -399,6 +399,8 @@ interface Window {
     close: () => void;
     activate: (temporaryOnTop?: boolean) => Promise<boolean>;
     setThemeSource: (source: 'light' | 'dark' | 'system') => void;
+    getFullScreen: () => Promise<boolean>;
+    onFullScreenChange: (listener: (fullScreen: boolean) => void) => () => void;
   };
 
   electronOverlay: {

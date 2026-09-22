@@ -23,6 +23,24 @@ export function getDesktopPlatform(): DesktopPlatform {
 }
 
 export function installDesktopPlatformDomState() {
-  if (typeof document === 'undefined') return
+  if (typeof document === 'undefined') return () => undefined
   document.documentElement.dataset.platform = getDesktopPlatform()
+  const root = document.documentElement
+  root.dataset.windowFullscreen = 'false'
+  let disposed = false
+  let receivedEvent = false
+  const bridge = typeof window === 'undefined' ? undefined : window.electronWindow
+  const unsubscribe = bridge?.onFullScreenChange?.(fullScreen => {
+    if (disposed) return
+    receivedEvent = true
+    root.dataset.windowFullscreen = String(fullScreen === true)
+  })
+  // A transition received during the initial read is newer than its reply.
+  void bridge?.getFullScreen?.().then(fullScreen => {
+    if (!disposed && !receivedEvent) root.dataset.windowFullscreen = String(fullScreen === true)
+  }).catch(() => undefined)
+  return () => {
+    disposed = true
+    unsubscribe?.()
+  }
 }

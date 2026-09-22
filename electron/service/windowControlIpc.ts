@@ -7,6 +7,12 @@ type WindowControlIpcOptions = {
 const WINDOW_ACTIVATE_TOPMOST_DURATION_MS = 240
 
 export function registerWindowControlIpcHandlers(options: WindowControlIpcOptions) {
+  ipcMain.handle('window-get-full-screen', (event) => {
+    const win = options.getMainWindow()
+    if (!win || win.isDestroyed() || event.sender !== win.webContents || event.senderFrame !== win.webContents.mainFrame) return false
+    return win.isFullScreen()
+  })
+
   ipcMain.on('window-minimize', (event) => {
     const targetWindow = BrowserWindow.fromWebContents(event.sender) ?? options.getMainWindow()
     targetWindow?.minimize()
