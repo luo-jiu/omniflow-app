@@ -1,5 +1,7 @@
-import { prepareAgentPluginRename, executeAgentPluginRename } from './agent-plugin-service';
+import { prepareAgentPluginRename, executeAgentPluginRename, prepareAgentPluginFileOutput, executeAgentPluginFileOutput, releaseAgentPluginOutputs } from './agent-plugin-service';
 import type { AgentPluginRenameRequest } from './agent-plugin-rename';
+import type { AgentPluginFileOutputRequest } from './agent-plugin-file-output';
+import { reconcileAgentPluginOperation } from './agent-plugin-receipts';
 import { createAgentPluginToolSnapshot } from './agent-plugin-tool-adapter';
 import { getAgentPluginToolRegistrations, executeAgentPluginTool, type AgentPluginToolRequest } from './agent-plugin-service';
 import type { PluginToolRegistration } from '../extensions/plugin-tool-catalog';
@@ -45,6 +47,7 @@ import type {
   AgentMediaInspectionRequest,
   AgentOwnerScope,
   AgentPluginToolSource,
+  AgentPluginOperationReconcileRequest,
   AgentPreparedActionPublic,
   AgentPerceptionSnapshot,
   AgentReasoningEffort,
@@ -371,6 +374,9 @@ interface AgentMediaArtifactFallbackGrant {
 }
 
 interface AgentOrchestratorOptions {
+  releasePluginOutputs?: typeof releaseAgentPluginOutputs;
+  preparePluginFileOutput?: typeof prepareAgentPluginFileOutput;
+  executePluginFileOutput?: typeof executeAgentPluginFileOutput;
   preparePluginRename?: typeof prepareAgentPluginRename;
   executePluginRename?: typeof executeAgentPluginRename;
   getPluginTools?: (reservedNames: readonly string[]) => readonly PluginToolRegistration[];
@@ -857,7 +863,7 @@ function resolveAgentProviderToolResultPolicy(
 }
 
 interface CreatePreparedRuntimeOptions {
-  pluginOperation?: 'rename';
+  pluginOperation?: 'rename' | 'file-output';
   permissionMode?: AgentRunCapabilitySnapshot['shellPermissionMode'];
   identity?: AgentToolMainPreparationIdentity;
   preparedActionId?: string;
@@ -896,7 +902,8 @@ function createPreparedRuntime(
     throw new Error('Agent Tool prepare 风险等级与注册定义不匹配');
   }
   let action = Object.freeze(normalizeAgentPreparedActionPublic(result.publicAction));
-  if (action.kind !== expectedToolName && !(options.pluginOperation === 'rename' && action.kind === 'plugin.rename')) {
+  if (action.kind !== expectedToolName && !(options.pluginOperation === 'rename' && action.kind === 'plugin.rename')
+    && !(options.pluginOperation === 'file-output' && action.kind === 'plugin.file-output')) {
     throw new Error('Agent prepared action 与 Tool 不匹配');
   }
   if (
@@ -1369,8 +1376,8 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
           throw new Error('Agent prepared action 已变化，请按最新确认内容重试');
         }
         const requestedAction = normalizeAgentPreparedActionPublic(input.preparedAction);
-        if (requestedAction.kind !== pending.approval.call.name && !(requestedAction.kind === 'plugin.rename'
-          && pending.prepared.current.action.kind === 'plugin.rename'
+        if (requestedAction.kind !== pending.approval.call.name && !(['plugin.rename', 'plugin.file-output'].includes(requestedAction.kind)
+          && pending.prepared.current.action.kind === requestedAction.kind
           && hashToolInput(requestedAction) === hashToolInput(pending.prepared.current.action))) {
           throw new Error('Agent prepared action 与 Tool 不匹配');
         }
@@ -2142,7 +2149,33 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         authority: { sender, ownerScope: input.ownerScope, libraryId: Number(input.appContext.libraryId), sessionId, runId, toolRunId,
           signal: AbortSignal.any([signal, operationSignal]), operation: { operation: 'rename-library-files', nodeIds, includeCredentials: false } } };
     };
+    const outputRequest = (source: AgentPluginToolSource, pluginInput: unknown, operationSignal: AbortSignal): AgentPluginFileOutputRequest => {
+      if (tool?.pluginOperation !== 'file-output' || !tool.pluginSource || !accessGuard
+        || source.registrationId !== tool.registrationId || hashToolInput(source) !== hashToolInput(tool.pluginSource)
+        || hashToolInput(pluginInput) !== hashToolInput(call.input)) throw new Error('插件产物调用身份不匹配');
+      const outputInput = pluginInput as { resource: { nodeId: number }; destination: { parentId: number } };
+      const nodeId = outputInput.resource.nodeId;
+      const parentId = outputInput.destination.parentId;
+      const assertIdentity = (requestSignal: AbortSignal) => {
+        signal.throwIfAborted(); requestSignal.throwIfAborted();
+        const activeRun = activeRuns.get(sessionId);
+        if (!activeRun || activeRun.runId !== runId || activeRun.ownerWebContentsId !== sender.id || sender.isDestroyed()) throw new Error('插件产物运行已结束');
+        const current = createAgentAiDestinationSnapshot({ model: input.model, profileId: input.profileId, runtimeConnection: resolveRuntimeProfile(input.profileId) });
+        if (current.identity !== aiDestination.identity) throw new Error('AI 目的地已变化');
+      };
+      const assertCurrent = async (requestSignal: AbortSignal) => {
+        assertIdentity(requestSignal); await accessGuard.authorizeOutput(nodeId, parentId, toolRunId, false); assertIdentity(requestSignal);
+      };
+      return { source: tool.pluginSource, input: pluginInput, aiDestinationId: aiDestination.identity,
+        lifetimeSignal: signal, assertCurrent, onProgress: persistAndEmitProgress,
+        authority: { sender, ownerScope: input.ownerScope, libraryId: Number(input.appContext.libraryId), sessionId, runId, toolRunId,
+          signal: AbortSignal.any([signal, operationSignal]), operation: { operation: 'stage-library-node', nodeId, includeDownloadUrl: true } } };
+    };
     const executionContext: AgentToolExecutionContext = {
+      executePluginFileOutput: async (source, pluginInput, preparation, commit, operationSignal) => {
+        if (!options.executePluginFileOutput) throw new Error('插件文件产物执行能力未配置');
+        return options.executePluginFileOutput(outputRequest(source, pluginInput, operationSignal), preparation, commit);
+      },
       executePluginRename: async (source, pluginInput, preparation, commit, operationSignal) => {
         if (!options.executePluginRename) throw new Error('插件重命名提交能力未配置');
         const request = renameRequest(source, pluginInput, operationSignal);
@@ -2380,7 +2413,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     // 插件来源在资源审批之前落盘；停止等待审批时也保留真实调用身份。
     if (!preflightDecision && !call.inputError && tool?.pluginSource && accessGuard) {
       activity = await store.createToolRun({ callId: call.id, id: toolRunId, input: auditProjection.input,
-        now: now(), permissionBehavior: tool.pluginOperation === 'rename' ? 'ask' : 'allow', runId, status: preparationMode === 'none' ? 'running' : 'preparing', toolKind: tool.kind,
+        now: now(), permissionBehavior: tool.pluginOperation ? 'ask' : 'allow', runId, status: preparationMode === 'none' ? 'running' : 'preparing', toolKind: tool.kind,
         toolName: call.name, pluginSource: tool.pluginSource });
       emit(sender, { activity, call: { id: call.id, input: call.input, name: call.name }, runId, sessionId, type: 'tool-started' });
       persistAndEmitProgress({ message: '检查插件读取范围' });
@@ -2525,6 +2558,12 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
               return toolPrepareBroker.prepareMain({
                 prepare: async (preparationSignal) => {
                   const preparationContext: AgentToolMainPreparationContext = {
+                    ...(tool.pluginOperation === 'file-output' ? {
+                      preparePluginFileOutput: async (source: AgentPluginToolSource, pluginInput: unknown, operationSignal: AbortSignal) => {
+                        if (!options.preparePluginFileOutput) throw new Error('插件文件产物准备能力未配置');
+                        return options.preparePluginFileOutput(outputRequest(source, pluginInput, operationSignal));
+                      },
+                    } : {}),
                     ...(tool.pluginOperation === 'rename' ? {
                       preparePluginRename: async (source: AgentPluginToolSource, pluginInput: unknown, operationSignal: AbortSignal) => {
                         if (!options.preparePluginRename) throw new Error('插件重命名提案能力未配置');
@@ -2549,7 +2588,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
                   throwIfAborted(preparationSignal);
                   return createPreparedRuntime(result, call.name, tool.risk, tool.preparedRisk, 'main', {
                     pluginOperation: tool.pluginOperation,
-                    permissionMode: tool.pluginOperation === 'rename' ? 'ask' : await accessGuard?.canAutoApproveTool(call, toolRunId, result.publicAction) ? 'full-access' : capabilitySnapshot.shellPermissionMode,
+                    permissionMode: tool.pluginOperation ? 'ask' : await accessGuard?.canAutoApproveTool(call, toolRunId, result.publicAction) ? 'full-access' : capabilitySnapshot.shellPermissionMode,
                     identity: preparationIdentity,
                     sealMain: sealInput => capabilitySnapshot.sealMainPreparedExecution(
                       call.name,
@@ -2848,6 +2887,8 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         message: normalizeAgentErrorMessage(error, `${call.name} 执行失败`),
         ok: false,
       };
+    } finally {
+      if (tool?.pluginOperation === 'file-output') await (options.releasePluginOutputs ?? releaseAgentPluginOutputs)(runId, toolRunId).catch(() => undefined);
     }
 
     result = normalizeAgentToolResult(result);
@@ -3828,6 +3869,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       }
     } finally {
       await waitForMediaArtifactSaves(save => save.runId === runId);
+      await (options.releasePluginOutputs ?? releaseAgentPluginOutputs)(runId).catch(() => undefined);
       agentLibraryTextReader.releaseRun(runId);
       clearMediaArtifactFallbackGrants(grant => grant.runId === runId);
       await mediaArtifactStore.releaseRun(runId).catch(() => undefined);
@@ -3938,7 +3980,8 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       const combinedToolSnapshot = createAgentPluginToolSnapshot(baseToolSnapshot, pluginRegistrations);
       const pluginTools = new Map(combinedToolSnapshot.tools.flatMap(item => item.pluginSource && !item.pluginOperation ? [[item.name, item.pluginSource] as const] : []));
       const pluginRenameTools = new Map(combinedToolSnapshot.tools.flatMap(item => item.pluginSource && item.pluginOperation === 'rename' ? [[item.name, item.pluginSource] as const] : []));
-      const accessGuard = createAgentLibraryAccessGuard({ pluginTools, pluginRenameTools, policy: libraryAccess, context, signal: controller.signal,
+      const pluginOutputTools = new Map(combinedToolSnapshot.tools.flatMap(item => item.pluginSource && item.pluginOperation === 'file-output' ? [[item.name, item.pluginSource] as const] : []));
+      const accessGuard = createAgentLibraryAccessGuard({ pluginTools, pluginRenameTools, pluginOutputTools, policy: libraryAccess, context, signal: controller.signal,
         read: async (query, signal) => {
           if (!options.readLibraryMetadata) throw new Error('当前运行时无法验证资料库目录授权');
           return normalizeAgentLibraryReadResult(await options.readLibraryMetadata({ sender, libraryId, ownerScope,
@@ -4450,6 +4493,8 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
 
   return {
     completeToolPreparation,
+    reconcilePluginOperation: async (sender: WebContents, request: AgentPluginOperationReconcileRequest) =>
+      reconcileAgentPluginOperation(await resolveSessionStore(), sender, request),
     completeToolExecution,
     deleteMemory,
     deleteSession,
@@ -4482,6 +4527,8 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
 }
 
 export const agentOrchestrator = createAgentOrchestrator({
+  preparePluginFileOutput: prepareAgentPluginFileOutput,
+  executePluginFileOutput: executeAgentPluginFileOutput,
   getPluginTools: getAgentPluginToolRegistrations,
   preparePluginRename: prepareAgentPluginRename,
   executePluginRename: executeAgentPluginRename,

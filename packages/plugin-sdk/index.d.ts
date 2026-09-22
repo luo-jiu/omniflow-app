@@ -8,6 +8,7 @@ export const LIMITS: Readonly<{
   snapshotBytes: number; snapshotsTotalBytes: number; snapshots: number;
   startupTimeoutMs: number; heartbeatMs: number; heartbeatTimeoutMs: number;
   toolResultBytes: number; toolRequestBytes: number; toolTimeoutMs: number;
+  fileOutputBytes: number; fileOutputRequestBytes: number;
 }>;
 export class PluginError extends Error { readonly code: string; constructor(code: string, message: string); }
 export interface PluginTransport { exchange(request: string): Promise<string>; subscribe(listener: (event: string) => void): () => void; }
@@ -16,7 +17,7 @@ export interface DirectoryEntry { id: string; name: string; size: number; mimeTy
 export interface ResourceReference { kind?: 'file' | 'directory'; handle: string; name: string; size: number; revision: string; }
 interface PluginContextBase { pluginId: string; capabilities: readonly string[]; resource: ResourceReference | null; readGranted: boolean; theme: ThemeSnapshot; }
 export interface PluginViewerContext extends PluginContextBase { kind?: 'viewer'; viewerId: string; }
-export interface PluginToolContext extends PluginContextBase { kind: 'tool'; toolId: string; }
+export interface PluginToolContext extends PluginContextBase { kind: 'tool'; toolId: string; output?: PluginFileOutputDeclaration; }
 export type PluginContext = PluginViewerContext | PluginToolContext;
 export interface PluginToolSchema {
   type: 'object' | 'array' | 'string' | 'integer' | 'number' | 'boolean' | 'null';
@@ -33,18 +34,29 @@ export interface PluginToolSchema {
 }
 interface PluginToolContributionBase {
   id: string; title: string; description: string; entry: string;
-  inputSchema: PluginToolSchema; outputSchema: PluginToolSchema;
-  timeoutMs: number; maxResultBytes: number;
+  inputSchema: PluginToolSchema; timeoutMs: number;
 }
-export interface PluginReadToolContribution extends PluginToolContributionBase {
+interface PluginJsonToolContributionBase extends PluginToolContributionBase {
+  outputSchema: PluginToolSchema; maxResultBytes: number;
+}
+export interface PluginReadToolContribution extends PluginJsonToolContributionBase {
   kind?: undefined;
   resourceAccess: [{ parameter: 'resource'; mode: 'read'; kind: 'file' }];
 }
-export interface PluginRenameProposalToolContribution extends PluginToolContributionBase {
+export interface PluginRenameProposalToolContribution extends PluginJsonToolContributionBase {
   kind: 'rename-proposal';
   resourceAccess: [{ parameter: 'resources'; mode: 'metadata'; kind: 'file'; maxItems: 50 }];
 }
-export type PluginToolContribution = PluginReadToolContribution | PluginRenameProposalToolContribution;
+export type PluginFileOutputMediaType = 'text/csv' | 'application/json';
+export interface PluginFileOutputDeclaration { mediaTypes: PluginFileOutputMediaType[]; maxBytes: number; }
+export interface PluginFileOutput { mediaType: PluginFileOutputMediaType; text: string; }
+export interface PluginFileOutputToolContribution extends PluginToolContributionBase {
+  kind: 'file-output';
+  resourceAccess: [{ parameter: 'resource'; mode: 'read'; kind: 'file' }];
+  output: PluginFileOutputDeclaration;
+  outputSchema?: never; maxResultBytes?: never;
+}
+export type PluginToolContribution = PluginReadToolContribution | PluginRenameProposalToolContribution | PluginFileOutputToolContribution;
 export interface PluginMetadataFile { id: string; name: string; }
 export interface PluginRenameProposal { changes: Array<{ id: string; name: string }>; }
 export interface PluginRenameProposalInput { parameters: Record<string, unknown>; files: PluginMetadataFile[]; }
@@ -57,6 +69,7 @@ export interface PluginClient {
   ready(): Promise<null>;
   toolInvocation(): Promise<PluginToolInvocation>;
   completeTool(invocationId: string, output: unknown): Promise<null>;
+  completeFileOutput(invocationId: string, output: PluginFileOutput): Promise<null>;
   failTool(invocationId: string, code: PluginToolFailureCode): Promise<null>;
   read(handle: string, offset: number, length: number, options?: { signal?: AbortSignal }): Promise<{ bytes: Uint8Array; nextOffset: number; eof: boolean; revision: string }>;
   listDirectory(handle: string, offset?: number, options?: { signal?: AbortSignal }): Promise<{ entries: DirectoryEntry[]; nextOffset: number; eof: boolean; revision: string }>;

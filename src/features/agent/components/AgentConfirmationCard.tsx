@@ -343,6 +343,13 @@ export default function AgentConfirmationCard({
     () => normalizeRenamePreparedAction(preparation?.action, libraryId, approval.call.name),
     [preparation?.action, libraryId, approval.call.name],
   );
+  const fileOutputAction = React.useMemo(() => {
+    try {
+      const action = normalizeAgentPreparedActionPublic(preparation?.action);
+      return action.kind === 'plugin.file-output' && action.libraryId === libraryId
+        && approval.call.name.startsWith(`${action.pluginId}.`) ? action : undefined;
+    } catch { return undefined; }
+  }, [preparation?.action, libraryId, approval.call.name]);
   const [preparedActionDraft, setPreparedActionDraft] = React.useState<PreparedActionDraft | undefined>(
     () => initialAction && preparedActionId
       ? { action: initialAction, preparedActionId }
@@ -353,7 +360,7 @@ export default function AgentConfirmationCard({
     ? preparedActionDraft.action
     : initialAction;
   const unsupportedPreparation = Boolean(
-    preparation && !initialAction && !shellAction && !fileBridgeAction && !renameAction,
+    preparation && !initialAction && !shellAction && !fileBridgeAction && !renameAction && !fileOutputAction,
   );
   const libraryTargetRef = React.useRef<LibraryTargetDraft>({
     parentId: initialAction?.parentId,
@@ -467,6 +474,20 @@ export default function AgentConfirmationCard({
               ))}
             </dl>
           </div>
+        ) : fileOutputAction ? (
+          <div className="agent-confirmation-shell"><dl>
+            <dt>插件</dt><dd>{fileOutputAction.pluginId}@{fileOutputAction.pluginVersion}</dd>
+            {approval.preview.details?.find(entry => entry.label === '来源文件' && entry.value.trim()) ? <>
+              <dt>来源文件</dt><dd>{approval.preview.details.find(entry => entry.label === '来源文件' && entry.value.trim())!.value}</dd>
+            </> : null}
+            <dt>新文件</dt><dd>{fileOutputAction.fileName}</dd>
+            <dt>目标目录</dt><dd>{approval.preview.details?.find(entry => entry.label === '目标目录' && entry.value.trim())?.value ?? `#${fileOutputAction.parentId}`}</dd>
+            <dt>存储服务</dt><dd>{fileOutputAction.providerId}</dd>
+            <dt>文件格式</dt><dd>{fileOutputAction.mediaType}</dd>
+            <dt>文件大小</dt><dd>{fileOutputAction.sizeBytes} 字节</dd>
+            <dt>内容 SHA-256</dt><dd>{fileOutputAction.sha256}</dd>
+            <dt>保存方式</dt><dd>仅新建，同名冲突时停止，不覆盖现有文件</dd>
+          </dl></div>
         ) : renameAction ? (
           <div className="agent-confirmation-shell">
             <dl>
@@ -589,7 +610,7 @@ export default function AgentConfirmationCard({
             className="agent-confirmation-allow"
             disabled={busy || unsupportedPreparation || Boolean(initialAction && !preparedAction)
               || (preparedAction?.destination === 'library' && !(Number.isSafeInteger(preparedAction.parentId) && Number(preparedAction.parentId) > 0))}
-            onClick={() => onResolve(true, renameAction ?? (shellAction ? undefined : preparedAction))}
+            onClick={() => onResolve(true, fileOutputAction ?? renameAction ?? (shellAction ? undefined : preparedAction))}
             type="button"
           >
             {busy ? '处理中' : '允许'}

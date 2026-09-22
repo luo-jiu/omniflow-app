@@ -220,7 +220,7 @@ export function createAgentToolBroker(options: AgentToolBrokerOptions = {}) {
       const executionRegistry = runToolRegistry || toolRegistry;
       const registeredTool = context.runCapabilitySnapshot?.getTool(name, context.activeSkillId);
       const expectedRegistrationId = registeredTool?.registrationId;
-      const supportsCommitSettlement = registeredTool?.pluginOperation === 'rename'
+      const supportsCommitSettlement = (registeredTool?.pluginOperation === 'rename' || registeredTool?.pluginOperation === 'file-output')
         && registeredTool.risk === 'write' && registeredTool.executor === 'main';
       const commitSettlement: AgentMainCommitSettlement | undefined = supportsCommitSettlement ? {
         begin: fallback => {

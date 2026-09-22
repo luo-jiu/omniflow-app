@@ -7,6 +7,7 @@ import { PluginInstallStore } from './plugin-install-store';
 import { PluginSettingsStore } from './plugin-settings-store';
 import manifestBase from '../../../samples/csv-viewer/manifest.json';
 import renameManifest from '../../../samples/batch-rename/manifest.json';
+import outputManifest from '../../../samples/csv-export/manifest.json';
 const roots:string[]=[];
 async function root(){const value=await mkdtemp(path.join(tmpdir(),'omniflow-d1-test-'));roots.push(value);return value;}
 function manifest(version='1.0.0'){return {...manifestBase,id:'test.csv',version,viewers:[{...manifestBase.viewers[0],id:'test.csv.table'}],activation:['viewer:test.csv.table']};}
@@ -64,6 +65,17 @@ describe('persistent version-isolated settings',()=>{
 });
 
 describe('independent Agent Tool install approval',()=>{
+ it('persists output approval and revokes it on upgrade, rollback and missing historical flags',async()=>{
+  const dir=await root();const folder=path.join(dir,'store');const store=new PluginInstallStore(folder,'darwin');await store.initialize();
+  async function install(version:string){const review=await store.prepare(await archive(dir,version,zip=>{zip.file('manifest.json',JSON.stringify({...outputManifest,version}));zip.file('tool.html','<p>export</p>');}));await store.commit(review.ticket,()=>undefined);}
+  await install('1.0.0');await store.action(outputManifest.id,'approve-output',()=>undefined);
+  const restarted=new PluginInstallStore(folder,'darwin');await restarted.initialize();expect(restarted.snapshot().plugins[0].outputApproved).toBe(true);
+  await install('1.0.1');expect(store.snapshot().plugins[0].outputApproved).toBe(false);
+  await store.action(outputManifest.id,'approve-output',()=>undefined);await store.action(outputManifest.id,'rollback',()=>undefined);expect(store.snapshot().plugins[0].outputApproved).toBe(false);
+  const index=JSON.parse(await readFile(path.join(folder,'index.json'),'utf8'));delete index.plugins[0].outputApproved;await writeFile(path.join(folder,'index.json'),JSON.stringify(index));
+  const legacy=new PluginInstallStore(folder,'darwin');await legacy.initialize();expect(legacy.snapshot().plugins[0].outputApproved).toBe(false);
+  index.plugins[0].outputApproved='yes';await writeFile(path.join(folder,'index.json'),JSON.stringify(index));const corrupt=new PluginInstallStore(folder,'darwin');await corrupt.initialize();expect(corrupt.snapshot().safeMode).toBe(true);
+ });
  it('persists rename approval only for the current package and resets on upgrade and rollback',async()=>{
   const dir=await root();const folder=path.join(dir,'store');const store=new PluginInstallStore(folder,'darwin');await store.initialize();
   async function install(version:string){const review=await store.prepare(await archive(dir,version,zip=>{zip.file('manifest.json',JSON.stringify({...renameManifest,version}));zip.file('tool.html','<p>rename</p>');}));await store.commit(review.ticket,()=>undefined);}

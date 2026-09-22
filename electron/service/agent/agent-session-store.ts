@@ -19,6 +19,7 @@ import {
   AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_VERSION,
   AGENT_PREPARED_ACTION_PUBLIC_IDENTITIES,
   AGENT_PLUGIN_RENAME_PREPARED_ACTION_KIND,
+  AGENT_PLUGIN_FILE_OUTPUT_PREPARED_ACTION_KIND,
   type AgentActionPreview,
   type AgentAppContext,
   type AgentAssistantItemSnapshot,
@@ -30,6 +31,7 @@ import {
   type AgentNonAssistantMessage,
   type AgentOwnerScope,
   type AgentPluginToolSource,
+  type AgentPluginOperationReconcileRequest,
   type AgentPreparedActionPublic,
   type AgentReasoningEffort,
   type AgentRunPlanSnapshot,
@@ -45,6 +47,7 @@ import {
   type AgentToolProgress,
   type AgentToolResult,
 } from '../../../src/shared/agent/agent.types';
+import { sanitizeAgentSensitiveValue } from './agent-sensitive-data';
 import { normalizeAgentOwnerScope } from '../../../src/shared/agent/agent-owner-scope';
 import {
   AGENT_SHELL_FORBIDDEN_ENVIRONMENT_NAMES,
@@ -411,6 +414,42 @@ const PLUGIN_RENAME_PREPARED_ACTION_INVALID_SQL = `
     SELECT 1 FROM json_each(${PLUGIN_RENAME_ITEMS_SQL}) AS rename_item
     GROUP BY json_extract(${PLUGIN_RENAME_ITEM_SQL}, '$.parentId'), json_extract(${PLUGIN_RENAME_ITEM_SQL}, '$.newName') HAVING COUNT(*) > 1
   )
+`;
+
+const PLUGIN_FILE_OUTPUT_ACTION_IDENTITY_SQL = PLUGIN_RENAME_ACTION_IDENTITY_SQL.replace(sqlText(AGENT_PLUGIN_RENAME_PREPARED_ACTION_KIND), sqlText(AGENT_PLUGIN_FILE_OUTPUT_PREPARED_ACTION_KIND));
+const PLUGIN_FILE_OUTPUT_PREPARED_ACTION_INVALID_SQL = `
+  NOT (${PLUGIN_FILE_OUTPUT_ACTION_IDENTITY_SQL})
+  OR ${strictJsonObjectInvalidSql('NEW.prepared_action_json', ['kind', 'version', 'libraryId', 'operationId', 'pluginId', 'pluginVersion', 'packageFingerprint', 'sourceNodeId', 'parentId', 'fileName', 'providerId', 'mediaType', 'sizeBytes', 'sha256'])}
+  OR COALESCE(json_type(NEW.prepared_action_json, '$.operationId'), '') <> 'text'
+  OR length(json_extract(NEW.prepared_action_json, '$.operationId')) <> 36
+  OR substr(json_extract(NEW.prepared_action_json, '$.operationId'), 9, 1) <> '-'
+  OR substr(json_extract(NEW.prepared_action_json, '$.operationId'), 14, 1) <> '-'
+  OR substr(json_extract(NEW.prepared_action_json, '$.operationId'), 19, 1) <> '-'
+  OR substr(json_extract(NEW.prepared_action_json, '$.operationId'), 24, 1) <> '-'
+  OR length(replace(json_extract(NEW.prepared_action_json, '$.operationId'), '-', '')) <> 32
+  OR replace(json_extract(NEW.prepared_action_json, '$.operationId'), '-', '') GLOB '*[^0-9a-f]*'
+  OR substr(json_extract(NEW.prepared_action_json, '$.operationId'), 15, 1) NOT BETWEEN '1' AND '8'
+  OR substr(json_extract(NEW.prepared_action_json, '$.operationId'), 20, 1) NOT IN ('8', '9', 'a', 'b')
+  OR COALESCE(json_type(NEW.prepared_action_json, '$.sourceNodeId'), '') <> 'integer'
+  OR json_extract(NEW.prepared_action_json, '$.sourceNodeId') NOT BETWEEN 1 AND ${MAX_SAFE_SQLITE_AGENT_ID}
+  OR COALESCE(json_type(NEW.prepared_action_json, '$.parentId'), '') <> 'integer'
+  OR json_extract(NEW.prepared_action_json, '$.parentId') NOT BETWEEN 1 AND ${MAX_SAFE_SQLITE_AGENT_ID}
+  OR COALESCE(json_type(NEW.prepared_action_json, '$.sizeBytes'), '') <> 'integer'
+  OR json_extract(NEW.prepared_action_json, '$.sizeBytes') NOT BETWEEN 1 AND 1048576
+  OR COALESCE(json_type(NEW.prepared_action_json, '$.sha256'), '') <> 'text'
+  OR length(json_extract(NEW.prepared_action_json, '$.sha256')) <> 64
+  OR json_extract(NEW.prepared_action_json, '$.sha256') GLOB '*[^0-9a-f]*'
+  OR COALESCE(json_type(NEW.prepared_action_json, '$.fileName'), '') <> 'text'
+  OR (${invalidCanonicalShellTextSql("json_extract(NEW.prepared_action_json, '$.fileName')", 240)})
+  OR instr(json_extract(NEW.prepared_action_json, '$.fileName'), '/') > 0
+  OR instr(json_extract(NEW.prepared_action_json, '$.fileName'), char(92)) > 0
+  OR json_extract(NEW.prepared_action_json, '$.fileName') GLOB '*[<>:"|?*]*'
+  OR COALESCE(json_type(NEW.prepared_action_json, '$.providerId'), '') <> 'text'
+  OR length(json_extract(NEW.prepared_action_json, '$.providerId')) NOT BETWEEN 1 AND 128
+  OR json_extract(NEW.prepared_action_json, '$.providerId') GLOB '*[^A-Za-z0-9._:-]*'
+  OR substr(json_extract(NEW.prepared_action_json, '$.providerId'), 1, 1) NOT GLOB '[A-Za-z0-9]'
+  OR NOT (COALESCE(json_extract(NEW.prepared_action_json, '$.mediaType'), '') = 'text/csv' AND length(json_extract(NEW.prepared_action_json, '$.fileName')) > 4 AND substr(json_extract(NEW.prepared_action_json, '$.fileName'), -4) = '.csv'
+    OR COALESCE(json_extract(NEW.prepared_action_json, '$.mediaType'), '') = 'application/json' AND length(json_extract(NEW.prepared_action_json, '$.fileName')) > 5 AND substr(json_extract(NEW.prepared_action_json, '$.fileName'), -5) = '.json')
 `;
 
 function containsShellControlCharacterSql(valueSql: string): string {
@@ -1253,7 +1292,14 @@ export interface AgentAssistantRunTerminalResult {
   run: AgentRunSnapshot;
 }
 
+export interface ReconcileAgentPluginToolRunInput extends Omit<AgentPluginOperationReconcileRequest, 'credentials'> {
+  operationId: string;
+  result: AgentToolResult;
+  checkedAt: string;
+}
+
 export interface AgentSessionStore {
+  reconcilePluginToolRun: (input: ReconcileAgentPluginToolRunInput) => Promise<AgentToolActivitySnapshot>;
   listGroups: (owner: AgentOwnerScope, libraryId: number) => Promise<AgentSessionDirectorySummary>;
   getGroup: (owner: AgentOwnerScope, libraryId: number, id: string) => Promise<AgentSessionGroup | null>;
   saveGroup: (owner: AgentOwnerScope, libraryId: number, input: AgentSessionGroupInput, now: string) => Promise<AgentSessionGroup>;
@@ -2353,11 +2399,13 @@ async function ensureToolPreparationTriggers(
           char(92) || 'u0000'
         ) > 0
         OR COALESCE(json_type(NEW.prepared_action_json, '$.kind'), '') <> 'text'
-        OR (json_extract(NEW.prepared_action_json, '$.kind') <> NEW.tool_name AND NOT (${PLUGIN_RENAME_ACTION_IDENTITY_SQL}))
+        OR (json_extract(NEW.prepared_action_json, '$.kind') <> NEW.tool_name AND NOT (${PLUGIN_RENAME_ACTION_IDENTITY_SQL}) AND NOT (${PLUGIN_FILE_OUTPUT_ACTION_IDENTITY_SQL}))
         OR COALESCE(json_type(NEW.prepared_action_json, '$.version'), '') <> 'integer'
         OR NOT (${PREPARED_ACTION_SUPPORTED_IDENTITY_SQL})
         OR (json_extract(NEW.prepared_action_json, '$.kind') = ${sqlText(AGENT_PLUGIN_RENAME_PREPARED_ACTION_KIND)}
           AND (${PLUGIN_RENAME_PREPARED_ACTION_INVALID_SQL}))
+        OR (json_extract(NEW.prepared_action_json, '$.kind') = ${sqlText(AGENT_PLUGIN_FILE_OUTPUT_PREPARED_ACTION_KIND)}
+          AND (${PLUGIN_FILE_OUTPUT_PREPARED_ACTION_INVALID_SQL}))
         OR (
           json_extract(NEW.prepared_action_json, '$.kind')
             = ${sqlText(AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_KIND)}
@@ -3052,6 +3100,7 @@ async function recoverInterruptedState(database: sqlite3.Database): Promise<void
         AND runs.status IN ('preparing', 'running', 'awaiting_approval', 'awaiting_interaction')
     `);
     const renameRuns = new Map<string, 'commit_unknown' | 'committed'>();
+    const outputRuns = new Set<string>();
     for (const row of recoverableRenames) {
       let action: AgentPreparedActionPublic;
       let source: AgentPluginToolSource;
@@ -3059,17 +3108,18 @@ async function recoverInterruptedState(database: sqlite3.Database): Promise<void
         action = normalizeAgentPreparedActionPublicForMain(JSON.parse(row.prepared_action_json));
         source = normalizeAgentPluginToolSource(JSON.parse(row.plugin_source_json), row.tool_name);
       } catch { continue; }
-      if (action.kind !== AGENT_PLUGIN_RENAME_PREPARED_ACTION_KIND || action.libraryId !== row.library_id
+      if ((action.kind !== AGENT_PLUGIN_RENAME_PREPARED_ACTION_KIND && action.kind !== AGENT_PLUGIN_FILE_OUTPUT_PREPARED_ACTION_KIND) || action.libraryId !== row.library_id
         || action.pluginId !== source.pluginId || action.pluginVersion !== source.pluginVersion
         || action.packageFingerprint !== source.packageFingerprint) continue;
+      if (action.kind === AGENT_PLUGIN_FILE_OUTPUT_PREPARED_ACTION_KIND) outputRuns.add(row.run_id);
       if (row.status === 'completed') {
         try {
           const receipt = JSON.parse(row.result_json || 'null') as AgentToolResult | null;
           const data = receipt?.data;
           if (receipt?.ok === true && data && typeof data === 'object' && !Array.isArray(data)) {
             const result = data as Record<string, unknown>;
-            if (result.mutationCommitState === 'committed' && result.operationId === action.operationId
-              && result.libraryId === action.libraryId && result.atomic === true && !renameRuns.has(row.run_id)) {
+            if ((action.kind === AGENT_PLUGIN_RENAME_PREPARED_ACTION_KIND ? result.mutationCommitState === 'committed' && result.atomic === true : result.uploadCommitState === 'committed') && result.operationId === action.operationId
+              && result.libraryId === action.libraryId && !renameRuns.has(row.run_id)) {
               renameRuns.set(row.run_id, 'committed');
             }
           }
@@ -3077,8 +3127,8 @@ async function recoverInterruptedState(database: sqlite3.Database): Promise<void
         continue;
       }
       const result: AgentToolResult = { ok: false,
-        message: '应用退出时重命名尚未确认提交结果，请先按操作ID核对，勿直接重复提交。',
-        data: { mutationCommitState: 'commit_unknown', operationId: action.operationId, libraryId: action.libraryId, atomic: true } };
+        message: action.kind === AGENT_PLUGIN_RENAME_PREPARED_ACTION_KIND ? '应用退出时重命名尚未确认提交结果，请先按操作ID核对，勿直接重复提交。' : '应用退出时文件产物尚未确认提交结果，请先查询回执，勿直接重复提交。',
+        data: { ...(action.kind === AGENT_PLUGIN_RENAME_PREPARED_ACTION_KIND ? { mutationCommitState: 'commit_unknown', atomic: true } : { mutationCommitState: 'commit_unknown', uploadCommitState: 'commit_unknown' }), operationId: action.operationId, libraryId: action.libraryId } };
       const changed = await run(database, `
         UPDATE agent_tool_runs
         SET status = 'interrupted', result_json = ?, revision = revision + 1, finished_at = ?
@@ -3092,8 +3142,8 @@ async function recoverInterruptedState(database: sqlite3.Database): Promise<void
         SET status = 'interrupted', current_step = ?, error = ?,
           revision = revision + 1, updated_at = ?, finished_at = ?
         WHERE id = ? AND status IN ('preparing', 'running', 'awaiting_approval', 'awaiting_interaction')
-      `, [state === 'committed' ? '改名已提交，任务已中断' : '重命名结果待核对',
-        state === 'committed' ? '改名已提交，请查看现有回执继续未完成步骤，勿重复改名。'
+      `, [outputRuns.has(runId) ? state === 'committed' ? '文件已保存，任务已中断' : '文件保存结果待核对' : state === 'committed' ? '改名已提交，任务已中断' : '重命名结果待核对',
+        outputRuns.has(runId) ? state === 'committed' ? '文件已保存，请查看现有回执继续未完成步骤，勿重复创建。' : '应用退出时文件可能已经保存，请先查询回执，勿直接重复创建。' : state === 'committed' ? '改名已提交，请查看现有回执继续未完成步骤，勿重复改名。'
           : '应用退出时重命名可能已经提交，请先按操作ID核对结果，勿直接重新发送上一条消息或重复提交。',
         recoveredAt, recoveredAt, runId]);
     }
@@ -3685,6 +3735,67 @@ export async function createSQLiteAgentSessionStore(
         throw new Error('Agent 上下文 checkpoint 不存在或已经结束');
       }
       return readContextCheckpoint(checkpointId);
+    },
+
+    async reconcilePluginToolRun(input) {
+      const owner = normalizeAgentOwnerScope(input.ownerScope);
+      const libraryId = normalizeLibraryId(input.libraryId);
+      if (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 1 || typeof input.checkedAt !== 'string'
+        || input.checkedAt.length > 100 || !Number.isFinite(Date.parse(input.checkedAt))) throw new Error('回执核对参数无效');
+      const authorized = await get<{ id: string }>(database, `SELECT tools.id FROM agent_tool_runs AS tools
+        JOIN agent_runs AS runs ON runs.id = tools.run_id JOIN agent_sessions AS sessions ON sessions.id = runs.session_id
+        WHERE tools.id = ? AND sessions.id = ? AND sessions.library_id = ? AND sessions.backend_scope = ? AND sessions.account_scope = ?`,
+      [input.toolRunId, input.sessionId, libraryId, owner.backendScope, owner.accountScope]);
+      if (!authorized) throw new Error('回执核对记录不属于当前账号或资料库');
+      const current = await readToolActivity(input.toolRunId);
+      const action = current.preparation?.action; const source = current.pluginSource;
+      if (!source || !action || (action.kind !== 'plugin.rename' && action.kind !== 'plugin.file-output') || action.libraryId !== libraryId
+        || source.toolId !== current.call.name || action.pluginId !== source.pluginId || action.pluginVersion !== source.pluginVersion
+        || action.packageFingerprint !== source.packageFingerprint || action.operationId !== input.operationId
+        || current.approval?.status !== 'approved' || !['completed', 'failed', 'cancelled', 'interrupted'].includes(current.status)) throw new Error('回执核对缺少已批准的插件操作');
+      if (current.revision !== input.expectedRevision) throw new Error('回执核对记录版本已变化，请刷新后重试');
+      const record = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+      const stateKey = action.kind === 'plugin.rename' ? 'mutationCommitState' : 'uploadCommitState';
+      const previous = record(current.result?.data);
+      if (previous[stateKey] === 'committed' && current.result?.ok === true) return current;
+      if (previous[stateKey] === 'uncommitted') throw new Error('该操作已有明确未提交回执');
+      const result = sanitizeAgentSensitiveValue(input.result) as AgentToolResult;
+      const data = record(result?.data); const state = data[stateKey];
+      if (typeof result?.ok !== 'boolean' || typeof state !== 'string' || !['committed', 'uncommitted', 'commit_unknown'].includes(state)
+        || result.ok !== (state === 'committed') || data.operationId !== action.operationId || data.libraryId !== libraryId
+        || (action.kind === 'plugin.file-output' && data.mutationCommitState !== state)) throw new Error('回执核对结果无效');
+      if (state === 'committed') {
+        if (action.kind === 'plugin.rename') {
+          const items = data.items; const seen = new Set<number>();
+          if (!Array.isArray(items) || items.length !== action.items.length || items.some(raw => {
+            const item = record(raw); const approved = action.items.find(value => value.nodeId === item.nodeId);
+            if (!approved || seen.has(approved.nodeId) || item.parentId !== approved.parentId || typeof item.name !== 'string' || typeof item.ext !== 'string'
+              || item.name + (item.ext ? `.${item.ext}` : '') !== approved.newName) return true;
+            seen.add(approved.nodeId); return false;
+          })) throw new Error('改名回执目标与批准不匹配');
+        } else {
+          const destination = record(data.destination);
+          if (destination.kind !== 'library' || !Number.isSafeInteger(destination.nodeId) || Number(destination.nodeId) <= 0
+            || destination.nodeId === action.sourceNodeId
+            || destination.parentId !== action.parentId || data.fileName !== action.fileName || data.sizeBytes !== action.sizeBytes
+            || data.sha256 !== action.sha256) throw new Error('文件产物回执与批准不匹配');
+        }
+      }
+      const priorTrace = record(previous.reconciliation);
+      const checks = Array.isArray(priorTrace.checks) ? priorTrace.checks.slice(-7) : [];
+      const settled: AgentToolResult = { ...result, data: { ...data, reconciliation: {
+        originalResult: priorTrace.originalResult ?? current.result ?? { ok: false }, originalStatus: priorTrace.originalStatus ?? current.status,
+        checks: [...checks, { checkedAt: input.checkedAt, state }],
+      } } };
+      const serialized = JSON.stringify(settled);
+      if (Buffer.byteLength(serialized) > 200_000) throw new Error('回执核对记录超限');
+      const update = await run(database, `UPDATE agent_tool_runs SET result_json = ?, status = ?, revision = revision + 1
+        WHERE id = ? AND revision = ? AND status IN ('completed', 'failed', 'cancelled', 'interrupted')
+        AND EXISTS (SELECT 1 FROM agent_runs AS runs JOIN agent_sessions AS sessions ON sessions.id = runs.session_id
+          WHERE runs.id = agent_tool_runs.run_id AND sessions.id = ? AND sessions.library_id = ? AND sessions.backend_scope = ? AND sessions.account_scope = ?)`,
+      [serialized, result.ok ? 'completed' : current.status, input.toolRunId, input.expectedRevision, input.sessionId, libraryId, owner.backendScope, owner.accountScope]);
+      if (!update.changes) throw new Error('回执核对记录版本已变化，请刷新后重试');
+      return readToolActivity(input.toolRunId);
     },
 
     async completeToolRun(id, result, now, status) {

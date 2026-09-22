@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import type { PluginRenameProposal } from '../../../packages/plugin-sdk/index.js';
+import type { PluginFileOutput, PluginRenameProposal } from '../../../packages/plugin-sdk/index.js';
 import { PluginFault, isMetadataResourceAuthority, validateMetadataResourceAuthority, type MetadataResourceAuthority, type PluginResourceAuthority, type OpenedResourceAuthority } from './resource-broker';
 import { validateToolInput, validateToolOutput } from './tool-schema';
+import { validateFileOutput } from './file-output';
 import type { PluginManager } from './plugin-manager';
 import type { PluginDevelopmentHost, IsolatedPluginInstance } from './isolated-view';
 
@@ -67,6 +68,7 @@ export interface PluginRenameProposalExecutionResult {
   output: PluginRenameProposal;
   source: Readonly<{ pluginId: string; version: string; fingerprint: string; toolId: string; registrationId: string; nodeIds: readonly number[]; resourceRevision: string }>;
 }
+export interface PluginFileOutputExecutionResult extends Omit<PluginToolExecutionResult, 'output'> { output: PluginFileOutput }
 
 /** main-only 调用入口；AT1 负责真实 Agent 的授权适配、有效目录组合和 ToolRun 持久化。 */
 export class PluginToolRuntime {
@@ -92,12 +94,29 @@ export class PluginToolRuntime {
     try { spec = this.manager.resolveTool(toolId, fingerprint); }
     catch { throw new PluginFault('FORBIDDEN', 'Tool package unavailable'); }
     if (spec.plugin.id !== authority.binding.pluginId || spec.tool.id !== toolId || spec.plugin.fingerprint !== fingerprint) throw new PluginFault('FORBIDDEN', 'Tool package identity mismatch');
-    if (spec.tool.kind === 'rename-proposal') throw new PluginFault('FORBIDDEN', 'Tool requires metadata authority');
+    if (spec.tool.kind !== undefined) throw new PluginFault('FORBIDDEN', 'Tool requires its dedicated execution capability');
     try { validateToolInput(spec.tool, input); } catch { throw new PluginFault('BAD_REQUEST', 'Invalid Tool input'); }
     if ((input.resource as { nodeId: number }).nodeId !== authority.binding.nodeId) throw new PluginFault('FORBIDDEN', 'Resource identity mismatch');
     const { resource: _resource, ...parameters } = input;
     void _resource;
     const output = await this.run(spec, authority, parameters);
+    return { output, source: Object.freeze({ pluginId: spec.plugin.id, version: spec.plugin.version, fingerprint,
+      toolId, registrationId: spec.registrationId, nodeId: authority.resource.nodeId, resourceRevision: authority.resource.revision }) };
+  }
+
+  async executeFileOutput(toolId: string, fingerprint: string, input: unknown, capability: PluginToolCallAuthority): Promise<PluginFileOutputExecutionResult> {
+    const authority = authorities.get(capability);
+    if (!authority || this.disposed) throw new PluginFault('FORBIDDEN', 'Invalid Tool authority');
+    authorities.delete(capability);
+    if (toolId !== authority.binding.toolId || fingerprint !== authority.binding.packageFingerprint) throw new PluginFault('FORBIDDEN', 'Tool identity mismatch');
+    let spec: ReturnType<PluginManager['resolveTool']>;
+    try { spec = this.manager.resolveTool(toolId, fingerprint); } catch { throw new PluginFault('FORBIDDEN', 'Tool package unavailable'); }
+    if (spec.plugin.id !== authority.binding.pluginId || spec.tool.id !== toolId || spec.plugin.fingerprint !== fingerprint || spec.tool.kind !== 'file-output') throw new PluginFault('FORBIDDEN', 'Tool package identity mismatch');
+    try { validateToolInput(spec.tool, input); } catch { throw new PluginFault('BAD_REQUEST', 'Invalid Tool input'); }
+    if ((input.resource as { nodeId: number }).nodeId !== authority.binding.nodeId) throw new PluginFault('FORBIDDEN', 'Resource identity mismatch');
+    const { resource: _resource, destination: _destination, ...parameters } = input;
+    void _resource; void _destination;
+    const output = await this.run(spec, authority, parameters) as PluginFileOutput;
     return { output, source: Object.freeze({ pluginId: spec.plugin.id, version: spec.plugin.version, fingerprint,
       toolId, registrationId: spec.registrationId, nodeId: authority.resource.nodeId, resourceRevision: authority.resource.revision }) };
   }
@@ -183,7 +202,8 @@ export class PluginToolRuntime {
       if (!await wait(resource.authorize(signal))) throw new PluginFault('FORBIDDEN', 'Resource access revoked');
       if (await wait(resource.currentRevision(signal)) !== resource.revision) throw new PluginFault('CONTENT_CHANGED', 'Resource changed');
       await wait(check(signal));
-      validateToolOutput(spec.tool, output);
+      if (spec.tool.kind === 'file-output') validateFileOutput(spec.tool, output);
+      else validateToolOutput(spec.tool, output);
       if (isMetadataResourceAuthority(resource)) {
         const proposal = output as PluginRenameProposal;
         const ids = new Set(resource.files.map(file => file.id));

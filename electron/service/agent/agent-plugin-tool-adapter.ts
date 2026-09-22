@@ -1,12 +1,12 @@
 import type { PluginToolContribution } from '../../../packages/plugin-sdk/index.js';
 import { assertPluginToolNames, type PluginToolRegistration } from '../extensions/plugin-tool-catalog';
-import { validateToolInput, validateToolSchemas } from '../extensions/tool-schema';
+import { validateToolInput, validateToolContribution } from '../extensions/tool-schema';
 import { normalizeAgentPluginToolSource } from './agent-plugin-source';
 import { toAgentProviderToolName } from './agent-provider-tool-name';
 import { createAgentToolRegistry, type AgentTool, type AgentToolRegistrySnapshot } from './agent-tool-registry';
 
 function freezeContribution(contribution: PluginToolContribution): PluginToolContribution {
-  validateToolSchemas(contribution.inputSchema, contribution.outputSchema, contribution.kind);
+  validateToolContribution(contribution);
   const clone = structuredClone(contribution);
   const freeze = (value: unknown): void => {
     if (!value || typeof value !== 'object') return;
@@ -60,6 +60,24 @@ export function createAgentPluginToolSnapshot(
         return context.executePluginTool(source, input, context.signal);
       },
     };
+    if (contribution.kind === 'file-output') {
+      return {
+        ...definition, pluginOperation: 'file-output', risk: 'write', presentation: undefined,
+        timeoutMs: 120_000, cancellationSettleTimeoutMs: 45_000,
+        prepareMain: async (input, _requestedAction, context) => {
+          validateToolInput(contribution, input);
+          if (!context.preparePluginFileOutput) throw new Error('插件文件产物准备能力未配置');
+          return context.preparePluginFileOutput(source, input, context.signal);
+        },
+        execute: async (input, context) => {
+          validateToolInput(contribution, input);
+          if (!context.preparation || !context.commitSettlement || !context.executePluginFileOutput) {
+            throw new Error('插件产物缺少已批准的准备结果或宿主提交能力');
+          }
+          return context.executePluginFileOutput(source, input, context.preparation, context.commitSettlement, context.signal);
+        },
+      };
+    }
     if (contribution.kind === 'rename-proposal') {
       return {
         ...definition,

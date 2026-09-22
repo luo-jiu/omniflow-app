@@ -3,7 +3,7 @@ import type {
   AgentToolActivitySnapshot,
 } from '@/shared/agent/agent.types';
 import { buildFileFullName } from '@/utils/fileTreeSettings';
-import { committedPluginRenameItems, getPluginRenamePreparedAction } from './agent-published-file';
+import { committedAgentFileParents, getPluginOperationPreparedAction } from './agent-published-file';
 
 type ToolPresenter = (
   activity: AgentToolActivitySnapshot,
@@ -250,15 +250,24 @@ export function buildAgentToolPresentation(
     { label: '工具', value: activity.pluginSource.toolId },
     { label: '包指纹', value: activity.pluginSource.packageFingerprint },
   ] }] : [];
-  const renameAction = getPluginRenamePreparedAction(activity, libraryId);
-  if (renameAction) {
+  const operationAction = getPluginOperationPreparedAction(activity, libraryId);
+  if (operationAction) {
     const data = asRecord(activity.result?.data);
-    const state = data?.operationId === renameAction.operationId ? textValue(data?.mutationCommitState) : '';
+    const state = data?.operationId === operationAction.operationId ? textValue(operationAction.kind === 'plugin.rename' ? data?.mutationCommitState : data?.uploadCommitState) : '';
+    const queryable = activity.approval?.status === 'approved' && !['committed', 'uncommitted'].includes(state)
+      && ['failed', 'interrupted', 'cancelled', 'completed'].includes(activity.status);
     pluginSourceBlocks.push({ type: 'details', title: '提交回执', entries: [
-      { label: '操作 ID', value: renameAction.operationId },
-      { label: '提交状态', value: state === 'committed' && committedPluginRenameItems(activity, libraryId).length ? '已提交'
+      { label: '操作 ID', value: operationAction.operationId },
+      { label: '提交状态', value: state === 'committed' && committedAgentFileParents(activity, libraryId).length ? '已提交'
         : state === 'uncommitted' && activity.result?.ok === false ? '未提交' : '尚不能确认，请查询回执' },
-    ] });
+    ], ...(queryable ? { actions: [{ action: 'agent.operation.reconcile' as const, label: '查询回执', libraryId,
+      sessionId: activity.sessionId, toolRunId: activity.id, expectedRevision: activity.revision }] } : {}) });
+    const trace = asRecord(data?.reconciliation); const checks = Array.isArray(trace?.checks) ? trace.checks : [];
+    if (checks.length) pluginSourceBlocks.push({ type: 'details', title: '核对记录', entries: checks.slice(-8).flatMap(raw => {
+      const item = asRecord(raw);
+      return typeof item?.checkedAt === 'string' && typeof item.state === 'string' ? [{ label: item.checkedAt,
+        value: item.state === 'committed' ? '已提交' : item.state === 'uncommitted' ? '未提交' : '结果仍未知' }] : [];
+    }) });
   }
   if (activity.status === 'completed') {
     const specific = TOOL_PRESENTERS[activity.call.name]?.(activity, libraryId) || [];

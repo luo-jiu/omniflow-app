@@ -693,8 +693,14 @@ export default function AgentWorkspace({
     || session.runs.length > 0
     || session.toolActivities.length > 0;
   const submitInteraction = session.submitInteraction;
+  const reconcileOperation = session.reconcileOperation;
   const toolActivities = session.toolActivities;
   const handlePresentationAction = React.useCallback((action: AgentPresentationAction) => {
+    if (action.action === 'agent.operation.reconcile') {
+      const activity = toolActivities.find(item => item.id === action.toolRunId && item.sessionId === action.sessionId && item.revision === action.expectedRevision);
+      if (!activity || action.libraryId !== libraryId) { Toast.warning('该操作回执不属于当前会话或已更新'); return; }
+      void reconcileOperation(activity); return;
+    }
     if (action.action === 'tree.revealNode') {
       if (
         action.libraryId !== libraryId
@@ -719,7 +725,7 @@ export default function AgentWorkspace({
       return;
     }
     Toast.info('该 Agent 结果操作尚未接入当前工作区');
-  }, [libraryId, submitInteraction, toolActivities]);
+  }, [libraryId, submitInteraction, toolActivities, reconcileOperation]);
 
   const handleToolExpand = React.useCallback(() => {
     shouldFollowScrollRef.current = false;
@@ -1040,6 +1046,7 @@ export default function AgentWorkspace({
             <AgentFileLinkContext.Provider value={onOpenFileLink}><AgentTimeline
               approvalBusyIds={session.approvalBusyIds}
               interactionBusyIds={session.interactionBusyIds}
+              receiptBusyIds={session.receiptBusyIds}
               libraryId={libraryId}
               messages={session.messages}
               onAction={handlePresentationAction}

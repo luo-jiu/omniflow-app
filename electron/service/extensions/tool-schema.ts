@@ -133,10 +133,17 @@ function validateResourceSchema(schema: PluginToolSchema, kind?: ToolKind): void
       || hasOwn(schema.properties ?? {}, 'resource')) throw new Error('Proposal resources must be 1 to 50 unique positive safe nodeIds');
     return;
   }
-  if (kind !== undefined) throw new Error('Unsupported Tool kind');
+  if (kind !== undefined && kind !== 'file-output') throw new Error('Unsupported Tool kind');
   const resource = schema.properties?.resource;
   const nodeId = resource?.properties?.nodeId;
   if (!schema.required?.includes('resource') || resource?.type !== 'object' || resource.required?.length !== 1 || resource.required[0] !== 'nodeId' || Object.keys(resource.properties ?? {}).length !== 1 || nodeId?.type !== 'integer' || nodeId.minimum !== 1 || nodeId.maximum !== Number.MAX_SAFE_INTEGER || nodeId.enum) throw new Error('Tool resource must be a required positive safe nodeId');
+  if (kind === 'file-output') {
+    const destination = schema.properties?.destination, parentId = destination?.properties?.parentId, fileName = destination?.properties?.fileName;
+    if (!schema.required?.includes('destination') || destination?.type !== 'object' || destination.required?.length !== 2
+      || !destination.required.includes('parentId') || !destination.required.includes('fileName') || Object.keys(destination.properties ?? {}).length !== 2
+      || parentId?.type !== 'integer' || parentId.minimum !== 1 || parentId.maximum !== Number.MAX_SAFE_INTEGER || parentId.enum
+      || fileName?.type !== 'string' || fileName.minLength !== 1 || fileName.maxLength !== 240 || fileName.enum) throw new Error('File output requires a bounded host destination');
+  }
 }
 
 function validateProposalOutputSchema(schema: PluginToolSchema): void {
@@ -149,13 +156,29 @@ function validateProposalOutputSchema(schema: PluginToolSchema): void {
 }
 
 export function validateToolSchemas(inputSchema: unknown, outputSchema: unknown, kind?: ToolKind): void {
+  if (kind === 'file-output') throw new Error('File output uses a fixed output declaration');
   validateSchema(inputSchema); validateResourceSchema(inputSchema, kind); validateSchema(outputSchema);
   if (kind === 'rename-proposal') validateProposalOutputSchema(outputSchema);
+}
+
+export function validateToolContribution(tool: PluginToolContribution): void {
+  if (tool.kind !== 'file-output') { validateToolSchemas(tool.inputSchema, tool.outputSchema, tool.kind); return; }
+  validateSchema(tool.inputSchema); validateResourceSchema(tool.inputSchema, tool.kind);
+  const output = tool.output;
+  if (!record(output) || Object.keys(output).length !== 2 || !Array.isArray(output.mediaTypes) || !output.mediaTypes.length
+    || output.mediaTypes.length > 2 || new Set(output.mediaTypes).size !== output.mediaTypes.length
+    || output.mediaTypes.some(type => !['text/csv', 'application/json'].includes(type))
+    || !boundedInteger(output.maxBytes, 1, 1048576) || hasOwn(tool, 'outputSchema') || hasOwn(tool, 'maxResultBytes')) throw new Error('Invalid file output declaration');
 }
 
 export function validateToolInput(tool: { inputSchema: PluginToolSchema; kind?: ToolKind }, input: unknown): asserts input is Record<string, unknown> {
   validateSchema(tool.inputSchema); validateResourceSchema(tool.inputSchema, tool.kind);
   jsonBytes(input, TOOL_SCHEMA_LIMITS.inputBytes); validateValue(tool.inputSchema, input);
+  if (tool.kind === 'file-output') {
+    const fileName = (input as { destination: { fileName: string } }).destination.fileName;
+    if (fileName !== fileName.trim() || fileName === '.' || fileName === '..' || /[\p{Cc}/\\]/u.test(fileName)
+      || Buffer.byteLength(fileName, 'utf8') > 240 || Buffer.from(fileName, 'utf8').toString('utf8') !== fileName) throw new Error('Invalid output file name');
+  }
 }
 
 export function validateToolOutput(tool: { outputSchema: PluginToolSchema; maxResultBytes: number; kind?: ToolKind }, output: unknown): void {

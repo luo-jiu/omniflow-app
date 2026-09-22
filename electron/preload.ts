@@ -262,6 +262,8 @@ contextBridge.exposeInMainWorld('electronAIService', {
 })
 
 contextBridge.exposeInMainWorld('electronAgent', {
+  reconcilePluginOperation: (input: import('../src/shared/agent/agent.types').AgentPluginOperationReconcileRequest): Promise<import('../src/shared/agent/agent.types').AgentToolActivitySnapshot> =>
+    ipcRenderer.invoke('agent:plugin-operation:reconcile', input),
   importAttachment: (input: import('../src/shared/agent/agent-attachments').AgentAttachmentImport) => ipcRenderer.invoke('agent:attachment:import', input),
   discardAttachment: (input: import('../src/shared/agent/agent-attachments').AgentAttachmentScope & { id: string }) => ipcRenderer.invoke('agent:attachment:discard', input),
   previewAttachment: (input: import('../src/shared/agent/agent-attachments').AgentAttachmentPreviewRequest) => ipcRenderer.invoke('agent:attachment:preview', input),

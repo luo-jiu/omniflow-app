@@ -27,6 +27,21 @@ function fixture(data: unknown = receipt(request())) {
 }
 
 describe('plugin rename transport', () => {
+  it('queries a persisted public action without requiring private preparation timestamps or current node reads', async () => {
+    const source = request(); const confirmed = receipt(source);
+    const action = { kind: 'plugin.rename' as const, version: 1 as const, libraryId: 3, operationId: source.operationId,
+      pluginId: 'example.rename', pluginVersion: '0.1.0', packageFingerprint: 'a'.repeat(64),
+      items: source.items.map(item => ({ nodeId: item.nodeId, parentId: item.expected.parentId,
+        oldName: item.expected.name + (item.expected.ext ? '.' + item.expected.ext : ''), newName: item.name + (item.expected.ext ? '.' + item.expected.ext : '') })) };
+    const f = fixture({ operationId: source.operationId, libraryId: 3, state: 'committed', result: confirmed });
+    expect(await f.transport.statusForAction(action, credentials, signal())).toEqual(confirmed);
+    expect(f.fetch).toHaveBeenCalledOnce(); expect(String(f.fetch.mock.calls[0][0])).toContain('/rename/batch/status?');
+    for (const patch of [{ newName: 'other.jpg' }, { oldName: 'different.jpg' }, { parentId: 99 }]) {
+      await expect(f.transport.statusForAction({ ...action, items: [{ ...action.items[0], ...patch }, action.items[1]] }, credentials, signal())).rejects.toMatchObject({ code: 'INVALID_RECEIPT' });
+    }
+    f.fetch.mockResolvedValueOnce(response({ operationId: source.operationId, libraryId: 3, state: 'not_found' }));
+    expect(await f.transport.statusForAction(action, credentials, signal())).toBeNull();
+  });
   it('uses fixed backend URLs, isolated credentials and exact snapshots', async () => {
     const source = request(); const f = fixture();
     const result = await f.transport.commit(source, credentials, signal());

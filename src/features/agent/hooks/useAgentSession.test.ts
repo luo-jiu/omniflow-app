@@ -27,6 +27,7 @@ const apiMocks = vi.hoisted(() => ({
   submitAgentInteraction: vi.fn(),
   subscribeAgentChat: vi.fn(),
   subscribeAgentFileAuthorityRequests: vi.fn(),
+  reconcileAgentPluginOperation: vi.fn(),
 }));
 
 const contextMocks = vi.hoisted(() => ({
@@ -215,6 +216,41 @@ function renderSessionHook(onRefreshDirectory?: (id: number) => Promise<void> | 
 }
 
 describe('useAgentSession event coordination', () => {
+  it('queries once, merges the same ToolRun revision and refreshes without broadcasting historical names', async () => {
+    const settled = renameActivity(); settled.revision = 3;
+    const original = { ...settled, revision: 2, status: 'interrupted' as const, result: { ok: false, data: { mutationCommitState: 'commit_unknown' } } };
+    apiMocks.getAgentSession.mockResolvedValue({ ...sessionSnapshot(), runs: [run(3, 'cancelled')], lastRunStatus: 'cancelled', toolActivities: [original] });
+    const pending = deferred<AgentToolActivitySnapshot>(); apiMocks.reconcileAgentPluginOperation.mockReturnValue(pending.promise);
+    const refresh = vi.fn(); const hook = renderSessionHook(refresh);
+    try {
+      await act(async () => { await hook.current.restore('session-1'); });
+      let querying!: Promise<void>;
+      act(() => { querying = hook.current.reconcileOperation(original); });
+      expect(hook.current.receiptBusyIds.has(original.id)).toBe(true);
+      await act(async () => hook.current.reconcileOperation(original)); expect(apiMocks.reconcileAgentPluginOperation).toHaveBeenCalledOnce();
+      expect(apiMocks.reconcileAgentPluginOperation).toHaveBeenCalledWith({ ownerScope: OWNER_SCOPE, libraryId: 3, sessionId: 'session-1', toolRunId: original.id, expectedRevision: 2 });
+      await act(async () => { pending.resolve(settled); await querying; });
+      expect(hook.current.toolActivities).toEqual([settled]); expect(hook.current.receiptBusyIds.size).toBe(0);
+      expect(hook.current.runs[0].status).toBe('cancelled'); expect(refresh).toHaveBeenCalledWith(10);
+      expect(mutationMocks.notifyLibraryNodesMutated).not.toHaveBeenCalled();
+    } finally { hook.unmount(); }
+  });
+  it('keeps failed queries retryable and ignores receipt replies after an owner change', async () => {
+    const original = { ...renameActivity(), status: 'interrupted' as const, result: { ok: false } };
+    apiMocks.getAgentSession.mockResolvedValue({ ...sessionSnapshot(), toolActivities: [original] });
+    const hook = renderSessionHook(vi.fn());
+    try {
+      await act(async () => { await hook.current.restore('session-1'); });
+      apiMocks.reconcileAgentPluginOperation.mockRejectedValueOnce(new Error('offline'));
+      await act(async () => hook.current.reconcileOperation(original)); expect(hook.current.error).toContain('offline');
+      expect(hook.current.toolActivities[0]).toEqual(original); expect(hook.current.receiptBusyIds.size).toBe(0);
+      const pending = deferred<AgentToolActivitySnapshot>(); apiMocks.reconcileAgentPluginOperation.mockReturnValueOnce(pending.promise);
+      let querying!: Promise<void>; act(() => { querying = hook.current.reconcileOperation(original); });
+      hook.changeScope({ ...OWNER_SCOPE, accountScope: 'user:8' }, 3);
+      await act(async () => { pending.resolve({ ...renameActivity(), revision: 9 }); await querying; });
+      expect(hook.current.toolActivities).toEqual([]); expect(hook.current.error).toBeNull(); expect(hook.current.receiptBusyIds.size).toBe(0);
+    } finally { hook.unmount(); }
+  });
   function renameActivity(libraryId = 3): AgentToolActivitySnapshot {
     const operationId = 'eaf4604e-5779-4a3c-8c3d-3eaf45c9aa68';
     return { ...activity(2, 'completed'), call: { id: 'rename-call', name: 'example.rename.propose', input: { resources: [11] } },

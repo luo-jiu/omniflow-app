@@ -534,6 +534,7 @@ function renderBlock(
   interactive: boolean,
   interactionBusy: boolean,
   onAction?: (action: AgentPresentationAction) => void,
+  receiptBusy = false,
 ) {
   if (block.type === 'choice' || block.type === 'form') {
     if (!interactive) {
@@ -588,6 +589,11 @@ function renderBlock(
             </dd>
           </React.Fragment>
         ))}
+        {interactive && onAction ? block.actions?.map(action => <div key={`${action.action}:${action.label}`}>
+          <button className="agent-activity-action" type="button" disabled={receiptBusy} onClick={() => onAction(action)}>
+            {receiptBusy ? '正在查询回执…' : action.label}
+          </button>
+        </div>) : null}
       </dl>
     );
   }
@@ -625,6 +631,7 @@ function renderBlock(
 }
 
 interface AgentToolActivityCardProps {
+  receiptBusy?: boolean;
   activity: AgentToolActivitySnapshot;
   approvalBusy: boolean;
   interactive?: boolean;
@@ -833,6 +840,7 @@ function AgentShellActivity({ activity, libraryId, onExpand, ownerScope }: Agent
 }
 
 export default function AgentToolActivityCard({
+  receiptBusy = false,
   activity,
   approvalBusy,
   interactive = true,
@@ -944,6 +952,7 @@ export default function AgentToolActivityCard({
                 interactive,
                 interactionBusy,
                 onAction,
+                receiptBusy,
               ))}
             </div>
           </div>

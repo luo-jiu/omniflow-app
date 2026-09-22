@@ -38,6 +38,8 @@ export function isPluginToolAllowed(plugin: ManagedPlugin, contribution: PluginT
   if (!plugin.enabled || plugin.blockedReason || !plugin.toolApproved || !plugin.permissions.includes('agent.tools')) return false;
   return contribution.kind === 'rename-proposal'
     ? Boolean(plugin.renameApproved && plugin.permissions.includes('resource.rename.propose'))
+    : contribution.kind === 'file-output'
+      ? Boolean(plugin.readApproved && plugin.outputApproved && plugin.permissions.includes('resource.read') && plugin.permissions.includes('resource.output.propose'))
     : Boolean(plugin.readApproved && plugin.permissions.includes('resource.read'));
 }
 

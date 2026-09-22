@@ -7,8 +7,8 @@ import { assertPluginToolNames } from './plugin-tool-catalog';
 import type { PluginInstallReview, PluginManagementAction } from '../../../src/shared/plugin-management';
 
 type Version = { manifest: PluginManifest; fingerprint: string };
-export type InstalledPlugin = Version & { enabled: boolean; readApproved: boolean; toolApproved: boolean; renameApproved: boolean; installedAt: string; failure?: string; previous?: Version };
-type Index = { schemaVersion: 1; safeMode: boolean; recoveryPackages?: string[]; bundled?: { enabled: boolean; readApproved: boolean; toolApproved: boolean; toolFingerprint?: string; renameApproved?: boolean; renameFingerprint?: string; failure?: string }; plugins: InstalledPlugin[] };
+export type InstalledPlugin = Version & { enabled: boolean; readApproved: boolean; toolApproved: boolean; renameApproved: boolean; outputApproved: boolean; installedAt: string; failure?: string; previous?: Version };
+type Index = { schemaVersion: 1; safeMode: boolean; recoveryPackages?: string[]; bundled?: { enabled: boolean; readApproved: boolean; toolApproved: boolean; toolFingerprint?: string; renameApproved?: boolean; renameFingerprint?: string; outputApproved?: boolean; outputFingerprint?: string; failure?: string }; plugins: InstalledPlugin[] };
 const MAX_INDEX_BYTES = 2 * 1024 * 1024;
 const empty = (): Index => ({ schemaVersion: 1, safeMode: false, plugins: [] });
 const fingerprintValid = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
@@ -33,14 +33,14 @@ export class PluginInstallStore {
       if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_INDEX_BYTES) throw new Error('INVALID_INDEX');
       const input = JSON.parse(await readFile(file, 'utf8')) as Index;
       if (input.schemaVersion !== 1 || typeof input.safeMode !== 'boolean' || !Array.isArray(input.plugins) || input.plugins.length > 32) throw new Error('INVALID_INDEX');
-      if (input.bundled && (typeof input.bundled.enabled !== 'boolean' || typeof input.bundled.readApproved !== 'boolean' || (input.bundled.toolApproved !== undefined && typeof input.bundled.toolApproved !== 'boolean') || (input.bundled.toolFingerprint !== undefined && !fingerprintValid(input.bundled.toolFingerprint)) || (input.bundled.renameApproved !== undefined && typeof input.bundled.renameApproved !== 'boolean') || (input.bundled.renameFingerprint !== undefined && !fingerprintValid(input.bundled.renameFingerprint)))) throw new Error('INVALID_INDEX');
+      if (input.bundled && (typeof input.bundled.enabled !== 'boolean' || typeof input.bundled.readApproved !== 'boolean' || (input.bundled.toolApproved !== undefined && typeof input.bundled.toolApproved !== 'boolean') || (input.bundled.toolFingerprint !== undefined && !fingerprintValid(input.bundled.toolFingerprint)) || (input.bundled.renameApproved !== undefined && typeof input.bundled.renameApproved !== 'boolean') || (input.bundled.renameFingerprint !== undefined && !fingerprintValid(input.bundled.renameFingerprint)) || (input.bundled.outputApproved !== undefined && typeof input.bundled.outputApproved !== 'boolean') || (input.bundled.outputFingerprint !== undefined && !fingerprintValid(input.bundled.outputFingerprint)))) throw new Error('INVALID_INDEX');
       if (input.recoveryPackages && (!Array.isArray(input.recoveryPackages) || input.recoveryPackages.length > 66 || input.recoveryPackages.some(value => !fingerprintValid(value)))) throw new Error('INVALID_INDEX');
-      if (input.bundled) { input.bundled.toolApproved ??= false; input.bundled.renameApproved ??= false; }
+      if (input.bundled) { input.bundled.toolApproved ??= false; input.bundled.renameApproved ??= false; input.bundled.outputApproved ??= false; }
       const ids = new Set<string>(); const viewerIds = new Set<string>(['example.csv.table']);
       for (const item of input.plugins) {
         item.manifest = parsePluginManifest(item.manifest, this.platform);
-        if (ids.has(item.manifest.id) || (item.manifest.id === 'example.csv' || item.manifest.id === 'omniflow' || item.manifest.id.startsWith('omniflow.')) || !fingerprintValid(item.fingerprint) || typeof item.enabled !== 'boolean' || typeof item.readApproved !== 'boolean' || (item.toolApproved !== undefined && typeof item.toolApproved !== 'boolean') || (item.renameApproved !== undefined && typeof item.renameApproved !== 'boolean') || typeof item.installedAt !== 'string') throw new Error('INVALID_INDEX');
-        item.toolApproved ??= false; item.renameApproved ??= false;
+        if (ids.has(item.manifest.id) || (item.manifest.id === 'example.csv' || item.manifest.id === 'omniflow' || item.manifest.id.startsWith('omniflow.')) || !fingerprintValid(item.fingerprint) || typeof item.enabled !== 'boolean' || typeof item.readApproved !== 'boolean' || (item.toolApproved !== undefined && typeof item.toolApproved !== 'boolean') || (item.renameApproved !== undefined && typeof item.renameApproved !== 'boolean') || (item.outputApproved !== undefined && typeof item.outputApproved !== 'boolean') || typeof item.installedAt !== 'string') throw new Error('INVALID_INDEX');
+        item.toolApproved ??= false; item.renameApproved ??= false; item.outputApproved ??= false;
         ids.add(item.manifest.id);
         for(const viewer of item.manifest.viewers){if(viewerIds.has(viewer.id))throw new Error('DUPLICATE_VIEWER_ID');viewerIds.add(viewer.id);}
         if (item.previous) {
@@ -105,7 +105,7 @@ export class PluginInstallStore {
     try { await rename(pending.root, destination); }
     catch (error) { if (!(error instanceof Error && 'code' in error && ['EEXIST','ENOTEMPTY'].includes(String(error.code)))) throw error; await this.verify({ manifest: loaded.manifest, fingerprint: loaded.fingerprint }); }
     for (const name of loaded.assets.keys()) await chmod(path.join(destination, name), 0o400);
-    const nextItem: InstalledPlugin = { manifest: loaded.manifest, fingerprint: loaded.fingerprint, installedAt: new Date().toISOString(), enabled: false, readApproved: false, toolApproved: false, renameApproved: false,
+    const nextItem: InstalledPlugin = { manifest: loaded.manifest, fingerprint: loaded.fingerprint, installedAt: new Date().toISOString(), enabled: false, readApproved: false, toolApproved: false, renameApproved: false, outputApproved: false,
       ...(current ? { previous: { manifest: current.manifest, fingerprint: current.fingerprint } } : {}) };
     await this.save({ ...this.state, plugins: [...this.state.plugins.filter(item => item.manifest.id !== loaded.manifest.id), nextItem] });
     await this.discardUnlocked(ticket).catch(() => undefined);
@@ -124,9 +124,11 @@ export class PluginInstallStore {
     else if (action === 'revoke-tools') item.toolApproved = false;
     else if (action === 'approve-rename') { if (!item.manifest.permissions.includes('resource.rename.propose') || !item.manifest.agentTools?.some(tool => tool.kind === 'rename-proposal')) throw new Error('CAPABILITY_NOT_DECLARED'); item.renameApproved = true; }
     else if (action === 'revoke-rename') item.renameApproved = false;
+    else if (action === 'approve-output') { if (!item.manifest.permissions.includes('resource.output.propose') || !item.manifest.agentTools?.some(tool => tool.kind === 'file-output')) throw new Error('CAPABILITY_NOT_DECLARED'); item.outputApproved = true; }
+    else if (action === 'revoke-output') item.outputApproved = false;
     else if (action === 'rollback') {
       if (!item.previous) throw new Error('NO_PREVIOUS_VERSION'); this.checkContributionIds(item.previous.manifest); await this.verify(item.previous);
-      const previous = item.previous; item.previous = { manifest: item.manifest, fingerprint: item.fingerprint }; item.manifest = previous.manifest; item.fingerprint = previous.fingerprint; item.enabled = false; item.readApproved = false; item.toolApproved = false; item.renameApproved = false; delete item.failure;
+      const previous = item.previous; item.previous = { manifest: item.manifest, fingerprint: item.fingerprint }; item.manifest = previous.manifest; item.fingerprint = previous.fingerprint; item.enabled = false; item.readApproved = false; item.toolApproved = false; item.renameApproved = false; item.outputApproved = false; delete item.failure;
     } else throw new Error('INVALID_ACTION');
     await this.save(next); await this.collectUnused().catch(() => undefined);
   }); }
@@ -138,7 +140,7 @@ export class PluginInstallStore {
   }); }
   async setBundled(action: PluginManagementAction, stop: (id: string) => void, fingerprint?: string) { return this.serial(async () => {
     const flags = { ...(this.state.bundled ?? { enabled: true, readApproved: true, toolApproved: false }) }; stop('example.csv');
-    if (action === 'enable') { flags.enabled = true; delete flags.failure; } else if (action === 'disable') flags.enabled = false; else if (action === 'approve-read') flags.readApproved = true; else if (action === 'revoke-read') flags.readApproved = false; else if (action === 'approve-tools') { if (!fingerprintValid(fingerprint)) throw new Error('INVALID_FINGERPRINT'); flags.toolApproved = true; flags.toolFingerprint = fingerprint; } else if (action === 'revoke-tools') flags.toolApproved = false; else if (action === 'approve-rename') { if (!fingerprintValid(fingerprint)) throw new Error('INVALID_FINGERPRINT'); flags.renameApproved = true; flags.renameFingerprint = fingerprint; } else if (action === 'revoke-rename') flags.renameApproved = false; else throw new Error('BUNDLED_PACKAGE');
+    if (action === 'enable') { flags.enabled = true; delete flags.failure; } else if (action === 'disable') flags.enabled = false; else if (action === 'approve-read') flags.readApproved = true; else if (action === 'revoke-read') flags.readApproved = false; else if (action === 'approve-tools') { if (!fingerprintValid(fingerprint)) throw new Error('INVALID_FINGERPRINT'); flags.toolApproved = true; flags.toolFingerprint = fingerprint; } else if (action === 'revoke-tools') flags.toolApproved = false; else if (action === 'approve-rename') { if (!fingerprintValid(fingerprint)) throw new Error('INVALID_FINGERPRINT'); flags.renameApproved = true; flags.renameFingerprint = fingerprint; } else if (action === 'revoke-rename') flags.renameApproved = false; else if (action === 'approve-output') { if (!fingerprintValid(fingerprint)) throw new Error('INVALID_FINGERPRINT'); flags.outputApproved = true; flags.outputFingerprint = fingerprint; } else if (action === 'revoke-output') flags.outputApproved = false; else throw new Error('BUNDLED_PACKAGE');
     await this.save({ ...this.state, bundled: flags });
   }); }
   async setSafeMode(enabled: boolean, stopAll: () => void) { return this.serial(async () => { stopAll(); await this.save({ ...this.state, safeMode: enabled }); }); }

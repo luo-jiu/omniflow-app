@@ -181,6 +181,7 @@ const ActivityGroup = styled.section`
 interface AgentToolActivityGroupProps {
   activities: AgentToolActivitySnapshot[];
   approvalBusyIds: Set<string>;
+  receiptBusyIds?: ReadonlySet<string>;
   interactionBusyIds: Set<string>;
   libraryId: number;
   onAction?: (action: AgentPresentationAction) => void;
@@ -200,6 +201,7 @@ function activityCard(
 ) {
   return (
     <AgentToolActivityCard
+      receiptBusy={props.receiptBusyIds?.has(activity.id)}
       activity={activity}
       approvalBusy={Boolean(
         activity.approval && props.approvalBusyIds.has(activity.approval.approvalId)

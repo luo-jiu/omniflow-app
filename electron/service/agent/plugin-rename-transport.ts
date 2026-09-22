@@ -1,4 +1,6 @@
 import { net } from 'electron';
+import { normalizeAgentPluginRenamePreparedActionPublicV1 } from '../../../src/shared/agent/agent-prepared-action';
+import type { AgentPluginRenamePreparedActionPublicV1 } from '../../../src/shared/agent/agent.types';
 
 export interface PluginRenameCredentials { token: string; username: string }
 export interface ConditionalRenameState { name: string; ext: string; updatedAt: string }
@@ -194,6 +196,26 @@ export function createPluginRenameTransport(options: { apiBaseUrl: string; fetch
   }
 
   return {
+    async statusForAction(input: AgentPluginRenamePreparedActionPublicV1, credentials: PluginRenameCredentials, signal: AbortSignal): Promise<ConditionalRenameReceipt | null> {
+      const action = normalizeAgentPluginRenamePreparedActionPublicV1(input);
+      const query = new URLSearchParams({ libraryId: String(action.libraryId), operationId: action.operationId });
+      let data: unknown;
+      try { data = await invoke(`v1/nodes/rename/batch/status?${query}`, credentials, signal); }
+      catch (error) { fail(error instanceof RenameTransportError ? error.code : 'NETWORK', 'commit_unknown'); }
+      if (!object(data) || data.operationId !== action.operationId || data.libraryId !== action.libraryId) fail('INVALID_RECEIPT', 'commit_unknown');
+      if (data.state === 'not_found' && !hasOwn(data, 'result')) return null;
+      if (data.state !== 'committed' || !object(data.result) || !Array.isArray(data.result.items) || data.result.items.length !== action.items.length) fail('INVALID_RECEIPT', 'commit_unknown');
+      const request: ConditionalRenameRequest = { libraryId: action.libraryId, operationId: action.operationId, items: data.result.items.map(raw => {
+        if (!object(raw) || !object(raw.previous) || !object(raw.current)) fail('INVALID_RECEIPT', 'commit_unknown');
+        const approved = action.items.find(item => item.nodeId === raw.nodeId);
+        const fullName = (state: Record<string, unknown>) => typeof state.name === 'string' && typeof state.ext === 'string' ? state.name + (state.ext ? `.${state.ext}` : '') : null;
+        if (!approved || raw.parentId !== approved.parentId || fullName(raw.previous) !== approved.oldName || fullName(raw.current) !== approved.newName
+          || raw.previous.ext !== raw.current.ext || !timestamp(raw.previous.updatedAt) || !timestamp(raw.current.updatedAt)) fail('INVALID_RECEIPT', 'commit_unknown');
+        return { nodeId: approved.nodeId, name: raw.current.name as string, expected: { parentId: approved.parentId,
+          name: raw.previous.name as string, ext: raw.previous.ext as string, updatedAt: raw.previous.updatedAt as string } };
+      }) };
+      try { return validateReceipt(data.result, request, 'committed'); } catch { fail('INVALID_RECEIPT', 'commit_unknown'); }
+    },
     async verifyActor(credentials: PluginRenameCredentials, owner: { accountScope: string }, signal: AbortSignal): Promise<void> {
       const accountScope = owner.accountScope;
       if (!/^user:[1-9]\d*$/u.test(accountScope)) fail('ACTOR_MISMATCH');

@@ -34,6 +34,7 @@ import {
   stopAgentChat,
   subscribeAgentChat,
   subscribeAgentFileAuthorityRequests,
+  reconcileAgentPluginOperation,
 } from '../services/agent.api';
 import { resolveAgentFileAuthority } from '../services/agent-file-authority';
 import { readAgentPerception } from '../services/agent-context.api';
@@ -130,6 +131,8 @@ export function useAgentSession({
   const [toolActivities, setToolActivities] = React.useState<AgentToolActivitySnapshot[]>([]);
   const [approvalBusyIds, setApprovalBusyIds] = React.useState<Set<string>>(() => new Set());
   const [interactionBusyIds, setInteractionBusyIds] = React.useState<Set<string>>(() => new Set());
+  const [receiptBusyIds, setReceiptBusyIds] = React.useState<Set<string>>(() => new Set());
+  const receiptRequestsRef = React.useRef(new Set<string>());
   const ownerScopeKey = serializeAgentOwnerScope(ownerScope);
   const sessionScopeKey = `${ownerScopeKey}\u0000${Number(appContext.libraryId)}`;
   const attachments = useAgentAttachments(ownerScope ? { ownerScope, libraryId: Number(appContext.libraryId) } : null);
@@ -670,6 +673,8 @@ export function useAgentSession({
     setToolActivities([]);
     setApprovalBusyIds(new Set());
     setInteractionBusyIds(new Set());
+    setReceiptBusyIds(new Set());
+    receiptRequestsRef.current.clear();
     approvalsInFlightRef.current.clear();
     interactionsInFlightRef.current.clear();
     setIsStreaming(false);
@@ -720,6 +725,8 @@ export function useAgentSession({
       interactionsInFlightRef.current.clear();
       setApprovalBusyIds(new Set());
       setInteractionBusyIds(new Set());
+      setReceiptBusyIds(new Set());
+      receiptRequestsRef.current.clear();
       setDraft('');
       desyncedAssistantItemIdsRef.current.clear();
       const running = snapshot.lastRunStatus === 'running'
@@ -1050,10 +1057,39 @@ export function useAgentSession({
     setToolActivities([]);
     setApprovalBusyIds(new Set());
     setInteractionBusyIds(new Set());
+    setReceiptBusyIds(new Set());
+    receiptRequestsRef.current.clear();
     approvalsInFlightRef.current.clear();
     interactionsInFlightRef.current.clear();
     setPreparing(false);
   }, [clearAttachments, clearFailedDrafts, isStreaming, setPreparing, setDraft]);
+
+  const reconcileOperation = React.useCallback(async (activity: AgentToolActivitySnapshot) => {
+    const libraryId = Number(appContext.libraryId);
+    if (!ownerScope || !Number.isSafeInteger(libraryId) || libraryId <= 0 || activity.sessionId !== sessionIdRef.current) return;
+    const requestScope = sessionScopeKey;
+    const key = `${requestScope}\u0000${activity.sessionId}\u0000${activity.id}`;
+    if (receiptRequestsRef.current.has(key)) return;
+    receiptRequestsRef.current.add(key);
+    setReceiptBusyIds(current => new Set(current).add(activity.id)); setError(null);
+    try {
+      const updated = await reconcileAgentPluginOperation({ ownerScope, libraryId, sessionId: activity.sessionId,
+        toolRunId: activity.id, expectedRevision: activity.revision });
+      if (!mountedRef.current || sessionScopeKeyRef.current !== requestScope || sessionIdRef.current !== activity.sessionId) return;
+      if (updated.id !== activity.id || updated.sessionId !== activity.sessionId || updated.revision < activity.revision) throw new Error('回执查询响应身份不匹配');
+      // This is a historical receipt update, never a fresh rename event or a resumed Run.
+      setToolActivities(current => upsertAgentToolActivity(current, updated));
+    } catch (failure) {
+      if (mountedRef.current && sessionScopeKeyRef.current === requestScope && sessionIdRef.current === activity.sessionId) {
+        setError(failure instanceof Error ? failure.message : '回执查询失败，请稍后重试');
+      }
+    } finally {
+      receiptRequestsRef.current.delete(key);
+      if (mountedRef.current && sessionScopeKeyRef.current === requestScope && sessionIdRef.current === activity.sessionId) {
+        setReceiptBusyIds(current => { const next = new Set(current); next.delete(activity.id); return next; });
+      }
+    }
+  }, [appContext.libraryId, ownerScope, sessionScopeKey]);
 
   return {
     sessionInfo: sessionInfo?.id === sessionId ? sessionInfo : null,
@@ -1071,6 +1107,8 @@ export function useAgentSession({
     toolActivities,
     approvalBusyIds,
     interactionBusyIds,
+    receiptBusyIds,
+    reconcileOperation,
     reset,
     continueTask,
     resumableRunId,

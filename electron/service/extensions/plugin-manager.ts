@@ -50,11 +50,11 @@ export class PluginManager {
     const state = this.installs.snapshot(); const safeMode = state.safeMode || this.forcedSafeMode || this.transitioningSafeMode || this.storageUnavailable;
     const runtimeBlock = this.runtimeUnavailable ? '运行时停止失败，请重启应用后检查。' : this.resettingSettings ? '正在重置插件设置' : undefined;
     const plugins: ManagedPlugin[] = state.plugins.map(item => ({ id:item.manifest.id,version:item.manifest.version,fingerprint:item.fingerprint,
-      enabled:item.enabled,readApproved:item.readApproved,toolApproved:item.toolApproved,renameApproved:item.renameApproved,source:'local',installedAt:item.installedAt,previousVersion:item.previous?.manifest.version,
+      enabled:item.enabled,readApproved:item.readApproved,toolApproved:item.toolApproved,renameApproved:item.renameApproved,outputApproved:item.outputApproved,source:'local',installedAt:item.installedAt,previousVersion:item.previous?.manifest.version,
       viewers:item.manifest.viewers,agentTools:item.manifest.agentTools ?? [],permissions:item.manifest.permissions,running:this.running.get(item.manifest.id)??0,
       blockedReason:runtimeBlock??(this.operating.has(item.manifest.id)?'操作进行中':this.blocked.get(item.manifest.id)??(item.failure?'运行异常：'+item.failure:undefined)??(safeMode?'恢复模式阻止第三方运行':undefined)) }));
     if(this.bundled) { const flags=state.bundled??{enabled:true,readApproved:true,toolApproved:false};plugins.unshift({id:this.bundled.manifest.id,version:this.bundled.manifest.version,fingerprint:this.bundled.fingerprint,
-      ...flags,toolApproved:flags.toolApproved && flags.toolFingerprint===this.bundled.fingerprint,renameApproved:Boolean(flags.renameApproved && flags.renameFingerprint===this.bundled.fingerprint),source:'bundled',installedAt:'随应用提供',viewers:this.bundled.manifest.viewers,agentTools:this.bundled.manifest.agentTools ?? [],permissions:this.bundled.manifest.permissions,running:this.running.get(this.bundled.manifest.id)??0,
+      ...flags,toolApproved:flags.toolApproved && flags.toolFingerprint===this.bundled.fingerprint,renameApproved:Boolean(flags.renameApproved && flags.renameFingerprint===this.bundled.fingerprint),outputApproved:Boolean(flags.outputApproved && flags.outputFingerprint===this.bundled.fingerprint),source:'bundled',installedAt:'随应用提供',viewers:this.bundled.manifest.viewers,agentTools:this.bundled.manifest.agentTools ?? [],permissions:this.bundled.manifest.permissions,running:this.running.get(this.bundled.manifest.id)??0,
       blockedReason:runtimeBlock??(this.operating.has(this.bundled.manifest.id)?'操作进行中':this.blocked.get(this.bundled.manifest.id)??(flags.failure?'运行异常：'+flags.failure:undefined))}); }
     return { revision:this.revision,safeMode,settingsRecoveryRequired:this.settings.needsRecovery,recoveryReason:this.forcedSafeMode?'启动参数强制禁用第三方，移除参数并重启后才能解除。':this.installs.recoveryReason,plugins,logs:structuredClone(this.logs) };
   }
@@ -99,6 +99,10 @@ export class PluginManager {
       if (action === 'approve-rename') {
         const plugin = this.catalog().plugins.find(item => item.id === id);
         if (!plugin?.permissions.includes('resource.rename.propose') || !plugin.agentTools?.some(tool => tool.kind === 'rename-proposal')) throw new Error('CAPABILITY_NOT_DECLARED');
+      }
+      if (action === 'approve-output') {
+        const plugin = this.catalog().plugins.find(item => item.id === id);
+        if (!plugin?.permissions.includes('resource.output.propose') || !plugin.agentTools?.some(tool => tool.kind === 'file-output')) throw new Error('CAPABILITY_NOT_DECLARED');
       }
       if(action==='clear-data')await this.settings.clearPlugin(id);
       else if(id==='example.csv')await this.installs.setBundled(action,value=>this.stopRuntimes(value),this.bundled?.fingerprint);

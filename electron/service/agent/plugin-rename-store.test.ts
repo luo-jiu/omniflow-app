@@ -108,6 +108,17 @@ describe('plugin rename prepared action SQLite consistency', () => {
 });
 
 describe('plugin rename interruption recovery', () => {
+  it('reconciles the original unknown rename row while retaining its original outcome', async () => {
+    const f = await fixture(); await f.prepare(); await f.store.resolveToolApproval('approval', 'approved', time);
+    const original = { ok: false, data: { mutationCommitState: 'commit_unknown', operationId: action().operationId, libraryId: 3, atomic: true } };
+    const row = await f.store.completeToolRun('tool', original, time);
+    const result = { ok: true, data: { mutationCommitState: 'committed', operationId: action().operationId, libraryId: 3, atomic: true,
+      affectedParentIds: [2], items: [{ nodeId: 8, parentId: 2, name: 'new', ext: 'jpg' }] } };
+    const updated = await f.store.reconcilePluginToolRun({ ownerScope, libraryId: 3, sessionId: 'session', toolRunId: 'tool', expectedRevision: row.revision,
+      operationId: action().operationId, result, checkedAt: time });
+    expect(updated).toMatchObject({ id: 'tool', status: 'completed', revision: row.revision + 1, result: { ok: true,
+      data: { reconciliation: { originalResult: original, originalStatus: 'failed', checks: [{ checkedAt: time, state: 'committed' }] } } } });
+  });
   it('recovers an approved in-flight rename as commit_unknown before Run finalization can overwrite it', async () => {
     const f = await fixture(); await f.prepare(); await f.store.resolveToolApproval('approval', 'approved', time);
     // A sibling open read Tool demonstrates that the ordinary Run trigger still runs.

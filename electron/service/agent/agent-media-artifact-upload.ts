@@ -37,11 +37,13 @@ export interface AgentMediaArtifactUploadTarget {
 
 export interface AgentMediaArtifactUploadInput {
   artifactId: string;
+  /** main 在批准前冻结的操作身份；旧调用方省略时保留既有稳定摘要。 */
+  operationId?: string;
   credentials: AgentMediaUploadCredentials;
   expectedUserId: number;
   beforeCommit?: () => Promise<void>;
   onProgress?: (uploadedBytes: number, totalBytes: number) => void;
-  onSettlementStarted?: () => void;
+  onSettlementStarted?: (operationId: string) => void;
   owner: AgentMediaArtifactOwner;
   signal: AbortSignal;
   target: AgentMediaArtifactUploadTarget;
@@ -66,13 +68,6 @@ export interface AgentMediaArtifactPutTransport {
     signal: AbortSignal;
     url: string;
   }): Promise<{ etag: string; sentBytes: number; status: number }>;
-}
-
-class AgentMediaArtifactUploadUncommittedError extends Error {
-  constructor() {
-    super('Agent 媒体产物上传未提交');
-    this.name = 'AgentMediaArtifactUploadUncommittedError';
-  }
 }
 
 interface AgentMediaArtifactUploadManagerOptions {
@@ -218,6 +213,14 @@ function operationIdFor(input: {
   })).digest('hex');
 }
 
+function normalizeOperationId(value: string): string {
+  if (typeof value !== 'string' || (!/^[a-f0-9]{64}$/u.test(value)
+    && !/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u.test(value))) {
+    throw stableError('Agent 上传操作 ID 无效');
+  }
+  return value;
+}
+
 export function createAgentMediaArtifactPutTransport(): AgentMediaArtifactPutTransport {
   return {
     put(input) {
@@ -345,7 +348,8 @@ export function createAgentMediaArtifactUploadManager(options: AgentMediaArtifac
     const expectedUserId = positiveInteger(input?.expectedUserId, 'Agent 上传账号');
     const owner = normalizeOwner(input?.owner);
     const target = normalizeTarget(input?.target);
-    const operationId = operationIdFor({ artifactId, owner, target });
+    const operationId = input.operationId === undefined
+      ? operationIdFor({ artifactId, owner, target }) : normalizeOperationId(input.operationId);
     let nonRetryableSettlement: Extract<
       AgentMediaArtifactUploadResult,
       { commitState: 'committed' | 'commit_unknown' }
@@ -494,7 +498,7 @@ export function createAgentMediaArtifactUploadManager(options: AgentMediaArtifac
         await ownedFile.verifyUnchanged();
         await input.beforeCommit?.();
         throwIfAborted(input.signal);
-        input.onSettlementStarted?.();
+        input.onSettlementStarted?.(operationId);
         completeStarted = true;
         try {
           const node = normalizeCommittedNode(await controlPlane.complete(credentials, {
@@ -504,7 +508,7 @@ export function createAgentMediaArtifactUploadManager(options: AgentMediaArtifac
             uploadId,
           }, input.signal));
           if (node) {
-            nonRetryableSettlement = { commitState: 'committed', node };
+            nonRetryableSettlement = { commitState: 'committed', node, operationId };
             return nonRetryableSettlement;
           }
         } catch (error) {
@@ -522,19 +526,16 @@ export function createAgentMediaArtifactUploadManager(options: AgentMediaArtifac
             ? normalizeCommittedNode(status.node)
             : null;
           if (node) {
-            nonRetryableSettlement = { commitState: 'committed', node };
+            nonRetryableSettlement = { commitState: 'committed', node, operationId };
             return nonRetryableSettlement;
           }
-          if (status?.state === 'uncommitted') {
-            throw new AgentMediaArtifactUploadUncommittedError();
-          }
+          // 旧服务的 uncommitted 也可能只是 complete 已认领但仍在途，不能触发 abort 或第二次上传。
           preserveForReconciliation = true;
-          nonRetryableSettlement = { commitState: 'commit_unknown' };
+          nonRetryableSettlement = { commitState: 'commit_unknown', operationId };
           return nonRetryableSettlement;
         } catch (error) {
-          if (error instanceof AgentMediaArtifactUploadUncommittedError) throw error;
           preserveForReconciliation = true;
-          nonRetryableSettlement = { commitState: 'commit_unknown' };
+          nonRetryableSettlement = { commitState: 'commit_unknown', operationId };
           return nonRetryableSettlement;
         } finally {
           reconciliation.dispose();
@@ -543,15 +544,14 @@ export function createAgentMediaArtifactUploadManager(options: AgentMediaArtifac
         if (
           completeStarted
           && !isDefinitiveClientError(error)
-          && !(error instanceof AgentMediaArtifactUploadUncommittedError)
         ) {
           preserveForReconciliation = true;
         }
         await abortSession();
         if (input.signal.aborted && !completeStarted) throw abortError();
         if (isAuthenticationError(error)) throw stableError('auth_expired');
-        if (preserveForReconciliation) return { commitState: 'commit_unknown' };
-        return { commitState: 'uncommitted' };
+        if (preserveForReconciliation) return { commitState: 'commit_unknown', operationId };
+        return { commitState: 'uncommitted', operationId };
       }
     };
 

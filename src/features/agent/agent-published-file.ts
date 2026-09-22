@@ -1,8 +1,18 @@
 import type { AgentPluginRenamePreparedActionPublicV1, AgentToolActivitySnapshot } from '@/shared/agent/agent.types';
 import { AGENT_LIBRARY_MUTATION_TOOLS } from '@/shared/agent/agent-library-actions';
-import { normalizeAgentPluginRenamePreparedActionPublicV1 } from '@/shared/agent/agent-prepared-action';
+import { normalizeAgentPreparedActionPublic, normalizeAgentPluginRenamePreparedActionPublicV1 } from '@/shared/agent/agent-prepared-action';
 
 export function committedAgentFileParents(activity: AgentToolActivitySnapshot, libraryId?: number): number[] {
+  const action = getPluginOperationPreparedAction(activity, libraryId);
+  if (action?.kind === 'plugin.file-output') {
+    const data = activity.result?.data as Record<string, unknown> | undefined;
+    const destination = data?.destination as Record<string, unknown> | undefined;
+    return activity.status === 'completed' && activity.result?.ok === true && data?.uploadCommitState === 'committed'
+      && data.operationId === action.operationId && data.libraryId === action.libraryId
+      && destination?.kind === 'library' && Number.isSafeInteger(destination.nodeId) && Number(destination.nodeId) > 0
+      && destination.parentId === action.parentId && data.fileName === action.fileName && data.sha256 === action.sha256
+      && data.sizeBytes === action.sizeBytes ? [action.parentId] : [];
+  }
   if (activity.pluginSource && activity.preparation?.action.kind === 'plugin.rename') {
     return [...new Set(committedPluginRenameItems(activity, libraryId).map(item => item.parentId))];
   }
@@ -14,6 +24,17 @@ export function committedAgentFileParents(activity: AgentToolActivitySnapshot, l
   }
   const parent = committedAgentFileParent(activity);
   return parent === null ? [] : [parent];
+}
+
+export function getPluginOperationPreparedAction(activity: AgentToolActivitySnapshot, libraryId?: number) {
+  const source = activity.pluginSource;
+  try {
+    const action = normalizeAgentPreparedActionPublic(activity.preparation?.action);
+    if (!source || (action.kind !== 'plugin.rename' && action.kind !== 'plugin.file-output') || source.toolId !== activity.call.name
+      || source.pluginId !== action.pluginId || source.pluginVersion !== action.pluginVersion || source.packageFingerprint !== action.packageFingerprint
+      || (libraryId !== undefined && action.libraryId !== libraryId)) return undefined;
+    return action;
+  } catch { return undefined; }
 }
 
 export function getPluginRenamePreparedAction(activity: AgentToolActivitySnapshot, libraryId?: number): AgentPluginRenamePreparedActionPublicV1 | undefined {

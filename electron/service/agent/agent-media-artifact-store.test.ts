@@ -94,6 +94,52 @@ describe('Agent media artifact store', () => {
     await expect(access(oversized.directoryPath)).rejects.toThrow();
   });
 
+  it('reserves the requested limit and accepts text exactly at its 1 MiB boundary', async () => {
+    const maximum = 1024 * 1024;
+    const quotaManager = createAgentLocalStorageQuotaManager({ maxTotalBytes: 2 * maximum });
+    const { store } = await createStore({ quotaManager });
+    const artifact = await store.create('output.csv', OWNER, { maxBytes: maximum });
+    expect(quotaManager.getUsage().totalBytes).toBe(maximum);
+    await writeFile(artifact.filePath, Buffer.alloc(maximum, 'a'));
+    await expect(store.finalize(artifact.artifactId)).resolves.toMatchObject({ sizeBytes: maximum });
+    expect(quotaManager.getUsage().totalBytes).toBeGreaterThanOrEqual(maximum);
+    await store.release(artifact.artifactId, OWNER);
+    expect(quotaManager.getUsage().totalBytes).toBe(0);
+  });
+
+  it('allows the final allocation block while rejecting even one extra content byte', async () => {
+    const quotaManager = createAgentLocalStorageQuotaManager({ maxTotalBytes: 8192 });
+    const { store } = await createStore({ quotaManager });
+    const small = await store.create('small.json', OWNER, { maxBytes: 3 });
+    expect(quotaManager.getUsage().totalBytes).toBe(3);
+    await writeFile(small.filePath, '[1]');
+    await expect(store.finalize(small.artifactId)).resolves.toMatchObject({ sizeBytes: 3 });
+    expect(quotaManager.getUsage().totalBytes).toBeGreaterThanOrEqual(3);
+    expect(quotaManager.getUsage().totalBytes).toBeLessThanOrEqual(4096);
+    await store.release(small.artifactId, OWNER);
+    const oversized = await store.create('too-large.csv', OWNER, { maxBytes: 3 });
+    await writeFile(oversized.filePath, 'abcd');
+    await expect(store.finalize(oversized.artifactId)).rejects.toThrow('超过 3 字节');
+    await expect(access(oversized.directoryPath)).rejects.toThrow();
+    expect(quotaManager.getUsage().totalBytes).toBe(0);
+  });
+
+  it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, AGENT_MEDIA_MAX_ARTIFACT_BYTES + 1])('rejects invalid artifact content limit %s before reserving storage', async maxBytes => {
+    const quotaManager = createAgentLocalStorageQuotaManager();
+    const { store } = await createStore({ quotaManager });
+    await expect(store.create('bounded.csv', OWNER, { maxBytes })).rejects.toThrow('大小上限无效');
+    expect(quotaManager.getUsage().totalBytes).toBe(0);
+  });
+
+  macosIt('does not hide oversized allocated forks behind a small content limit', async () => {
+    const { store } = await createStore();
+    const artifact = await store.create('forked.csv', OWNER, { maxBytes: 5 });
+    await writeFile(artifact.filePath, 'audio');
+    await writeFile(`${artifact.filePath}/..namedfork/rsrc`, Buffer.alloc(8192, 1));
+    await expect(store.finalize(artifact.artifactId)).rejects.toThrow('超过 5 字节');
+    await expect(access(artifact.directoryPath)).rejects.toThrow();
+  });
+
   symlinkRootIt('rejects a symlinked artifact output without reading or removing its target', async () => {
     const { root, store } = await createStore();
     const outsidePath = path.join(root, 'outside-audio.m4a');

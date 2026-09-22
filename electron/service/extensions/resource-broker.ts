@@ -2,6 +2,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import { LIMITS, type PluginMetadataFile, type ThemeSnapshot } from '../../../packages/plugin-sdk/index.js';
 import type { PluginManifest, PluginToolContribution } from './manifest';
 import { validateToolOutput } from './tool-schema';
+import { decodeFileOutput } from './file-output';
 
 export interface PluginToolExecution {
   contribution: PluginToolContribution;
@@ -118,6 +119,7 @@ export class PluginResourceBroker {
       if (!resource.accountScope || !integer(resource.libraryId, 1, Number.MAX_SAFE_INTEGER) || !integer(resource.nodeId, 1, Number.MAX_SAFE_INTEGER)
         || !integer(resource.size, 0, LIMITS.readTotalBytes) || !resource.revision || resource.revision.length > 256 || resource.name.length > 512) throw new Error('Invalid host resource scope');
       if (execution && (execution.contribution.kind === 'rename-proposal' || resource.directory || !manifest.permissions.includes('agent.tools') || !manifest.permissions.includes('resource.read'))) throw new Error('Invalid Tool resource scope');
+      if (execution?.contribution.kind === 'file-output' && !manifest.permissions.includes('resource.output.propose')) throw new Error('Invalid file output scope');
     }
     this.theme = validateTheme(theme);
     this.settingsScope = JSON.stringify([manifest.id, resource.accountScope, resource.libraryId]);
@@ -139,13 +141,13 @@ export class PluginResourceBroker {
     const requestOwner = {}; // 每次exchange独立；复用同一requestId也不能取得终态所有权。
     try {
       this.checkActive();
-      if (typeof raw !== 'string' || Buffer.byteLength(raw) > (this.execution ? LIMITS.toolRequestBytes : LIMITS.requestBytes)) throw new PluginFault('LIMIT', 'Request too large');
+      if (typeof raw !== 'string' || Buffer.byteLength(raw) > (this.execution?.contribution.kind === 'file-output' ? LIMITS.fileOutputRequestBytes : this.execution ? LIMITS.toolRequestBytes : LIMITS.requestBytes)) throw new PluginFault('LIMIT', 'Request too large');
       let request: unknown;
       try { request = JSON.parse(raw); } catch { throw new PluginFault('BAD_REQUEST', 'Invalid JSON'); }
       if (!object(request) || request.version !== 1 || typeof request.id !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(request.id)
         || typeof request.method !== 'string' || !object(request.params) || Object.keys(request).length !== 4) throw new PluginFault('BAD_REQUEST', 'Invalid request envelope');
       id = request.id; method = request.method;
-      if (Buffer.byteLength(raw) > (this.execution && method === 'tool.complete' ? LIMITS.toolRequestBytes : LIMITS.requestBytes)) throw new PluginFault('LIMIT', 'Request too large');
+      if (Buffer.byteLength(raw) > (this.execution?.contribution.kind === 'file-output' && method === 'tool.output.complete' ? LIMITS.fileOutputRequestBytes : this.execution && method === 'tool.complete' ? LIMITS.toolRequestBytes : LIMITS.requestBytes)) throw new PluginFault('LIMIT', 'Request too large');
       const params = request.params;
       if (method === 'lifecycle.pong') {
         fields(params, ['nonce']);
@@ -187,7 +189,7 @@ export class PluginResourceBroker {
       }
       const messages: Record<string, string> = { BAD_REQUEST: 'Invalid request', LIMIT: 'Capability limit reached', FORBIDDEN: 'Access denied', UNAVAILABLE: 'Instance unavailable', CANCELLED: 'Request cancelled', TIMEOUT: 'Request timed out', CONTENT_CHANGED: 'Resource changed', CONFLICT: 'Setting revision changed', UNSUPPORTED: 'Capability unavailable', INTERNAL: 'Host request failed' };
       const code = Object.prototype.hasOwnProperty.call(messages, fault.code) ? fault.code : 'INTERNAL';
-      const safeMethod = ['context.get', 'tool.invocation', 'tool.complete', 'tool.fail', 'directory.list', 'directory.open', 'resource.release', 'resource.read', 'settings.get', 'settings.set', 'state.get', 'state.set', 'lifecycle.ready', 'lifecycle.pong', 'request.cancel'].includes(method) ? method : 'unknown';
+      const safeMethod = ['context.get', 'tool.invocation', 'tool.complete', 'tool.output.complete', 'tool.fail', 'directory.list', 'directory.open', 'resource.release', 'resource.read', 'settings.get', 'settings.set', 'state.get', 'state.set', 'lifecycle.ready', 'lifecycle.pong', 'request.cancel'].includes(method) ? method : 'unknown';
       this.diagnostic({ method: safeMethod, code, elapsedMs: Date.now() - start, requestTag: id ? createHash('sha256').update(id).digest('hex').slice(0,12) : undefined });
       return JSON.stringify({ version: 1, id, ok: false, error: { code, message: messages[code] } });
     }
@@ -197,7 +199,10 @@ export class PluginResourceBroker {
       fields(params, []);
       if (isMetadataResourceAuthority(this.resource)) return { kind: 'tool', pluginId: this.manifest.id, toolId: this.execution!.contribution.id,
         capabilities: ['resource.rename.propose', 'tool.invoke', 'lifecycle'], resource: null, readGranted: false, theme: this.theme };
-      if (this.execution) return { kind: 'tool', pluginId: this.manifest.id, toolId: this.execution.contribution.id, capabilities: ['resource.read', 'tool.invoke', 'lifecycle'], resource: { handle: this.handle, name: this.resource.name, size: this.resource.size, revision: this.resource.revision }, readGranted: this.granted, theme: this.theme };
+      if (this.execution) return { kind: 'tool', pluginId: this.manifest.id, toolId: this.execution.contribution.id,
+        capabilities: ['resource.read', ...(this.execution.contribution.kind === 'file-output' ? ['resource.output.propose'] : []), 'tool.invoke', 'lifecycle'],
+        ...(this.execution.contribution.kind === 'file-output' ? { output: structuredClone(this.execution.contribution.output) } : {}),
+        resource: { handle: this.handle, name: this.resource.name, size: this.resource.size, revision: this.resource.revision }, readGranted: this.granted, theme: this.theme };
       return { pluginId: this.manifest.id, viewerId: this.manifest.viewers[0].id, capabilities: [...(this.resource.directory ? ['directory.read'] : []), 'resource.read', 'settings', 'state', 'theme', 'lifecycle'], resource: { ...(this.resource.directory ? { kind: 'directory' } : {}), handle: this.handle, name: this.resource.name, size: this.resource.size, revision: this.resource.revision },
         readGranted: this.granted && this.manifest.permissions.includes('resource.read'), theme: this.theme };
     }
@@ -206,11 +211,18 @@ export class PluginResourceBroker {
     if (!this.ready) throw new PluginFault('UNAVAILABLE', 'Instance not ready');
     if (this.execution) {
       if (this.toolTerminal !== 'open') throw new PluginFault('UNAVAILABLE', 'Tool already settled');
-      if (method === 'tool.invocation' || method === 'tool.complete' || method === 'tool.fail') {
-        fields(params, method === 'tool.invocation' ? [] : method === 'tool.complete' ? ['invocationId', 'output'] : ['invocationId', 'code']);
+      if (method === 'tool.invocation' || method === 'tool.complete' || method === 'tool.output.complete' || method === 'tool.fail') {
+        fields(params, method === 'tool.invocation' ? [] : method === 'tool.complete' ? ['invocationId', 'output'] : method === 'tool.output.complete' ? ['invocationId', 'mediaType', 'base64'] : ['invocationId', 'code']);
         if (method !== 'tool.invocation' && (!this.invocationDelivered || params.invocationId !== this.execution.invocationId)) throw new PluginFault('FORBIDDEN', 'Invalid invocation');
+        let fileOutput: unknown;
         if (method === 'tool.complete') {
+          if (this.execution.contribution.kind === 'file-output') throw new PluginFault('UNSUPPORTED', 'File output requires its dedicated completion');
           try { validateToolOutput(this.execution.contribution, params.output); } catch { throw new PluginFault('BAD_REQUEST', 'Invalid Tool result'); }
+        }
+        if (method === 'tool.output.complete') {
+          if (this.execution.contribution.kind !== 'file-output') throw new PluginFault('UNSUPPORTED', 'File output capability unavailable');
+          try { fileOutput = decodeFileOutput(this.execution.contribution, params.mediaType, params.base64); }
+          catch { throw new PluginFault('BAD_REQUEST', 'Invalid file output'); }
         }
         if (method === 'tool.fail' && !['INVALID_INPUT', 'UNSUPPORTED_FORMAT', 'FAILED'].includes(String(params.code))) throw new PluginFault('BAD_REQUEST', 'Invalid Tool error');
         if (method !== 'tool.invocation') { this.toolTerminal = 'pending'; this.toolTerminalOwner = requestOwner; }
@@ -224,6 +236,7 @@ export class PluginResourceBroker {
         }
         this.toolTerminal = 'settled';
         if (method === 'tool.complete') this.execution.complete(structuredClone(params.output));
+        else if (method === 'tool.output.complete') this.execution.complete(fileOutput);
         else this.execution.fail(params.code as 'INVALID_INPUT' | 'UNSUPPORTED_FORMAT' | 'FAILED');
         return null;
       }

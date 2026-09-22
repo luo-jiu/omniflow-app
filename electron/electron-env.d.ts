@@ -268,6 +268,7 @@ interface Window {
   };
 
   electronAgent?: {
+    reconcilePluginOperation: (input: import('@/shared/agent/agent.types').AgentPluginOperationReconcileRequest) => Promise<import('@/shared/agent/agent.types').AgentToolActivitySnapshot>;
     importAttachment: (input: import('@/shared/agent/agent-attachments').AgentAttachmentImport) => Promise<import('@/shared/agent/agent-attachments').AgentAttachment>;
     discardAttachment: (input: import('@/shared/agent/agent-attachments').AgentAttachmentScope & { id: string }) => Promise<void>;
     previewAttachment: (input: import('@/shared/agent/agent-attachments').AgentAttachmentPreviewRequest) => Promise<string>;

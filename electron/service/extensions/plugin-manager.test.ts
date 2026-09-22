@@ -6,6 +6,7 @@ import JSZip from 'jszip';
 import { PluginManager } from './plugin-manager';
 import base from '../../../samples/csv-viewer/manifest.json';
 import renameManifest from '../../../samples/batch-rename/manifest.json';
+import outputManifest from '../../../samples/csv-export/manifest.json';
 const roots:string[]=[];
 async function fixture(){const root=await mkdtemp(path.join(tmpdir(),'plugin-manager-test-'));roots.push(root);const bundled=path.join(root,'bundled');await mkdir(bundled);await writeFile(path.join(bundled,'manifest.json'),JSON.stringify(base));await writeFile(path.join(bundled,'index.html'),'<p>bundled</p>');return {root,bundled};}
 async function zip(root:string,id:string,viewerId=id+'.table'){const archive=new JSZip();archive.file('manifest.json',JSON.stringify({...base,id,version:'1.0.0',viewers:[{...base.viewers[0],id:viewerId}],activation:['viewer:'+viewerId]}));archive.file('index.html','<p>local</p>');const file=path.join(root,id+'.zip');await writeFile(file,await archive.generateAsync({type:'nodebuffer'}));return file;}
@@ -34,6 +35,17 @@ describe('plugin admission and recovery',()=>{
 });
 
 describe('plugin tool admission and runtime broadcasts',()=>{
+ it('requires independent file output approval in addition to read and Agent Tool grants',async()=>{
+  const f=await fixture();const manager=new PluginManager(path.join(f.root,'store'),f.bundled);await manager.initialize();
+  const archive=new JSZip();archive.file('manifest.json',JSON.stringify(outputManifest));archive.file('tool.html','<p>export</p>');
+  const packagePath=path.join(f.root,'export.zip');await writeFile(packagePath,await archive.generateAsync({type:'nodebuffer'}));
+  const review=await manager.prepare(packagePath);await manager.commit(review.ticket);
+  for(const action of ['enable','approve-read','approve-tools'] as const)await manager.action(outputManifest.id,action);
+  expect(manager.toolSnapshot()).toEqual([]);expect(manager.catalog().plugins.find(item=>item.id===outputManifest.id)?.outputApproved).toBe(false);
+  await manager.action(outputManifest.id,'approve-output');expect(manager.resolveTool(outputManifest.agentTools[0].id).plugin.outputApproved).toBe(true);
+  const stop=vi.fn();manager.attachRuntime(stop);await manager.action(outputManifest.id,'revoke-output');expect(stop).toHaveBeenCalledWith(outputManifest.id);expect(manager.toolSnapshot()).toEqual([]);
+  await expect(manager.action('example.csv','approve-output')).rejects.toThrow('CAPABILITY_NOT_DECLARED');
+ });
  it('admits metadata-only rename proposals only after independent approval and revokes active runtimes',async()=>{
   const f=await fixture();const manager=new PluginManager(path.join(f.root,'store'),f.bundled);await manager.initialize();
   const archive=new JSZip();archive.file('manifest.json',JSON.stringify(renameManifest));archive.file('tool.html','<p>rename proposal</p>');

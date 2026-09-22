@@ -9,11 +9,14 @@ let subscriptions = 0;
 let start = 0; let count = 0; let heartbeatCount = 0;
 contextBridge.exposeInMainWorld('omniflowTransport', Object.freeze({
   exchange: (request: unknown): Promise<string> => {
-    if (typeof request !== 'string' || request.length > 34816 || new TextEncoder().encode(request).length > 34816) return Promise.reject(new Error('Request size limit'));
+    if (typeof request !== 'string' || request.length > 1400152 || new TextEncoder().encode(request).length > 1400152) return Promise.reject(new Error('Request size limit'));
     const now = Date.now();
     if (now - start >= 1000) { start = now; count = 0; heartbeatCount = 0; }
     let priority = false;
-    try { const method = JSON.parse(request).method; priority = method === 'lifecycle.pong'; if (method !== 'tool.complete' && new TextEncoder().encode(request).length > 16384) return Promise.reject(new Error('Request size limit')); } catch { /* main validates JSON */ }
+    try { const method = JSON.parse(request).method; priority = method === 'lifecycle.pong';
+      const limit = method === 'tool.output.complete' ? 1400152 : method === 'tool.complete' ? 34816 : 16384;
+      if (new TextEncoder().encode(request).length > limit) return Promise.reject(new Error('Request size limit'));
+    } catch { /* main validates JSON */ }
     if (priority ? ++heartbeatCount > 2 : ++count > 64) return Promise.reject(new Error('Request rate limit'));
     return ipcRenderer.invoke('omniflow-plugin:rpc', request);
   },

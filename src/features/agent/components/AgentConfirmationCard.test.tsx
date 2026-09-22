@@ -3,6 +3,7 @@ import TestRenderer, { act } from 'react-test-renderer';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type {
+  AgentPluginFileOutputPreparedActionPublicV1,
   AgentFilePublishPreparedActionPublicV1,
   AgentFileStagePreparedActionPublicV1,
   AgentFileUploadPreparedActionPublicV1,
@@ -29,6 +30,23 @@ vi.mock('@/features/file-explorer', () => ({
 }));
 
 const renderers: TestRenderer.ReactTestRenderer[] = [];
+
+describe('plugin file-output confirmation', () => {
+  it('shows the immutable destination and content digest and passes the same action to approval', () => {
+    const action: AgentPluginFileOutputPreparedActionPublicV1 = { kind: 'plugin.file-output', version: 1, libraryId: 3,
+      operationId: 'eaf4604e-5779-4a3c-8c3d-3eaf45c9aa68', pluginId: 'example.csv-export', pluginVersion: '0.1.0', packageFingerprint: 'a'.repeat(64),
+      sourceNodeId: 8, parentId: 10, fileName: 'export.json', mediaType: 'application/json', providerId: 'local-minio', sizeBytes: 123, sha256: 'b'.repeat(64) };
+    const input = approval(action); input.call.name = 'example.csv-export.export';
+    input.preview.details = [{ label: '来源文件', value: '原始数据.csv' }, { label: '目标目录', value: '导出结果' }];
+    const { renderer, onResolve } = renderCard(input);
+    const content = textContent(renderer.root);
+    for (const expected of ['原始数据.csv', 'export.json', '导出结果', 'local-minio', '123 字节', action.sha256, '不覆盖现有文件']) expect(content).toContain(expected);
+    const allow = renderer.root.findAllByType('button').find(button => textContent(button) === '允许')!;
+    expect(allow.props.disabled).toBe(false); act(() => allow.props.onClick());
+    expect(onResolve).toHaveBeenCalledWith(true, action);
+    expect(renderer.root.findAllByType('input')).toHaveLength(0);
+  });
+});
 
 function mediaAction(
   overrides: Partial<AgentMediaExtractAudioPreparedActionPublicV1> = {},

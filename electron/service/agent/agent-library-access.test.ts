@@ -6,7 +6,8 @@ import type { AgentLibraryAccessSnapshot } from '@/shared/agent/agent-session-ma
 import { createAgentLibraryAccessGuard, type AgentAccessApproval } from './agent-library-access';
 
 function fixture(mode: AgentLibraryAccessSnapshot['mode'] = 'group', access: AgentLibraryAccessSnapshot['access'] = 'read-write',
-  pluginTools?: ReadonlyMap<string, AgentPluginToolSource>, pluginRenameTools?: ReadonlyMap<string, AgentPluginToolSource>) {
+  pluginTools?: ReadonlyMap<string, AgentPluginToolSource>, pluginRenameTools?: ReadonlyMap<string, AgentPluginToolSource>,
+  pluginOutputTools?: ReadonlyMap<string, AgentPluginToolSource>) {
   const nodes = new Map<number, AgentLibraryNode>([
     [1, { id: 1, libraryId: 3, parentId: 0, name: 'root', type: 'dir', path: '/' }],
     [10, { id: 10, libraryId: 3, parentId: 1, name: 'docs', type: 'dir', path: '/docs' }],
@@ -29,7 +30,7 @@ function fixture(mode: AgentLibraryAccessSnapshot['mode'] = 'group', access: Age
   const assertCurrent = vi.fn(async () => undefined);
   const guard = createAgentLibraryAccessGuard({ policy: { version: 1, groupId: 'g', policyRevision: 1, mode, access,
     directories: [{ nodeId: 10, name: 'docs' }] }, context: { libraryId: 3, platform: 'darwin', selectedNodeIds: [], currentDirectory: { id: 10, name: 'docs' } },
-    signal: controller.signal, read, approve, assertCurrent, pluginTools, pluginRenameTools });
+    signal: controller.signal, read, approve, assertCurrent, pluginTools, pluginRenameTools, pluginOutputTools });
   const call = (name: string, input: object) => ({ id: name, name, input });
   return { guard, nodes, read, approve, controller, assertCurrent, call };
 }
@@ -294,5 +295,49 @@ describe('Agent plugin rename scope and sealed file set', () => {
     expect(read.mock.calls.map(([query]) => query.nodeId).filter(nodeId => nodeId === 1)).toHaveLength(1);
     read.mockClear(); await guard.authorizeRename([11, 13], 'rename');
     expect(read.mock.calls.map(([query]) => query.nodeId).filter(nodeId => nodeId === 10)).toHaveLength(1);
+  });
+});
+
+describe('Agent file-output plugin authorization', () => {
+  const name = 'example.csv-export.export';
+  const input = { resource: { nodeId: 11 }, destination: { parentId: 20, fileName: 'filtered.csv' } };
+  const setup = (mode: AgentLibraryAccessSnapshot['mode'] = 'ask') => fixture(mode, 'read-write', undefined, undefined, pluginCatalog('example.csv-export', name));
+  it('approves exactly one readable source and one writable directory without replacing proposal approval', async () => {
+    const f = setup();
+    expect(await f.guard.authorizeTool(f.call(name, input), 'output')).toBe(false);
+    expect(f.approve).toHaveBeenCalledOnce();
+    expect(f.approve.mock.calls[0][0].targets).toEqual([
+      { nodeId: 11, name: '/docs/a.txt', write: false, descendants: false },
+      { nodeId: 20, name: '/secret', write: true, descendants: false },
+    ]);
+    await f.guard.authorizeResource(11, false, 'output', false);
+    await f.guard.authorizeResource(20, true, 'output', false);
+    expect(await f.guard.canAutoApproveTool(f.call(name, input), 'output')).toBe(false);
+  });
+  it('does not expand source or destination access even in full-access mode or after an opaque grant', async () => {
+    const f = setup('full-access');
+    await f.guard.authorizeTool(f.call(name, input), 'output'); f.guard.grantApprovedTool('output');
+    for (const [nodeId, write] of [[11, true], [20, false], [21, false], [10, true]] as const) {
+      await expect(f.guard.authorizeResource(nodeId, write, 'output', false)).rejects.toThrow('冻结范围');
+    }
+    await expect(f.guard.authorizeDirectory('/secret', true, 'output', false)).rejects.toThrow('目录访问');
+    expect(await f.guard.canAutoApproveTool(f.call(name, input), 'output')).toBe(false);
+    expect(f.approve).not.toHaveBeenCalled();
+  });
+  it('rejects a source directory, target file, cross-library node and later target substitution', async () => {
+    const f = setup();
+    await expect(f.guard.authorizeTool(f.call(name, { ...input, resource: { nodeId: 10 } }), 'dir-source')).rejects.toThrow('普通文件');
+    await expect(f.guard.authorizeTool(f.call(name, { ...input, destination: { parentId: 21 } }), 'file-target')).rejects.toThrow('普通目录');
+    await f.guard.authorizeTool(f.call(name, input), 'output');
+    await expect(f.guard.authorizeTool(f.call(name, { ...input, destination: { parentId: 10 } }), 'output')).rejects.toThrow('已变化');
+    f.nodes.set(20, { ...f.nodes.get(20)!, libraryId: 4 });
+    await expect(f.guard.authorizeOutput(11, 20, 'output', false)).rejects.toThrow('当前资料库');
+  });
+  it('rechecks ancestry and does not permit directory enumeration through metadata', async () => {
+    const f = setup(); await f.guard.authorizeTool(f.call(name, input), 'output');
+    await expect(f.guard.authorizeQuery({ kind: 'list', directoryId: 20 }, false, 'output')).rejects.toThrow('已冻结');
+    await expect(f.guard.checkMetadata({ libraryId: 3, node: f.nodes.get(21)! }, 'output')).rejects.toThrow('超出范围');
+    f.nodes.set(20, { ...f.nodes.get(20)!, parentId: 30 });
+    await expect(f.guard.authorizeOutput(11, 20, 'output', false)).rejects.toThrow('授权已变化');
   });
 });

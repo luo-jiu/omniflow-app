@@ -1,0 +1,105 @@
+{
+  "formatVersion": 2,
+  "id": "example.csv-export",
+  "version": "0.1.0",
+  "sdkVersion": 1,
+  "minHostVersion": "0.2.2",
+  "platforms": [
+    "darwin"
+  ],
+  "activation": [
+    "tool:example.csv-export.export"
+  ],
+  "permissions": [
+    "resource.read",
+    "resource.output.propose",
+    "agent.tools"
+  ],
+  "viewers": [],
+  "agentTools": [
+    {
+      "id": "example.csv-export.export",
+      "kind": "file-output",
+      "title": "CSV处理并另存",
+      "description": "完整读取获准的CSV，将全部数据或column（从0开始）精确等于equals的行导出为CSV或JSON。最多4MiB源文件、10000行和1MiB产物；超限明确失败，不截断。目标由宿主确认后创建新文件，不覆盖。",
+      "entry": "tool.html",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "resource",
+          "destination",
+          "format"
+        ],
+        "properties": {
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "nodeId"
+            ],
+            "properties": {
+              "nodeId": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              }
+            }
+          },
+          "destination": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "parentId",
+              "fileName"
+            ],
+            "properties": {
+              "parentId": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              },
+              "fileName": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 240
+              }
+            }
+          },
+          "format": {
+            "type": "string",
+            "enum": [
+              "csv",
+              "json"
+            ],
+            "maxLength": 4
+          },
+          "column": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 127
+          },
+          "equals": {
+            "type": "string",
+            "maxLength": 256
+          }
+        }
+      },
+      "output": {
+        "mediaTypes": [
+          "text/csv",
+          "application/json"
+        ],
+        "maxBytes": 1048576
+      },
+      "resourceAccess": [
+        {
+          "parameter": "resource",
+          "mode": "read",
+          "kind": "file"
+        }
+      ],
+      "timeoutMs": 30000
+    }
+  ]
+}

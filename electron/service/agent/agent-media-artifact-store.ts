@@ -41,6 +41,7 @@ const AGENT_MEDIA_QUOTA_CATEGORY = 'artifact';
 const AGENT_MEDIA_RESOURCE_REF_PREFIX = `${AGENT_MEDIA_QUOTA_ADAPTER_ID}:`;
 const AGENT_MEDIA_RESIDUE_ADMISSION_BLOCK_ID = 'media-artifact-unmanaged-residue';
 const MAX_ARTIFACT_ID_LENGTH = 128;
+const ARTIFACT_ALLOCATION_BLOCK_BYTES = 4096;
 
 export interface AgentMediaArtifactOwner {
   executionId: string;
@@ -66,6 +67,7 @@ export interface AgentMediaOwnedFile {
 
 interface AgentMediaArtifactRecord extends AgentMediaArtifact, AgentMediaArtifactOwner {
   createdAt: number;
+  maxBytes: number;
   allocatedBytes?: number;
   fileIdentity?: {
     ctimeNs: bigint;
@@ -87,6 +89,19 @@ interface AgentMediaArtifactStoreOptions {
   resolveRootPath?: () => string;
   rootPath?: string;
   ttlMs?: number;
+}
+
+export interface AgentMediaArtifactCreateOptions {
+  /** main-owned 内容上限；只能收窄默认的 2 GiB 上限。 */
+  maxBytes?: number;
+}
+
+function normalizeArtifactMaxBytes(value: number | undefined): number {
+  if (value === undefined) return AGENT_MEDIA_MAX_ARTIFACT_BYTES;
+  if (!Number.isSafeInteger(value) || value < 1 || value > AGENT_MEDIA_MAX_ARTIFACT_BYTES) {
+    throw new Error('Agent 临时产物大小上限无效');
+  }
+  return value;
 }
 
 function normalizeArtifactId(value: unknown): string {
@@ -462,7 +477,9 @@ export function createAgentMediaArtifactStore(
   async function create(
     fileName: string,
     ownerInput: AgentMediaArtifactOwner,
+    createOptions: AgentMediaArtifactCreateOptions = {},
   ): Promise<AgentMediaArtifact> {
+    const maxBytes = normalizeArtifactMaxBytes(createOptions.maxBytes);
     await sweepExpired();
     if (records.size + pendingCreateCount >= maxActiveArtifacts) {
       throw new Error(`Agent 媒体临时产物数量已达到上限：${maxActiveArtifacts}`);
@@ -491,7 +508,7 @@ export function createAgentMediaArtifactStore(
         owner.ownerScope,
         AGENT_MEDIA_QUOTA_CATEGORY,
         owner.runId,
-        AGENT_MEDIA_MAX_ARTIFACT_BYTES,
+        maxBytes,
         ttlMs,
         AGENT_MEDIA_QUOTA_ADAPTER_ID,
       );
@@ -506,6 +523,7 @@ export function createAgentMediaArtifactStore(
         ...owner,
         artifactId,
         createdAt: now(),
+        maxBytes,
         directoryPath,
         fileName: normalizedFileName,
         filePath: path.join(directoryPath, normalizedFileName),
@@ -549,9 +567,13 @@ export function createAgentMediaArtifactStore(
         await removeRecord(record);
         throw new Error('ffmpeg 未生成有效的音频文件');
       }
-      if (fileIdentity.allocatedBytes > AGENT_MEDIA_MAX_ARTIFACT_BYTES) {
+      // 内容严格按本次上限；物理占用允许文件系统最后一个 4 KiB 块向上取整，仍按实际量结算共享配额。
+      const allocatedLimit = Math.ceil(record.maxBytes / ARTIFACT_ALLOCATION_BLOCK_BYTES) * ARTIFACT_ALLOCATION_BLOCK_BYTES;
+      if (fileIdentity.sizeBytes > record.maxBytes || fileIdentity.allocatedBytes > allocatedLimit) {
         await removeRecord(record);
-        throw new Error('提取后的音频文件超过 2 GiB 上限');
+        throw new Error(record.maxBytes === AGENT_MEDIA_MAX_ARTIFACT_BYTES
+          ? '提取后的音频文件超过 2 GiB 上限'
+          : `Agent 临时产物超过 ${record.maxBytes} 字节上限`);
       }
       const quotaManager = await resolveQuotaManager();
       try {

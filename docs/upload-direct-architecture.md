@@ -1,6 +1,6 @@
 # 直传 MinIO 上传链路（前端视角）
 
-更新时间：2026-08-28
+更新时间：2026-09-22
 状态：已落地（与 `omniflow-go/docs/architecture/upload-direct-design.md` 配套）
 
 本文的 `runDirectUpload` 主链路只描述普通本地路径上传。Agent 生成的 sealed artifact 不进入上传中心，也不复用 Renderer 协调的 control plane；该例外由 Electron main 以单一事务持有，见下文。
@@ -46,6 +46,8 @@ Electron main
 
 main 从 `AgentMediaArtifactStore.withOwnedFile` 提供的同一个已验证 `FileHandle` 按显式 offset 读取；complete 前复验源身份。Renderer 不取得 artifact 物理路径、签名 URL、upload session、part 或 ETag，也不能为单次请求指定上传目标。控制面 API 基址由构建期 `__OMNIFLOW_API_BASE_URL__` 固定注入。
 
+Store 的 `create(fileName, owner, {maxBytes})` 可由 main 收窄本次产物内容上限，省略时继续使用 2 GiB；预留按本次上限，不为小文本占满媒体额度。finalize 同时校验内容字节及向上取整到 4 KiB 的物理占用边界，最终仍按实际 allocated bytes 结算共享配额，不能用小正文掩盖过大 resource fork。1 MiB 内容边界、单字节超限及小文件末块分配已有自动回归。
+
 ## 2. 关键文件
 
 | 文件 | 角色 |
@@ -88,7 +90,9 @@ main 从 `AgentMediaArtifactStore.withOwnedFile` 提供的同一个已验证 `Fi
 - `404 / 410` 与其他明确 `4xx` 是确定失败，仍走普通清理路径。
 - 后端 committed 回执保留 7 天；重复 complete 不会创建第二个 node。旧客户端未传 operation ID 时由后端按 upload ID 生成兼容身份。
 - 普通 `runDirectUpload` 仍以成功 node 或 `UploadCommitUnknownError` 表达结果；它不承担 Agent 的三态与本机兜底决策。
-- Agent main-owned 链路显式返回 `uncommitted / commit_unknown / committed`。complete 或 reconcile 只有返回有效正整数 `node.id` 与非空 `node.name` 才能判定 `committed`；complete 已发出但仍无法核对时保留 session 并返回 `commit_unknown`。`committed` 与 `commit_unknown` 一旦形成，随后本地 FileHandle 退出复验或 lease 清理异常只能触发本地产物隔离，不能把禁止盲目重试的结算降级成普通 IPC 失败。
+- Agent main-owned 链路显式返回 `uncommitted / commit_unknown / committed`，每个返回分支携带稳定 operationId。main 可在上传前冻结 UUID 或 64 位小写十六进制 ID 并经 input.operationId 传入；省略时沿用 artifact/owner/target 的既有稳定摘要。`onSettlementStarted(operationId)` 在即将调用 complete 时通知宿主，旧无参数回调仍兼容；沙箱或任意 renderer 不可借此指定身份。complete 或 reconcile 返回有效正整数 `node.id` 与非空 `node.name` 才能判定原媒体接口的 `committed`；新业务适配必须另验目标库、父目录、名称和格式等冻结事实，不能仅靠此最小 node 投影。`committed` 与 `commit_unknown` 一旦形成，随后本地 FileHandle 退出复验或 lease 清理异常只能触发本地产物隔离，不能把禁止盲目重试的结算降级成普通 IPC 失败。
+- complete 已发出后，status 任何非 committed 值及查询失败都保留 session 并返回 commit_unknown，不自动 abort。尤其旧后端的 uncommitted 可能只表示 pending 的在途 complete，不能据此另建上传或允许本机兜底。直接 complete 返回明确 4xx（排除 408/429）仍沿用确定未提交及清理路径。当前 Go status 已将 pending 改为 unknown，命中当前 actor 的回执后还需现有 library read 权限；撤权 403 是核对失败，不能反证旧提交没发生。
+- 上传回执保留 7 天，跨重启查询使用同一 actor 的当前凭据及 operationId；ID 可在 init 前由宿主生成，但后端在 complete 认领前还未将其绑定，过期/未命中均 unknown。查询返回的是提交时 node 快照，不能作为节点此后未移动或改名的证明。
 - Agent 只有收到 main 显式返回的 `uncommitted` 才登记一次性本机兜底 grant；`committed`、`commit_unknown`、Renderer 未取得结构化结果的普通 IPC 错误、错误 sender 和重放都不能触发 Save As。grant 绑定具体 artifact、execution、窗口、Session 和 Run。critical settlement 只在即将调用 complete 时开启，不覆盖上传数据阶段。
 
 ## 7. 嗅探 / 下载链路 0 改动不变量

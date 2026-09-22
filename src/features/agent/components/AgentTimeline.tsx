@@ -183,6 +183,7 @@ const WORK_ITEM_STATUS_LABELS = {
 } as const;
 
 interface AgentTimelineProps {
+  receiptBusyIds?: ReadonlySet<string>;
   approvalBusyIds: Set<string>;
   interactionBusyIds: Set<string>;
   libraryId: number;
@@ -200,6 +201,7 @@ interface AgentTimelineProps {
 }
 
 export default function AgentTimeline({
+  receiptBusyIds,
   approvalBusyIds,
   interactionBusyIds,
   libraryId,
@@ -276,6 +278,7 @@ export default function AgentTimeline({
         if (item.type === 'tool-group') {
           return (
             <AgentToolActivityGroup
+              receiptBusyIds={receiptBusyIds}
               activities={item.activities}
               approvalBusyIds={approvalBusyIds}
               interactionBusyIds={interactionBusyIds}
@@ -291,6 +294,7 @@ export default function AgentTimeline({
         if (item.type === 'tool-activity') {
           return (
             <AgentToolActivityCard
+              receiptBusy={receiptBusyIds?.has(item.activity.id)}
               activity={item.activity}
               approvalBusy={Boolean(
                 item.activity.approval

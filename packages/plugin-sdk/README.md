@@ -1,6 +1,6 @@
 # OmniFlow Plugin SDK
 
-版本 `0.4.0`，wire 协议与 `sdkVersion` 继续为 `1`，Manifest 支持 `formatVersion: 1 | 2`，分别管理。此包为独立 ESM JavaScript + TypeScript 声明，无运行时依赖，不导入宿主源码。当前提供 macOS 受限只读插件及只处理获准元数据的重命名提案；本地安装见 D1，目录扩展见 E1，独立 Agent Tool 契约见下文。
+版本 `0.5.0`，wire 协议与 `sdkVersion` 继续为 `1`，Manifest 支持 `formatVersion: 1 | 2`，分别管理。此包为独立 ESM JavaScript + TypeScript 声明，无运行时依赖，不导入宿主源码。当前提供 macOS 受限只读插件、重命名提案与单文件文本产物协议；本地安装见 D1，目录扩展见 E1，独立 Agent Tool 契约见下文。
 
 ## 构建与使用
 
@@ -93,6 +93,18 @@ Tool 显式声明 `kind: "rename-proposal"`，包权限为 `resource.rename.prop
 `outputSchema` 使用固定封闭结构 `{ changes: [{ id, name }] }`：changes 数组 0～50 项，条目只允许必填 id/name；id 长度 1～64，name 长度 1～240。所有 object 仍要求 `additionalProperties: false`。允许空 changes 表示无需修改；不得重复或引用输入之外的 id。name 为完整名称；有扩展名时保留原扩展名及大小写，无扩展名时不借改名新增扩展名。宿主另以最多 240 UTF-8 字节及合法名称规则校验，不能只按 schema 的字符长度判断可用。SDK 不提供写入方法；`completeTool()` 成功只表示提案交付，并不表示任何文件已重命名。
 
 调用继续适用 Tool 的超时、结果字节、取消、停用、包指纹和单终态约束。变更后的文件范围或版本须重新准备，不能将旧引用或旧批准用于新的文件。
+
+## 单源文件产物（0.5.0 / Manifest v2）
+
+`kind: "file-output"` 同时要求 `resource.read`、`resource.output.propose` 与 `agent.tools`，文件产物必须独立批准；升级或回滚会清除批准。贡献使用 `output:{mediaTypes,maxBytes}`，mediaTypes为`text/csv`、`application/json`的非空无重复子集，maxBytes为1至1048576；不声明outputSchema/maxResultBytes，不提高旧Tool的任意JSON结果预算。
+
+inputSchema必填原有`resource:{nodeId}`以及`destination:{parentId,fileName}`；目标对象封闭，parentId为正安全整数，fileName为长度1～240的字符串，宿主另验240 UTF-8字节上限。资源ID、目标目录和文件名由宿主冻结并剥除，插件仅收到处理参数；源正文继续通过当前单文件句柄读取。`context()`额外投影贡献的output声明和`resource.output.propose`能力，目标身份不进入沙箱。
+
+`completeFileOutput(invocationId,{mediaType,text})`交付一个1字节至1MiB的UTF-8产物。SDK先检查context的能力、MIME和声明预算，再通过专用`tool.output.complete`以canonical base64发送；完整信封最多1400152字节。宿主拒绝非法UTF-8、非规范base64、空产物、未声明MIME、超限结果和重复终态。普通Tool/Viewer不能调用此方法；file-output不能用旧completeTool绕过产物边界。state/settings、目录及网络能力不因此开放。
+
+正文只交给main私有准备路径，不作为普通AgentToolResult返回模型或写入SQLite聊天记录；宿主持有受管暂存、摘要、目标预览与批准，成功另存后才交付新节点回执。SDK完成只代表产物交付，并不代表已创建文件。首期`.csv`、`.json`目标与MIME对应，固定不覆盖、不自动改名。完整导出超限必须失败，不得截断后宣称完整。
+
+独立样板为`samples/csv-export`。端到端保存、取消、回执核对与实际验收状态以宿主`docs/plugin-system-w3-file-output.md`为准。
 
 OmniFlow 宿主通过标准 Agent 审批卡展示完整旧名→新名，即使会话完全访问也明确询问。批准前重新准备并校验目标，批准后由宿主调用通用条件批量 API，插件不接触提交凭据或回执查询。旧后端不支持接口时拒绝执行，不降级为无条件改名。取消后已发生的提交不会由 SDK 撤销；不应将工具终止理解为用户文件未改动。
 

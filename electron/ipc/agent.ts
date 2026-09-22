@@ -58,6 +58,10 @@ export function registerAgentIpc(
     ensureOwnerCleanup(sender);
     return agentOrchestrator.start(sender, input);
   });
+  ipcMain.handle('agent:plugin-operation:reconcile', (event, input: import('../../src/shared/agent/agent.types').AgentPluginOperationReconcileRequest) => {
+    const sender = requireMainWindow(event);
+    return agentOrchestrator.reconcilePluginOperation(sender, input);
+  });
   ipcMain.handle('agent:attachment:import', (event, input: AgentAttachmentImport) => {
     requireMainWindow(event);
     return getAgentAttachmentStore().import(input);

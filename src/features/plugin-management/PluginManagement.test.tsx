@@ -24,6 +24,13 @@ describe('plugin management review and host-owned state',()=>{
 });
 
 describe('Agent Tool capability projection',()=>{
+ it('shows file output approval as a separate capability without authorizing writes or Tool use',async()=>{
+  mocks.catalog.plugins=[{id:'example.csv-export',version:'0.1.0',fingerprint:'c'.repeat(64),enabled:true,readApproved:true,outputApproved:false,toolApproved:false,source:'local',installedAt:'now',permissions:['resource.read','resource.output.propose','agent.tools'],viewers:[],agentTools:[{id:'example.csv-export.export',kind:'file-output',title:'CSV处理并另存'}],running:0}];
+  let tree!:ReactTestRenderer;await act(async()=>{tree=create(<PluginManagement onBack={()=>undefined}/>);});
+  expect(JSON.stringify(tree.toJSON())).toContain('宿主确认后另存为新文件，不覆盖原文件');
+  await act(async()=>button(tree,'批准文件产物能力').props.onClick());expect(mocks.action).toHaveBeenCalledOnce();expect(mocks.action).toHaveBeenCalledWith('example.csv-export','approve-output');
+  expect(button(tree,'撤销读取批准')).toBeTruthy();expect(button(tree,'批准 Agent Tool 能力')).toBeTruthy();await act(async()=>tree.unmount());
+ });
  it('shows metadata-only rename approval without implying file content or write access',async()=>{
   mocks.catalog.plugins=[{id:'example.batch-rename',version:'0.1.0',fingerprint:'b'.repeat(64),enabled:true,readApproved:false,renameApproved:false,toolApproved:false,source:'local',installedAt:'now',permissions:['resource.rename.propose','agent.tools'],viewers:[],agentTools:[{id:'example.batch-rename.propose',kind:'rename-proposal',title:'批量改名提案',description:'添加文件名前后缀'}],running:0}];
   let tree!:ReactTestRenderer;await act(async()=>{tree=create(<PluginManagement onBack={()=>undefined}/>);});

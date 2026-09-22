@@ -18,6 +18,8 @@ D1 原始验收仅覆盖只读 Viewer Manifest 与 SDK。后续 E1 增加目录 
 
 改名包的启用、元数据提案权限与 Agent Tool 权限独立管理；插件安装/授权不等于用户批准某批改名。更新/停用/撤权会中断提案运行，已发出的条件提交则按 W0～W2 有界结算，不把实例终止误报成未提交。详情见 [受控改名](plugin-system-w0-w2-rename.md)。
 
+W3 文件处理包增加独立 `outputApproved`：读取、`resource.output.propose` 和 Agent Tool 分别批准，包指纹变化及回滚不会沿用旧产物授权。安装/启用不代表批准目标目录中的新文件；具体产物仍走标准批准。已发生操作的固定“查询回执”不运行插件，停用或卸载后仍可按当前账号权限查询。实际 macOS 正常导出及未知查询未手验边界见 [W3](plugin-system-w3-file-output.md)。
+
 ## 2. 入口与 owner
 
 | 入口 | 职责 |

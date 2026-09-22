@@ -181,6 +181,18 @@ function renameActivity(): AgentToolActivitySnapshot {
 }
 
 describe('plugin rename receipt presentation', () => {
+  it('offers a fixed query action only for an approved unknown plugin operation', () => {
+    const activity = renameActivity(); activity.status = 'interrupted';
+    activity.result = { ok: false, data: { ...(activity.result!.data as object), mutationCommitState: 'commit_unknown' } };
+    activity.approval = { approvalId: 'approval', status: 'approved', preview: { title: '', description: '', risk: 'write' } };
+    const block = buildAgentToolPresentation(activity, 3).find(item => item.type === 'details' && item.title === '提交回执');
+    expect(block).toMatchObject({ actions: [{ action: 'agent.operation.reconcile', label: '查询回执', libraryId: 3,
+      sessionId: activity.sessionId, toolRunId: activity.id, expectedRevision: activity.revision }] });
+    activity.approval.status = 'denied';
+    expect(buildAgentToolPresentation(activity, 3).some(item => item.type === 'details' && item.actions?.length)).toBe(false);
+    const old = completedActivity('file.upload', { uploadCommitState: 'commit_unknown' }); old.status = 'failed';
+    expect(buildAgentToolPresentation(old, 3).some(item => item.type === 'details' && item.actions?.length)).toBe(false);
+  });
   it('shows host-recorded source and the matching committed receipt without exposing arbitrary fields', () => {
     const activity = renameActivity();
     activity.result!.data = { ...(activity.result!.data as object), source: 'forged plugin', secretUrl: 'https://example.invalid/private' };

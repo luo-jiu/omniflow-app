@@ -71,7 +71,8 @@
           "resource.read",
           "directory.read",
           "agent.tools",
-          "resource.rename.propose"
+          "resource.rename.propose",
+          "resource.output.propose"
         ]
       }
     },
@@ -160,10 +161,8 @@
           "description",
           "entry",
           "inputSchema",
-          "outputSchema",
           "resourceAccess",
-          "timeoutMs",
-          "maxResultBytes"
+          "timeoutMs"
         ],
         "properties": {
           "id": {
@@ -204,7 +203,37 @@
             "maximum": 32768
           },
           "kind": {
-            "const": "rename-proposal"
+            "enum": [
+              "rename-proposal",
+              "file-output"
+            ]
+          },
+          "output": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "mediaTypes",
+              "maxBytes"
+            ],
+            "properties": {
+              "mediaTypes": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 2,
+                "uniqueItems": true,
+                "items": {
+                  "enum": [
+                    "text/csv",
+                    "application/json"
+                  ]
+                }
+              },
+              "maxBytes": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 1048576
+              }
+            }
           }
         },
         "allOf": [
@@ -212,7 +241,12 @@
             "if": {
               "required": [
                 "kind"
-              ]
+              ],
+              "properties": {
+                "kind": {
+                  "const": "rename-proposal"
+                }
+              }
             },
             "then": {
               "properties": {
@@ -239,6 +273,36 @@
                     }
                   ]
                 }
+              }
+            }
+          },
+          {
+            "if": {
+              "required": [
+                "kind"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "file-output"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "output"
+              ],
+              "properties": {
+                "outputSchema": false,
+                "maxResultBytes": false
+              }
+            },
+            "else": {
+              "required": [
+                "outputSchema",
+                "maxResultBytes"
+              ],
+              "properties": {
+                "output": false
               }
             }
           }

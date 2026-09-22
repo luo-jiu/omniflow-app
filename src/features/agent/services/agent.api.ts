@@ -67,6 +67,13 @@ export function stopAgentChat(sessionId: string): Promise<boolean> {
   return bridge().stopChat(sessionId);
 }
 
+export function reconcileAgentPluginOperation(input: Omit<import('@/shared/agent/agent.types').AgentPluginOperationReconcileRequest, 'credentials'>) {
+  const token = String(auth.getToken() || '').trim();
+  const username = String(auth.getUsername() || '').trim();
+  if (!token || !username) throw new Error('登录状态已失效，请重新登录后查询回执');
+  return bridge().reconcilePluginOperation({ ...input, credentials: { token, username } });
+}
+
 export function verifyAgentToolAccess(request: AgentToolExecutionRequest): Promise<boolean> {
   return bridge().verifyToolAccess({ executionId: request.executionId, ownerScope: request.ownerScope,
     libraryId: Number(request.appContext.libraryId), sessionId: request.sessionId, runId: request.runId });

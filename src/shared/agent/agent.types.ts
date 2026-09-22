@@ -319,6 +319,8 @@ export const AGENT_FILE_UPLOAD_PREPARED_ACTION_VERSION = 1 as const;
 export const AGENT_PLUGIN_RENAME_PREPARED_ACTION_KIND = 'plugin.rename' as const;
 
 export const AGENT_PLUGIN_RENAME_PREPARED_ACTION_VERSION = 1 as const;
+export const AGENT_PLUGIN_FILE_OUTPUT_PREPARED_ACTION_KIND = 'plugin.file-output' as const;
+export const AGENT_PLUGIN_FILE_OUTPUT_PREPARED_ACTION_VERSION = 1 as const;
 
 export const AGENT_PREPARED_ACTION_PUBLIC_IDENTITIES = [{
   kind: AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_KIND,
@@ -338,6 +340,9 @@ export const AGENT_PREPARED_ACTION_PUBLIC_IDENTITIES = [{
 }, {
   kind: AGENT_PLUGIN_RENAME_PREPARED_ACTION_KIND,
   version: AGENT_PLUGIN_RENAME_PREPARED_ACTION_VERSION,
+}, {
+  kind: AGENT_PLUGIN_FILE_OUTPUT_PREPARED_ACTION_KIND,
+  version: AGENT_PLUGIN_FILE_OUTPUT_PREPARED_ACTION_VERSION,
 }] as const;
 
 export interface AgentPluginRenamePreparedActionPublicV1 {
@@ -349,6 +354,23 @@ export interface AgentPluginRenamePreparedActionPublicV1 {
   pluginVersion: string;
   packageFingerprint: string;
   items: Array<{ nodeId: number; parentId: number; oldName: string; newName: string }>;
+}
+
+export interface AgentPluginFileOutputPreparedActionPublicV1 {
+  kind: typeof AGENT_PLUGIN_FILE_OUTPUT_PREPARED_ACTION_KIND;
+  version: typeof AGENT_PLUGIN_FILE_OUTPUT_PREPARED_ACTION_VERSION;
+  libraryId: number;
+  operationId: string;
+  pluginId: string;
+  pluginVersion: string;
+  packageFingerprint: string;
+  sourceNodeId: number;
+  parentId: number;
+  fileName: string;
+  providerId: string;
+  mediaType: 'text/csv' | 'application/json';
+  sizeBytes: number;
+  sha256: string;
 }
 
 export type AgentMediaExtractAudioOutputFormat = 'm4a' | 'mp3' | 'wav';
@@ -527,6 +549,7 @@ export interface AgentFileAuthorityCompletionV1 {
 
 export type AgentPreparedActionPublic =
   | AgentPluginRenamePreparedActionPublicV1
+  | AgentPluginFileOutputPreparedActionPublicV1
   | AgentFilePublishPreparedActionPublicV1
   | AgentFileStagePreparedActionPublicV1
   | AgentFileUploadPreparedActionPublicV1
@@ -645,6 +668,15 @@ export interface AgentToolActivitySnapshot {
   toolMetadata?: AgentToolRendererMetadata;
 }
 
+export interface AgentPluginOperationReconcileRequest {
+  ownerScope: AgentOwnerScope;
+  libraryId: number;
+  sessionId: string;
+  toolRunId: string;
+  expectedRevision: number;
+  credentials: { token: string; username: string };
+}
+
 export interface AgentInteractionSubmissionRequest {
   interactionId: string;
   libraryId: number;
@@ -754,6 +786,7 @@ export interface AgentMediaArtifactUploadRequest {
 
 export type AgentMediaArtifactUploadResult =
   | {
+      operationId?: string;
       commitState: 'committed';
       node: {
         ext?: string;
@@ -762,9 +795,11 @@ export type AgentMediaArtifactUploadResult =
       };
     }
   | {
+      operationId?: string;
       commitState: 'uncommitted';
     }
   | {
+      operationId?: string;
       commitState: 'commit_unknown';
     };
 
@@ -1022,6 +1057,7 @@ export interface AgentArtifactReference {
 }
 
 export type AgentPresentationAction =
+  | { action: 'agent.operation.reconcile'; label: string; libraryId: number; sessionId: string; toolRunId: string; expectedRevision: number }
   | {
       action: 'artifact.preview';
       artifact: AgentArtifactReference;
@@ -1071,6 +1107,7 @@ export type AgentPresentationBlock =
     }
   | {
       entries: Array<{ label: string; value: string }>;
+      actions?: AgentPresentationAction[];
       title?: string;
       type: 'details';
     }

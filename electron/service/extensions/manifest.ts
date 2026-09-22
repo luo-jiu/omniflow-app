@@ -7,13 +7,13 @@ import schema from '../../../packages/plugin-sdk/manifest.schema.json';
 import { LIMITS } from '../../../packages/plugin-sdk/index.js';
 import { validateIconSvg } from '../../../src/features/appearance/svg-assets';
 import type { PluginToolContribution } from '../../../packages/plugin-sdk/index.js';
-import { validateToolSchemas } from './tool-schema';
+import { validateToolContribution } from './tool-schema';
 export type { PluginToolContribution, PluginToolSchema } from '../../../packages/plugin-sdk/index.js';
 
 export interface PluginManifest {
   formatVersion: 1 | 2; id: string; version: string; sdkVersion: 1; minHostVersion: string;
   platforms: Array<'darwin' | 'win32' | 'linux'>; entry?: string;
-  activation: string[]; permissions: Array<'resource.read' | 'directory.read' | 'agent.tools' | 'resource.rename.propose'>;
+  activation: string[]; permissions: Array<'resource.read' | 'directory.read' | 'agent.tools' | 'resource.rename.propose' | 'resource.output.propose'>;
   viewers: Array<{ id: string; title: string; extensions: string[]; directoryTypes?: Array<'COMIC'> }>;
   agentTools?: PluginToolContribution[];
 }
@@ -42,11 +42,13 @@ export function parsePluginManifest(input: unknown, platform: string, hostVersio
       if (!input.permissions.includes('agent.tools') || !input.permissions.includes('resource.rename.propose')
         || input.permissions.includes('resource.read') || input.permissions.includes('directory.read') || input.viewers?.length) throw new Error('Proposal Tool requires metadata-only permissions');
     } else if (!input.permissions.includes('agent.tools') || !input.permissions.includes('resource.read') || input.permissions.includes('directory.read')) throw new Error('Tool requires single-file read permissions');
-    validateToolSchemas(tool.inputSchema, tool.outputSchema, tool.kind);
+    if (tool.kind === 'file-output' && !input.permissions.includes('resource.output.propose')) throw new Error('File output requires independent proposal permission');
+    validateToolContribution(tool);
     ids.add(tool.id); activation.add(`tool:${tool.id}`);
   }
   if (input.permissions.includes('agent.tools') && !input.agentTools?.length) throw new Error('Tool permission requires a tool contribution');
   if (input.permissions.includes('resource.rename.propose') && !input.agentTools?.some(tool => tool.kind === 'rename-proposal')) throw new Error('Proposal permission requires a proposal contribution');
+  if (input.permissions.includes('resource.output.propose') && !input.agentTools?.some(tool => tool.kind === 'file-output')) throw new Error('Output permission requires an output contribution');
   if (input.activation.length !== activation.size || input.activation.some(event => !activation.has(event))) throw new Error('Invalid activation conditions');
   return { ...structuredClone(input), viewers: structuredClone(input.viewers ?? []) };
 }

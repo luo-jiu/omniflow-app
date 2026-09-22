@@ -9,6 +9,8 @@ import {
   AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_VERSION,
   AGENT_PLUGIN_RENAME_PREPARED_ACTION_KIND,
   AGENT_PLUGIN_RENAME_PREPARED_ACTION_VERSION,
+  AGENT_PLUGIN_FILE_OUTPUT_PREPARED_ACTION_KIND,
+  AGENT_PLUGIN_FILE_OUTPUT_PREPARED_ACTION_VERSION,
   AGENT_SHELL_PREPARED_ACTION_VERSION,
   AGENT_SHELL_RUN_TOOL_NAME,
   type AgentFilePublishPreparedActionPublicV1,
@@ -18,6 +20,7 @@ import {
   type AgentMediaExtractAudioPreparedActionPublicV1,
   type AgentPreparedActionPublic,
   type AgentPluginRenamePreparedActionPublicV1,
+  type AgentPluginFileOutputPreparedActionPublicV1,
 } from './agent.types';
 import { normalizeAgentShellPreparedActionPublicV1 } from './shell/agent-shell.types';
 
@@ -75,6 +78,29 @@ const MEDIA_EXTRACT_AUDIO_OUTPUT_FORMATS = new Set<AgentMediaExtractAudioOutputF
 ]);
 const PLUGIN_RENAME_FIELDS = new Set(['kind', 'version', 'libraryId', 'operationId', 'pluginId', 'pluginVersion', 'packageFingerprint', 'items']);
 const PLUGIN_RENAME_ITEM_FIELDS = new Set(['nodeId', 'parentId', 'oldName', 'newName']);
+const PLUGIN_FILE_OUTPUT_FIELDS = new Set(['kind', 'version', 'libraryId', 'operationId', 'pluginId', 'pluginVersion',
+  'packageFingerprint', 'sourceNodeId', 'parentId', 'fileName', 'providerId', 'mediaType', 'sizeBytes', 'sha256']);
+
+export function normalizeAgentPluginFileOutputPreparedActionPublicV1(input: unknown): AgentPluginFileOutputPreparedActionPublicV1 {
+  const source = strictRenameObject(input, PLUGIN_FILE_OUTPUT_FIELDS);
+  if (source.kind !== AGENT_PLUGIN_FILE_OUTPUT_PREPARED_ACTION_KIND || source.version !== AGENT_PLUGIN_FILE_OUTPUT_PREPARED_ACTION_VERSION) throw new Error('Agent prepared action 类型或版本不受支持');
+  if (typeof source.operationId !== 'string' || !/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u.test(source.operationId)
+    || typeof source.pluginId !== 'string' || source.pluginId.length > 96 || !/^[a-z0-9]+(?:[.-][a-z0-9]+)*\.[a-z0-9]+(?:[.-][a-z0-9]+)*$/u.test(source.pluginId)
+    || typeof source.pluginVersion !== 'string' || !/^(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$/u.test(source.pluginVersion)
+    || typeof source.packageFingerprint !== 'string' || !/^[a-f0-9]{64}$/u.test(source.packageFingerprint)) throw new Error('Agent 文件产物提案来源无效');
+  const fileName = renameFileName(source.fileName);
+  if (/[<>:"|?*]/u.test(fileName) || fileName.endsWith('.')
+    || (source.mediaType !== 'text/csv' && source.mediaType !== 'application/json')
+    || fileName.length <= (source.mediaType === 'text/csv' ? 4 : 5) || !fileName.endsWith(source.mediaType === 'text/csv' ? '.csv' : '.json')
+    || typeof source.providerId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u.test(source.providerId)
+    || !Number.isSafeInteger(source.sizeBytes) || Number(source.sizeBytes) < 1 || Number(source.sizeBytes) > 1048576
+    || typeof source.sha256 !== 'string' || !/^[a-f0-9]{64}$/u.test(source.sha256)) throw new Error('Agent 文件产物目标或摘要无效');
+  return { kind: AGENT_PLUGIN_FILE_OUTPUT_PREPARED_ACTION_KIND, version: AGENT_PLUGIN_FILE_OUTPUT_PREPARED_ACTION_VERSION,
+    libraryId: positiveId(source.libraryId, '资料库'), operationId: source.operationId, pluginId: source.pluginId,
+    pluginVersion: source.pluginVersion, packageFingerprint: source.packageFingerprint, sourceNodeId: positiveId(source.sourceNodeId, '源文件'),
+    parentId: positiveId(source.parentId, '目标目录'), fileName, providerId: source.providerId, mediaType: source.mediaType,
+    sizeBytes: Number(source.sizeBytes), sha256: source.sha256 };
+}
 
 function strictRenameObject(input: unknown, allowed: ReadonlySet<string>): Record<string, unknown> {
   const source = strictObject(input);
@@ -412,6 +438,9 @@ export function normalizeAgentPreparedActionPublic(
   input: unknown,
 ): AgentPreparedActionPublic {
   const source = strictObject(input);
+  if (source.kind === AGENT_PLUGIN_FILE_OUTPUT_PREPARED_ACTION_KIND && source.version === AGENT_PLUGIN_FILE_OUTPUT_PREPARED_ACTION_VERSION) {
+    return normalizeAgentPluginFileOutputPreparedActionPublicV1(source);
+  }
   if (source.kind === AGENT_PLUGIN_RENAME_PREPARED_ACTION_KIND && source.version === AGENT_PLUGIN_RENAME_PREPARED_ACTION_VERSION) {
     return normalizeAgentPluginRenamePreparedActionPublicV1(source);
   }

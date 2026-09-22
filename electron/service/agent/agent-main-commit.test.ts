@@ -41,6 +41,14 @@ function fixture(execute: (context: AgentToolDispatchContext) => Promise<AgentTo
 afterEach(() => vi.useRealTimers());
 
 describe('host-owned plugin rename commit settlement', () => {
+  it('also provides settlement only to the frozen file-output main write capability', async () => {
+    const run = fixture(async context => {
+      context.commitSettlement!.begin(result('commit_unknown'));
+      context.commitSettlement!.settle(result('committed'));
+      return result('committed');
+    }, { tool: { registrationId: 'output@frozen', pluginOperation: 'file-output', risk: 'write', executor: 'main' } });
+    await expect(run.running).resolves.toEqual(result('committed'));
+  });
   it('preserves a successful receipt when cancellation follows settle before executor return', async () => {
     const run = fixture(async context => {
       context.commitSettlement!.begin(result('commit_unknown'));

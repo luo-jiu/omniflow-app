@@ -9,6 +9,7 @@ export const LIMITS = Object.freeze({
   snapshotBytes: 32768, snapshotsTotalBytes: 262144, snapshots: 64,
   instances: 4, startupTimeoutMs: 5000, heartbeatMs: 1000, heartbeatTimeoutMs: 4000,
   toolResultBytes: 32768, toolRequestBytes: 34816, toolTimeoutMs: 30000,
+  fileOutputBytes: 1048576, fileOutputRequestBytes: 1400152,
 });
 export class PluginError extends Error {
   constructor(code, message) { super(message); this.name = 'PluginError'; this.code = code; }
@@ -25,7 +26,7 @@ export function createPluginClient(transport = globalThis.omniflowTransport) {
     if (active >= LIMITS.concurrentRequests) throw new PluginError('LIMIT', 'Too many requests');
     const id = crypto.randomUUID();
     const wire = JSON.stringify({ version: PROTOCOL_VERSION, id, method, params });
-    if (new TextEncoder().encode(wire).length > (method === 'tool.complete' ? LIMITS.toolRequestBytes : LIMITS.requestBytes)) throw new PluginError('LIMIT', 'Request too large');
+    if (new TextEncoder().encode(wire).length > (method === 'tool.output.complete' ? LIMITS.fileOutputRequestBytes : method === 'tool.complete' ? LIMITS.toolRequestBytes : LIMITS.requestBytes)) throw new PluginError('LIMIT', 'Request too large');
     active += 1;
     let timer;
     let abort;
@@ -65,6 +66,20 @@ export function createPluginClient(transport = globalThis.omniflowTransport) {
     ready: () => request('lifecycle.ready'),
     toolInvocation: () => request('tool.invocation'),
     completeTool: (invocationId, output) => request('tool.complete', { invocationId, output }),
+    completeFileOutput: async (invocationId, output) => {
+      if (!output || typeof output !== 'object' || Array.isArray(output) || Object.keys(output).length !== 2
+        || !['text/csv', 'application/json'].includes(output.mediaType) || typeof output.text !== 'string'
+        || !output.text.length || output.text.length > LIMITS.fileOutputBytes || /[\uD800-\uDFFF]/u.test(output.text)) throw new PluginError('BAD_REQUEST', 'Invalid file output');
+      const bytes = new TextEncoder().encode(output.text);
+      if (bytes.byteLength > LIMITS.fileOutputBytes) throw new PluginError('LIMIT', 'File output is too large');
+      const context = await request('context.get');
+      if (context?.kind !== 'tool' || !context.capabilities?.includes('resource.output.propose') || !context.output?.mediaTypes?.includes(output.mediaType)) throw new PluginError('FORBIDDEN', 'File output is unavailable');
+      if (!Number.isSafeInteger(context.output.maxBytes) || context.output.maxBytes < 1 || context.output.maxBytes > LIMITS.fileOutputBytes
+        || bytes.byteLength > context.output.maxBytes) throw new PluginError('LIMIT', 'File output is too large');
+      let binary = '';
+      for (let index = 0; index < bytes.length; index += 8192) binary += String.fromCharCode(...bytes.subarray(index, index + 8192));
+      return request('tool.output.complete', { invocationId, mediaType: output.mediaType, base64: btoa(binary) });
+    },
     failTool: (invocationId, code) => request('tool.fail', { invocationId, code }),
     read: async (handle, offset, length, options) => {
       const result = await request('resource.read', { handle, offset, length }, options);

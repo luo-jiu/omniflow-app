@@ -48,7 +48,7 @@ describe('Agent media artifact main-owned upload transaction', () => {
     const { manager, input, controlPlane } = await fixture();
     const beforeCommit = vi.fn(async () => { throw new Error('Directory moved outside authorized roots'); });
     const onSettlementStarted = vi.fn();
-    await expect(manager.upload({ ...input, beforeCommit, onSettlementStarted })).resolves.toEqual({ commitState: 'uncommitted' });
+    await expect(manager.upload({ ...input, beforeCommit, onSettlementStarted })).resolves.toEqual({ commitState: 'uncommitted', operationId: expect.stringMatching(/^[a-f0-9]{64}$/u) });
     expect(beforeCommit).toHaveBeenCalledOnce();
     expect(controlPlane.complete).not.toHaveBeenCalled();
     expect(controlPlane.abort).toHaveBeenCalledOnce();
@@ -131,7 +131,7 @@ describe('Agent media artifact main-owned upload transaction', () => {
       onProgress: progress,
       onSettlementStarted,
     })).resolves.toEqual({
-      commitState: 'committed',
+      commitState: 'committed', operationId: expect.stringMatching(/^[a-f0-9]{64}$/u),
       node: { ext: 'm4a', id: 32, name: 'audio' },
     });
     expect(controlPlane.init).toHaveBeenCalledWith(input.credentials, {
@@ -164,9 +164,40 @@ describe('Agent media artifact main-owned upload transaction', () => {
     expect(operationId.length).toBeLessThanOrEqual(128);
     expect(progress).toHaveBeenLastCalledWith(8, 8);
     expect(onSettlementStarted).toHaveBeenCalledOnce();
+    expect(onSettlementStarted).toHaveBeenCalledWith(operationId);
     expect(onSettlementStarted.mock.invocationCallOrder[0])
       .toBeLessThan(vi.mocked(controlPlane.complete).mock.invocationCallOrder[0]);
     expect(controlPlane.abort).not.toHaveBeenCalled();
+  });
+
+  it.each(['e43b4b4c-f9ca-4488-a4ec-2015c8a9d370', 'd'.repeat(64)])('uses a main-provided stable operation before uploading: %s', async operationId => {
+    const { controlPlane, input, manager } = await fixture();
+    const onSettlementStarted = vi.fn();
+    const result = await manager.upload({ ...input, operationId, onSettlementStarted });
+    expect(result).toMatchObject({ commitState: 'committed', operationId });
+    expect(controlPlane.complete).toHaveBeenCalledWith(input.credentials, expect.objectContaining({ clientOperationId: operationId }), input.signal);
+    expect(onSettlementStarted).toHaveBeenCalledWith(operationId);
+  });
+
+  it.each(['', 'not-an-operation', 'A'.repeat(64), '0'.repeat(63), '00000000-0000-0000-0000-000000000000', ' e43b4b4c-f9ca-4488-a4ec-2015c8a9d370'])('rejects invalid explicit operation identity %j before any request', async operationId => {
+    const { controlPlane, input, manager } = await fixture();
+    await expect(manager.upload({ ...input, operationId })).rejects.toThrow('操作 ID 无效');
+    expect(controlPlane.verifyAccount).not.toHaveBeenCalled();
+    expect(controlPlane.init).not.toHaveBeenCalled();
+  });
+
+  it('retains the supplied operation ID on reconciliation and every returned non-success state', async () => {
+    const operationId = 'e43b4b4c-f9ca-4488-a4ec-2015c8a9d370';
+    const unknown = await fixture({ controlPlane: {
+      complete: vi.fn(async () => { throw new AgentMediaUploadControlPlaneError('network_error'); }),
+      reconcile: vi.fn(async () => ({ state: 'uncommitted' as const })),
+    } });
+    await expect(unknown.manager.upload({ ...unknown.input, operationId })).resolves.toEqual({ commitState: 'commit_unknown', operationId });
+    expect(unknown.controlPlane.reconcile).toHaveBeenCalledWith(unknown.input.credentials, operationId, expect.any(AbortSignal));
+    expect(unknown.controlPlane.abort).not.toHaveBeenCalled();
+    const refused = await fixture({ controlPlane: { complete: vi.fn(async () => { throw new AgentMediaUploadControlPlaneError('invalid_request', 409); }) } });
+    await expect(refused.manager.upload({ ...refused.input, operationId })).resolves.toEqual({ commitState: 'uncommitted', operationId });
+    expect(refused.controlPlane.reconcile).not.toHaveBeenCalled();
   });
 
   it('streams the sealed artifact through the default HTTP PUT transport', async () => {
@@ -206,7 +237,7 @@ describe('Agent media artifact main-owned upload transaction', () => {
         defaultTransport: true,
       });
 
-      await expect(manager.upload(input)).resolves.toMatchObject({ commitState: 'committed' });
+      await expect(manager.upload(input)).resolves.toMatchObject({ commitState: 'committed', operationId: expect.stringMatching(/^[a-f0-9]{64}$/u) });
       expect(received).toEqual(new Map([[1, 'abcd'], [2, 'efgh']]));
     } finally {
       await new Promise<void>((resolve, reject) => {
@@ -278,7 +309,7 @@ describe('Agent media artifact main-owned upload transaction', () => {
 
     try {
       await expect(manager.upload(input)).resolves.toEqual({
-        commitState: 'committed',
+        commitState: 'committed', operationId: expect.stringMatching(/^[a-f0-9]{64}$/u),
         node: { ext: 'm4a', id: 32, name: 'audio' },
       });
       expect(warn).toHaveBeenCalledWith(
@@ -332,7 +363,7 @@ describe('Agent media artifact main-owned upload transaction', () => {
 
     try {
       await expect(manager.upload(input)).resolves.toEqual({
-        commitState: 'commit_unknown',
+        commitState: 'commit_unknown', operationId: expect.stringMatching(/^[a-f0-9]{64}$/u),
       });
       expect(warn).toHaveBeenCalledWith(
         'Agent media artifact cleanup failed after non-retryable settlement',
@@ -380,7 +411,7 @@ describe('Agent media artifact main-owned upload transaction', () => {
     });
 
     await expect(manager.upload(input)).resolves.toEqual({
-      commitState: 'committed',
+      commitState: 'committed', operationId: expect.stringMatching(/^[a-f0-9]{64}$/u),
       node: { id: 33, name: 'reconciled' },
     });
     expect(reconcile).toHaveBeenCalledWith(
@@ -400,7 +431,7 @@ describe('Agent media artifact main-owned upload transaction', () => {
       },
     });
 
-    await expect(manager.upload(input)).resolves.toEqual({ commitState: 'commit_unknown' });
+    await expect(manager.upload(input)).resolves.toEqual({ commitState: 'commit_unknown', operationId: expect.stringMatching(/^[a-f0-9]{64}$/u) });
     expect(controlPlane.abort).not.toHaveBeenCalled();
   });
 
@@ -425,7 +456,7 @@ describe('Agent media artifact main-owned upload transaction', () => {
     });
 
     await expect(manager.upload({ ...input, signal: controller.signal })).resolves.toEqual({
-      commitState: 'committed',
+      commitState: 'committed', operationId: expect.stringMatching(/^[a-f0-9]{64}$/u),
       node: { id: 34, name: 'cancel-race' },
     });
     expect(controlPlane.abort).not.toHaveBeenCalled();
@@ -463,7 +494,7 @@ describe('Agent media artifact main-owned upload transaction', () => {
       },
     });
 
-    await expect(manager.upload(input)).resolves.toEqual({ commitState: 'uncommitted' });
+    await expect(manager.upload(input)).resolves.toEqual({ commitState: 'uncommitted', operationId: expect.stringMatching(/^[a-f0-9]{64}$/u) });
     expect(controlPlane.abort).toHaveBeenCalledOnce();
     expect(controlPlane.complete).not.toHaveBeenCalled();
   });
@@ -475,7 +506,7 @@ describe('Agent media artifact main-owned upload transaction', () => {
       },
     });
 
-    await expect(manager.upload(input)).resolves.toEqual({ commitState: 'uncommitted' });
+    await expect(manager.upload(input)).resolves.toEqual({ commitState: 'uncommitted', operationId: expect.stringMatching(/^[a-f0-9]{64}$/u) });
     expect(controlPlane.abort).toHaveBeenCalledOnce();
     expect(controlPlane.complete).not.toHaveBeenCalled();
   });
@@ -501,7 +532,7 @@ describe('Agent media artifact main-owned upload transaction', () => {
     });
 
     await expect(manager.upload({ ...input, onProgress: progress }))
-      .resolves.toEqual({ commitState: 'uncommitted' });
+      .resolves.toEqual({ commitState: 'uncommitted', operationId: expect.stringMatching(/^[a-f0-9]{64}$/u) });
     expect(siblingAborted).toHaveBeenCalledOnce();
     expect(progress).not.toHaveBeenCalled();
     expect(controlPlane.abort).toHaveBeenCalledOnce();
@@ -518,12 +549,12 @@ describe('Agent media artifact main-owned upload transaction', () => {
       },
     });
 
-    await expect(manager.upload(input)).resolves.toEqual({ commitState: 'uncommitted' });
+    await expect(manager.upload(input)).resolves.toEqual({ commitState: 'uncommitted', operationId: expect.stringMatching(/^[a-f0-9]{64}$/u) });
     expect(controlPlane.reconcile).not.toHaveBeenCalled();
     expect(controlPlane.abort).toHaveBeenCalledOnce();
   });
 
-  it('aborts when reconciliation authoritatively reports uncommitted', async () => {
+  it('preserves unknown when an older service reports a pending completion as uncommitted', async () => {
     const { controlPlane, input, manager } = await fixture({
       controlPlane: {
         complete: vi.fn(async () => { throw new Error('connection lost'); }),
@@ -531,7 +562,8 @@ describe('Agent media artifact main-owned upload transaction', () => {
       },
     });
 
-    await expect(manager.upload(input)).resolves.toEqual({ commitState: 'uncommitted' });
-    expect(controlPlane.abort).toHaveBeenCalledOnce();
+    await expect(manager.upload(input)).resolves.toEqual({ commitState: 'commit_unknown', operationId: expect.stringMatching(/^[a-f0-9]{64}$/u) });
+    expect(controlPlane.abort).not.toHaveBeenCalled();
+    expect(controlPlane.complete).toHaveBeenCalledOnce();
   });
 });

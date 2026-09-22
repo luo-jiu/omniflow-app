@@ -122,6 +122,10 @@ export interface AgentMainCommitSettlement {
 
 export interface AgentToolExecutionContext {
   readonly commitSettlement?: AgentMainCommitSettlement;
+  executePluginFileOutput?: (
+    source: AgentPluginToolSource, input: unknown, preparation: AgentToolMainPreparedExecution,
+    commit: AgentMainCommitSettlement, signal: AbortSignal,
+  ) => Promise<AgentToolResult>;
   /** Main-owned execution of an already approved, sealed rename proposal. */
   executePluginRename?: (
     source: AgentPluginToolSource, input: unknown, preparation: AgentToolMainPreparedExecution,
@@ -169,6 +173,9 @@ export interface AgentToolDispatchContext extends Omit<AgentToolExecutionContext
 }
 
 export interface AgentToolMainPreparationContext {
+  readonly preparePluginFileOutput?: (
+    source: AgentPluginToolSource, input: unknown, signal: AbortSignal,
+  ) => Promise<AgentToolMainPreparationResult>;
   /** Host gathers permitted metadata, runs the isolated proposal and prepares the preview. */
   readonly preparePluginRename?: (
     source: AgentPluginToolSource, input: unknown, signal: AbortSignal,
@@ -226,7 +233,7 @@ export interface AgentToolMainPreparationResult {
 export interface AgentTool {
   /** Host-owned provenance copied from the frozen package catalog, never model input. */
   readonly pluginSource?: AgentPluginToolSource;
-  readonly pluginOperation?: 'rename';
+  readonly pluginOperation?: 'rename' | 'file-output';
   readonly availability?: Partial<AgentToolAvailabilityPolicy>;
   /** Main-only time budget for authoritative cleanup after execution cancellation. */
   readonly cancellationSettleTimeoutMs?: number;
@@ -745,12 +752,12 @@ function sealMainPreparedExecutionFromMaps(
       normalizeAgentPreparedActionPublicForMain(input.publicAction),
       'public action',
     ) as AgentPreparedActionPublic;
-    if (publicAction.kind === 'plugin.rename') {
-      if (tool.pluginOperation !== 'rename' || !tool.pluginSource
+    if (publicAction.kind === 'plugin.rename' || publicAction.kind === 'plugin.file-output') {
+      if (tool.pluginOperation !== (publicAction.kind === 'plugin.rename' ? 'rename' : 'file-output') || !tool.pluginSource
         || publicAction.pluginId !== tool.pluginSource.pluginId
         || publicAction.pluginVersion !== tool.pluginSource.pluginVersion
         || publicAction.packageFingerprint !== tool.pluginSource.packageFingerprint) throw new Error('invalid plugin rename source');
-    } else if (tool.pluginOperation === 'rename' || publicAction.kind !== tool.name) throw new Error('invalid action kind');
+    } else if (tool.pluginOperation || publicAction.kind !== tool.name) throw new Error('invalid action kind');
     const binding = normalizeAgentToolMainPreparationBinding(input.binding);
     const approvalSemantics = cloneMainPreparationJson(
       input.approvalSemantics,
@@ -947,13 +954,13 @@ export function createAgentToolRegistry(initialTools: AgentTool[] = []) {
     const pluginSource = tool.pluginSource === undefined ? undefined
       : normalizeAgentPluginToolSource(tool.pluginSource, name);
     const pluginOperation = tool.pluginOperation;
-    if (pluginOperation !== undefined && (pluginOperation !== 'rename' || !pluginSource)) {
+    if (pluginOperation !== undefined && (!['rename', 'file-output'].includes(pluginOperation) || !pluginSource)) {
       throw new Error(`Agent 插件 Tool 契约无效：${name}`);
     }
     if (pluginSource && (kind !== 'business' || executor !== 'main'
       || pluginSource.registrationId !== tool.registrationId
       || hasRendererPreparation
-      || (pluginOperation === 'rename' ? tool.risk !== 'write' || !hasMainPreparation
+      || (pluginOperation ? tool.risk !== 'write' || !hasMainPreparation
         : tool.risk !== 'read' || hasMainPreparation))) {
       throw new Error(`Agent 插件 Tool 契约无效：${name}`);
     }

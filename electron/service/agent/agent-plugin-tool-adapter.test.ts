@@ -5,6 +5,7 @@ import type { ManagedPlugin } from '../../../src/shared/plugin-management';
 import { createPluginToolSnapshot } from '../extensions/plugin-tool-catalog';
 import { parsePluginManifest } from '../extensions/manifest';
 import renameManifest from '../../../samples/batch-rename/manifest.json';
+import outputManifest from '../../../samples/csv-export/manifest.json';
 import { createAgentPluginToolSnapshot } from './agent-plugin-tool-adapter';
 import { createAgentToolRegistry, hashAgentToolInputForPreparation, type AgentToolExecutionContext,
   type AgentToolMainPreparationContext, type AgentToolMainPreparationResult, type AgentToolMainPreparationSealInput,
@@ -227,5 +228,40 @@ describe('Agent plugin rename proposal adapter', () => {
       mainPreparationCapability: sealed.capability, mainPreparationIdentity: sealed.identity };
     await expect(snapshot.execute(tool.name, { resources: [13] }, ctx)).rejects.toThrow('identity 不匹配');
     expect(executePluginRename).not.toHaveBeenCalled();
+  });
+});
+
+describe('Agent plugin file-output adapter', () => {
+  function outputSnapshot() {
+    const manifest = parsePluginManifest(outputManifest, 'darwin');
+    const registrations = createPluginToolSnapshot([plugin({ id: manifest.id, version: manifest.version,
+      outputApproved: true, permissions: manifest.permissions, agentTools: manifest.agentTools })]);
+    const snapshot = createAgentPluginToolSnapshot(createAgentToolRegistry().createSnapshot(), registrations);
+    return { snapshot, tool: snapshot.get(manifest.agentTools![0].id)! };
+  }
+  it('requires a sealed source-bound file-output preparation and never dispatches through the read callback', async () => {
+    const { snapshot, tool } = outputSnapshot();
+    const input = { resource: { nodeId: 11 }, destination: { parentId: 10, fileName: 'processed.csv' }, format: 'csv' };
+    expect(tool).toMatchObject({ pluginOperation: 'file-output', risk: 'write', executor: 'main', cancellationSettleTimeoutMs: 45_000 });
+    const source = tool.pluginSource!;
+    const base = renamePreparation(source, input);
+    const prepared: AgentToolMainPreparationSealInput = { ...base, publicAction: { kind: 'plugin.file-output', version: 1,
+      libraryId: 3, operationId: 'eaf4604e-5779-4a3c-8c3d-3eaf45c9aa68', sourceNodeId: 11, parentId: 10,
+      fileName: 'processed.csv', providerId: 'local-minio', mediaType: 'text/csv', sizeBytes: 12, sha256: 'c'.repeat(64),
+      pluginId: source.pluginId, pluginVersion: source.pluginVersion, packageFingerprint: source.packageFingerprint } };
+    const preparationResult: AgentToolMainPreparationResult = { binding: prepared.binding, publicAction: prepared.publicAction,
+      decision: { behavior: 'ask', risk: 'write', preview: { title: '保存产物', description: '', risk: 'write' } } };
+    const preparePluginFileOutput = vi.fn(async () => preparationResult);
+    await expect(tool.prepareMain!(input, undefined, { preparePluginFileOutput } as unknown as AgentToolMainPreparationContext)).resolves.toBe(preparationResult);
+    const executePluginFileOutput = vi.fn(async () => ({ ok: true }));
+    const executePluginTool = vi.fn();
+    await expect(snapshot.execute(tool.name, input, { ...context(), executePluginFileOutput })).rejects.toThrow('main prepared');
+    const sealed = snapshot.sealMainPreparedExecution(tool.name, prepared);
+    const ctx = { ...context(), executePluginFileOutput, executePluginTool, commitSettlement: { begin: vi.fn(), settle: vi.fn() },
+      mainPreparationCapability: sealed.capability, mainPreparationIdentity: sealed.identity };
+    await expect(snapshot.execute(tool.name, input, ctx)).resolves.toEqual({ ok: true });
+    expect(executePluginTool).not.toHaveBeenCalled(); expect(executePluginFileOutput).toHaveBeenCalledOnce();
+    await expect(snapshot.execute(tool.name, input, ctx)).rejects.toThrow('已使用');
+    expect(() => snapshot.sealMainPreparedExecution(tool.name, renamePreparation(source, input))).toThrow();
   });
 });

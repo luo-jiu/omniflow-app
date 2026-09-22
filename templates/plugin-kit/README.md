@@ -20,9 +20,9 @@ SDK 尚未发布到公开 npm 注册表，不要把 `npm install @omniflow/plugi
 
 ## 独立样板
 
-`examples/csv-viewer`、`examples/json-tree-viewer`、`examples/comic-viewer`、`examples/csv-tool` 和 `examples/batch-rename` 分别覆盖文件查看、目录漫画、同包 Viewer/Tool 与元数据改名提案，均只依赖本开发包 SDK。在任一示例目录执行相同的 install/build/package 命令即可得到 ZIP。CSV Viewer 默认 ID 为随包保留 ID，制作外部副本时先修改 Manifest 的 id、viewers[].id 和 activation；Tool 副本还应同步 agentTools[].id 和 tool activation。
+`examples/csv-viewer`、`examples/json-tree-viewer`、`examples/comic-viewer`、`examples/csv-tool` 、`examples/batch-rename` 和 `examples/csv-export` 分别覆盖文件查看、目录漫画、同包 Viewer/Tool、元数据改名提案与CSV/JSON完整导出，均只依赖本开发包 SDK。在任一示例目录执行相同的 install/build/package 命令即可得到 ZIP。CSV Viewer 默认 ID 为随包保留 ID，制作外部副本时先修改 Manifest 的 id、viewers[].id 和 activation；Tool 副本还应同步 agentTools[].id 和 tool activation。
 
-开发包当前包含 SDK 0.4.0，格式 2 支持独立 Tool 批准。CSV Tool 已接入内部 Agent 生产工具目录和会话单文件权限，在 macOS 通过真实模型与资料库验收；新安装/启用的 Tool 从后续新 Run 的冻结目录发现。
+开发包当前包含 SDK 0.5.0，格式 2 支持独立 Tool 批准。CSV Tool 已接入内部 Agent 生产工具目录和会话单文件权限，在 macOS 通过真实模型与资料库验收；新安装/启用的 Tool 从后续新 Run 的冻结目录发现。
 
 batch-rename 只声明元数据提案与 Tool 权限，收到随机引用和名称，不能读正文或直接写文件。宿主标准审批卡展示完整提案，批准后使用条件原子接口执行。真实 macOS Agent 与 Win/local-minio 专用合成文件已验证双阶段批准、改名、回执审计和目录/预览同步，完整边界见宿主 W0～W2 验收记录；安装成功不能代替后端兼容与本次批准。生成器仍创建只读 Viewer 工程，改名插件以本样板为起点。
 
@@ -54,3 +54,5 @@ batch-rename 只声明元数据提案与 Tool 权限，收到随机引用和名�
 管理页可停用、撤权、回滚、开启恢复模式和恢复内置外观。插件死循环、超预算或违反隔离边界会被停止，不应阻止宿主打开管理页面。启动前还可用 `--disable-third-party-plugins`；开发宿主可使用 `OMNIFLOW_DISABLE_THIRD_PARTY=1`。
 
 “最近操作与失败日志”包含插件/实例与请求哈希，默认不记正文或凭据。坏包预检失败不会注册部分贡献。发行包、多显示器、Windows/Linux 未在本轮交付中完成验收。
+
+文件产物样板csv-export使用独立resource.output.propose批准，SDK正文上限1MiB，超限失败；目标由宿主确认后创建新文件、不覆盖，正文不进入模型Tool结果或聊天审计。它不改变生成器的只读Viewer默认模板。完整执行、上传和回执核对验收以宿主W3文档为准，SDK打包成功不代表端到端验收完成。

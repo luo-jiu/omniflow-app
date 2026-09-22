@@ -1,5 +1,9 @@
 # 内置 Agent UI 契约
 
+W3 文件产物卡只展示 main 的 `plugin.file-output` action：新文件名、目标目录、provider、MIME、大小、摘要和插件来源；目标目录优先显示宿主已知名称，不能把模型自报目录当权威。正文与本机 artifact 路径不进入卡片，批准仍经原 prepare/审批链，完全访问也确认具体产物。真实 CSV→JSON 正常另存/打开已验证，范围见 [W3](plugin-system-w3-file-output.md)。
+
+未知插件操作可展示固定 `agent.operation.reconcile`（“查询回执”）动作，仅传 owner/库/Session/ToolRun 与预期 revision，由 main 从持久 action 取 operation ID 并执行只读核对。结果经 CAS 更新同一 ToolActivity，保留原结果与有限核对记录，不重开 Run 或重写历史对话；成功不降级，过期/未查到仍未知。历史改名核对仍只刷新目录，不重播旧名称。该 UI 入口目前只有自动化覆盖，不能称真机故障或重启后点击已验收。
+
 插件改名使用标准 `AgentConfirmationCard` 的只读完整预览：显示插件/版本、包指纹、文件数量及每个旧名→新名，长列表在卡内滚动并保留键盘进入能力。数据只来自 main 的规范 `plugin.rename` public action，审批不能从插件 output 或模型 input 临时拼装；按原批准链提交，变化后重新批准。资源范围授权不能代替提案确认，完全访问也保留这一步。真实 macOS 已验证两文件范围授权、暗色两项卡片、批准提交与目录/预览同步；50 项列表完整性有自动化断言，亮/暗 50 项长列表的视觉与滚动点击未手验，范围见 [W0～W2](plugin-system-w0-w2-rename.md)。
 
 成功界面只消费已核对且匹配批准目标的 committed ToolRun，本次实时完成按节点 ID 同步目录和已打开标签名称；历史会话恢复只刷新父目录，不广播旧回执里的名称，避免覆盖后来发生的改名。Run 停止不抹去已经提交的 ToolRun；commit_unknown 显示结果未确认及操作身份，不冒充“已取消且未修改”，也不提供换新 ID 的盲重试。SQLite 可恢复审批/结果投影，但本批未提供跨重启自动核对或撤销页面。

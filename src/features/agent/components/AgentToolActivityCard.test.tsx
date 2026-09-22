@@ -41,6 +41,29 @@ const OWNER_SCOPE: AgentOwnerScope = {
 const renderers: TestRenderer.ReactTestRenderer[] = [];
 const readShellLogPageMock = vi.mocked(readAgentShellLogPage);
 
+describe('plugin operation receipt action', () => {
+  it('renders the fixed query action and disables it while the host query is pending', () => {
+    const operationId = 'eaf4604e-5779-4a3c-8c3d-3eaf45c9aa68';
+    const activity: AgentToolActivitySnapshot = { id: 'rename-tool', sessionId: 'session', runId: 'run', ordinal: 1, revision: 4, createdAt: '', status: 'interrupted', permissionBehavior: 'ask',
+      call: { id: 'call', name: 'example.rename.propose', input: {} },
+      pluginSource: { pluginId: 'example.rename', pluginVersion: '0.1.0', packageFingerprint: 'a'.repeat(64), toolId: 'example.rename.propose', registrationId: `plugin-tool:${'b'.repeat(64)}` },
+      approval: { approvalId: 'approval', status: 'approved', preview: { title: '', description: '', risk: 'write' } },
+      preparation: { preparedActionId: 'prepared', snapshotHash: 'c'.repeat(64), action: { kind: 'plugin.rename', version: 1, libraryId: 3, operationId,
+        pluginId: 'example.rename', pluginVersion: '0.1.0', packageFingerprint: 'a'.repeat(64), items: [{ nodeId: 11, parentId: 10, oldName: 'old.txt', newName: 'new.txt' }] } },
+      result: { ok: false, data: { mutationCommitState: 'commit_unknown', operationId } },
+    };
+    const onAction = vi.fn();
+    const props = { activity, onAction, approvalBusy: false, interactionBusy: false, libraryId: 3, ownerScope: OWNER_SCOPE, onResolveApproval: vi.fn() };
+    let renderer!: TestRenderer.ReactTestRenderer;
+    act(() => { renderer = TestRenderer.create(React.createElement(AgentToolActivityCard, props)); }); renderers.push(renderer);
+    const button = renderer.root.findAllByType('button').find(node => node.children.includes('查询回执'))!;
+    expect(button.props.disabled).toBe(false); act(() => button.props.onClick());
+    expect(onAction).toHaveBeenCalledWith({ action: 'agent.operation.reconcile', label: '查询回执', libraryId: 3, sessionId: 'session', toolRunId: 'rename-tool', expectedRevision: 4 });
+    act(() => renderer.update(React.createElement(AgentToolActivityCard, { ...props, receiptBusy: true })));
+    expect(renderer.root.findAllByType('button').find(node => node.children.includes('正在查询回执…'))?.props.disabled).toBe(true);
+  });
+});
+
 function shellAction(command = 'pwd\nprintf "done"'): AgentShellPreparedActionPublicV1 {
   return {
     aiDestination: {

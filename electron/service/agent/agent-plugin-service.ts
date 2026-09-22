@@ -1,4 +1,5 @@
 import { createAgentPluginRenameService, type AgentPluginRenameRequest } from './agent-plugin-rename';
+import { createAgentPluginFileOutputService, type AgentPluginFileOutputRequest } from './agent-plugin-file-output';
 import type { AgentToolMainPreparedExecution, AgentMainCommitSettlement } from './agent-tool-registry';
 import { BrowserWindow, type WebContents } from 'electron';
 import path from 'node:path';
@@ -47,6 +48,7 @@ export function createAgentPluginService(options: AgentPluginServiceOptions) {
     return current.runtime;
   };
   const detach = options.manager.attachRuntime((id, reason) => {
+    outputs.revoke(id);
     // Pending resource acquisition is also part of a call; its per-package filter lives below.
     for (const controller of calls) {
       if (!id || callOwners.get(controller) === id) controller.abort(reason === 'fault' ? new PluginFault('UNAVAILABLE', 'Plugin instance failed') : undefined);
@@ -54,8 +56,9 @@ export function createAgentPluginService(options: AgentPluginServiceOptions) {
   });
   const callOwners = new WeakMap<AbortController, string>();
   const renames = createAgentPluginRenameService({ manager: options.manager, runtimeFor: request => runtimeFor(request.authority.sender) });
-  async function renameCall<T>(request: AgentPluginRenameRequest,
-    action: (bound: AgentPluginRenameRequest, commit?: AgentMainCommitSettlement) => Promise<T>, commit?: AgentMainCommitSettlement): Promise<T> {
+  const outputs = createAgentPluginFileOutputService({ manager: options.manager, runtimeFor: request => runtimeFor(request.authority.sender), openResource: options.openResource });
+  async function renameCall<T, Request extends AgentPluginRenameRequest>(request: Request,
+    action: (bound: Request, commit?: AgentMainCommitSettlement) => Promise<T>, commit?: AgentMainCommitSettlement): Promise<T> {
     normalizeAgentPluginToolSource(request.source); checkSender(request.authority.sender);
     const controller = new AbortController(); calls.add(controller); callOwners.set(controller, request.source.pluginId);
     const signal = AbortSignal.any([controller.signal, request.authority.signal]);
@@ -87,6 +90,11 @@ export function createAgentPluginService(options: AgentPluginServiceOptions) {
     prepareRename(request: AgentPluginRenameRequest) { return renameCall(request, bound => renames.prepare(bound)); },
     executeRename(request: AgentPluginRenameRequest, preparation: AgentToolMainPreparedExecution, commit: AgentMainCommitSettlement) {
       return renameCall(request, (bound, settlement) => renames.execute(bound, preparation, settlement!), commit);
+    },
+    prepareFileOutput(request: AgentPluginFileOutputRequest) { return renameCall(request, bound => outputs.prepare(bound)); },
+    releaseOutputs(runId: string, toolRunId?: string) { return outputs.releaseRun(runId, toolRunId); },
+    executeFileOutput(request: AgentPluginFileOutputRequest, preparation: AgentToolMainPreparedExecution, commit: AgentMainCommitSettlement) {
+      return renameCall(request, (bound, settlement) => outputs.execute(bound, preparation, settlement!), commit);
     },
     async execute(request: AgentPluginToolRequest): Promise<AgentToolResult> {
       const source = normalizeAgentPluginToolSource(request.source);
@@ -130,6 +138,7 @@ export function createAgentPluginService(options: AgentPluginServiceOptions) {
     },
     dispose() {
       if (disposed) return; disposed = true; detach();
+      outputs.revoke();
       for (const controller of calls) controller.abort();
       current?.runtime.dispose(); current?.host.dispose(); current = undefined;
     },
@@ -139,9 +148,18 @@ let service: ReturnType<typeof createAgentPluginService> | undefined;
 export function configureAgentPluginService(options: AgentPluginServiceOptions) { service?.dispose(); service = createAgentPluginService(options); }
 export function disposeAgentPluginService() { service?.dispose(); service = undefined; }
 export function getAgentPluginToolRegistrations(reservedNames: readonly string[] = []) { return service?.snapshot(reservedNames) ?? []; }
+export async function releaseAgentPluginOutputs(runId: string, toolRunId?: string) { await service?.releaseOutputs(runId, toolRunId); }
 export async function executeAgentPluginTool(request: AgentPluginToolRequest) {
   if (!service) throw new PluginFault('UNAVAILABLE', 'Plugin Agent service unavailable');
   return service.execute(request);
+}
+export async function prepareAgentPluginFileOutput(request: AgentPluginFileOutputRequest) {
+  if (!service) throw new PluginFault('UNAVAILABLE', 'Plugin Agent service unavailable');
+  return service.prepareFileOutput(request);
+}
+export async function executeAgentPluginFileOutput(request: AgentPluginFileOutputRequest, preparation: AgentToolMainPreparedExecution, commit: AgentMainCommitSettlement) {
+  if (!service) throw new PluginFault('UNAVAILABLE', 'Plugin Agent service unavailable');
+  return service.executeFileOutput(request, preparation, commit);
 }
 
 export async function prepareAgentPluginRename(request: AgentPluginRenameRequest) {

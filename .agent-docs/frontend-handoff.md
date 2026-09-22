@@ -81,6 +81,8 @@
   - [AT2 故障恢复](../docs/plugin-system-at2-fault-recovery.md)（macOS 开发环境既定范围已验收完成；2834 项测试、63 项原生断言及实际 win 资料库等待授权时离库取消与返回恢复通过；小时级性能、发行包和 Windows/Linux 未验收）
 - 元数据提案、标准批准、条件批量改名和提交核对：
   - [W0～W2 受控插件改名](../docs/plugin-system-w0-w2-rename.md)（本批限定 macOS 功能验收完成：SDK 0.4.0、独立样板、真实 gpt-5.5 与 Win/local-minio 专用文件、范围/提案批准、条件原子提交、PG/SQLite 审计和目录/预览名称同步；50 项仅自动验证列表完整性，实测暗色两项卡片，亮/暗 50 项视觉/滚动未手验；小时性能、跨重启自动核对与撤销未纳入）
+- 文件处理产物、同库新文件与显式回执查询：
+  - [W3 文件产物](../docs/plugin-system-w3-file-output.md)（SDK 0.5.0，独立 output 批准、封存私有正文、标准产物卡及复用上传事务；真实 gpt-5.5 的 205 行 CSV→JSON 另存/打开及摘要/回执通过。固定查询动作有终态 CAS/原结果保留，未知查询 UI 仅自动化，真机故障与重启后点击未手验）
 - 当前云端、Tailscale、多 MinIO 和发布方式：
   - `docs/current-deployment-topology.md`
 - macOS / Windows 窗口策略、平台 bridge 和构建验证：
