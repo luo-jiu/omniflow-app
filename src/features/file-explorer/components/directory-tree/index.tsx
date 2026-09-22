@@ -26,7 +26,8 @@ import { useFileViewer } from '@/hooks/useFileViewer';
 import { useViewerAccountScope } from '@/features/file-viewer/session';
 import { globalAudioPlayer } from '@/features/file-viewer/services/global-audio-player';
 import { softDeleteNodeSubtree } from '@/features/file-explorer/services/node-deletion';
-import { getDirectoryBuiltInIcon } from '@/features/file-explorer/utils/file-node-icon';
+import DirectoryNodeIcon from './DirectoryNodeIcon';
+import { ExpandedDirectoryKeysContext } from './directory-icon.context';
 import {
   downloadUrlToDesktopPath,
   ensureDesktopDirectory,
@@ -149,18 +150,7 @@ const TREE_EXPAND_ICON = (
   </span>
 );
 
-function renderTreeNodeIcon(treeNodeProps: any): ReactNode {
-  const node = treeNodeProps?.data ?? treeNodeProps;
-  if (!node || String(node.type) === 'file') {
-    return treeNodeProps?.icon ?? null;
-  }
-
-  return getDirectoryBuiltInIcon(
-    node.builtInType,
-    node.archiveMode,
-    treeNodeProps?.expanded === true,
-  ) ?? getDirectoryBuiltInIcon('DEF', 0, treeNodeProps?.expanded === true);
-}
+const EMPTY_TREE_ICON = <></>;
 
 function removeStaleTreeDragPreviews() {
   document
@@ -694,6 +684,8 @@ export default function DirectoryTree({
     await loadData(node);
   };
 
+  const expandedDirectoryKeys = React.useMemo(() => new Set(expandedKeys.map(String)), [expandedKeys]);
+
   const renderTreeData = React.useMemo(() => {
     // 读取版本号用于在首次授权后触发重算。
     void rawOpenVersion;
@@ -711,18 +703,16 @@ export default function DirectoryTree({
           return node;
         }
 
+        const icon = <DirectoryNodeIcon nodeKey={String(node.key)} builtInType={node.builtInType} archiveMode={node.archiveMode} />;
         if (!isBuiltInFolderNode(node)) {
-          // 目录开合图标由 Tree.icon 根据 expanded 动态渲染，避免视觉状态重建 treeData。
-          if (patchedChildren !== node.children || node.icon !== undefined) {
-            return { ...node, icon: undefined, children: patchedChildren };
-          }
-          return node;
+          // icon 保持 ReactNode，开合变化由只读 Context 投影，不因展开重建 treeData。
+          return { ...node, icon, children: patchedChildren };
         }
 
         if (isRawOpenAllowed(node.key)) {
           return {
             ...node,
-            icon: undefined,
+            icon,
             isLeaf: false,
             children: patchedChildren,
           };
@@ -731,7 +721,7 @@ export default function DirectoryTree({
         // 未授权时隐藏箭头和子节点；授权会保留到当前侧栏卸载。
         return {
           ...node,
-          icon: undefined,
+          icon,
           isLeaf: true,
           loaded: false,
           children: [],
@@ -2584,6 +2574,7 @@ export default function DirectoryTree({
             目录树为空，右键菜单可新建文件或文件夹
           </div>
         ) : (
+          <ExpandedDirectoryKeysContext.Provider value={expandedDirectoryKeys}>
           <Tree
             draggable
             onDragStart={(info) => {
@@ -2640,11 +2631,12 @@ export default function DirectoryTree({
             onDoubleClick={handleTreeDoubleClick}
             loadData={handleLoadData}
             directory
-            icon={renderTreeNodeIcon}
+            icon={EMPTY_TREE_ICON}
             expandIcon={TREE_EXPAND_ICON}
             renderLabel={renderLabel}
             style={{ padding: '2px 0 2px 0' }}
           />
+          </ExpandedDirectoryKeysContext.Provider>
         )}
       </div>
 

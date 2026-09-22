@@ -55,7 +55,7 @@ main 将 source 投影到 nativeTheme；非 vibrancy 主窗口使用解析后的
 
 ## 5. 图标与 SVG
 
-目录事实识别和 expanded owner 不变。`getDirectoryBuiltInIcon` 先取得纯语义，保留未知类型警告及 DEF+archive 的既有特殊返回，再由 `ThemedDirectoryIcon` 消费只读图标选择。子菜单对图标尺寸/style 的 clone 仍透传到 img。
+目录事实识别和 expanded owner 不变。Semi Tree 的全局 icon 运行时校验仅接受 ReactNode；目录图标作为节点 icon 元素提供，使用现有 expandedKeys 的只读 Context 投影更新开合，不向 Tree.icon 传函数，也不因展开重建 treeData。`getDirectoryBuiltInIcon` 先取得纯语义，保留未知类型警告及 DEF+archive 的既有特殊返回，再由 `ThemedDirectoryIcon` 消费只读图标选择。子菜单对图标尺寸/style 的 clone 仍透传到 img。
 
 线条包包含 22 个目录 SVG，覆盖普通目录及五种业务目录的普通/归档、闭合/展开状态。普通文件类型继续继承原有 material 资产。开态缺失先用同包闭态，再回退原内置资产；不改节点类型、树数据或打开行为。错误、离线等宿主状态装饰不被新资产替代。
 
