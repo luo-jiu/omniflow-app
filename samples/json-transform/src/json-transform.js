@@ -9,15 +9,8 @@ const isRecord = value => value !== null && typeof value === 'object' && !Array.
 const own = (value, key) => Object.prototype.hasOwnProperty.call(value, key);
 
 export function validateTransformInput(input) {
-  if (!isRecord(input) || Object.keys(input).some(key => !['resource', 'destination', 'select', 'pretty'].includes(key))) {
-    throw new JsonTransformError('INVALID_INPUT', '只接受 resource、destination、select、pretty');
-  }
-  const resource = input.resource;
-  const destination = input.destination;
-  if (!isRecord(resource) || Object.keys(resource).length !== 1 || !Number.isSafeInteger(resource.nodeId) || resource.nodeId < 1
-    || !isRecord(destination) || Object.keys(destination).length !== 2 || !Number.isSafeInteger(destination.parentId) || destination.parentId < 1
-    || typeof destination.fileName !== 'string' || !destination.fileName || !destination.fileName.endsWith('.json')) {
-    throw new JsonTransformError('INVALID_INPUT', 'resource、destination 或 JSON 文件名无效');
+  if (!isRecord(input) || Object.keys(input).some(key => !['select', 'pretty'].includes(key))) {
+    throw new JsonTransformError('INVALID_INPUT', '只接受 select、pretty 业务参数');
   }
   if (input.select !== undefined && (!Array.isArray(input.select) || input.select.length > MAX_FIELDS
     || new Set(input.select).size !== input.select.length || input.select.some(key => typeof key !== 'string' || !key || key.length > MAX_KEY_LENGTH))) {
