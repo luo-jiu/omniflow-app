@@ -32,6 +32,7 @@ export interface AgentMediaArtifactUploadTarget {
   fileName: string;
   libraryId: number;
   parentId: number;
+  strictParent?: boolean;
   storageProvider: string;
 }
 
@@ -399,6 +400,7 @@ export function createAgentMediaArtifactUploadManager(options: AgentMediaArtifac
           fileSize: ownedFile.artifact.sizeBytes,
           libraryId: target.libraryId,
           parentId: target.parentId,
+          ...(target.strictParent ? { strictParent: true } : {}),
           storageProvider: target.storageProvider,
         }, input.signal), ownedFile.artifact.sizeBytes);
         uploadId = initialized.uploadId;

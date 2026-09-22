@@ -1,0 +1,41 @@
+{
+  "formatVersion": 2,
+  "id": "example.json-transform",
+  "version": "0.1.0",
+  "sdkVersion": 0.5,
+  "minHostVersion": "0.2.2",
+  "platforms": ["darwin"],
+  "activation": ["tool:example.json-transform.export"],
+  "permissions": ["resource.read", "resource.output.propose", "agent.tools"],
+  "viewers": [],
+  "agentTools": [{
+    "id": "example.json-transform.export",
+    "kind": "file-output",
+    "title": "JSON 转换并另存",
+    "description": "读取一个 UTF-8 JSON 文件，可选择顶层字段、筛选数组对象，并将结果完整输出为新的 JSON 文件。",
+    "entry": "tool.html",
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["resource", "destination"],
+      "properties": {
+        "resource": {
+          "type": "object", "additionalProperties": false, "required": ["nodeId"],
+          "properties": { "nodeId": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 } }
+        },
+        "destination": {
+          "type": "object", "additionalProperties": false, "required": ["parentId", "fileName"],
+          "properties": {
+            "parentId": { "type": "integer", "minimum": 1, "maximum": 9007199254740991 },
+            "fileName": { "type": "string", "minLength": 1, "maxLength": 240 }
+          }
+        },
+        "select": { "type": "array", "maxItems": 64, "items": { "type": "string", "minLength": 1, "maxLength": 128 } },
+        "pretty": { "type": "boolean" }
+      }
+    },
+    "output": { "mediaTypes": ["application/json"], "maxBytes": 1048576 },
+    "resourceAccess": [{ "parameter": "resource", "mode": "read", "kind": "file" }],
+    "timeoutMs": 30000
+  }]
+}

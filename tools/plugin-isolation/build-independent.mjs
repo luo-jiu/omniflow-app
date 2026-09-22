@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const sampleName = process.argv[2] ?? 'csv-viewer';
-if (!['csv-viewer','json-tree-viewer','comic-viewer','csv-tool','batch-rename','csv-export'].includes(sampleName)) throw new Error('Unknown sample');
+if (!['csv-viewer','json-tree-viewer','comic-viewer','csv-tool','batch-rename','csv-export','json-transform','json-transform'].includes(sampleName)) throw new Error('Unknown sample');
 const work = await mkdtemp(path.join(tmpdir(), 'omniflow-sdk-independent-'));
 await cp(path.join(root, 'packages/plugin-sdk'), path.join(work, 'sdk'), { recursive: true });
 const packed = JSON.parse(execFileSync('npm', ['pack', '--json', '--ignore-scripts'], { cwd: path.join(work, 'sdk'), encoding: 'utf8' }));

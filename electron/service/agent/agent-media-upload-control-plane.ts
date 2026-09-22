@@ -47,6 +47,7 @@ export interface AgentMediaUploadInitInput {
   fileSize: number;
   libraryId: number;
   parentId: number;
+  strictParent?: boolean;
   storageProvider: string;
 }
 

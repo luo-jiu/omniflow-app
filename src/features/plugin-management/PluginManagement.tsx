@@ -5,6 +5,18 @@ import type { PluginInstallReview, PluginManagementAction } from '@/shared/plugi
 import { AppearanceControlContext } from '@/features/appearance/appearance.context';
 import { defaultSelection } from '@/features/appearance/appearance-storage';
 import { openCompactConfirm } from '@/components/ui/compact-confirm';
+import type { PluginFileOutputMediaType, PluginToolContribution } from '../../../packages/plugin-sdk/index.js';
+function formatBytes(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(bytes % (1024 * 1024) ? 1 : 0)} MiB`;
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KiB`;
+  return `${bytes} B`;
+}
+function outputCapabilityDescription(tools: PluginToolContribution[] | undefined): string {
+  const output = tools?.find(tool => tool.kind === 'file-output');
+  if (!output || output.kind !== 'file-output') return '';
+  const media = output.output.mediaTypes.map((type: PluginFileOutputMediaType) => type === 'text/csv' ? 'CSV' : type === 'application/json' ? 'JSON' : type).join('、');
+  return `读取获准的单个源文件，生成${media}产物（最多 ${formatBytes(output.output.maxBytes)}）；宿主确认后另存为新文件，不覆盖原文件。`;
+}
 const Page=styled.section`
   color:var(--app-text);font-size:13px;line-height:1.6;padding:16px;max-width:1040px;margin:auto;
   h2{font-size:18px;margin:0}h3{font-size:14px;margin:0}p{margin:6px 0}header,.actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}header{justify-content:space-between;margin-bottom:16px}
@@ -39,7 +51,7 @@ export default function PluginManagement({onBack}:{onBack:()=>void}){
     {catalog?.plugins.map(plugin=><article key={plugin.id} aria-label={`插件 ${plugin.id}`}>
       <header><div><h3>{plugin.viewers[0]?.title??plugin.agentTools?.[0]?.title??plugin.id}</h3><small>{plugin.id} · {plugin.version} · {plugin.source==='bundled'?'随应用提供':'本地包 / 发布者未验证'}</small></div><span role="status">{plugin.blockedReason?'已阻止':!plugin.enabled?'已停用':plugin.running?`运行中（${plugin.running}）`:'已启用'}{plugin.permissions.includes('resource.read')&&!plugin.readApproved?' · 待读取批准':''}{plugin.permissions.includes('resource.rename.propose')&&!plugin.renameApproved?' · 待改名提案批准':''}{plugin.permissions.includes('resource.output.propose')&&!plugin.outputApproved?' · 待文件产物批准':''}{plugin.agentTools?.length&&!plugin.toolApproved?' · 待 Agent Tool 批准':''}</span></header>
       {plugin.blockedReason&&<p>{plugin.blockedReason}</p>}
-      <p>能力：{plugin.permissions.includes('resource.output.propose')?'读取获准的单个源文件，生成CSV或JSON产物；宿主确认后另存为新文件，不覆盖原文件。':plugin.permissions.includes('resource.rename.propose')?'获取本次授权文件的名称并生成改名提案，不读取文件正文。实际改名由宿主另行预览确认后执行。':plugin.permissions.includes('directory.read')?'枚举获准漫画目录的直属图片并读取图片内容，不递归、不能修改文件。':plugin.permissions.includes('resource.read')?'读取当前获准文件，不能修改文件或访问其他资源。':'无正文读取能力。'}</p>
+      <p>能力：{plugin.permissions.includes('resource.output.propose')?(outputCapabilityDescription(plugin.agentTools)||'生成文件产物；宿主确认后另存为新文件，不覆盖原文件。'):plugin.permissions.includes('resource.rename.propose')?'获取本次授权文件的名称并生成改名提案，不读取文件正文。实际改名由宿主另行预览确认后执行。':plugin.permissions.includes('directory.read')?'枚举获准漫画目录的直属图片并读取图片内容，不递归、不能修改文件。':plugin.permissions.includes('resource.read')?'读取当前获准文件，不能修改文件或访问其他资源。':'无正文读取能力。'}</p>
       {!!plugin.agentTools?.length&&<p>Agent Tool：{plugin.permissions.includes('resource.output.propose')?'产物正文仅交付宿主，不进入模型回复；另存目标与内容摘要须单独确认。':plugin.permissions.includes('resource.rename.propose')?'仅处理本次调用获准的文件名称；提案批准不授予直接写入权限。':'仅分析本次调用获准的单个文件；'}安装和能力批准不会自动批准 Agent Tool，也不会授予会话资源权限。启用或升级后，从新一轮任务开始生效。</p>}
       <div className="actions"><button disabled={busy} onClick={()=>action(plugin.id,plugin.enabled?'disable':'enable')}>{plugin.enabled?'停用':'启用'}</button>{plugin.permissions.includes('resource.read')&&<button disabled={busy} onClick={()=>action(plugin.id,plugin.readApproved?'revoke-read':'approve-read')}>{plugin.readApproved?'撤销读取批准':'批准读取能力'}</button>}{plugin.permissions.includes('resource.rename.propose')&&<button disabled={busy} onClick={()=>action(plugin.id,plugin.renameApproved?'revoke-rename':'approve-rename')}>{plugin.renameApproved?'撤销改名提案批准':'批准改名提案能力'}</button>}{plugin.permissions.includes('resource.output.propose')&&<button disabled={busy} onClick={()=>action(plugin.id,plugin.outputApproved?'revoke-output':'approve-output')}>{plugin.outputApproved?'撤销文件产物批准':'批准文件产物能力'}</button>}{!!plugin.agentTools?.length&&<button disabled={busy} onClick={()=>action(plugin.id,plugin.toolApproved?'revoke-tools':'approve-tools')}>{plugin.toolApproved?'撤销 Agent Tool 批准':'批准 Agent Tool 能力'}</button>}{plugin.previousVersion&&<button disabled={busy} onClick={()=>action(plugin.id,'rollback')}>回滚到 {plugin.previousVersion}</button>}{plugin.source==='local'&&<button disabled={busy} onClick={()=>action(plugin.id,'uninstall')}>卸载</button>}<button disabled={busy} onClick={()=>action(plugin.id,'clear-data')}>清除设置</button></div>
       <details><summary>版本、贡献与完整性</summary><p>安装时间：{plugin.installedAt}</p><code>{plugin.fingerprint}</code><ul>{plugin.viewers.map(viewer=><li key={viewer.id}>{viewer.id}：{viewer.directoryTypes ? '普通漫画目录' : viewer.extensions.map(ext=>'.'+ext).join('、')}</li>)}{plugin.agentTools?.map(tool=><li key={tool.id}>{tool.id}：Agent Tool · {tool.description}</li>)}</ul></details>

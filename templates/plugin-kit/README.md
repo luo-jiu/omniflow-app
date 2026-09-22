@@ -20,7 +20,7 @@ SDK 尚未发布到公开 npm 注册表，不要把 `npm install @omniflow/plugi
 
 ## 独立样板
 
-`examples/csv-viewer`、`examples/json-tree-viewer`、`examples/comic-viewer`、`examples/csv-tool` 、`examples/batch-rename` 和 `examples/csv-export` 分别覆盖文件查看、目录漫画、同包 Viewer/Tool、元数据改名提案与CSV/JSON完整导出，均只依赖本开发包 SDK。在任一示例目录执行相同的 install/build/package 命令即可得到 ZIP。CSV Viewer 默认 ID 为随包保留 ID，制作外部副本时先修改 Manifest 的 id、viewers[].id 和 activation；Tool 副本还应同步 agentTools[].id 和 tool activation。
+`examples/csv-viewer`、`examples/json-tree-viewer`、`examples/comic-viewer`、`examples/csv-tool`、`examples/batch-rename`、`examples/csv-export` 和 `examples/json-transform` 分别覆盖文件查看、目录漫画、同包 Viewer/Tool、元数据改名提案与 CSV/JSON 文件产物，均只依赖本开发包 SDK。在任一示例目录执行相同的 install/build/package 命令即可得到 ZIP。CSV Viewer 默认 ID 为随包保留 ID，制作外部副本时先修改 Manifest 的 id、viewers[].id 和 activation；Tool 副本还应同步 agentTools[].id 和 tool activation。
 
 开发包当前包含 SDK 0.5.0，格式 2 支持独立 Tool 批准。CSV Tool 已接入内部 Agent 生产工具目录和会话单文件权限，在 macOS 通过真实模型与资料库验收；新安装/启用的 Tool 从后续新 Run 的冻结目录发现。
 

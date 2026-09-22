@@ -146,7 +146,7 @@ export function createAgentPluginFileOutputService(options: {
           record = { key, inputHash, pluginId: request.source.pluginId, source: structuredClone(request.source),
             sourceRevision: resource.revision, parentRevision: target.revision, action, artifactId: artifact.artifactId,
             owner, target: { conflictPolicy: 'error', contentType: action.mediaType, fileName: action.fileName,
-              libraryId: action.libraryId, parentId: action.parentId, storageProvider: action.providerId },
+              libraryId: action.libraryId, parentId: action.parentId, strictParent: true, storageProvider: action.providerId },
             busy: false, removeListener: () => undefined };
           const outputRecord = record;
           const dispose = () => { void release(outputRecord).catch(() => undefined); };
