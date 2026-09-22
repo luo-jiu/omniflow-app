@@ -8,6 +8,7 @@ import { ThemeProvider } from "@/contexts/ThemeContext";
 import UserPreferencesBootstrap from '@/features/user/preferences/UserPreferencesBootstrap';
 import SyncedUserPreferencesProvider from '@/features/user/preferences/SyncedUserPreferencesProvider';
 import FloatingMiniVideoPlayer from '@/features/file-viewer/components/floating-mini-video-player';
+import AgentLibraryRunLifecycle from '@/features/library-workspace/AgentLibraryRunLifecycle';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 import '@/features/resource-monitor/services/resource-monitor-runtime';
 import './App.css'
@@ -65,6 +66,7 @@ function App() {
   return (
     <ThemeProvider>
       <AuthProvider>
+        <AgentLibraryRunLifecycle />
         <SyncedUserPreferencesProvider>
           <UserPreferencesBootstrap />
           <MainLayout>

@@ -12,6 +12,7 @@ import type {
   AgentOwnerScope,
   AgentPreparedActionPublic,
   AgentPerceptionSnapshot,
+  AgentPluginToolSource,
   AgentToolProgress,
   AgentToolDisplayMetadata,
   AgentToolResult,
@@ -25,6 +26,7 @@ import {
 } from './skills/agent-skill.types';
 import type { AgentToolMainAiDestinationSnapshot } from './agent-ai-destination';
 import type { AgentRunCapabilitySnapshot } from './agent-run-capability-snapshot';
+import { normalizeAgentPluginToolSource } from './agent-plugin-source';
 
 const INVALID_TOOL_INPUT_MESSAGE = 'Agent Tool 参数不符合输入约束';
 const INVALID_TOOL_SCHEMA_MESSAGE = 'Agent Tool 输入约束无效';
@@ -111,7 +113,22 @@ export interface AgentToolMainPreparationSealResult {
   readonly stabilityHash: string;
 }
 
+export interface AgentMainCommitSettlement {
+  /** Host-only fallback, registered immediately before sending the mutation request. */
+  begin(fallback: AgentToolResult): void;
+  /** Authoritative receipt; cancellation must not erase committed/unknown outcomes. */
+  settle(result: AgentToolResult): void;
+}
+
 export interface AgentToolExecutionContext {
+  readonly commitSettlement?: AgentMainCommitSettlement;
+  /** Main-owned execution of an already approved, sealed rename proposal. */
+  executePluginRename?: (
+    source: AgentPluginToolSource, input: unknown, preparation: AgentToolMainPreparedExecution,
+    commit: AgentMainCommitSettlement, signal: AbortSignal,
+  ) => Promise<AgentToolResult>;
+  /** Run/ToolRun-bound main closure; plugins never receive this context or choose the source. */
+  executePluginTool?: (source: AgentPluginToolSource, input: unknown, signal: AbortSignal) => Promise<AgentToolResult>;
   readOperationJournal?: (operationId: string, signal: AbortSignal) => Promise<{
     operationId: string;
     toolName: string;
@@ -152,6 +169,10 @@ export interface AgentToolDispatchContext extends Omit<AgentToolExecutionContext
 }
 
 export interface AgentToolMainPreparationContext {
+  /** Host gathers permitted metadata, runs the isolated proposal and prepares the preview. */
+  readonly preparePluginRename?: (
+    source: AgentPluginToolSource, input: unknown, signal: AbortSignal,
+  ) => Promise<AgentToolMainPreparationResult>;
   readonly activeSkillId?: string;
   readonly aiDestination: AgentToolMainAiDestinationSnapshot;
   readonly appContext: AgentAppContext;
@@ -203,6 +224,9 @@ export interface AgentToolMainPreparationResult {
 }
 
 export interface AgentTool {
+  /** Host-owned provenance copied from the frozen package catalog, never model input. */
+  readonly pluginSource?: AgentPluginToolSource;
+  readonly pluginOperation?: 'rename';
   readonly availability?: Partial<AgentToolAvailabilityPolicy>;
   /** Main-only time budget for authoritative cleanup after execution cancellation. */
   readonly cancellationSettleTimeoutMs?: number;
@@ -721,7 +745,12 @@ function sealMainPreparedExecutionFromMaps(
       normalizeAgentPreparedActionPublicForMain(input.publicAction),
       'public action',
     ) as AgentPreparedActionPublic;
-    if (publicAction.kind !== tool.name) throw new Error('invalid action kind');
+    if (publicAction.kind === 'plugin.rename') {
+      if (tool.pluginOperation !== 'rename' || !tool.pluginSource
+        || publicAction.pluginId !== tool.pluginSource.pluginId
+        || publicAction.pluginVersion !== tool.pluginSource.pluginVersion
+        || publicAction.packageFingerprint !== tool.pluginSource.packageFingerprint) throw new Error('invalid plugin rename source');
+    } else if (tool.pluginOperation === 'rename' || publicAction.kind !== tool.name) throw new Error('invalid action kind');
     const binding = normalizeAgentToolMainPreparationBinding(input.binding);
     const approvalSemantics = cloneMainPreparationJson(
       input.approvalSemantics,
@@ -915,6 +944,19 @@ export function createAgentToolRegistry(initialTools: AgentTool[] = []) {
     if (executor !== 'main' && executor !== 'renderer') {
       throw new Error(`Agent Tool executor 无效：${name}`);
     }
+    const pluginSource = tool.pluginSource === undefined ? undefined
+      : normalizeAgentPluginToolSource(tool.pluginSource, name);
+    const pluginOperation = tool.pluginOperation;
+    if (pluginOperation !== undefined && (pluginOperation !== 'rename' || !pluginSource)) {
+      throw new Error(`Agent 插件 Tool 契约无效：${name}`);
+    }
+    if (pluginSource && (kind !== 'business' || executor !== 'main'
+      || pluginSource.registrationId !== tool.registrationId
+      || hasRendererPreparation
+      || (pluginOperation === 'rename' ? tool.risk !== 'write' || !hasMainPreparation
+        : tool.risk !== 'read' || hasMainPreparation))) {
+      throw new Error(`Agent 插件 Tool 契约无效：${name}`);
+    }
     if (hasRendererPreparation && executor !== 'renderer') {
       throw new Error(`Agent Tool prepare 只支持 Renderer executor：${name}`);
     }
@@ -981,6 +1023,8 @@ export function createAgentToolRegistry(initialTools: AgentTool[] = []) {
       inputSchema,
       kind,
       name,
+      pluginOperation,
+      ...(pluginSource ? { pluginSource } : {}),
       presentation,
       registrationId,
     }));

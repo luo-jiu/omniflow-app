@@ -75,6 +75,12 @@
   - [D1 管理与恢复](../docs/plugin-system-d1-management.md)（macOS 已验证；设置按包指纹持久化、session 清理复用；后续独立开发见 D2）
 - 第二功能与可移交开发模板：
   - [D2 独立开发交付](../docs/plugin-system-d2-external-development.md)（JSON 树、仓库外离线构建与开发包已验证；A0～D2 macOS 只读技术链路收口）
+- 插件 Tool 的独立协议、共享沙箱及 main-only 调用能力：
+  - [AT0 Tool 运行时](../docs/plugin-system-at0-tool-runtime.md)（macOS 隔离实验及旧 Viewer 回归通过；[AT1](../docs/plugin-system-at1-agent-tools.md)已完成 macOS 核心范围验收：真实 gpt-5.5 在 win 资料库读取并查询 CSV，无需打开 Viewer，授权、结果与插件来源审计可见；故障闭环见 AT2）
+- 插件故障隔离、单终态和库工作区退出清理：
+  - [AT2 故障恢复](../docs/plugin-system-at2-fault-recovery.md)（macOS 开发环境既定范围已验收完成；2834 项测试、63 项原生断言及实际 win 资料库等待授权时离库取消与返回恢复通过；小时级性能、发行包和 Windows/Linux 未验收）
+- 元数据提案、标准批准、条件批量改名和提交核对：
+  - [W0～W2 受控插件改名](../docs/plugin-system-w0-w2-rename.md)（本批限定 macOS 功能验收完成：SDK 0.4.0、独立样板、真实 gpt-5.5 与 Win/local-minio 专用文件、范围/提案批准、条件原子提交、PG/SQLite 审计和目录/预览名称同步；50 项仅自动验证列表完整性，实测暗色两项卡片，亮/暗 50 项视觉/滚动未手验；小时性能、跨重启自动核对与撤销未纳入）
 - 当前云端、Tailscale、多 MinIO 和发布方式：
   - `docs/current-deployment-topology.md`
 - macOS / Windows 窗口策略、平台 bridge 和构建验证：

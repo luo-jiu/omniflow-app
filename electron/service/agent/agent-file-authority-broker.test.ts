@@ -135,6 +135,87 @@ function resolveCompletion(
   });
 }
 
+function renameRequest(broker: ReturnType<typeof createAgentFileAuthorityBroker>, nodeIds = [8, 9], includeCredentials = false,
+  requestSender = sender(), signal = new AbortController().signal) {
+  return broker.request({ libraryId: 3, operation: { operation: 'rename-library-files', nodeIds, includeCredentials },
+    ownerScope: OWNER_SCOPE, runId: 'run-1', sessionId: 'session-1', toolRunId: 'tool-run-1', sender: requestSender, signal });
+}
+function renameCompletion(result: unknown = { operation: 'rename-library-files', version: 1, nodes: [node(), node({ id: 9, name: 'second.txt' })] }) {
+  return completion('rename-authority', { result: result as AgentFileAuthorityCompletionV1['result'] });
+}
+
+describe('Agent rename metadata authority', () => {
+  it('freezes the granted ordered IDs before asynchronous scope checks and accepts only matching nodes', async () => {
+    const broker = createAgentFileAuthorityBroker({ createId: () => 'rename-authority' });
+    const ids = [8, 9]; let resume!: () => void;
+    const gate = new Promise<void>(resolve => { resume = resolve; });
+    const before = vi.fn(async () => gate); const after = vi.fn(async () => undefined);
+    broker.registerRunAccess('run-1', { before, after });
+    const sent = vi.fn(); const pending = renameRequest(broker, ids, false, sender(sent));
+    ids[0] = 123; resume();
+    await vi.waitFor(() => expect(sent).toHaveBeenCalledOnce());
+    expect(sent.mock.calls[0][1]).toMatchObject({ nodeIds: [8, 9], includeCredentials: false });
+    expect(Object.isFrozen(sent.mock.calls[0][1].nodeIds)).toBe(true);
+    broker.complete(17, renameCompletion());
+    await expect(pending).resolves.toMatchObject({ nodes: [{ id: 8 }, { id: 9 }] });
+    expect(before).toHaveBeenCalledOnce(); expect(after).toHaveBeenCalledOnce();
+    expect(() => broker.complete(17, renameCompletion())).toThrow('失效');
+  });
+
+  it('rejects empty, duplicate, oversized or nonnumeric target selections before IPC', async () => {
+    const broker = createAgentFileAuthorityBroker(); const sent = vi.fn();
+    for (const ids of [[], [8, 8], [0], [-1], ['8'], [Number.MAX_SAFE_INTEGER + 1], new Array(1), Array.from({ length: 51 }, (_, i) => i + 1)]) {
+      await expect(renameRequest(broker, ids as number[], false, sender(sent))).rejects.toThrow();
+    }
+    await expect(renameRequest(broker, [8], 'yes' as unknown as boolean, sender(sent))).rejects.toThrow();
+    expect(sent).not.toHaveBeenCalled();
+  });
+
+  it('rejects reordered, foreign, incomplete, directory and extra-field results without accepting them', async () => {
+    const broker = createAgentFileAuthorityBroker({ createId: () => 'rename-authority' });
+    const pending = renameRequest(broker);
+    for (const nodes of [[node({ id: 9 }), node()], [node(), node({ id: 10 })], [node()],
+      [node(), node({ id: 9, libraryId: 4 })], [node(), node({ id: 9, type: 'dir' })],
+      [node(), { ...node({ id: 9 }), downloadUrl: 'https://private.example' }]]) {
+      expect(() => broker.complete(17, renameCompletion({ operation: 'rename-library-files', version: 1, nodes }))).toThrow();
+    }
+    expect(() => broker.complete(17, renameCompletion({ operation: 'rename-library-files', version: 1, nodes: [node(), node({ id: 9 })], downloadUrl: 'https://private.example' }))).toThrow();
+    broker.complete(17, renameCompletion()); await expect(pending).resolves.toHaveProperty('nodes');
+  });
+
+  it('returns credentials only when explicitly requested and rejects missing or oversized secrets', async () => {
+    const broker = createAgentFileAuthorityBroker({ createId: () => 'rename-authority' });
+    const read = renameRequest(broker);
+    const value = { operation: 'rename-library-files', version: 1, nodes: [node(), node({ id: 9 })], credentials: { token: 'token', username: 'user' } };
+    expect(() => broker.complete(17, renameCompletion(value))).toThrow('未申请凭据');
+    broker.complete(17, renameCompletion()); await read;
+    const withCredentials = renameRequest(broker, [8, 9], true);
+    expect(() => broker.complete(17, renameCompletion())).toThrow('缺少请求的凭据');
+    expect(() => broker.complete(17, renameCompletion({ ...value, credentials: { token: 'x'.repeat(32769), username: 'user' } }))).toThrow();
+    expect(() => broker.complete(17, renameCompletion({ ...value, credentials: { token: 'token', username: 'user', backend: 'other' } }))).toThrow();
+    broker.complete(17, renameCompletion(value)); await expect(withCredentials).resolves.toMatchObject({ credentials: { token: 'token', username: 'user' } });
+  });
+
+  it('rejects oversized metadata bodies, getters and sparse result arrays', async () => {
+    const broker = createAgentFileAuthorityBroker({ createId: () => 'rename-authority' });
+    const pending = renameRequest(broker);
+    const result = { operation: 'rename-library-files', version: 1, nodes: [node(), node({ id: 9, storageKey: 'x'.repeat(256 * 1024) })] };
+    expect(() => broker.complete(17, renameCompletion(result))).toThrow('安全上限');
+    const getter = vi.fn(() => 8); const hostile = Object.defineProperty(node(), 'id', { get: getter, enumerable: true });
+    expect(() => broker.complete(17, renameCompletion({ ...result, nodes: [hostile, node({ id: 9 })] }))).toThrow();
+    expect(getter).not.toHaveBeenCalled();
+    expect(() => broker.complete(17, renameCompletion({ ...result, nodes: new Array(2) }))).toThrow();
+    broker.complete(17, renameCompletion()); await pending;
+  });
+
+  it('cancels a pending credentials acquisition and refuses its late reply', async () => {
+    const broker = createAgentFileAuthorityBroker({ createId: () => 'rename-authority' }); const controller = new AbortController();
+    const pending = renameRequest(broker, [8, 9], true, sender(), controller.signal);
+    controller.abort(); await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    expect(() => broker.complete(17, renameCompletion())).toThrow('失效');
+  });
+});
+
 describe('Agent file authority broker', () => {
   it('accepts one identity-bound completion and rejects replay', async () => {
     let delivered: AgentFileAuthorityRequestV1 | undefined;

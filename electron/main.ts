@@ -1,3 +1,4 @@
+import { configureAgentPluginService, disposeAgentPluginService } from './service/agent/agent-plugin-service'
 import { PluginManager } from './service/extensions/plugin-manager'
 import { registerPluginManagementIpc } from './service/extensions/plugin-management-ipc'
 import { registerPluginScheme } from './service/extensions/isolated-view'
@@ -418,6 +419,7 @@ const appGracefulShutdown = createAppGracefulShutdown({
     overlayWindowController.destroy()
     systemVideoWindowController.destroy()
     let agentSettled = await agentOrchestrator.shutdown()
+    disposeAgentPluginService()
     await clearFileTransferRuntime()
     await disposeAgentShellServiceRuntime()
     if (!agentSettled) {
@@ -495,6 +497,7 @@ app.whenReady().then(async () => {
     await manager.initialize()
     registerPluginManagementIpc(manager, () => mainWindow)
     registerFirstPartyViewer(() => mainWindow, { manager })
+    configureAgentPluginService({ manager, getMainWindow: () => mainWindow })
   }
   registerWindowControlIpcHandlers({
     getMainWindow: () => mainWindow,

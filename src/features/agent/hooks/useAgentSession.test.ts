@@ -6,6 +6,7 @@ import type {
   AgentAssistantItemSnapshot,
   AgentChatStreamEvent,
   AgentMediaExtractAudioPreparedActionPublicV1,
+  AgentOwnerScope,
   AgentRunSnapshot,
   AgentSessionSnapshot,
   AgentToolApprovalSnapshot,
@@ -35,10 +36,12 @@ const contextMocks = vi.hoisted(() => ({
 const executorMocks = vi.hoisted(() => ({
   executeAgentRendererTool: vi.fn(),
 }));
+const mutationMocks = vi.hoisted(() => ({ notifyLibraryNodesMutated: vi.fn() }));
 
 vi.mock('../services/agent.api', () => apiMocks);
 vi.mock('../services/agent-context.api', () => contextMocks);
 vi.mock('../services/agent-tool-executor', () => executorMocks);
+vi.mock('@/features/file-explorer/services/node-mutation-events', () => mutationMocks);
 
 const OWNER_SCOPE = {
   accountScope: 'user:7',
@@ -176,11 +179,11 @@ function renderSessionHook(onRefreshDirectory?: (id: number) => Promise<void> | 
   let current: ReturnType<typeof useAgentSession> | null = null;
   const onSessionChanged = vi.fn();
   const onSessionTitleChanged = vi.fn();
-  function Harness() {
+  function Harness({ scope = OWNER_SCOPE, libraryId = 3 }: { scope?: AgentOwnerScope; libraryId?: number }) {
     current = useAgentSession({
       appContext: {
         currentDirectory: { id: 10, name: '视频' },
-        libraryId: 3,
+        libraryId,
         platform: 'darwin',
         selectedNodeIds: [],
       },
@@ -188,7 +191,7 @@ function renderSessionHook(onRefreshDirectory?: (id: number) => Promise<void> | 
       onSessionChanged,
       onSessionTitleChanged,
       onRefreshDirectory,
-      ownerScope: OWNER_SCOPE,
+      ownerScope: scope,
       profileId: 'profile-a',
       reasoningEffort: 'medium',
     });
@@ -206,11 +209,106 @@ function renderSessionHook(onRefreshDirectory?: (id: number) => Promise<void> | 
     },
     onSessionChanged,
     onSessionTitleChanged,
+    changeScope: (scope: AgentOwnerScope, libraryId: number) => act(() => renderer.update(React.createElement(Harness, { scope, libraryId }))),
     unmount: () => act(() => renderer.unmount()),
   };
 }
 
 describe('useAgentSession event coordination', () => {
+  function renameActivity(libraryId = 3): AgentToolActivitySnapshot {
+    const operationId = 'eaf4604e-5779-4a3c-8c3d-3eaf45c9aa68';
+    return { ...activity(2, 'completed'), call: { id: 'rename-call', name: 'example.rename.propose', input: { resources: [11] } },
+      pluginSource: { pluginId: 'example.rename', pluginVersion: '0.1.0', packageFingerprint: 'a'.repeat(64), toolId: 'example.rename.propose', registrationId: `plugin-tool:${'b'.repeat(64)}` },
+      preparation: { preparedActionId: 'prepared', snapshotHash: 'c'.repeat(64), action: {
+        kind: 'plugin.rename', version: 1, libraryId, operationId, pluginId: 'example.rename', pluginVersion: '0.1.0', packageFingerprint: 'a'.repeat(64),
+        items: [{ nodeId: 11, parentId: 10, oldName: 'old.txt', newName: '新名称.txt' }],
+      } },
+      result: { ok: true, data: { operationId, mutationCommitState: 'committed', affectedParentIds: [10],
+        items: [{ nodeId: 11, parentId: 10, name: '新名称', ext: 'txt' }] } },
+    };
+  }
+
+  it('synchronizes a committed plugin rename with the current owner once and preserves its receipt on refresh failure', async () => {
+    const renamed = renameActivity();
+    apiMocks.getAgentSession.mockResolvedValue({ ...sessionSnapshot(), toolActivities: [] });
+    const refresh = vi.fn().mockRejectedValue(new Error('refresh offline')); const hook = renderSessionHook(refresh);
+    try {
+      await act(async () => { await hook.current.restore('session-1'); });
+      await act(async () => listener?.({ type: 'tool-completed', sessionId: 'session-1', runId: 'run-1',
+        activity: renamed, call: renamed.call, result: renamed.result! }));
+      expect(mutationMocks.notifyLibraryNodesMutated).toHaveBeenCalledTimes(1);
+      expect(mutationMocks.notifyLibraryNodesMutated).toHaveBeenCalledWith({
+        ...OWNER_SCOPE, libraryId: 3, nodeId: 11, parentId: 10, name: '新名称', ext: 'txt', type: 'file', affectedParentIds: [10],
+      });
+      expect(refresh).toHaveBeenCalledWith(10); expect(hook.current.warning).toContain('不要重复执行');
+      expect(hook.current.toolActivities[0].result?.ok).toBe(true);
+      await act(async () => listener?.({ type: 'tool-completed', sessionId: 'session-1', runId: 'run-1',
+        activity: { ...renamed, revision: 3 }, call: renamed.call, result: renamed.result! }));
+      expect(mutationMocks.notifyLibraryNodesMutated).toHaveBeenCalledTimes(1); expect(refresh).toHaveBeenCalledTimes(1);
+    } finally { hook.unmount(); }
+  });
+
+  it('refreshes a historical rename without replaying possibly obsolete names into open tabs', async () => {
+    apiMocks.getAgentSession.mockResolvedValue({ ...sessionSnapshot(), toolActivities: [renameActivity()] });
+    const refresh = vi.fn(); const hook = renderSessionHook(refresh);
+    try {
+      await act(async () => { await hook.current.restore('session-1'); });
+      expect(refresh).toHaveBeenCalledWith(10); expect(mutationMocks.notifyLibraryNodesMutated).not.toHaveBeenCalled();
+    } finally { hook.unmount(); }
+  });
+
+  it('does not roll an existing tab name back when returning to an older rename session after a later change', async () => {
+    apiMocks.getAgentSession.mockResolvedValue({ ...sessionSnapshot(), toolActivities: [] });
+    const hook = renderSessionHook(vi.fn()); let tabName = 'old.txt';
+    mutationMocks.notifyLibraryNodesMutated.mockImplementation(event => { tabName = `${event.name}.${event.ext}`; });
+    try {
+      await act(async () => { await hook.current.restore('session-1'); });
+      const renamed = renameActivity();
+      await act(async () => listener?.({ type: 'tool-completed', sessionId: 'session-1', runId: 'run-1',
+        activity: renamed, call: renamed.call, result: renamed.result! }));
+      expect(tabName).toBe('新名称.txt');
+      // Another authorized operation already supplied a newer current filename.
+      tabName = '后续修改.txt';
+      hook.changeScope(OWNER_SCOPE, 4);
+      hook.changeScope(OWNER_SCOPE, 3);
+      apiMocks.getAgentSession.mockResolvedValue({ ...sessionSnapshot(), toolActivities: [renamed] });
+      await act(async () => { await hook.current.restore('session-1'); });
+      expect(tabName).toBe('后续修改.txt'); expect(mutationMocks.notifyLibraryNodesMutated).toHaveBeenCalledTimes(1);
+    } finally { hook.unmount(); mutationMocks.notifyLibraryNodesMutated.mockReset(); }
+  });
+
+  it('does not rename or refresh this library from a foreign-library or uncertain receipt', async () => {
+    for (const renamed of [renameActivity(4), { ...renameActivity(), result: { ok: false, data: {
+      operationId: 'eaf4604e-5779-4a3c-8c3d-3eaf45c9aa68', mutationCommitState: 'commit_unknown', affectedParentIds: [10],
+    } } }]) {
+      apiMocks.getAgentSession.mockResolvedValue({ ...sessionSnapshot(), toolActivities: [renamed] });
+      const refresh = vi.fn(); const hook = renderSessionHook(refresh);
+      try {
+        await act(async () => { await hook.current.restore('session-1'); });
+        expect(mutationMocks.notifyLibraryNodesMutated).not.toHaveBeenCalled(); expect(refresh).not.toHaveBeenCalled();
+      } finally { hook.unmount(); }
+    }
+  });
+
+  it.each(['owner', 'library'] as const)('rejects late rename events retained by an old %s subscription', async change => {
+    apiMocks.getAgentSession.mockResolvedValue({ ...sessionSnapshot(), toolActivities: [] });
+    const refresh = vi.fn(); const hook = renderSessionHook(refresh);
+    try {
+      await act(async () => { await hook.current.restore('session-1'); });
+      const previousListener = listener;
+      const nextOwner = change === 'owner' ? { ...OWNER_SCOPE, accountScope: 'user:8' } : OWNER_SCOPE;
+      const nextLibrary = change === 'library' ? 4 : 3;
+      hook.changeScope(nextOwner, nextLibrary);
+      apiMocks.getAgentSession.mockResolvedValue({ ...sessionSnapshot(), libraryId: nextLibrary, toolActivities: [] });
+      await act(async () => { await hook.current.restore('session-1'); });
+      // Even a reused session ID cannot make the old subscription write labels under a new owner.
+      const renamed = renameActivity();
+      await act(async () => previousListener?.({ type: 'tool-completed', sessionId: 'session-1', runId: 'run-1',
+        activity: renamed, call: renamed.call, result: renamed.result! }));
+      expect(mutationMocks.notifyLibraryNodesMutated).not.toHaveBeenCalled(); expect(refresh).not.toHaveBeenCalled();
+      expect(hook.current.toolActivities).toEqual([]);
+    } finally { hook.unmount(); }
+  });
   it.each(['accepted', 'rejected'] as const)('continues a stopped task without adding another question: %s', async outcome => {
     apiMocks.getAgentSession.mockResolvedValue({ ...sessionSnapshot(), lastRunStatus: 'cancelled',
       runs: [run(2, 'cancelled')], toolActivities: [] });

@@ -93,6 +93,49 @@ describe('Agent persistence runtime manager', () => {
     ]);
   });
 
+  it('adds plugin provenance in coordinated bootstrap without rewriting existing ToolRun history', async () => {
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'omniflow-agent-plugin-migration-'));
+    temporaryDirectories.push(directory);
+    const databasePath = path.join(directory, 'agent.sqlite3');
+    const ownerScope = { accountScope: 'user:7', backendScope: 'https://example.com/api' };
+    const before = await createSQLiteAgentSessionStore(databasePath);
+    try {
+      await before.createSession({
+        id: 'preserved-session', ownerScope, title: '保留的会话', now: '2026-09-22T00:00:00.000Z',
+        appContext: { libraryId: 3, platform: 'darwin', selectedNodeIds: [] },
+      });
+      await before.createRun({ id: 'preserved-run', sessionId: 'preserved-session', model: 'model',
+        profileId: 'profile', reasoningEffort: 'auto', userPrompt: '读取文件', now: '2026-09-22T00:00:01.000Z' });
+      await before.createToolRun({ id: 'preserved-tool', runId: 'preserved-run', callId: 'preserved-call',
+        input: { nodeId: 42 }, permissionBehavior: 'allow', toolName: 'file.read', status: 'running',
+        now: '2026-09-22T00:00:02.000Z' });
+      await before.completeToolRun('preserved-tool', { ok: true, data: { text: '历史内容' } }, '2026-09-22T00:00:03.000Z');
+      await before.updateRun('preserved-run', { status: 'cancelled', updatedAt: '2026-09-22T00:00:04.000Z' });
+    } finally { await before.close(); }
+    await withDatabase(databasePath, database => exec(database, `
+      DROP TRIGGER agent_tool_runs_validate_plugin_source_insert;
+      DROP TRIGGER agent_tool_runs_plugin_source_is_immutable;
+      DROP TRIGGER agent_tool_runs_validate_preparation_insert;
+      DROP TRIGGER agent_tool_runs_validate_preparation_update;
+      ALTER TABLE agent_tool_runs DROP COLUMN plugin_source_json;
+    `));
+    await bootstrapAgentPersistenceDatabase(databasePath);
+    const after = await createSQLiteAgentSessionStore(databasePath);
+    try {
+      const history = await after.getSession('preserved-session', ownerScope, 3);
+      expect(history?.toolActivities).toHaveLength(1);
+      expect(history?.toolActivities[0]).toMatchObject({
+        id: 'preserved-tool', status: 'completed', result: { ok: true, data: { text: '历史内容' } },
+      });
+      expect(history?.toolActivities[0].pluginSource).toBeUndefined();
+      expect(await withDatabase(databasePath, database => get(database,
+        "SELECT plugin_source_json FROM agent_tool_runs WHERE id = 'preserved-tool'")))
+        .toEqual({ plugin_source_json: null });
+      expect(await withDatabase(databasePath, database => get(database, 'PRAGMA user_version')))
+        .toEqual({ user_version: 2 });
+    } finally { await after.close(); }
+  });
+
   it('reconciles a legacy prepared action inside the production bootstrap transaction', async () => {
     const directory = await mkdtemp(path.join(os.tmpdir(), 'omniflow-agent-bootstrap-legacy-'));
     temporaryDirectories.push(directory);

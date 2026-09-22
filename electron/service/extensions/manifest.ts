@@ -6,12 +6,16 @@ import { createHash } from 'node:crypto';
 import schema from '../../../packages/plugin-sdk/manifest.schema.json';
 import { LIMITS } from '../../../packages/plugin-sdk/index.js';
 import { validateIconSvg } from '../../../src/features/appearance/svg-assets';
+import type { PluginToolContribution } from '../../../packages/plugin-sdk/index.js';
+import { validateToolSchemas } from './tool-schema';
+export type { PluginToolContribution, PluginToolSchema } from '../../../packages/plugin-sdk/index.js';
 
 export interface PluginManifest {
-  formatVersion: 1; id: string; version: string; sdkVersion: 1; minHostVersion: string;
-  platforms: Array<'darwin' | 'win32' | 'linux'>; entry: string;
-  activation: string[]; permissions: Array<'resource.read'>;
-  viewers: Array<{ id: string; title: string; extensions: string[] }>;
+  formatVersion: 1 | 2; id: string; version: string; sdkVersion: 1; minHostVersion: string;
+  platforms: Array<'darwin' | 'win32' | 'linux'>; entry?: string;
+  activation: string[]; permissions: Array<'resource.read' | 'directory.read' | 'agent.tools' | 'resource.rename.propose'>;
+  viewers: Array<{ id: string; title: string; extensions: string[]; directoryTypes?: Array<'COMIC'> }>;
+  agentTools?: PluginToolContribution[];
 }
 const validate = new Ajv({ allErrors: true }).compile<PluginManifest>(schema);
 export function isPackagePath(value: string): boolean {
@@ -20,17 +24,31 @@ export function isPackagePath(value: string): boolean {
 }
 export function parsePluginManifest(input: unknown, platform: string, hostVersion = '0.2.2'): PluginManifest {
   if (!validate(input)) throw new Error('Invalid plugin manifest');
-  if (!input.platforms.some(item => item === platform) || !isPackagePath(input.entry) || !input.entry.endsWith('.html')) throw new Error('Unsupported plugin platform or entry');
+  if (!input.platforms.some(item => item === platform) || (input.entry !== undefined && (!isPackagePath(input.entry) || !input.entry.endsWith('.html')))) throw new Error('Unsupported plugin platform or entry');
   const min = input.minHostVersion.split('.').map(Number); const host = hostVersion.split('.').map(Number);
   const comparison = min.map((value, index) => value - host[index]).find(value => value !== 0) ?? 0;
   if (comparison > 0) throw new Error('Incompatible host version');
-  const ids = new Set<string>();
-  for (const viewer of input.viewers) {
+  const ids = new Set<string>(); const activation = new Set<string>();
+  for (const viewer of input.viewers ?? []) {
     if (!viewer.id.startsWith(`${input.id}.`) || !/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/.test(viewer.id) || ids.has(viewer.id)) throw new Error('Invalid or duplicate viewer id');
+    if (viewer.directoryTypes && (!input.permissions.includes('directory.read') || !input.permissions.includes('resource.read'))) throw new Error('Directory viewer requires read permissions');
     ids.add(viewer.id);
+    activation.add(`viewer:${viewer.id}`);
   }
-  if (input.activation.length !== ids.size || input.activation.some(event => !event.startsWith('viewer:') || !ids.has(event.slice(7)))) throw new Error('Invalid activation conditions');
-  return structuredClone(input);
+  for (const tool of input.agentTools ?? []) {
+    if (!tool.id.startsWith(`${input.id}.`) || !/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/.test(tool.id) || ids.has(tool.id)) throw new Error('Invalid or duplicate tool id');
+    if (!isPackagePath(tool.entry) || !tool.entry.endsWith('.html')) throw new Error('Invalid tool entry');
+    if (tool.kind === 'rename-proposal') {
+      if (!input.permissions.includes('agent.tools') || !input.permissions.includes('resource.rename.propose')
+        || input.permissions.includes('resource.read') || input.permissions.includes('directory.read') || input.viewers?.length) throw new Error('Proposal Tool requires metadata-only permissions');
+    } else if (!input.permissions.includes('agent.tools') || !input.permissions.includes('resource.read') || input.permissions.includes('directory.read')) throw new Error('Tool requires single-file read permissions');
+    validateToolSchemas(tool.inputSchema, tool.outputSchema, tool.kind);
+    ids.add(tool.id); activation.add(`tool:${tool.id}`);
+  }
+  if (input.permissions.includes('agent.tools') && !input.agentTools?.length) throw new Error('Tool permission requires a tool contribution');
+  if (input.permissions.includes('resource.rename.propose') && !input.agentTools?.some(tool => tool.kind === 'rename-proposal')) throw new Error('Proposal permission requires a proposal contribution');
+  if (input.activation.length !== activation.size || input.activation.some(event => !activation.has(event))) throw new Error('Invalid activation conditions');
+  return { ...structuredClone(input), viewers: structuredClone(input.viewers ?? []) };
 }
 export interface LoadedPluginPackage { source: string; fingerprint: string; manifest: PluginManifest; assets: ReadonlyMap<string, { bytes: Buffer; mime: string }> }
 const MIME: Record<string, string> = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.png': 'image/png', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.woff2': 'font/woff2' };
@@ -78,7 +96,7 @@ export async function loadPluginPackage(directory: string, platform = process.pl
   const manifestBytes = assets.get('manifest.json')?.bytes;
   if (!manifestBytes || manifestBytes.length > LIMITS.requestBytes) throw new Error('Missing or oversized manifest');
   if (JSON.stringify(parsePluginManifest(JSON.parse(manifestBytes.toString('utf8')), platform)) !== JSON.stringify(manifest)) throw new Error('Manifest changed during loading');
-  if (!assets.has(manifest.entry)) throw new Error('Plugin entry not found');
+  if ((manifest.entry !== undefined && !assets.has(manifest.entry)) || manifest.agentTools?.some(tool => !assets.has(tool.entry))) throw new Error('Plugin entry not found');
   const source = await realpath(root);
   const hash = createHash('sha256').update('omniflow-package-v1\n');
   for (const [key, asset] of [...assets].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) {

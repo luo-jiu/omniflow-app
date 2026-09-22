@@ -1,1 +1,16 @@
-{"name":"omniflow-readonly-starter","version":"0.1.0","private":true,"type":"module","engines":{"node":">=20"},"scripts":{"build":"node build.mjs","package":"node pack.mjs"},"dependencies":{"@omniflow/plugin-sdk":"0.1.0"}}
+{
+  "name": "omniflow-readonly-starter",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "package": "node pack.mjs"
+  },
+  "dependencies": {
+    "@omniflow/plugin-sdk": "0.4.0"
+  }
+}

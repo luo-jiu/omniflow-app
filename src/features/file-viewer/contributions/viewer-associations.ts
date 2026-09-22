@@ -4,6 +4,7 @@ import type { ViewerFacts } from './viewer-registry';
 
 const PREFIX = 'omniflow:viewer-associations:v1:';
 export function viewerFormatKey(facts: ViewerFacts): string {
+  if (facts.fileType === 'comic') return 'comic:';
   return `${facts.fileType ?? 'other'}:${/\.([a-z0-9]{1,32})$/i.exec(facts.fileName ?? '')?.[1].toLowerCase() ?? ''}`;
 }
 function storageKey(accountScope: string, libraryId: number) {

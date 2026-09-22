@@ -6,14 +6,14 @@ export function installManagedViewerContributions(View:ComponentType<FileDispatc
   const installed=new Map<string,{signature:string;release:()=>void}>();
   const sync=()=>{
     const catalog=pluginManagementApi.getSnapshot();if(!catalog)return;
-    const enabled=catalog.plugins.filter(item=>item.enabled&&!item.blockedReason&&(!item.permissions.includes('resource.read')||item.readApproved));
+    const enabled=catalog.plugins.filter(item=>item.viewers.length>0&&item.enabled&&!item.blockedReason&&(!item.permissions.includes('resource.read')||item.readApproved));
     for(const [id,item] of installed)if(!enabled.some(plugin=>plugin.id===id)){item.release();installed.delete(id);}
     for(const plugin of enabled){
       const signature=JSON.stringify([plugin.fingerprint,plugin.viewers]);if(installed.get(plugin.id)?.signature===signature)continue;
       installed.get(plugin.id)?.release();
       // 包改变时更换组件类型，让旧实例卸载；不能沿用旧的逐文件授权。
       const ManagedView=(props:FileDispatcherProps)=>createElement(View,props);
-      const release=viewerRegistry.registerBatch(plugin.id,plugin.viewers.map(viewer=>({...viewer,title: `${viewer.title.slice(0,60)} · ${plugin.source === 'bundled' ? '随应用' : plugin.id.slice(0,60)}`,fileTypes:['text','image','pdf','other'],View:ManagedView})));
+      const release=viewerRegistry.registerBatch(plugin.id,plugin.viewers.map(viewer=>({...viewer,title: `${viewer.title.slice(0,60)} · ${plugin.source === 'bundled' ? '随应用' : plugin.id.slice(0,60)}`,extensions: viewer.directoryTypes ? undefined : viewer.extensions,fileTypes:viewer.directoryTypes ? ['comic'] : ['text','image','pdf','other'],View:ManagedView})));
       installed.set(plugin.id,{signature,release});
     }
   };

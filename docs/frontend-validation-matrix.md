@@ -1,5 +1,33 @@
 # 前端验证矩阵
 
+## W0～W2 受控插件改名（2026-09-22）
+
+最近一次全量：401 个测试文件通过、3 个跳过，3087 项通过、7 项跳过；lint/build 通过。后端全量 Go 测试与 CLI 构建通过；最后启动恢复收尾另通过 79 项 Store/session/bootstrap 回归并重新构建，不累计测试数。
+
+已通过 SDK/权限/元数据隔离、准备身份/目标替换拒绝、稳定 operation ID、微秒条件、HTTP 回执校验、主进程取消结算、SQLite 严格约束和确认卡/结果投影回归。真实 macOS Electron 运行独立插件 ZIP、PluginManager、沙箱、Agent Orchestrator 与 SQLite，使用合成模型/HTTP/libraryId=3，覆盖批准、拒绝、响应丢失、完全访问仍要求确认，以及提交期间取消后保留 committed/commit_unknown。另以真实 PG 单连接临时影子表验证实际 SQL、唯一索引、dry-run/冲突回滚和持久回执逻辑，最后回滚且不触碰用户节点或 sequence。复现与证据边界见 [W0～W2](plugin-system-w0-w2-rename.md)。
+
+本批限定 macOS 功能验收已完成：新版 8850、管理页安装/启用、独立提案/Tool 权限、真实 gpt-5.5 调用及 Win/local-minio 两份新增合成 TXT 的范围确认→完整预览→提案批准→原子改名通过。目录立即显示新名，原打开 a 文件的预览标签与底部名称同步，正文保持 fixture A；PG 与 SQLite 核对同一 committed operation。首次试运行在范围批准前停止，Run/Tool/批准均 cancelled 且无提交。Tool-only 空 Viewer 白屏已修复并刷新确认。证据 ID 保留在 W0～W2 专题。
+
+持续回归：批准前变化要求重新确认、同名/过期条件全批拒绝、撤权与取消结算、历史会话只刷新父目录而不广播旧名称。50 项列表完整性有自动化断言，实际视觉验证为暗色两项卡片；亮/暗 50 项长列表及滚动点击尚未手验。小时性能、发行包、其他平台、跨重启自动回执核对及撤销未覆盖，不纳入本次有限完成声明。不可用合成 HTTP 或组件数据测试宣称主题视觉或未做的人工组合已通过。
+
+启动恢复已有本机 Store/session/bootstrap 自动回归：running＋approved 且来源有效的改名保守保存 interrupted/commit_unknown 与 operation ID；审批前不标未知，已提交 ToolRun 回执保持不变；所属活跃 Run 不再建议直接重发，同一 Run 有未知改名时优先要求核对。重复初始化幂等，损坏来源不授予可信提交事实。该测试不执行自动网络核对或真实进程崩溃后重新提交。
+
+## AT2 插件故障与恢复（2026-09-22）
+
+2834项测试通过、7项跳过，lint/types/build通过；原生Electron故障实验63项断言通过，覆盖撤权/管理变更/崩溃/死循环/超时/重复终态/四槽回收。修复故障原因被取消覆盖、重复终态抢占和离库未释放pure-main Run。实际win（ID 3）中，插件等待单文件授权时离库，Run/插件ToolRun/授权均取消；返回后来源审计恢复且无旧批准按钮，macOS既定范围完成。不把13秒循环视为长时内存验收。见 [AT2](plugin-system-at2-fault-recovery.md)。
+
+## AT1 Agent 插件调用（2026-09-22）
+
+全量2805项通过、7项跳过，lint/types/build通过；真实Electron+生产Agent+插件沙箱+SQLite+回环SSE/存储的合成查询通过，零Viewer。更换有效Key后，真实gpt-5.5的合成资源链路通过；实际win库（ID 3/local-minio）也完成安装双批准、单文件读取确认、205行CSV查询及来源详情核对，未打开Viewer。AT2完整故障与长时性能后续验证。范围与复现见 [AT1](plugin-system-at1-agent-tools.md)。
+
+## AT0 隔离 Tool（2026-09-22）
+
+全量 2720 项通过、7 项跳过，lint/build 通过；macOS 隐藏 CSV Tool 与旧 Viewer 共存、输出、跨实例拒绝、撤权广播、取消和路由释放完成 17 项 Electron 合成验证。本段为AT0底座验收；后续真实模型、会话目录和ToolRun接线与UI验收已在AT1完成。完整范围见 [AT0 实验](plugin-system-at0-tool-runtime.md)。
+
+## E1 目录插件（2026-09-22）
+
+全量 2618 项通过、7 项跳过，lint/build 通过；macOS 隔离 Electron 合成链路 11 项通过并检查亮暗截图。已在 win（ID 3）12 页漫画样本验证接管、默认打开方式、关闭重开/工作区恢复、overlay、撤权、停用回退及重新启用；长漫画、大图和持续资源趋势待验收，不使用第一个资料库。契约、复现命令和完整边界见 [E1 目录查看器](plugin-system-e1-directory-viewer.md)。
+
 ## macOS全屏标题栏留白（2026-09-14）
 
 - 原生全屏时目录树开关left从75px变为10px，退出恢复；拖拽区域、点击保护区及侧栏折叠后的工具栏留白同步。平台DOM标记来自主进程全屏事件与初始只读查询，页面不按尺寸猜测。

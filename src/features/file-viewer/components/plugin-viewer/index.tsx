@@ -7,6 +7,7 @@ import type { FileDispatcherProps } from '../../contributions/viewer.types';
 import type { PluginViewerSnapshot } from '@/shared/plugin-viewer';
 import type { ThemeSnapshot } from '../../../../../packages/plugin-sdk/index.js';
 export function PluginViewer(props: FileDispatcherProps) {
+  const directory = props.fileType === 'comic';
   const appearance = useContext(AppearanceViewContext);
   const scopeKey = JSON.stringify([props.accountScope, props.libraryId, props.nodeId, props.viewerId, props.contentRevision]);
   const [grantScope, setGrantScope] = useState<string | null>(null);
@@ -56,8 +57,8 @@ export function PluginViewer(props: FileDispatcherProps) {
   if (fatal) throw new Error('Isolated viewer stopped');
   return <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
     <div style={{ display: 'flex', gap: 8, padding: 8, alignItems: 'center', fontSize: 12 }}>
-      <span>插件只读查看器 · 仅当前文件</span>
-      <button onClick={() => setGrantScope(granted ? null : scopeKey)}>{granted ? '撤销读取授权' : '允许读取此文件'}</button>
+      <span>插件只读查看器 · {directory ? '当前目录直属图片' : '仅当前文件'}</span>
+      <button onClick={() => setGrantScope(granted ? null : scopeKey)}>{granted ? '撤销读取授权' : directory ? '允许读取此目录图片' : '允许读取此文件'}</button>
       {granted && <button onClick={() => setRetry(value => value + 1)}>重新加载</button>}
       <button onClick={() => props.onSelectViewer?.(builtInViewerId(props.fileType ?? 'other'))}>切回内置查看器</button>
       <span role="status">{granted ? status : '授权后才能读取正文。'}</span>

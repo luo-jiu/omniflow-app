@@ -8,16 +8,13 @@ const mocks = vi.hoisted(() => ({
   getFileLink: vi.fn(),
   getLibraryRootNodeId: vi.fn(),
 }));
+const authMocks = vi.hoisted(() => ({ getToken: vi.fn(), getUsername: vi.fn(), getUserInfo: vi.fn() }));
+const storageMocks = vi.hoisted(() => ({ fetchProviders: vi.fn(), resolveTarget: vi.fn(), testProvider: vi.fn() }));
 
 vi.mock('@/features/file-explorer/services/file.api', () => mocks);
-vi.mock('@/features/storage-config/services/storage-config.api', () => ({
-  fetchProviders: vi.fn(),
-  resolveTarget: vi.fn(),
-  testProvider: vi.fn(),
-}));
-vi.mock('@/utils/auth', () => ({
-  auth: { getToken: vi.fn(), getUsername: vi.fn() },
-}));
+vi.mock('@/features/storage-config/services/storage-config.api', () => storageMocks);
+vi.mock('@/utils/auth', () => ({ auth: authMocks }));
+vi.mock('@/config/api', () => ({ API_CONFIG: { BASE_URL: 'https://example.com/api' } }));
 
 import { resolveAgentFileAuthority } from './agent-file-authority';
 
@@ -136,5 +133,66 @@ describe('resolveAgentFileAuthority library directory paths', () => {
     mocks.fetchNodeDetailById.mockResolvedValue(directory(20, '提示词', 11));
 
     await expect(resolveAgentFileAuthority(request())).rejects.toThrow('已经变化或不可用');
+  });
+});
+
+function renameRequest(nodeIds = [8, 9], includeCredentials = false): AgentFileAuthorityRequestV1 {
+  const base = request();
+  return { authorityId: base.authorityId, libraryId: base.libraryId, ownerScope: base.ownerScope,
+    runId: base.runId, sessionId: base.sessionId, toolRunId: base.toolRunId, version: 1,
+    operation: 'rename-library-files', nodeIds, includeCredentials };
+}
+function file(id: number) {
+  return { id, libraryId: 3, parentId: 2, type: 'file' as const, name: `image-${id}`, ext: 'jpg', fileSize: 42,
+    updatedAt: '2026-09-22T10:30:00Z' };
+}
+
+describe('resolveAgentFileAuthority rename metadata', () => {
+  beforeEach(() => {
+    [...Object.values(mocks), ...Object.values(storageMocks), ...Object.values(authMocks)].forEach(mock => mock.mockReset());
+    authMocks.getUserInfo.mockReturnValue({ id: 7 });
+    authMocks.getToken.mockReturnValue('current-token'); authMocks.getUsername.mockReturnValue('current-user');
+    mocks.fetchNodeDetailById.mockImplementation(async (id: number) => file(id));
+  });
+
+  it('returns ordered file metadata without touching storage, file bodies or credentials', async () => {
+    const result = await resolveAgentFileAuthority(renameRequest([9, 8]));
+    expect(result).toEqual({ operation: 'rename-library-files', version: 1, nodes: [{ ...file(9), version: 1 }, { ...file(8), version: 1 }] });
+    expect(mocks.fetchNodeDetailById.mock.calls).toEqual([[9], [8]]);
+    expect(mocks.getFileLink).not.toHaveBeenCalled(); expect(mocks.getChildrenByNodeId).not.toHaveBeenCalled();
+    expect(mocks.getLibraryRootNodeId).not.toHaveBeenCalled();
+    Object.values(storageMocks).forEach(mock => expect(mock).not.toHaveBeenCalled());
+    expect(authMocks.getToken).not.toHaveBeenCalled(); expect(authMocks.getUsername).not.toHaveBeenCalled();
+  });
+
+  it('acquires current credentials only when requested after metadata validation', async () => {
+    await expect(resolveAgentFileAuthority(renameRequest([8], true))).resolves.toMatchObject({ credentials: { token: 'current-token', username: 'current-user' } });
+    expect(authMocks.getToken).toHaveBeenCalledOnce();
+    expect(mocks.getFileLink).not.toHaveBeenCalled(); Object.values(storageMocks).forEach(mock => expect(mock).not.toHaveBeenCalled());
+    authMocks.getToken.mockReturnValue('');
+    await expect(resolveAgentFileAuthority(renameRequest([8], true))).rejects.toThrow('登录状态已失效');
+  });
+
+  it('rejects malformed selections and foreign owners before any metadata query', async () => {
+    for (const ids of [[], [8, 8], [0], ['8'], new Array(1), Array.from({ length: 51 }, (_, i) => i + 1)]) {
+      await expect(resolveAgentFileAuthority(renameRequest(ids as number[]))).rejects.toThrow();
+    }
+    await expect(resolveAgentFileAuthority({ ...renameRequest(), ownerScope: { accountScope: 'user:9', backendScope: 'https://example.com/api' } })).rejects.toThrow('账号环境已变化');
+    await expect(resolveAgentFileAuthority({ ...renameRequest(), ownerScope: { accountScope: 'user:7', backendScope: 'https://other.example/api' } })).rejects.toThrow('账号环境已变化');
+    expect(mocks.fetchNodeDetailById).not.toHaveBeenCalled();
+  });
+
+  it.each([{ id: 19 }, { libraryId: 4 }, { type: 'dir' }, { parentId: 0 }, { name: '' }, { name: ' padded.jpg' }, { fileSize: '42' }, { fileSize: -1 }])('rejects invalid or changed file metadata %j', patch => {
+    mocks.fetchNodeDetailById.mockResolvedValue({ ...file(8), ...patch });
+    return expect(resolveAgentFileAuthority(renameRequest([8], true))).rejects.toThrow('目标文件已经变化');
+  });
+
+  it('rechecks current owner after asynchronous reads before delivering data or credentials', async () => {
+    mocks.fetchNodeDetailById.mockImplementationOnce(async (id: number) => {
+      authMocks.getUserInfo.mockReturnValue({ id: 9 }); return file(id);
+    });
+    await expect(resolveAgentFileAuthority(renameRequest([8, 9], true))).rejects.toThrow('账号环境已变化');
+    expect(mocks.fetchNodeDetailById).toHaveBeenCalledOnce();
+    expect(authMocks.getToken).not.toHaveBeenCalled();
   });
 });

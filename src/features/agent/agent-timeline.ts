@@ -142,6 +142,7 @@ function canGroupFailedActivity(activity: AgentToolActivitySnapshot): boolean {
 }
 
 function canJoinReadGroup(activity: AgentToolActivitySnapshot): boolean {
+  if (activity.pluginSource) return false;
   return activity.toolMetadata?.kind === 'business'
     && activity.toolMetadata.risk === 'read'
     && activity.toolMetadata.groupKind === 'resource-read'
@@ -155,6 +156,7 @@ function canJoinReadGroup(activity: AgentToolActivitySnapshot): boolean {
 }
 
 function canJoinInternalGroup(activity: AgentToolActivitySnapshot): boolean {
+  if (activity.pluginSource) return false;
   return activity.toolMetadata?.kind === 'business'
     && activity.call.name !== 'shell.run'
     && activity.toolMetadata.risk !== 'external'

@@ -1,0 +1,1 @@
+{"formatVersion":1,"id":"example.comic","version":"0.1.0","sdkVersion":1,"minHostVersion":"0.2.2","platforms":["darwin"],"entry":"index.html","activation":["viewer:example.comic.reader"],"permissions":["resource.read","directory.read"],"viewers":[{"id":"example.comic.reader","title":"漫画插件样板","extensions":[],"directoryTypes":["COMIC"]}]}

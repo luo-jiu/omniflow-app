@@ -18,6 +18,7 @@ import {
   AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_KIND,
   AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_VERSION,
   AGENT_PREPARED_ACTION_PUBLIC_IDENTITIES,
+  AGENT_PLUGIN_RENAME_PREPARED_ACTION_KIND,
   type AgentActionPreview,
   type AgentAppContext,
   type AgentAssistantItemSnapshot,
@@ -28,6 +29,7 @@ import {
   type AgentMessage,
   type AgentNonAssistantMessage,
   type AgentOwnerScope,
+  type AgentPluginToolSource,
   type AgentPreparedActionPublic,
   type AgentReasoningEffort,
   type AgentRunPlanSnapshot,
@@ -67,6 +69,7 @@ import {
 import { normalizeAgentPreparedActionPublicForMain } from './agent-prepared-action';
 import { parseStoredAgentRunPlan } from './agent-plan-model';
 import type { AgentToolKind } from './agent-tool-registry';
+import { MAX_PLUGIN_TOOL_SOURCE_BYTES, PLUGIN_TOOL_SOURCE_FIELDS, normalizeAgentPluginToolSource } from './agent-plugin-source';
 import { agentDatabaseSchemaCoordinator } from './storage/agent-database-schema-coordinator';
 
 export const AGENT_SESSION_SCHEMA_VERSION = 2;
@@ -80,7 +83,6 @@ const MAX_CONTEXT_CHECKPOINT_MODEL_LENGTH = 500;
 const MAX_CONTEXT_CHECKPOINT_SUMMARY_BYTES = 64 * 1024;
 const MAX_ASSISTANT_ITEM_ID_LENGTH = 200;
 const MAX_SAFE_SQLITE_AGENT_ID = Number.MAX_SAFE_INTEGER;
-
 function sqlText(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
 }
@@ -348,6 +350,68 @@ function strictJsonObjectInvalidSql(sourceSql: string, fields: readonly string[]
     OR (SELECT COUNT(*) FROM json_each(${sourceSql})) <> ${fields.length}
   )`;
 }
+
+const PLUGIN_RENAME_SOURCE_SQL = `CASE WHEN json_valid(NEW.plugin_source_json) THEN NEW.plugin_source_json ELSE '{}' END`;
+const PLUGIN_RENAME_ACTION_IDENTITY_SQL = `COALESCE((
+  json_extract(NEW.prepared_action_json, '$.kind') = ${sqlText(AGENT_PLUGIN_RENAME_PREPARED_ACTION_KIND)}
+  AND NEW.plugin_source_json IS NOT NULL
+  AND json_valid(NEW.plugin_source_json) = 1
+  AND NEW.tool_kind = 'business'
+  AND json_extract(${PLUGIN_RENAME_SOURCE_SQL}, '$.toolId') = NEW.tool_name
+  AND json_extract(NEW.prepared_action_json, '$.pluginId') = json_extract(${PLUGIN_RENAME_SOURCE_SQL}, '$.pluginId')
+  AND json_extract(NEW.prepared_action_json, '$.pluginVersion') = json_extract(${PLUGIN_RENAME_SOURCE_SQL}, '$.pluginVersion')
+  AND json_extract(NEW.prepared_action_json, '$.packageFingerprint') = json_extract(${PLUGIN_RENAME_SOURCE_SQL}, '$.packageFingerprint')
+  AND json_type(NEW.prepared_action_json, '$.libraryId') = 'integer'
+  AND json_extract(NEW.prepared_action_json, '$.libraryId') = (
+    SELECT sessions.library_id FROM agent_runs AS runs
+    JOIN agent_sessions AS sessions ON sessions.id = runs.session_id
+    WHERE runs.id = NEW.run_id
+  )
+), 0)`;
+const PLUGIN_RENAME_ITEMS_SQL = safeJsonFieldSql('NEW.prepared_action_json', '$.items', 'array');
+const PLUGIN_RENAME_ITEM_SQL = `CASE WHEN rename_item.type = 'object' THEN rename_item.value ELSE '{}' END`;
+function invalidRenameItemNameSql(field: 'oldName' | 'newName'): string {
+  const value = `json_extract(${PLUGIN_RENAME_ITEM_SQL}, '$.${field}')`;
+  return `COALESCE(json_type(${PLUGIN_RENAME_ITEM_SQL}, '$.${field}'), '') <> 'text'
+    OR (${invalidCanonicalShellTextSql(value, 240)})
+    OR ${value} IN ('.', '..') OR instr(${value}, '/') > 0 OR instr(${value}, char(92)) > 0`;
+}
+const PLUGIN_RENAME_PREPARED_ACTION_INVALID_SQL = `
+  NOT (${PLUGIN_RENAME_ACTION_IDENTITY_SQL})
+  OR ${strictJsonObjectInvalidSql('NEW.prepared_action_json', ['kind', 'version', 'libraryId', 'operationId', 'pluginId', 'pluginVersion', 'packageFingerprint', 'items'])}
+  OR COALESCE(json_type(NEW.prepared_action_json, '$.operationId'), '') <> 'text'
+  OR length(json_extract(NEW.prepared_action_json, '$.operationId')) <> 36
+  OR substr(json_extract(NEW.prepared_action_json, '$.operationId'), 9, 1) <> '-'
+  OR substr(json_extract(NEW.prepared_action_json, '$.operationId'), 14, 1) <> '-'
+  OR substr(json_extract(NEW.prepared_action_json, '$.operationId'), 19, 1) <> '-'
+  OR substr(json_extract(NEW.prepared_action_json, '$.operationId'), 24, 1) <> '-'
+  OR length(replace(json_extract(NEW.prepared_action_json, '$.operationId'), '-', '')) <> 32
+  OR replace(json_extract(NEW.prepared_action_json, '$.operationId'), '-', '') GLOB '*[^0-9a-f]*'
+  OR substr(json_extract(NEW.prepared_action_json, '$.operationId'), 15, 1) NOT BETWEEN '1' AND '8'
+  OR substr(json_extract(NEW.prepared_action_json, '$.operationId'), 20, 1) NOT IN ('8', '9', 'a', 'b')
+  OR COALESCE(json_type(NEW.prepared_action_json, '$.items'), '') <> 'array'
+  OR json_array_length(${PLUGIN_RENAME_ITEMS_SQL}) NOT BETWEEN 1 AND 50
+  OR EXISTS (
+    SELECT 1 FROM json_each(${PLUGIN_RENAME_ITEMS_SQL}) AS rename_item
+    WHERE rename_item.type <> 'object'
+      OR ${strictJsonObjectInvalidSql(PLUGIN_RENAME_ITEM_SQL, ['nodeId', 'parentId', 'oldName', 'newName'])}
+      OR COALESCE(json_type(${PLUGIN_RENAME_ITEM_SQL}, '$.nodeId'), '') <> 'integer'
+      OR json_extract(${PLUGIN_RENAME_ITEM_SQL}, '$.nodeId') NOT BETWEEN 1 AND ${MAX_SAFE_SQLITE_AGENT_ID}
+      OR COALESCE(json_type(${PLUGIN_RENAME_ITEM_SQL}, '$.parentId'), '') <> 'integer'
+      OR json_extract(${PLUGIN_RENAME_ITEM_SQL}, '$.parentId') NOT BETWEEN 1 AND ${MAX_SAFE_SQLITE_AGENT_ID}
+      OR ${invalidRenameItemNameSql('oldName')}
+      OR ${invalidRenameItemNameSql('newName')}
+      OR json_extract(${PLUGIN_RENAME_ITEM_SQL}, '$.oldName') = json_extract(${PLUGIN_RENAME_ITEM_SQL}, '$.newName')
+  )
+  OR EXISTS (
+    SELECT 1 FROM json_each(${PLUGIN_RENAME_ITEMS_SQL}) AS rename_item
+    GROUP BY json_extract(${PLUGIN_RENAME_ITEM_SQL}, '$.nodeId') HAVING COUNT(*) > 1
+  )
+  OR EXISTS (
+    SELECT 1 FROM json_each(${PLUGIN_RENAME_ITEMS_SQL}) AS rename_item
+    GROUP BY json_extract(${PLUGIN_RENAME_ITEM_SQL}, '$.parentId'), json_extract(${PLUGIN_RENAME_ITEM_SQL}, '$.newName') HAVING COUNT(*) > 1
+  )
+`;
 
 function containsShellControlCharacterSql(valueSql: string): string {
   return [...Array.from({ length: 32 }, (_, code) => code), 127]
@@ -842,6 +906,7 @@ const TOOL_PREPARATION_COLUMNS = [
 
 const TOOL_RUNTIME_COLUMNS = [
   ['tool_kind', "TEXT NOT NULL DEFAULT 'business'"],
+  ['plugin_source_json', 'TEXT'],
   ['ordinal', 'INTEGER NOT NULL DEFAULT 0'],
   ['plan_step_id', 'TEXT'],
   ['revision', 'INTEGER NOT NULL DEFAULT 1'],
@@ -993,6 +1058,7 @@ interface ToolActivityRow {
   ordinal: number;
   permission_behavior: AgentToolActivitySnapshot['permissionBehavior'];
   plan_step_id: string | null;
+  plugin_source_json: string | null;
   prepared_action_id: string | null;
   prepared_action_json: string | null;
   prepared_snapshot_hash: string | null;
@@ -1070,6 +1136,7 @@ export interface CreateAgentToolRunInput {
   input: unknown;
   now: string;
   permissionBehavior: 'allow' | 'ask' | 'deny';
+  pluginSource?: AgentPluginToolSource;
   runId: string;
   status: 'preparing' | 'awaiting_approval' | 'running';
   toolKind?: AgentToolKind;
@@ -1629,6 +1696,12 @@ function restoreToolPreparation(
 function toToolActivity(row: ToolActivityRow): AgentToolActivitySnapshot {
   const interaction = restoreToolInteraction(row);
   const preparation = restoreToolPreparation(row);
+  let pluginSource: AgentPluginToolSource | undefined;
+  if (row.plugin_source_json && Buffer.byteLength(row.plugin_source_json, 'utf8') <= MAX_PLUGIN_TOOL_SOURCE_BYTES) {
+    try {
+      pluginSource = normalizeAgentPluginToolSource(JSON.parse(row.plugin_source_json), row.tool_name);
+    } catch { /* Malformed historical metadata never becomes trusted renderer provenance. */ }
+  }
   return {
     ...(row.approval_id && row.approval_preview_json && row.approval_status
       ? {
@@ -1656,6 +1729,7 @@ function toToolActivity(row: ToolActivityRow): AgentToolActivitySnapshot {
     ordinal: Number(row.ordinal),
     permissionBehavior: row.permission_behavior,
     ...(row.plan_step_id ? { planStepId: row.plan_step_id } : {}),
+    ...(pluginSource ? { pluginSource } : {}),
     ...(preparation ? { preparation } : {}),
     ...(row.progress_json
       ? { progress: parseStoredJson<AgentToolProgress>(row.progress_json, { message: '' }) }
@@ -2136,6 +2210,54 @@ async function ensureToolRunColumns(database: sqlite3.Database): Promise<void> {
   `);
 }
 
+async function ensureToolPluginSourceTriggers(database: sqlite3.Database): Promise<void> {
+  const source = 'NEW.plugin_source_json';
+  const boundedText = (field: string, maximum: number): string => `
+    COALESCE(json_type(${source}, '$.${field}'), '') <> 'text'
+    OR length(CAST(json_extract(${source}, '$.${field}') AS BLOB)) NOT BETWEEN 1 AND ${maximum}
+  `;
+  await exec(database, `
+    DROP TRIGGER IF EXISTS agent_tool_runs_validate_plugin_source_insert;
+    DROP TRIGGER IF EXISTS agent_tool_runs_plugin_source_is_immutable;
+    CREATE TRIGGER agent_tool_runs_validate_plugin_source_insert
+    BEFORE INSERT ON agent_tool_runs
+    WHEN ${source} IS NOT NULL AND CASE
+      WHEN typeof(${source}) <> 'text'
+        OR length(CAST(${source} AS BLOB)) > ${MAX_PLUGIN_TOOL_SOURCE_BYTES}
+        OR NOT json_valid(${source}) THEN 1
+      ELSE (
+        ${strictJsonObjectInvalidSql(source, PLUGIN_TOOL_SOURCE_FIELDS)}
+        OR ${boundedText('pluginId', 96)}
+        OR ${boundedText('pluginVersion', 20)}
+        OR ${boundedText('toolId', 128)}
+        OR ${boundedText('packageFingerprint', 64)}
+        OR ${boundedText('registrationId', 76)}
+        OR json_extract(${source}, '$.pluginId') GLOB '*[^a-z0-9.-]*'
+        OR json_extract(${source}, '$.pluginVersion') GLOB '*[^0-9.]*'
+        OR json_extract(${source}, '$.toolId') GLOB '*[^a-z0-9.-]*'
+        OR json_extract(${source}, '$.toolId') <> NEW.tool_name
+        OR NEW.tool_kind <> 'business'
+        OR substr(json_extract(${source}, '$.toolId'), 1,
+          length(json_extract(${source}, '$.pluginId')) + 1)
+          <> json_extract(${source}, '$.pluginId') || '.'
+        OR length(json_extract(${source}, '$.packageFingerprint')) <> 64
+        OR json_extract(${source}, '$.packageFingerprint') GLOB '*[^a-f0-9]*'
+        OR length(json_extract(${source}, '$.registrationId')) <> 76
+        OR substr(json_extract(${source}, '$.registrationId'), 1, 12) <> 'plugin-tool:'
+        OR substr(json_extract(${source}, '$.registrationId'), 13) GLOB '*[^a-f0-9]*'
+      ) END
+    BEGIN
+      SELECT RAISE(ABORT, 'Agent Tool plugin source is invalid');
+    END;
+    CREATE TRIGGER agent_tool_runs_plugin_source_is_immutable
+    BEFORE UPDATE OF plugin_source_json ON agent_tool_runs
+    WHEN NEW.plugin_source_json IS NOT OLD.plugin_source_json
+    BEGIN
+      SELECT RAISE(ABORT, 'Agent Tool plugin source is immutable');
+    END;
+  `);
+}
+
 interface StoredPreparedActionRow {
   id: string;
   prepared_action_json: string;
@@ -2231,9 +2353,11 @@ async function ensureToolPreparationTriggers(
           char(92) || 'u0000'
         ) > 0
         OR COALESCE(json_type(NEW.prepared_action_json, '$.kind'), '') <> 'text'
-        OR json_extract(NEW.prepared_action_json, '$.kind') <> NEW.tool_name
+        OR (json_extract(NEW.prepared_action_json, '$.kind') <> NEW.tool_name AND NOT (${PLUGIN_RENAME_ACTION_IDENTITY_SQL}))
         OR COALESCE(json_type(NEW.prepared_action_json, '$.version'), '') <> 'integer'
         OR NOT (${PREPARED_ACTION_SUPPORTED_IDENTITY_SQL})
+        OR (json_extract(NEW.prepared_action_json, '$.kind') = ${sqlText(AGENT_PLUGIN_RENAME_PREPARED_ACTION_KIND)}
+          AND (${PLUGIN_RENAME_PREPARED_ACTION_INVALID_SQL}))
         OR (
           json_extract(NEW.prepared_action_json, '$.kind')
             = ${sqlText(AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_KIND)}
@@ -2910,6 +3034,69 @@ async function recoverInterruptedState(database: sqlite3.Database): Promise<void
   const recoveredAt = new Date().toISOString();
   await exec(database, 'BEGIN IMMEDIATE;');
   try {
+    // An approved rename may have reached the backend before the process exited.
+    // Persist its uncertainty before finalizing the Run: the generic Run trigger
+    // otherwise replaces every still-open Tool result with a plain interruption.
+    const recoverableRenames = await all<{
+      id: string; run_id: string; tool_name: string; library_id: number;
+      status: 'running' | 'completed'; result_json: string | null;
+      plugin_source_json: string; prepared_action_json: string;
+    }>(database, `
+      SELECT tools.id, tools.run_id, tools.tool_name, sessions.library_id,
+        tools.status, tools.result_json, tools.plugin_source_json, tools.prepared_action_json
+      FROM agent_tool_runs AS tools
+      JOIN agent_runs AS runs ON runs.id = tools.run_id
+      JOIN agent_sessions AS sessions ON sessions.id = runs.session_id
+      WHERE tools.status IN ('running', 'completed') AND tools.approval_status = 'approved'
+        AND tools.plugin_source_json IS NOT NULL AND tools.prepared_action_json IS NOT NULL
+        AND runs.status IN ('preparing', 'running', 'awaiting_approval', 'awaiting_interaction')
+    `);
+    const renameRuns = new Map<string, 'commit_unknown' | 'committed'>();
+    for (const row of recoverableRenames) {
+      let action: AgentPreparedActionPublic;
+      let source: AgentPluginToolSource;
+      try {
+        action = normalizeAgentPreparedActionPublicForMain(JSON.parse(row.prepared_action_json));
+        source = normalizeAgentPluginToolSource(JSON.parse(row.plugin_source_json), row.tool_name);
+      } catch { continue; }
+      if (action.kind !== AGENT_PLUGIN_RENAME_PREPARED_ACTION_KIND || action.libraryId !== row.library_id
+        || action.pluginId !== source.pluginId || action.pluginVersion !== source.pluginVersion
+        || action.packageFingerprint !== source.packageFingerprint) continue;
+      if (row.status === 'completed') {
+        try {
+          const receipt = JSON.parse(row.result_json || 'null') as AgentToolResult | null;
+          const data = receipt?.data;
+          if (receipt?.ok === true && data && typeof data === 'object' && !Array.isArray(data)) {
+            const result = data as Record<string, unknown>;
+            if (result.mutationCommitState === 'committed' && result.operationId === action.operationId
+              && result.libraryId === action.libraryId && result.atomic === true && !renameRuns.has(row.run_id)) {
+              renameRuns.set(row.run_id, 'committed');
+            }
+          }
+        } catch { /* A damaged historical receipt cannot establish a committed fact. */ }
+        continue;
+      }
+      const result: AgentToolResult = { ok: false,
+        message: '应用退出时重命名尚未确认提交结果，请先按操作ID核对，勿直接重复提交。',
+        data: { mutationCommitState: 'commit_unknown', operationId: action.operationId, libraryId: action.libraryId, atomic: true } };
+      const changed = await run(database, `
+        UPDATE agent_tool_runs
+        SET status = 'interrupted', result_json = ?, revision = revision + 1, finished_at = ?
+        WHERE id = ? AND status = 'running' AND approval_status = 'approved'
+      `, [JSON.stringify(result), recoveredAt, row.id]);
+      if (changed.changes) renameRuns.set(row.run_id, 'commit_unknown');
+    }
+    for (const [runId, state] of renameRuns) {
+      await run(database, `
+        UPDATE agent_runs
+        SET status = 'interrupted', current_step = ?, error = ?,
+          revision = revision + 1, updated_at = ?, finished_at = ?
+        WHERE id = ? AND status IN ('preparing', 'running', 'awaiting_approval', 'awaiting_interaction')
+      `, [state === 'committed' ? '改名已提交，任务已中断' : '重命名结果待核对',
+        state === 'committed' ? '改名已提交，请查看现有回执继续未完成步骤，勿重复改名。'
+          : '应用退出时重命名可能已经提交，请先按操作ID核对结果，勿直接重新发送上一条消息或重复提交。',
+        recoveredAt, recoveredAt, runId]);
+    }
     await run(database, `
       UPDATE agent_messages
       SET
@@ -3076,6 +3263,7 @@ export async function initializeAgentSessionDatabaseSchema(
           tool_kind IN ('business', 'control')
         ),
         input_json TEXT NOT NULL,
+        plugin_source_json TEXT,
         result_json TEXT,
         status TEXT NOT NULL,
         permission_behavior TEXT NOT NULL DEFAULT 'allow',
@@ -3175,6 +3363,7 @@ export async function initializeAgentSessionDatabaseSchema(
   await ensureSessionOrganizationSchema(database);
   await ensureMessageAssistantSchema(database, manageTransactions);
   await ensureToolRunColumns(database);
+  await ensureToolPluginSourceTriggers(database);
   await ensureToolPreparationTriggers(database, manageTransactions);
   await ensureRunPlanTriggers(database, manageTransactions);
   await ensureRunFinalizationTriggers(database, manageTransactions);
@@ -3311,6 +3500,7 @@ export async function createSQLiteAgentSessionStore(
         tools.id,
         tools.call_id,
         tools.tool_name,
+        tools.plugin_source_json,
         tools.input_json,
         tools.result_json,
         tools.status,
@@ -3713,6 +3903,11 @@ export async function createSQLiteAgentSessionStore(
     },
 
     async createToolRun(input) {
+      const pluginSource = input.pluginSource === undefined ? undefined
+        : normalizeAgentPluginToolSource(input.pluginSource, input.toolName);
+      if (pluginSource && input.toolKind && input.toolKind !== 'business') {
+        throw new Error('Agent Tool 插件来源只能用于业务工具');
+      }
       const result = await run(database, `
         WITH target_run AS (
           SELECT
@@ -3744,13 +3939,14 @@ export async function createSQLiteAgentSessionStore(
             = target_run.next_plan_ordinal
         )
         INSERT INTO agent_tool_runs (
-          id, run_id, call_id, tool_name, tool_kind, input_json, status,
+          id, run_id, call_id, tool_name, tool_kind, input_json, plugin_source_json, status,
           permission_behavior, approval_id, approval_input_hash,
           approval_preview_json, approval_status, ordinal, plan_step_id, created_at
         )
         SELECT
           ?,
           target_run.id,
+          ?,
           ?,
           ?,
           ?,
@@ -3778,6 +3974,7 @@ export async function createSQLiteAgentSessionStore(
         input.toolName,
         input.toolKind || 'business',
         JSON.stringify(input.input),
+        pluginSource ? JSON.stringify(pluginSource) : null,
         input.status,
         input.permissionBehavior,
         input.approvalId || null,
@@ -4102,6 +4299,7 @@ export async function createSQLiteAgentSessionStore(
           tools.id,
           tools.call_id,
           tools.tool_name,
+          tools.plugin_source_json,
           tools.input_json,
           tools.result_json,
           tools.status,

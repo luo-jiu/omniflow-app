@@ -1,4 +1,5 @@
 import { mkdtemp, rm } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import sqlite3 from 'sqlite3';
@@ -30,6 +31,20 @@ const OTHER_OWNER_SCOPE = {
   accountScope: 'user:8',
   backendScope: 'https://example.com/api',
 };
+
+function pluginSource() {
+  const identity = {
+    pluginId: 'org.example.csv', pluginVersion: '0.1.0',
+    packageFingerprint: 'a'.repeat(64), toolId: 'org.example.csv.query',
+  };
+  return {
+    ...identity,
+    registrationId: `plugin-tool:${createHash('sha256').update(JSON.stringify([
+      'omniflow-agent-tool-v1', identity.pluginId, identity.pluginVersion,
+      identity.packageFingerprint, identity.toolId,
+    ])).digest('hex')}`,
+  };
+}
 
 function checkpointSummary(label: string): AgentConversationSummaryV1 {
   return {
@@ -574,6 +589,75 @@ describe('SQLite Agent session store', () => {
       title,
     });
   }
+
+  it('captures plugin provenance before execution and retains it on success, failure, cancellation and restart', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'omniflow-agent-plugin-source-'));
+    temporaryDirectories.push(directory);
+    const databasePath = path.join(directory, 'agent.sqlite3');
+    const store = await createStore(databasePath);
+    await createSession(store, 'plugin-session', 3, '插件审计');
+    await store.createRun({ id: 'plugin-run', sessionId: 'plugin-session', model: 'model',
+      profileId: 'profile', reasoningEffort: 'auto', userPrompt: '读取CSV', now: timestamp(1) });
+    for (const status of ['completed', 'failed', 'cancelled', 'interrupted'] as const) {
+      const source = pluginSource();
+      const creating = store.createToolRun({
+        id: `plugin-${status}`, callId: `call-${status}`, runId: 'plugin-run',
+        input: { nodeId: 42 }, now: timestamp(2), permissionBehavior: 'allow',
+        status: 'running', toolName: source.toolId, pluginSource: source,
+      });
+      source.pluginVersion = '9.9.9';
+      const activity = await creating;
+      expect(activity.pluginSource).toEqual(pluginSource());
+      expect(activity.result).toBeUndefined();
+      if (status !== 'interrupted') {
+        const result = await store.completeToolRun(activity.id, { ok: status === 'completed' }, timestamp(3), status);
+        expect(result.pluginSource).toEqual(pluginSource());
+      }
+    }
+    await store.createToolRun({
+      id: 'ordinary-tool', callId: 'ordinary-call', runId: 'plugin-run',
+      input: { pluginSource: pluginSource() }, now: timestamp(4), permissionBehavior: 'allow',
+      status: 'running', toolName: 'file.list',
+    });
+    expect((await store.completeToolRun('ordinary-tool', {
+      ok: true, data: { pluginSource: pluginSource() },
+    }, timestamp(5))).pluginSource).toBeUndefined();
+    await store.close(); stores.splice(stores.indexOf(store), 1);
+    const reopened = await createStore(databasePath);
+    const activities = (await reopened.getSession('plugin-session', OWNER_SCOPE, 3))?.toolActivities;
+    expect(activities?.slice(0, 4).map(activity => ({ status: activity.status, source: activity.pluginSource })))
+      .toEqual(['completed', 'failed', 'cancelled', 'interrupted'].map(status => ({ status, source: pluginSource() })));
+    expect(activities?.[4].pluginSource).toBeUndefined();
+  });
+
+  it('rejects counterfeit source and prevents source changes after creating ToolRun', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'omniflow-agent-plugin-immutable-'));
+    temporaryDirectories.push(directory);
+    const databasePath = path.join(directory, 'agent.sqlite3');
+    const store = await createStore(databasePath);
+    await createSession(store, 'source-session', 3, '插件来源');
+    await store.createRun({ id: 'source-run', sessionId: 'source-session', model: 'model',
+      profileId: 'profile', reasoningEffort: 'auto', userPrompt: '读取CSV', now: timestamp(1) });
+    const input = { id: 'source-tool', callId: 'source-call', runId: 'source-run', input: {},
+      now: timestamp(2), permissionBehavior: 'allow' as const, status: 'running' as const,
+      toolName: pluginSource().toolId, pluginSource: pluginSource() };
+    await expect(store.createToolRun({ ...input, toolName: 'file.list' })).rejects.toThrow('插件来源无效');
+    await expect(store.createToolRun({ ...input, pluginSource: { ...pluginSource(), pluginVersion: '0.2.0' } }))
+      .rejects.toThrow('插件来源无效');
+    await expect(store.createToolRun({ ...input, toolKind: 'control' })).rejects.toThrow('只能用于业务工具');
+    await store.createToolRun(input);
+    await expect(runDatabaseSql(databasePath,
+      'UPDATE agent_tool_runs SET plugin_source_json = NULL WHERE id = ?', ['source-tool']))
+      .rejects.toThrow('plugin source is immutable');
+    const raw = await readDatabaseRow<{ plugin_source_json: string }>(databasePath,
+      'SELECT plugin_source_json FROM agent_tool_runs WHERE id = ?', ['source-tool']);
+    expect(JSON.parse(raw!.plugin_source_json)).toEqual(pluginSource());
+    await expect(runDatabaseSql(databasePath, `
+      INSERT INTO agent_tool_runs (id, run_id, call_id, tool_name, input_json, status, ordinal, created_at, plugin_source_json)
+      VALUES ('bad-source', 'source-run', 'bad-call', ?, '{}', 'running', 2, ?, ?)
+    `, [pluginSource().toolId, timestamp(3), JSON.stringify({ ...pluginSource(), token: 'never-persist' })]))
+      .rejects.toThrow('plugin source is invalid');
+  });
 
   async function createStoredPreparedAction(
     databasePath: string,

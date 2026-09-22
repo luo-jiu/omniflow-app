@@ -12,6 +12,7 @@ import { normalizeAgentOwnerScope } from '../../../src/shared/agent/agent-owner-
 import { normalizeAgentLibraryReadResult } from '../../../src/shared/agent/agent-library-query';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
+const MAX_RENAME_AUTHORITY_RESULT_BYTES = 256 * 1024;
 
 interface AgentFileAuthorityBrokerOptions {
   createId?: () => string;
@@ -36,6 +37,7 @@ type AgentFileAuthorityOperationInput =
   | Omit<Extract<AgentFileAuthorityRequestV1, { operation: 'query-library-metadata' }>, AgentFileAuthorityRequestBaseKeys>
   | Omit<Extract<AgentFileAuthorityRequestV1, { operation: 'stage-library-node' }>, AgentFileAuthorityRequestBaseKeys>
   | Omit<Extract<AgentFileAuthorityRequestV1, { operation: 'resolve-library-directory' }>, AgentFileAuthorityRequestBaseKeys>
+  | Omit<Extract<AgentFileAuthorityRequestV1, { operation: 'rename-library-files' }>, AgentFileAuthorityRequestBaseKeys>
   | Omit<Extract<AgentFileAuthorityRequestV1, { operation: 'publish-library-file' }>, AgentFileAuthorityRequestBaseKeys>;
 
 export interface AgentFileAuthorityBrokerRequestInput {
@@ -61,6 +63,7 @@ interface PendingAuthority {
   ownerScope: AgentOwnerScope;
   ownerWebContentsId: number;
   operation: AgentFileAuthorityRequestV1['operation'];
+  renameOperation?: Extract<AgentFileAuthorityOperationInput, { operation: 'rename-library-files' }>;
   reject: (error: Error) => void;
   resolve: (result: AgentFileAuthorityResultV1) => void;
   runId: string;
@@ -105,6 +108,38 @@ function positiveInteger(value: unknown, label: string, allowZero = false): numb
   return value;
 }
 
+function normalizeRenameOperation(input: unknown): Extract<AgentFileAuthorityOperationInput, { operation: 'rename-library-files' }> {
+  const source = strictObject(input, 'Agent 重命名元数据请求');
+  if (Object.getOwnPropertySymbols(source).length || Object.values(Object.getOwnPropertyDescriptors(source)).some(descriptor => !('value' in descriptor) || !descriptor.enumerable)) throw new Error('Agent 重命名元数据请求无效');
+  exactKeys(source, ['operation', 'nodeIds', 'includeCredentials']);
+  if (source.operation !== 'rename-library-files' || typeof source.includeCredentials !== 'boolean'
+    || !Array.isArray(source.nodeIds) || source.nodeIds.length < 1 || source.nodeIds.length > 50
+    || Object.keys(source.nodeIds).length !== source.nodeIds.length || Object.getOwnPropertySymbols(source.nodeIds).length
+    || Object.values(Object.getOwnPropertyDescriptors(source.nodeIds)).some(descriptor => !('value' in descriptor))) throw new Error('Agent 重命名元数据请求范围无效');
+  const nodeIds = source.nodeIds.map(id => positiveInteger(id, '重命名节点 ID'));
+  if (new Set(nodeIds).size !== nodeIds.length) throw new Error('Agent 重命名元数据请求包含重复目标');
+  Object.freeze(nodeIds);
+  return Object.freeze({ operation: 'rename-library-files', nodeIds, includeCredentials: source.includeCredentials });
+}
+
+function assertBoundedRenameResult(input: unknown): void {
+  const seen = new Set<object>(); let nodes = 0;
+  const visit = (value: unknown, depth: number) => {
+    if (++nodes > 4096 || depth > 5) throw new Error('Agent 重命名元数据结果超过安全上限');
+    if (value === null || typeof value === 'boolean' || typeof value === 'string' || (typeof value === 'number' && Number.isFinite(value))) return;
+    if (!value || typeof value !== 'object' || seen.has(value)) throw new Error('Agent 重命名元数据结果无效');
+    if (!Array.isArray(value)) strictObject(value, 'Agent 重命名元数据结果');
+    if (Object.getOwnPropertySymbols(value).length || Object.entries(Object.getOwnPropertyDescriptors(value)).some(([key, descriptor]) =>
+      !('value' in descriptor) || (key !== 'length' && !descriptor.enumerable))) throw new Error('Agent 重命名元数据结果无效');
+    if (Array.isArray(value) && Object.keys(value).length !== value.length) throw new Error('Agent 重命名元数据结果无效');
+    seen.add(value);
+    for (const child of Object.values(value)) visit(child, depth + 1);
+    seen.delete(value);
+  };
+  visit(input, 0);
+  if (Buffer.byteLength(JSON.stringify(input), 'utf8') > MAX_RENAME_AUTHORITY_RESULT_BYTES) throw new Error('Agent 重命名元数据结果超过安全上限');
+}
+
 function normalizeNode(input: unknown) {
   const source = strictObject(input, 'Agent 资料库节点');
   exactKeys(source, [
@@ -142,6 +177,7 @@ function normalizeResult(
   input: unknown,
   expectedOperation: AgentFileAuthorityRequestV1['operation'],
   expectedLibraryId: number,
+  renameOperation?: Extract<AgentFileAuthorityOperationInput, { operation: 'rename-library-files' }>,
 ): AgentFileAuthorityResultV1 {
   const source = strictObject(input, 'Agent 资料库文件授权结果');
   if (source.version !== 1 || source.operation !== expectedOperation) {
@@ -150,6 +186,23 @@ function normalizeResult(
   if (expectedOperation === 'query-library-metadata') {
     exactKeys(source, ['operation', 'data', 'version']);
     return { operation: expectedOperation, version: 1, data: normalizeAgentLibraryReadResult(source.data, expectedLibraryId) };
+  }
+  if (expectedOperation === 'rename-library-files') {
+    assertBoundedRenameResult(input);
+    exactKeys(source, ['operation', 'nodes', 'credentials', 'version']);
+    if (!renameOperation || !Array.isArray(source.nodes) || source.nodes.length !== renameOperation.nodeIds.length) throw new Error('Agent 重命名元数据目标数量不匹配');
+    const nodes = source.nodes.map((raw, index) => {
+      const node = normalizeNode(raw);
+      if (node.type !== 'file' || node.libraryId !== expectedLibraryId || node.id !== renameOperation.nodeIds[index]) throw new Error('Agent 重命名元数据目标身份不匹配');
+      return node;
+    });
+    let credentials: { token: string; username: string } | undefined;
+    if (source.credentials !== undefined) {
+      if (!renameOperation.includeCredentials) throw new Error('Agent 重命名元数据未申请凭据');
+      const raw = strictObject(source.credentials, 'Agent 资料库凭据'); exactKeys(raw, ['token', 'username']);
+      credentials = { token: boundedString(raw.token, 'Agent 资料库凭据', 32 * 1024), username: boundedString(raw.username, 'Agent 资料库用户名', 256) };
+    } else if (renameOperation.includeCredentials) throw new Error('Agent 重命名元数据缺少请求的凭据');
+    return { operation: 'rename-library-files', version: 1, nodes, ...(credentials ? { credentials } : {}) };
   }
   if (expectedOperation === 'stage-library-node') {
     exactKeys(source, ['downloadUrl', 'node', 'operation', 'version']);
@@ -246,7 +299,9 @@ export function createAgentFileAuthorityBroker(options: AgentFileAuthorityBroker
       return Promise.reject(new Error('Agent 资料库文件授权身份无效'));
     }
     const ownerScope = normalizeAgentOwnerScope(input.ownerScope);
-    const operation = input.operation.operation === 'resolve-library-directory'
+    const operation = input.operation.operation === 'rename-library-files'
+      ? normalizeRenameOperation(input.operation)
+      : input.operation.operation === 'resolve-library-directory'
       ? Object.freeze({
         directoryPath: normalizeAgentLibraryDirectoryPath(input.operation.directoryPath),
         operation: input.operation.operation,
@@ -283,6 +338,7 @@ export function createAgentFileAuthorityBroker(options: AgentFileAuthorityBroker
         ownerScope,
         ownerWebContentsId: input.sender.id,
         operation: requestPayload.operation,
+        ...(operation.operation === 'rename-library-files' ? { renameOperation: operation } : {}),
         reject: error => finish(() => reject(error)),
         resolve: result => finish(() => resolve(result)),
         runId: input.runId,
@@ -327,7 +383,7 @@ export function createAgentFileAuthorityBroker(options: AgentFileAuthorityBroker
       return true;
     }
     if (!completion.result) throw new Error('Agent 资料库文件授权结果缺失');
-    current.resolve(normalizeResult(completion.result, current.operation, current.libraryId));
+    current.resolve(normalizeResult(completion.result, current.operation, current.libraryId, current.renameOperation));
     return true;
   }
 
@@ -338,6 +394,7 @@ export function createAgentFileAuthorityBroker(options: AgentFileAuthorityBroker
   }
 
   async function request(input: AgentFileAuthorityBrokerRequestInput) {
+    if (input.operation.operation === 'rename-library-files') input = { ...input, operation: normalizeRenameOperation(input.operation) };
     const guard = input.internalScopeLookup ? undefined : runAccess.get(input.runId);
     if (!guard) return requestUnchecked(input);
     await guard?.before(input);

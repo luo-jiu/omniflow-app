@@ -1,7 +1,8 @@
-import type { AgentAppContext, AgentPerceptionSnapshot, AgentPreparedActionPublic, AgentToolCallSnapshot } from '../../../src/shared/agent/agent.types';
+import type { AgentAppContext, AgentPerceptionSnapshot, AgentPluginToolSource, AgentPreparedActionPublic, AgentToolCallSnapshot } from '../../../src/shared/agent/agent.types';
 import type { AgentLibraryNode, AgentLibraryQuery, AgentLibraryReadResult } from '../../../src/shared/agent/agent-library-query';
 import type { AgentLibraryAccessSnapshot } from '../../../src/shared/agent/agent-session-management';
 import { normalizeAgentLibraryDirectoryPath } from '../../../src/shared/agent/agent-library-path';
+import { normalizeAgentPluginToolSource } from './agent-plugin-source';
 
 export interface AgentAccessApproval {
   title: string;
@@ -9,20 +10,34 @@ export interface AgentAccessApproval {
   write: boolean;
   targets: Array<{ nodeId: number; name: string; write: boolean; descendants: boolean }>;
 }
-interface Target { nodeId?: number; path?: string; write: boolean; descendants?: boolean; sensitive?: boolean }
+interface Target { nodeId?: number; path?: string; write: boolean; descendants?: boolean; sensitive?: boolean; singleFile?: boolean }
 interface Intent { targets: Target[]; opaque?: string; external?: boolean }
 type Lookup = Map<string, Promise<AgentLibraryNode>>;
 const record = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 const id = (value: unknown) => Number.isSafeInteger(value) && Number(value) > 0 ? Number(value) : undefined;
 const text = (value: unknown) => typeof value === 'string' ? value : undefined;
+function renameNodeIds(value: unknown): number[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 50
+    || Array.from(value).some(nodeId => id(nodeId) === undefined)
+    || new Set(value).size !== value.length) throw new Error('插件改名必须提供 1 至 50 个不重复的 resources 文件 ID');
+  return [...value];
+}
 const parentPath = (value: string) => {
   const path = normalizeAgentLibraryDirectoryPath(value);
   if (path === '/') throw new Error('不能将资料库根目录作为新文件');
   return path.slice(0, path.lastIndexOf('/')) || '/';
 };
 
-function intentFor(name: string, value: unknown, context: AgentAppContext, action?: AgentPreparedActionPublic): Intent {
+function intentFor(name: string, value: unknown, context: AgentAppContext, action?: AgentPreparedActionPublic,
+  pluginTools?: ReadonlyMap<string, AgentPluginToolSource>): Intent {
   const input = record(value);
+  if (pluginTools?.has(name)) {
+    const resource = record(input.resource);
+    if (!Object.prototype.hasOwnProperty.call(input, 'resource')
+      || Object.keys(resource).length !== 1 || !Object.prototype.hasOwnProperty.call(resource, 'nodeId')
+      || !id(resource.nodeId)) throw new Error('插件 Tool 必须提供明确的 resource.nodeId');
+    return { targets: [{ nodeId: id(resource.nodeId), write: false, singleFile: true }] };
+  }
   const source = (write: boolean, sensitive = false): Target => ({
     ...(text(input.path) ? { path: text(input.path) } : { nodeId: id(input.nodeId) || id(input.sourceNodeId) || context.selectedNodeIds[0] }), write, sensitive,
   });
@@ -82,7 +97,21 @@ export function createAgentLibraryAccessGuard(options: {
   read: (query: AgentLibraryQuery, signal: AbortSignal) => Promise<AgentLibraryReadResult>;
   approve: (request: AgentAccessApproval) => Promise<boolean>;
   assertCurrent: () => Promise<void>;
+  /** Exact host-owned Tool names and provenance captured at the same Run boundary. */
+  pluginTools?: ReadonlyMap<string, AgentPluginToolSource>;
+  /** Rename declarations are separate from content-reading Tools. */
+  pluginRenameTools?: ReadonlyMap<string, AgentPluginToolSource>;
 }) {
+  const pluginTools = new Map([...options.pluginTools ?? []].map(([name, source]) => [
+    name, normalizeAgentPluginToolSource(source, name),
+  ]));
+  const pluginRenameTools = new Map([...options.pluginRenameTools ?? []].map(([name, source]) => [
+    name, normalizeAgentPluginToolSource(source, name),
+  ]));
+  if ([...pluginRenameTools.keys()].some(name => pluginTools.has(name))) throw new Error('插件 Tool 读取与改名能力不能混用');
+  const pluginToolRuns = new Map<string, { name: string; nodeId: number }>();
+  const pluginRenameRuns = new Map<string, { name: string; nodeIds: readonly number[] }>();
+  const isPluginRun = (key: string) => pluginToolRuns.has(key) || pluginRenameRuns.has(key);
   const grants: Array<{ nodeId: number; write: boolean; descendants: boolean }> = [];
   const operationGrants = new Set<string>();
   const writeGrants = new Set<string>();
@@ -94,12 +123,16 @@ export function createAgentLibraryAccessGuard(options: {
     options.signal.throwIfAborted();
     if (!target.nodeId && !target.path) throw new Error('请提供明确的文件或目录，才能确认访问范围');
     const key = target.path ? `path:${target.path}` : `id:${target.nodeId}`;
-    if (lookup?.has(key)) return lookup.get(key)!;
-    const pending = options.read(target.path ? { kind: 'resolve', path: target.path } : { kind: 'resolve', nodeId: target.nodeId }, options.signal).then(response => {
-      const node = response.node;
+    const validate = (node: AgentLibraryNode): AgentLibraryNode => {
       if (!node || node.libraryId !== Number(options.context.libraryId)) throw new Error('目标不存在或不属于当前资料库');
       if ((target.nodeId && node.id !== target.nodeId) || (target.path && node.path !== normalizeAgentLibraryDirectoryPath(target.path))) throw new Error('目标身份或目录位置已变化');
+      if (target.singleFile && node.type !== 'file') throw new Error('插件 Tool 只允许访问普通文件');
       return node;
+    };
+    if (lookup?.has(key)) return validate(await lookup.get(key)!);
+    const pending = options.read(target.path ? { kind: 'resolve', path: target.path } : { kind: 'resolve', nodeId: target.nodeId }, options.signal).then(response => {
+      if (response.libraryId !== Number(options.context.libraryId)) throw new Error('目标不存在或不属于当前资料库');
+      return validate(response.node!);
     });
     lookup?.set(key, pending);
     const node = await pending;
@@ -130,9 +163,8 @@ export function createAgentLibraryAccessGuard(options: {
     }
     return !target.write && grants.some(grant => !grant.write && (grant.nodeId === node.id || (grant.descendants && chain.includes(grant.nodeId))));
   }
-  async function authorizeTargets(targets: Target[], key: string, mayAsk: boolean, operationDescription = '') {
+  async function authorizeTargets(targets: Target[], key: string, mayAsk: boolean, operationDescription = '', lookup: Lookup = new Map()) {
     await options.assertCurrent();
-    const lookup: Lookup = new Map();
     const resolved = [];
     for (const target of targets) {
       const node = await resolve(target, lookup);
@@ -162,7 +194,40 @@ export function createAgentLibraryAccessGuard(options: {
     operationGrants.add(identity);
     await authorizeTargets(targets, key, false);
   }
+  async function authorizeRename(nodeIds: number[], toolRunId: string, mayAsk = false) {
+    const ids = renameNodeIds(nodeIds);
+    const run = pluginRenameRuns.get(toolRunId);
+    if (!run || ids.some(nodeId => !run.nodeIds.includes(nodeId))) throw new Error('插件改名文件身份或授权范围不匹配');
+    await authorizeTargets(ids.map(nodeId => ({ nodeId, write: true, singleFile: true })), toolRunId, mayAsk,
+      `插件 ${pluginRenameTools.get(run.name)!.pluginId} · ${run.name}（仅确认范围，改名提案另行确认）`);
+  }
   async function authorizeTool(call: AgentToolCallSnapshot, toolRunId: string, action?: AgentPreparedActionPublic, mayAsk = true): Promise<boolean> {
+    const previousRunName = pluginToolRuns.get(toolRunId)?.name ?? pluginRenameRuns.get(toolRunId)?.name;
+    if (previousRunName && previousRunName !== call.name) throw new Error('插件 Tool 文件身份已变化');
+    if (pluginRenameTools.has(call.name)) {
+      const input = record(call.input);
+      if (!Object.prototype.hasOwnProperty.call(input, 'resources')) throw new Error('插件改名必须提供明确的 resources');
+      const nodeIds = renameNodeIds(input.resources);
+      const previous = pluginRenameRuns.get(toolRunId);
+      if (previous && (previous.nodeIds.length !== nodeIds.length
+        || previous.nodeIds.some((nodeId, index) => nodeId !== nodeIds[index]))) throw new Error('插件改名文件身份已变化');
+      pluginRenameRuns.set(toolRunId, { name: call.name, nodeIds });
+      opaqueGrants.delete(toolRunId);
+      await authorizeRename(nodeIds, toolRunId, mayAsk);
+      // A scope approval never replaces the later old-name -> new-name confirmation.
+      return false;
+    }
+    if (pluginTools.has(call.name)) {
+      const intent = intentFor(call.name, call.input, options.context, action, pluginTools);
+      const nodeId = intent.targets[0]?.nodeId;
+      if (!nodeId) throw new Error('插件 Tool 文件身份无效');
+      const previous = pluginToolRuns.get(toolRunId);
+      if (previous && (previous.name !== call.name || previous.nodeId !== nodeId)) throw new Error('插件 Tool 文件身份已变化');
+      pluginToolRuns.set(toolRunId, { name: call.name, nodeId });
+      opaqueGrants.delete(toolRunId);
+      await authorizeTargets(intent.targets, toolRunId, mayAsk, `插件 ${pluginTools.get(call.name)!.pluginId} · ${call.name}`);
+      return true;
+    }
     if (full) return false;
     await options.assertCurrent();
     if (opaqueGrants.has(toolRunId)) return false;
@@ -185,18 +250,35 @@ export function createAgentLibraryAccessGuard(options: {
     return !intent.opaque;
   }
   async function authorizeQuery(query: AgentLibraryQuery, mayAsk = true, toolRunId?: string) {
+    if (toolRunId && pluginRenameRuns.has(toolRunId)) {
+      if (!['resolve', 'stat'].includes(query.kind) || !id(query.nodeId) || query.path !== undefined
+        || query.directoryId !== undefined) throw new Error('插件改名仅允许获准文件的元数据查询');
+      await authorizeRename([query.nodeId!], toolRunId, mayAsk);
+      return;
+    }
     if (full) return;
     await options.assertCurrent();
-    if (toolRunId && opaqueGrants.has(toolRunId)) return;
+    if (toolRunId && !isPluginRun(toolRunId) && opaqueGrants.has(toolRunId)) return;
     const target: Target = query.path ? { path: query.path, write: false }
       : { nodeId: query.nodeId || query.directoryId || options.context.currentDirectory?.id, write: false };
     if (!target.nodeId && !target.path) target.path = '/';
     await authorizeTargets([target], `query:${JSON.stringify(query)}`, mayAsk);
   }
   async function checkMetadata(data: AgentLibraryReadResult, toolRunId?: string) {
+    const renameRun = toolRunId ? pluginRenameRuns.get(toolRunId) : undefined;
+    if (renameRun) {
+      await options.assertCurrent();
+      const nodes = [...(data.entries || []), ...(data.node ? [data.node] : []), ...(data.directory ? [data.directory] : [])];
+      const ids = renameNodeIds(nodes.map(node => node.id));
+      if (data.libraryId !== Number(options.context.libraryId) || nodes.some(node => node.libraryId !== Number(options.context.libraryId)
+        || node.type !== 'file' || !renameRun.nodeIds.includes(node.id))) throw new Error('插件改名元数据返回了未经授权的文件');
+      const lookup: Lookup = new Map(nodes.map(node => [`id:${node.id}`, Promise.resolve(node)]));
+      await authorizeTargets(ids.map(nodeId => ({ nodeId, write: true, singleFile: true })), toolRunId!, false, '', lookup);
+      return;
+    }
     if (full) return;
     await options.assertCurrent();
-    if (toolRunId && opaqueGrants.has(toolRunId)) return;
+    if (toolRunId && !isPluginRun(toolRunId) && opaqueGrants.has(toolRunId)) return;
     const lookup: Lookup = new Map();
     const nodes = [...(data.entries || []), ...(data.node ? [data.node] : []), ...(data.directory ? [data.directory] : [])];
     for (const node of nodes) lookup.set(`id:${node.id}`, Promise.resolve(node));
@@ -238,18 +320,26 @@ export function createAgentLibraryAccessGuard(options: {
     result.knownNodes = [...new Map([...roots, root, ...(listing.entries || []), ...selectedNodes].map(node => [node.id, node])).values()];
     return result;
   }
-  return { authorizeTool, authorizeQuery, checkMetadata, initialPerception,
-    grantApprovedTool: (toolRunId: string) => { opaqueGrants.add(toolRunId); },
+  return { authorizeTool, authorizeQuery, authorizeRename, checkMetadata, initialPerception,
+    grantApprovedTool: (toolRunId: string) => { if (!isPluginRun(toolRunId)) opaqueGrants.add(toolRunId); },
     canAutoApproveTool: async (call: AgentToolCallSnapshot, toolRunId: string, action?: AgentPreparedActionPublic) => {
       try { return await authorizeTool(call, toolRunId, action, false); } catch { options.signal.throwIfAborted(); return false; }
     },
     observedNodes: () => [...observed.values()],
     authorizeResource: async (nodeId: number, write: boolean, key: string, mayAsk = true) => {
       await options.assertCurrent();
+      if (pluginRenameRuns.has(key)) throw new Error('插件改名不允许正文读取或通用文件写入');
+      const pluginRun = pluginToolRuns.get(key);
+      if (pluginRun) {
+        if (write || nodeId !== pluginRun.nodeId) throw new Error('插件 Tool 文件身份或读取权限不匹配');
+        await authorizeTargets([{ nodeId, write: false, singleFile: true }], key, mayAsk);
+        return;
+      }
       if (!full && !opaqueGrants.has(key)) await authorizeTargets([{ nodeId, write }], key, mayAsk);
     },
     authorizeDirectory: async (path: string, write: boolean, key: string, mayAsk = true) => {
       await options.assertCurrent();
+      if (isPluginRun(key)) throw new Error('插件 Tool 不允许目录访问');
       if (!full && !opaqueGrants.has(key)) await authorizeTargets([{ path, write }], key, mayAsk);
     },
   };

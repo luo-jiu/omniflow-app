@@ -1,9 +1,22 @@
 {
   "name": "@omniflow/plugin-sdk",
-  "version": "0.1.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
-  "exports": { ".": { "types": "./index.d.ts", "import": "./index.js" }, "./manifest.schema.json": "./manifest.schema.json" },
-  "files": ["index.js", "index.d.ts", "manifest.schema.json", "README.md"],
-  "engines": { "node": ">=20" }
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./index.js"
+    },
+    "./manifest.schema.json": "./manifest.schema.json"
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "manifest.schema.json",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  }
 }

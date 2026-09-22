@@ -1,0 +1,25 @@
+import { build } from 'esbuild';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { createRequire } from 'node:module';
+import { execFileSync, spawn } from 'node:child_process';
+const root = fileURLToPath(new URL('../../', import.meta.url));
+const live = process.argv.includes('--live');
+const work = await mkdtemp(path.join(tmpdir(), 'omniflow-at1-agent-'));
+const sample = JSON.parse(execFileSync(process.execPath, ['tools/plugin-isolation/build-independent.mjs', 'csv-tool'], { cwd: root, encoding: 'utf8' }));
+const entry = path.join(root, 'dist-electron', `at1-agent-${process.pid}.mjs`);
+const bootstrap = path.join(work, 'bootstrap.cjs');
+await build({ entryPoints: [path.join(root, 'tools/plugin-isolation/at1-agent-live.ts')], outfile: entry, bundle: true, platform: 'node', format: 'esm', packages: 'external', tsconfig: path.join(root, 'tsconfig.json'),
+  banner: { js: "import { createRequire as createLabRequire } from 'node:module'; const require = createLabRequire(import.meta.url);" } });
+await build({ entryPoints: [path.join(root, 'electron/service/extensions/plugin-preload.ts')], outfile: path.join(work, 'plugin-preload.cjs'), bundle: true, platform: 'node', format: 'cjs', external: ['electron'] });
+await writeFile(bootstrap, `const {app,protocol}=require('electron');protocol.registerSchemesAsPrivileged([{scheme:'omniflow-extension',privileges:{standard:true,secure:true,supportFetchAPI:true,corsEnabled:true}}]);app.setName('OmniFlow');import(${JSON.stringify(pathToFileURL(entry).href)}).catch(error=>{console.error('AT1_RESULT='+JSON.stringify({passed:false,error:String(error.message).slice(0,500)}));app.exit(1)});`);
+const env = { ...process.env, OMNIFLOW_AT1_WORK: work, OMNIFLOW_AT1_SAMPLE: sample.packageDirectory, OMNIFLOW_AT1_LIVE: live ? '1' : '0' }; delete env.ELECTRON_RUN_AS_NODE;
+const child = spawn(createRequire(import.meta.url)('electron'), [bootstrap], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
+let output = ''; child.stdout.on('data', data => { output += data; }); child.stderr.on('data', data => { output += data; });
+const timer = setTimeout(() => child.kill('SIGTERM'), 210000);
+const code = await new Promise(resolve => child.once('exit', resolve)); clearTimeout(timer);
+await writeFile(path.join(work, 'run.log'), output); await rm(entry, { force: true });
+const results = output.split('\n').filter(line => line.startsWith('AT1_RESULT=')); results.forEach(line => console.log(line)); console.log(JSON.stringify({ work, code }));
+process.exitCode = code === 0 && results.some(line => JSON.parse(line.slice('AT1_RESULT='.length)).passed === true) ? 0 : 1;

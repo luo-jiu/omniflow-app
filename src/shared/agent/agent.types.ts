@@ -316,6 +316,10 @@ export const AGENT_FILE_UPLOAD_PREPARED_ACTION_KIND = 'file.upload' as const;
 
 export const AGENT_FILE_UPLOAD_PREPARED_ACTION_VERSION = 1 as const;
 
+export const AGENT_PLUGIN_RENAME_PREPARED_ACTION_KIND = 'plugin.rename' as const;
+
+export const AGENT_PLUGIN_RENAME_PREPARED_ACTION_VERSION = 1 as const;
+
 export const AGENT_PREPARED_ACTION_PUBLIC_IDENTITIES = [{
   kind: AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_KIND,
   version: AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_VERSION,
@@ -331,7 +335,21 @@ export const AGENT_PREPARED_ACTION_PUBLIC_IDENTITIES = [{
 }, {
   kind: AGENT_FILE_UPLOAD_PREPARED_ACTION_KIND,
   version: AGENT_FILE_UPLOAD_PREPARED_ACTION_VERSION,
+}, {
+  kind: AGENT_PLUGIN_RENAME_PREPARED_ACTION_KIND,
+  version: AGENT_PLUGIN_RENAME_PREPARED_ACTION_VERSION,
 }] as const;
+
+export interface AgentPluginRenamePreparedActionPublicV1 {
+  kind: typeof AGENT_PLUGIN_RENAME_PREPARED_ACTION_KIND;
+  version: typeof AGENT_PLUGIN_RENAME_PREPARED_ACTION_VERSION;
+  libraryId: number;
+  operationId: string;
+  pluginId: string;
+  pluginVersion: string;
+  packageFingerprint: string;
+  items: Array<{ nodeId: number; parentId: number; oldName: string; newName: string }>;
+}
 
 export type AgentMediaExtractAudioOutputFormat = 'm4a' | 'mp3' | 'wav';
 
@@ -448,6 +466,11 @@ export type AgentFileAuthorityRequestV1 = AgentFileAuthorityRequestBaseV1 & (
       operation: 'resolve-library-directory';
     }
   | {
+      operation: 'rename-library-files';
+      nodeIds: number[];
+      includeCredentials: boolean;
+    }
+  | {
       contentType?: string;
       fileName: string;
       fileSize: number;
@@ -476,6 +499,12 @@ export type AgentFileAuthorityResultV1 =
       version: 1;
     }
   | {
+      operation: 'rename-library-files';
+      nodes: AgentFileAuthorityNodeSnapshotV1[];
+      credentials?: { token: string; username: string };
+      version: 1;
+    }
+  | {
       credentials?: { token: string; username: string };
       parent: AgentFileAuthorityNodeSnapshotV1;
       providerId: string;
@@ -497,6 +526,7 @@ export interface AgentFileAuthorityCompletionV1 {
 }
 
 export type AgentPreparedActionPublic =
+  | AgentPluginRenamePreparedActionPublicV1
   | AgentFilePublishPreparedActionPublicV1
   | AgentFileStagePreparedActionPublicV1
   | AgentFileUploadPreparedActionPublicV1
@@ -584,6 +614,15 @@ export interface AgentToolActivityInteraction {
   status: AgentInteractionStatus;
 }
 
+/** Host-authored package identity captured before Tool execution; never an authorization grant. */
+export interface AgentPluginToolSource {
+  readonly pluginId: string;
+  readonly pluginVersion: string;
+  readonly packageFingerprint: string;
+  readonly toolId: string;
+  readonly registrationId: string;
+}
+
 export interface AgentToolActivitySnapshot {
   approval?: AgentToolActivityApproval;
   call: AgentToolCallSnapshot;
@@ -594,6 +633,7 @@ export interface AgentToolActivitySnapshot {
   ordinal: number;
   permissionBehavior: AgentToolPermissionBehavior;
   planStepId?: string;
+  readonly pluginSource?: AgentPluginToolSource;
   preparation?: AgentToolPreparationSnapshot;
   progress?: AgentToolProgress;
   progressUpdatedAt?: string;

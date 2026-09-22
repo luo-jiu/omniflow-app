@@ -8,6 +8,7 @@ import type {
   AgentFileUploadPreparedActionPublicV1,
   AgentMediaExtractAudioPreparedActionPublicV1,
   AgentPreparedActionPublic,
+  AgentPluginRenamePreparedActionPublicV1,
   AgentShellPreparedActionPublicV1,
   AgentToolApprovalSnapshot,
 } from '@/shared/agent/agent.types';
@@ -153,6 +154,19 @@ function filePublishAction(): AgentFilePublishPreparedActionPublicV1 {
   };
 }
 
+function renameAction(count = 2): AgentPluginRenamePreparedActionPublicV1 {
+  return { kind: 'plugin.rename', version: 1, libraryId: 3, operationId: '83fc584b-037d-4c82-8883-a609846ea0d4',
+    pluginId: 'example.rename', pluginVersion: '0.1.0', packageFingerprint: 'c'.repeat(64),
+    items: Array.from({ length: count }, (_, i) => ({ nodeId: i + 8, parentId: 2, oldName: `old-${i + 1}.jpg`, newName: `new-${i + 1}.jpg` })) };
+}
+function renameApproval(action: unknown = renameAction()): AgentToolApprovalSnapshot {
+  const result = approval(action);
+  result.call.name = 'example.rename.prefix';
+  result.call.input = { forgedPreview: [{ oldName: 'forged', newName: 'fake' }] };
+  result.preview = { title: '重命名文件', description: '批准选定文件的重命名', risk: 'write', details: [{ label: '摘要', value: 'incomplete preview' }] };
+  return result;
+}
+
 function renderCard(input: AgentToolApprovalSnapshot, onResolve = vi.fn()) {
   let renderer!: TestRenderer.ReactTestRenderer;
   act(() => {
@@ -180,6 +194,53 @@ afterEach(() => {
 });
 
 describe('AgentConfirmationCard', () => {
+  it('renders all 50 immutable renames from the normalized action without truncating to preview details', () => {
+    const action = renameAction(50); const { renderer, onResolve } = renderCard(renameApproval(action));
+    const region = renderer.root.findByProps({ role: 'region', 'aria-label': '完整重命名预览' });
+    expect(region.props.tabIndex).toBe(0);
+    const rows = region.findAllByType('dd'); expect(rows).toHaveLength(50);
+    expect(textContent(rows[0])).toBe('old-1.jpg → new-1.jpg');
+    expect(textContent(rows[49])).toBe('old-50.jpg → new-50.jpg');
+    expect(textContent(renderer.root)).toContain('example.rename@0.1.0');
+    expect(textContent(renderer.root)).toContain('c'.repeat(64));
+    expect(textContent(renderer.root)).not.toContain('forged');
+    expect(textContent(renderer.root)).not.toContain('incomplete preview');
+    expect(renderer.root.findAllByType('input')).toHaveLength(0);
+    expect(renderer.root.findAllByType('select')).toHaveLength(0);
+    expect(renderer.root.findAllByProps({ 'data-testid': 'library-node-picker' })).toHaveLength(0);
+    const allow = renderer.root.findAllByType('button').find(button => textContent(button) === '允许')!;
+    expect(allow.props.disabled).toBe(false); act(() => allow.props.onClick());
+    expect(onResolve).toHaveBeenCalledWith(true, action);
+  });
+
+  it('replaces the readonly fingerprint and complete item list when a new preparation arrives', () => {
+    const { renderer, onResolve } = renderCard(renameApproval());
+    const changed = { ...renameAction(1), packageFingerprint: 'd'.repeat(64), pluginVersion: '0.2.0' };
+    const updated = renameApproval(changed); updated.preparation!.preparedActionId = 'prepared-2';
+    act(() => renderer.update(React.createElement(AgentConfirmationCard, { approval: updated, busy: false, libraryId: 3, onResolve })));
+    expect(textContent(renderer.root)).toContain('d'.repeat(64));
+    expect(textContent(renderer.root)).not.toContain('c'.repeat(64));
+    expect(textContent(renderer.root)).not.toContain('old-2.jpg');
+    act(() => renderer.root.findAllByType('button').find(button => textContent(button) === '允许')!.props.onClick());
+    expect(onResolve).toHaveBeenCalledWith(true, changed);
+  });
+
+  it.each([
+    { action: { ...renameAction(), pluginId: '../malicious' } },
+    { action: { ...renameAction(), pluginId: 'other.rename' } },
+    { action: { ...renameAction(), packageFingerprint: 'fake' } },
+    { action: { ...renameAction(), libraryId: 4 } },
+    { action: { ...renameAction(), kind: 'plugin.write' } },
+    { action: renameAction(), toolName: 'file.rename' },
+  ])('rejects an invalid or inconsistent rename preparation %j', testCase => {
+    const input = renameApproval(testCase.action);
+    if (testCase.toolName) input.call.name = testCase.toolName;
+    const { renderer, onResolve } = renderCard(input);
+    expect(renderer.root.findByProps({ role: 'alert' })).toBeDefined();
+    expect(renderer.root.findAllByType('button').find(button => textContent(button) === '允许')!.props.disabled).toBe(true);
+    const cancel = renderer.root.findAllByType('button').find(button => textContent(button) === '取消')!;
+    expect(cancel.props.disabled).toBe(false); act(() => cancel.props.onClick()); expect(onResolve).toHaveBeenCalledWith(false);
+  });
   it('allows changing a local default to a library target without guessing a parent node', () => {
     const action = mediaAction({ destination: 'local', fallbackPolicy: 'none', targetLabel: '本机' });
     delete action.parentId;

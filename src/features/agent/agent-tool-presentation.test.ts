@@ -168,3 +168,57 @@ describe('Agent Tool presentation registry', () => {
     }]);
   });
 });
+
+function renameActivity(): AgentToolActivitySnapshot {
+  const operationId = 'eaf4604e-5779-4a3c-8c3d-3eaf45c9aa68';
+  return { ...completedActivity('example.rename.propose', {
+    operationId, mutationCommitState: 'committed', items: [{ nodeId: 11, parentId: 10, name: 'new', ext: 'txt' }],
+  }), pluginSource: { pluginId: 'example.rename', pluginVersion: '0.1.0', packageFingerprint: 'a'.repeat(64), toolId: 'example.rename.propose', registrationId: `plugin-tool:${'b'.repeat(64)}` },
+  preparation: { preparedActionId: 'prepared', snapshotHash: 'c'.repeat(64), action: {
+    kind: 'plugin.rename', version: 1, libraryId: 3, operationId, pluginId: 'example.rename', pluginVersion: '0.1.0', packageFingerprint: 'a'.repeat(64),
+    items: [{ nodeId: 11, parentId: 10, oldName: 'old.txt', newName: 'new.txt' }],
+  } } };
+}
+
+describe('plugin rename receipt presentation', () => {
+  it('shows host-recorded source and the matching committed receipt without exposing arbitrary fields', () => {
+    const activity = renameActivity();
+    activity.result!.data = { ...(activity.result!.data as object), source: 'forged plugin', secretUrl: 'https://example.invalid/private' };
+    const blocks = buildAgentToolPresentation(activity, 3);
+    expect(blocks).toContainEqual({ type: 'details', title: '提交回执', entries: [
+      { label: '操作 ID', value: 'eaf4604e-5779-4a3c-8c3d-3eaf45c9aa68' }, { label: '提交状态', value: '已提交' },
+    ] });
+    expect(JSON.stringify(blocks)).toContain('example.rename');
+    expect(JSON.stringify(blocks)).not.toContain('forged plugin'); expect(JSON.stringify(blocks)).not.toContain('secretUrl');
+  });
+
+  it.each(['uncommitted', 'commit_unknown'] as const)('preserves %s after failure or cancellation', state => {
+    for (const status of ['failed', 'cancelled', 'interrupted'] as const) {
+      const activity = renameActivity(); activity.status = status;
+      activity.result = { ok: false, data: { ...(activity.result!.data as object), mutationCommitState: state } };
+      const blocks = buildAgentToolPresentation(activity, 3);
+      expect(JSON.stringify(blocks)).toContain(state === 'uncommitted' ? '未提交' : '尚不能确认，请查询回执');
+      expect(blocks).not.toContainEqual(expect.objectContaining({ tone: 'success' }));
+    }
+  });
+
+  it('does not label mismatched, failed or malformed claimed receipts as committed', () => {
+    for (const change of [{ operationId: 'other' }, { items: [] }, { items: [{ nodeId: 99, parentId: 10, name: 'new', ext: 'txt' }] }]) {
+      const activity = renameActivity(); activity.result!.data = { ...(activity.result!.data as object), ...change };
+      expect(JSON.stringify(buildAgentToolPresentation(activity, 3))).toContain('尚不能确认，请查询回执');
+    }
+    const failed = renameActivity(); failed.status = 'failed'; failed.result!.ok = false;
+    expect(JSON.stringify(buildAgentToolPresentation(failed, 3))).toContain('尚不能确认，请查询回执');
+    const mismatchedFailure = renameActivity(); mismatchedFailure.result!.data = { ...(mismatchedFailure.result!.data as object), mutationCommitState: 'uncommitted' };
+    expect(JSON.stringify(buildAgentToolPresentation(mismatchedFailure, 3))).toContain('尚不能确认，请查询回执');
+  });
+
+  it('does not fabricate a rename receipt from result fields, foreign sources or another library', () => {
+    const activity = renameActivity();
+    for (const invalid of [{ ...activity, pluginSource: undefined }, { ...activity, preparation: undefined },
+      { ...activity, pluginSource: { ...activity.pluginSource!, pluginVersion: '9.0.0' } }]) {
+      expect(buildAgentToolPresentation(invalid, 3)).not.toContainEqual(expect.objectContaining({ title: '提交回执' }));
+    }
+    expect(buildAgentToolPresentation(activity, 4)).not.toContainEqual(expect.objectContaining({ title: '提交回执' }));
+  });
+});

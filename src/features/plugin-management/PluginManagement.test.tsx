@@ -22,3 +22,22 @@ describe('plugin management review and host-owned state',()=>{
   let tree!:ReactTestRenderer;await act(async()=>{tree=create(<PluginManagement onBack={()=>undefined}/>);});await act(async()=>button(tree,'卸载').props.onClick());expect(mocks.action).not.toHaveBeenCalled();expect(mocks.confirm.mock.calls[0][0].content).toContain('用户文件、设置和阅读快照保留');await act(async()=>tree.unmount());
  });
 });
+
+describe('Agent Tool capability projection',()=>{
+ it('shows metadata-only rename approval without implying file content or write access',async()=>{
+  mocks.catalog.plugins=[{id:'example.batch-rename',version:'0.1.0',fingerprint:'b'.repeat(64),enabled:true,readApproved:false,renameApproved:false,toolApproved:false,source:'local',installedAt:'now',permissions:['resource.rename.propose','agent.tools'],viewers:[],agentTools:[{id:'example.batch-rename.propose',kind:'rename-proposal',title:'批量改名提案',description:'添加文件名前后缀'}],running:0}];
+  let tree!:ReactTestRenderer;await act(async()=>{tree=create(<PluginManagement onBack={()=>undefined}/>);});
+  expect(JSON.stringify(tree.toJSON())).toContain('实际改名由宿主另行预览确认后执行');expect(button(tree,'批准读取能力')).toBeUndefined();
+  await act(async()=>button(tree,'批准改名提案能力').props.onClick());expect(mocks.action).toHaveBeenCalledWith('example.batch-rename','approve-rename');expect(mocks.action).toHaveBeenCalledTimes(1);
+  expect(button(tree,'批准 Agent Tool 能力')).toBeTruthy();await act(async()=>tree.unmount());
+ });
+ it('shows Tool-only packages and sends independent approval without granting session resource access',async()=>{
+  mocks.catalog.plugins=[{id:'test.tools',version:'1.0.0',fingerprint:'b'.repeat(64),enabled:true,readApproved:true,toolApproved:false,source:'local',installedAt:'now',permissions:['resource.read','agent.tools'],viewers:[],agentTools:[{id:'test.tools.read',title:'文件分析',description:'本次授权文件分析'}],running:0}];
+  let tree!:ReactTestRenderer;await act(async()=>{tree=create(<PluginManagement onBack={()=>undefined}/>);});
+  expect(tree.root.findAllByType('h3').some(node=>node.children.includes('文件分析'))).toBe(true);
+  expect(JSON.stringify(tree.toJSON())).toContain('不会授予会话资源权限');
+  await act(async()=>button(tree,'批准 Agent Tool 能力').props.onClick());expect(mocks.action).toHaveBeenCalledWith('test.tools','approve-tools');
+  expect(mocks.action).toHaveBeenCalledTimes(1);expect(button(tree,'撤销读取批准')).toBeTruthy();
+  await act(async()=>tree.unmount());
+ });
+});

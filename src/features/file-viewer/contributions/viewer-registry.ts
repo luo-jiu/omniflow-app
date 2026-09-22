@@ -40,7 +40,7 @@ export const viewerRegistry = new ViewerRegistry((viewer, owner) => {
     || !viewer.title.trim() || viewer.title.length > 128 || typeof viewer.View !== 'function'
     || viewer.fileTypes.length === 0 || viewer.fileTypes.length > 14
     || (builtIn && (viewer.fileTypes.length !== 1 || viewer.id !== builtInViewerId(viewer.fileTypes[0])))
-    || viewer.fileTypes.some(kind => !BUILT_IN_VIEWER_KINDS.includes(kind) || (!builtIn && !['text', 'image', 'pdf', 'other'].includes(kind)))
+    || viewer.fileTypes.some(kind => !BUILT_IN_VIEWER_KINDS.includes(kind) || (!builtIn && !['text', 'image', 'pdf', 'other', 'comic'].includes(kind)))
     || (viewer.extensions && (viewer.extensions.length > 64 || viewer.extensions.some(ext => !/^[a-z0-9]{1,32}$/.test(ext))))) throw new Error('Invalid viewer contribution');
 });
 

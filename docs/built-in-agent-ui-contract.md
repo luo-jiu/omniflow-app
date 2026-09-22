@@ -1,5 +1,13 @@
 # 内置 Agent UI 契约
 
+插件改名使用标准 `AgentConfirmationCard` 的只读完整预览：显示插件/版本、包指纹、文件数量及每个旧名→新名，长列表在卡内滚动并保留键盘进入能力。数据只来自 main 的规范 `plugin.rename` public action，审批不能从插件 output 或模型 input 临时拼装；按原批准链提交，变化后重新批准。资源范围授权不能代替提案确认，完全访问也保留这一步。真实 macOS 已验证两文件范围授权、暗色两项卡片、批准提交与目录/预览同步；50 项列表完整性有自动化断言，亮/暗 50 项长列表的视觉与滚动点击未手验，范围见 [W0～W2](plugin-system-w0-w2-rename.md)。
+
+成功界面只消费已核对且匹配批准目标的 committed ToolRun，本次实时完成按节点 ID 同步目录和已打开标签名称；历史会话恢复只刷新父目录，不广播旧回执里的名称，避免覆盖后来发生的改名。Run 停止不抹去已经提交的 ToolRun；commit_unknown 显示结果未确认及操作身份，不冒充“已取消且未修改”，也不提供换新 ID 的盲重试。SQLite 可恢复审批/结果投影，但本批未提供跨重启自动核对或撤销页面。
+
+启动后，已批准但提交尚未确认的改名显示 main 恢复的 interrupted/commit_unknown 和原操作 ID，提示先核对、勿直接重发。已保存 committed ToolRun 不降级；如果所属 Run 尚未完成就退出，提示查看已有成功回执继续未完成步骤、勿重复改名。同一 Run 含未知改名时采用更保守的核对提示。审批前中断仍按普通未执行中断展示；UI 不据此发起自动回执查询或恢复执行。
+
+AT1插件Tool的终态卡沿用受控details块显示宿主记录的插件/版本/工具/包指纹，input/result自报字段不能生成来源展示。插件活动单独呈现，不混入内置读取分组。无需新增执行状态owner；实际模型/界面联调边界见 [AT1](plugin-system-at1-agent-tools.md)。
+
 ## 本机会话组与归档（2026-09-13）
 
 新组编辑器、新建/移动会话选择器为条件挂载的Semi Modal，必须先以visible=false挂载，再在effect中打开，避免StrictMode重放销毁初始可见Portal。不得以禁用全局StrictMode修复；当前开发版已实际验证创建、再次打开设置和选择组。实际读写、归档恢复、主题与隔离验收见 [验收记录](agent-session-groups-live-acceptance.md)。
@@ -137,6 +145,8 @@ Agent 仍按工作区模式挂载/卸载，返回时通过原主进程快照恢�
 Agent 是通用前端分层里“renderer 负责编排”的明确例外：Agent loop、Run 生命周期、Tool 调度、审批决策和任务状态机由 Electron main 持有；renderer 只负责展示、用户草稿和 main 明确请求的一次性业务 executor 分发。不能引用通用规则把 Agent 状态机搬回 React。
 
 ### 3.1 工作区切换与卸载
+
+AT2补充：App级`AgentLibraryRunLifecycle`消费已有路由/Auth事实。离开精确LibraryDetail路由（包括回收站）、切库、账号/后端变化或登出时调用既有owner-release，覆盖pure-main插件Run；同库Agent/文件/工具/设置模式和query/hash变化不取消。仅比较已提交scope，不使用unmount cleanup发取消，因此StrictMode重放与同scope重挂不会误杀。已在win资料库实测等待读取批准时离库取消，并验证返回后的终态/来源恢复；执行中故障与剩余边界见 [AT2](plugin-system-at2-fault-recovery.md)。
 
 `AgentWorkspace` 当前只在 `workspaceDisplayMode === 'search-home'` 时挂载。切到文件、浏览器、工具区或系统视图会卸载 Agent renderer，但不等于 owner / library scope 变化：
 

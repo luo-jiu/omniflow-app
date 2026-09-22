@@ -1,3 +1,8 @@
+import { prepareAgentPluginRename, executeAgentPluginRename } from './agent-plugin-service';
+import type { AgentPluginRenameRequest } from './agent-plugin-rename';
+import { createAgentPluginToolSnapshot } from './agent-plugin-tool-adapter';
+import { getAgentPluginToolRegistrations, executeAgentPluginTool, type AgentPluginToolRequest } from './agent-plugin-service';
+import type { PluginToolRegistration } from '../extensions/plugin-tool-catalog';
 import crypto from 'node:crypto';
 import { isAgentRendererMutationTool } from '../../../src/shared/agent/agent-library-actions';
 import { attachmentManifest } from '../../../src/shared/agent/agent-attachments';
@@ -39,6 +44,7 @@ import type {
   AgentNonAssistantMessage,
   AgentMediaInspectionRequest,
   AgentOwnerScope,
+  AgentPluginToolSource,
   AgentPreparedActionPublic,
   AgentPerceptionSnapshot,
   AgentReasoningEffort,
@@ -365,6 +371,10 @@ interface AgentMediaArtifactFallbackGrant {
 }
 
 interface AgentOrchestratorOptions {
+  preparePluginRename?: typeof prepareAgentPluginRename;
+  executePluginRename?: typeof executeAgentPluginRename;
+  getPluginTools?: (reservedNames: readonly string[]) => readonly PluginToolRegistration[];
+  executePluginTool?: (request: AgentPluginToolRequest) => Promise<AgentToolResult>;
   generateSessionTitle?: typeof generateAgentSessionTitle;
   attachmentBindings?: Pick<import('./agent-attachment-store').AgentAttachmentStore, 'resolve' | 'bind' | 'rollbackBinding'>;
   readLibraryMetadata?: (input: AgentFileAuthorityBrokerRequestInput) => Promise<AgentLibraryReadResult>;
@@ -847,6 +857,7 @@ function resolveAgentProviderToolResultPolicy(
 }
 
 interface CreatePreparedRuntimeOptions {
+  pluginOperation?: 'rename';
   permissionMode?: AgentRunCapabilitySnapshot['shellPermissionMode'];
   identity?: AgentToolMainPreparationIdentity;
   preparedActionId?: string;
@@ -885,7 +896,7 @@ function createPreparedRuntime(
     throw new Error('Agent Tool prepare 风险等级与注册定义不匹配');
   }
   let action = Object.freeze(normalizeAgentPreparedActionPublic(result.publicAction));
-  if (action.kind !== expectedToolName) {
+  if (action.kind !== expectedToolName && !(options.pluginOperation === 'rename' && action.kind === 'plugin.rename')) {
     throw new Error('Agent prepared action 与 Tool 不匹配');
   }
   if (
@@ -1358,7 +1369,9 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
           throw new Error('Agent prepared action 已变化，请按最新确认内容重试');
         }
         const requestedAction = normalizeAgentPreparedActionPublic(input.preparedAction);
-        if (requestedAction.kind !== pending.approval.call.name) {
+        if (requestedAction.kind !== pending.approval.call.name && !(requestedAction.kind === 'plugin.rename'
+          && pending.prepared.current.action.kind === 'plugin.rename'
+          && hashToolInput(requestedAction) === hashToolInput(pending.prepared.current.action))) {
           throw new Error('Agent prepared action 与 Tool 不匹配');
         }
         const currentPrepared = pending.prepared.current;
@@ -2050,7 +2063,13 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     readOutputTokenBudget?: number,
   ): Promise<AgentToolResult> {
     const tool = capabilitySnapshot.getTool(call.name, activeSkillId);
+    let pluginInputError: string | undefined;
     const registeredTool = capabilitySnapshot.toolSnapshot.get(call.name);
+    const preparationMode: AgentPreparedRuntime['preparationMode'] | 'none' = tool?.prepareMain
+      ? 'main'
+      : tool?.createRendererPrepareRequest && tool.finalizeRendererPreparation
+        ? 'renderer'
+        : 'none';
     if (tool && !call.inputError) {
       const schemaValidation = capabilitySnapshot.validateInput(
         tool.name,
@@ -2060,7 +2079,8 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       );
       if (!schemaValidation.ok) {
         call.input = { _omniflowAudit: 'invalid Tool input omitted' };
-        return { message: schemaValidation.message, ok: false };
+        if (!tool.pluginSource) return { message: schemaValidation.message, ok: false };
+        pluginInputError = schemaValidation.message;
       }
     }
     const toolRunId = crypto.randomUUID();
@@ -2103,7 +2123,56 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         }
       });
     };
+    const renameRequest = (source: import('@/shared/agent/agent.types').AgentPluginToolSource, pluginInput: unknown, operationSignal: AbortSignal): AgentPluginRenameRequest => {
+      if (tool?.pluginOperation !== 'rename' || !tool.pluginSource || !accessGuard
+        || source.registrationId !== tool.registrationId || JSON.stringify(source) !== JSON.stringify(tool.pluginSource)
+        || hashToolInput(pluginInput) !== hashToolInput(call.input)) throw new Error('重命名插件调用身份不匹配');
+      const nodeIds = [...(pluginInput as { resources: number[] }).resources];
+      const assertIdentity = (requestSignal: AbortSignal) => {
+        signal.throwIfAborted(); requestSignal.throwIfAborted();
+        const activeRun = activeRuns.get(sessionId);
+        if (!activeRun || activeRun.runId !== runId || activeRun.ownerWebContentsId !== sender.id || sender.isDestroyed()) throw new Error('重命名运行已结束');
+        const current = createAgentAiDestinationSnapshot({ model: input.model, profileId: input.profileId, runtimeConnection: resolveRuntimeProfile(input.profileId) });
+        if (current.identity !== aiDestination.identity) throw new Error('AI 目的地已变化，未继续改名');
+      };
+      const assertCurrent = async (requestSignal: AbortSignal) => {
+        assertIdentity(requestSignal); await accessGuard.authorizeRename(nodeIds, toolRunId, false); assertIdentity(requestSignal);
+      };
+      return { source: tool.pluginSource, input: pluginInput, aiDestinationId: aiDestination.identity, assertCurrent,
+        authority: { sender, ownerScope: input.ownerScope, libraryId: Number(input.appContext.libraryId), sessionId, runId, toolRunId,
+          signal: AbortSignal.any([signal, operationSignal]), operation: { operation: 'rename-library-files', nodeIds, includeCredentials: false } } };
+    };
     const executionContext: AgentToolExecutionContext = {
+      executePluginRename: async (source, pluginInput, preparation, commit, operationSignal) => {
+        if (!options.executePluginRename) throw new Error('插件重命名提交能力未配置');
+        const request = renameRequest(source, pluginInput, operationSignal);
+        return options.executePluginRename(request, preparation, commit);
+      },
+      executePluginTool: async (source, pluginInput, operationSignal) => {
+        if (!options.executePluginTool || !tool?.pluginSource || !accessGuard
+          || source.registrationId !== tool.registrationId || JSON.stringify(source) !== JSON.stringify(tool.pluginSource)
+          || hashToolInput(pluginInput) !== hashToolInput(call.input)) throw new Error('插件工具调用身份不匹配');
+        const nodeId = Number((pluginInput as { resource?: { nodeId?: number } }).resource?.nodeId);
+        const assertIdentity = (requestSignal: AbortSignal) => {
+          signal.throwIfAborted(); requestSignal.throwIfAborted();
+          const activeRun = activeRuns.get(sessionId);
+          if (!activeRun || activeRun.runId !== runId || activeRun.ownerWebContentsId !== sender.id || sender.isDestroyed()) throw new Error('插件工具运行已结束');
+          const destination = createAgentAiDestinationSnapshot({ model: input.model, profileId: input.profileId, runtimeConnection: resolveRuntimeProfile(input.profileId) });
+          if (destination.identity !== aiDestination.identity) throw new Error('AI 目的地已变化，请重新开始任务');
+        };
+        const assertCurrent = async (requestSignal: AbortSignal) => {
+          assertIdentity(requestSignal);
+          await accessGuard.authorizeResource(nodeId, false, toolRunId, false);
+          assertIdentity(requestSignal);
+        };
+        await assertCurrent(operationSignal);
+        const result = await options.executePluginTool({ source: tool.pluginSource, input: pluginInput,
+          authority: { sender, ownerScope: input.ownerScope, libraryId: Number(input.appContext.libraryId), sessionId, runId, toolRunId,
+            signal: AbortSignal.any([signal, operationSignal]), operation: { operation: 'stage-library-node', nodeId, includeDownloadUrl: true } },
+          aiDestinationId: aiDestination.identity, assertCurrent });
+        await assertCurrent(operationSignal);
+        return result;
+      },
       operateAttachment: (operation, query) => operateAgentAttachment(getAgentAttachmentStore(),
         { ownerScope: input.ownerScope, libraryId: Number(input.appContext.libraryId) }, sessionId,
         operation, query, signal, readOutputTokenBudget ?? 10000),
@@ -2283,7 +2352,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       type: 'tool-execution-cancelled',
     });
     let omitDeniedAudit = false;
-    let preflightDecision: AgentToolPermissionDecision | undefined;
+    let preflightDecision: AgentToolPermissionDecision | undefined = pluginInputError ? { behavior: 'deny', risk: 'read', message: pluginInputError } : undefined;
     let scopeMayAutoApprove = false;
     if (!call.inputError && call.name === interactionRequestTool.name) {
       try {
@@ -2308,6 +2377,14 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         risk: registeredTool?.risk || 'external',
       };
     }
+    // 插件来源在资源审批之前落盘；停止等待审批时也保留真实调用身份。
+    if (!preflightDecision && !call.inputError && tool?.pluginSource && accessGuard) {
+      activity = await store.createToolRun({ callId: call.id, id: toolRunId, input: auditProjection.input,
+        now: now(), permissionBehavior: tool.pluginOperation === 'rename' ? 'ask' : 'allow', runId, status: preparationMode === 'none' ? 'running' : 'preparing', toolKind: tool.kind,
+        toolName: call.name, pluginSource: tool.pluginSource });
+      emit(sender, { activity, call: { id: call.id, input: call.input, name: call.name }, runId, sessionId, type: 'tool-started' });
+      persistAndEmitProgress({ message: '检查插件读取范围' });
+    }
     if (!preflightDecision && !call.inputError && tool && accessGuard) {
       try {
         scopeMayAutoApprove = await accessGuard.authorizeTool(call, toolRunId);
@@ -2322,11 +2399,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         preflightDecision = { behavior: 'deny', risk: tool.risk, message: error instanceof Error ? error.message : '文件访问未获授权' };
       }
     }
-    const preparationMode: AgentPreparedRuntime['preparationMode'] | 'none' = tool?.prepareMain
-      ? 'main'
-      : tool?.createRendererPrepareRequest && tool.finalizeRendererPreparation
-        ? 'renderer'
-        : 'none';
+
     let decision: AgentToolPermissionDecision;
     let rendererExecutionInput: unknown;
     let preparedApproval: PendingAgentApproval['prepared'];
@@ -2341,7 +2414,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
           risk: tool.risk,
         };
       } else {
-        activity = await store.createToolRun({
+        if (!activity) activity = await store.createToolRun({
           callId: call.id,
           id: toolRunId,
           input: call.input,
@@ -2351,6 +2424,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
           status: 'preparing',
           toolKind: tool.kind,
           toolName: call.name,
+          ...(registeredTool?.pluginSource ? { pluginSource: registeredTool.pluginSource } : {}),
         });
         emit(sender, {
           activity,
@@ -2451,6 +2525,12 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
               return toolPrepareBroker.prepareMain({
                 prepare: async (preparationSignal) => {
                   const preparationContext: AgentToolMainPreparationContext = {
+                    ...(tool.pluginOperation === 'rename' ? {
+                      preparePluginRename: async (source: AgentPluginToolSource, pluginInput: unknown, operationSignal: AbortSignal) => {
+                        if (!options.preparePluginRename) throw new Error('插件重命名提案能力未配置');
+                        return options.preparePluginRename(renameRequest(source, pluginInput, operationSignal));
+                      },
+                    } : {}),
                     activeSkillId,
                     aiDestination,
                     appContext: input.appContext,
@@ -2468,7 +2548,8 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
                   );
                   throwIfAborted(preparationSignal);
                   return createPreparedRuntime(result, call.name, tool.risk, tool.preparedRisk, 'main', {
-                    permissionMode: await accessGuard?.canAutoApproveTool(call, toolRunId, result.publicAction) ? 'full-access' : capabilitySnapshot.shellPermissionMode,
+                    pluginOperation: tool.pluginOperation,
+                    permissionMode: tool.pluginOperation === 'rename' ? 'ask' : await accessGuard?.canAutoApproveTool(call, toolRunId, result.publicAction) ? 'full-access' : capabilitySnapshot.shellPermissionMode,
                     identity: preparationIdentity,
                     sealMain: sealInput => capabilitySnapshot.sealMainPreparedExecution(
                       call.name,
@@ -2619,6 +2700,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         status: decision.behavior === 'ask' ? 'awaiting_approval' : 'running',
         toolKind: tool?.kind || registeredTool?.kind || 'business',
         toolName: call.name,
+        ...(registeredTool?.pluginSource ? { pluginSource: registeredTool.pluginSource } : {}),
       });
       emit(sender, {
         activity,
@@ -3851,7 +3933,12 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       const libraryAccess: AgentLibraryAccessSnapshot = { version: 1, mode: permissionMode,
         groupId: selectedGroupId, policyRevision: selectedGroup?.policyRevision || 0,
         directories: selectedGroup?.directories || [], access: selectedGroup?.access || 'read' };
-      const accessGuard = createAgentLibraryAccessGuard({ policy: libraryAccess, context, signal: controller.signal,
+      const baseToolSnapshot = agentToolRegistry.createSnapshot();
+      const pluginRegistrations = options.getPluginTools?.(baseToolSnapshot.tools.map(item => item.name)) ?? [];
+      const combinedToolSnapshot = createAgentPluginToolSnapshot(baseToolSnapshot, pluginRegistrations);
+      const pluginTools = new Map(combinedToolSnapshot.tools.flatMap(item => item.pluginSource && !item.pluginOperation ? [[item.name, item.pluginSource] as const] : []));
+      const pluginRenameTools = new Map(combinedToolSnapshot.tools.flatMap(item => item.pluginSource && item.pluginOperation === 'rename' ? [[item.name, item.pluginSource] as const] : []));
+      const accessGuard = createAgentLibraryAccessGuard({ pluginTools, pluginRenameTools, policy: libraryAccess, context, signal: controller.signal,
         read: async (query, signal) => {
           if (!options.readLibraryMetadata) throw new Error('当前运行时无法验证资料库目录授权');
           return normalizeAgentLibraryReadResult(await options.readLibraryMetadata({ sender, libraryId, ownerScope,
@@ -3900,7 +3987,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         ...(options.contextBudget ? resolveAgentContextBudget(options.contextBudget) : {}),
       });
       resolveAIServiceOutputTokenLimit(contextBudget.outputReserveTokens);
-      const toolSnapshot = restrictAgentToolsForModel(agentToolRegistry.createSnapshot(), modelAdapter);
+      const toolSnapshot = restrictAgentToolsForModel(combinedToolSnapshot, modelAdapter);
       const skillSnapshot = restrictAgentSkillsForModel(builtInAgentSkillRegistry.createRunSnapshot(), toolSnapshot);
       const capabilityIds = Array.from(new Set(toolSnapshot.tools.flatMap(tool => [
         ...tool.availability.requiredCapabilities,
@@ -4018,10 +4105,12 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
           if (operation.operation === 'query-library-metadata') await accessGuard.authorizeQuery(operation.query, false, request.toolRunId);
           else if (operation.operation === 'stage-library-node') await accessGuard.authorizeResource(operation.nodeId, false, request.toolRunId, false);
           else if (operation.operation === 'resolve-library-directory') await accessGuard.authorizeDirectory(operation.directoryPath, true, request.toolRunId, false);
+          else if (operation.operation === 'rename-library-files') await accessGuard.authorizeRename(operation.nodeIds, request.toolRunId, false);
           else if (operation.operation === 'publish-library-file') await accessGuard.authorizeResource(operation.parentId, true, request.toolRunId, false);
         },
         after: async (request, result) => {
           if (result.operation === 'query-library-metadata') await accessGuard.checkMetadata(result.data, request.toolRunId);
+          if (result.operation === 'rename-library-files') await accessGuard.authorizeRename(result.nodes.map(node => node.id), request.toolRunId, false);
         },
       });
       emit(sender, {
@@ -4393,6 +4482,10 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
 }
 
 export const agentOrchestrator = createAgentOrchestrator({
+  getPluginTools: getAgentPluginToolRegistrations,
+  preparePluginRename: prepareAgentPluginRename,
+  executePluginRename: executeAgentPluginRename,
+  executePluginTool: executeAgentPluginTool,
   readLibraryText: readAgentLibraryText,
   readLibraryMetadata: async input => {
     const result = await agentFileAuthorityBroker.request(input);

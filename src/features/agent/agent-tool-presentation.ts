@@ -3,6 +3,7 @@ import type {
   AgentToolActivitySnapshot,
 } from '@/shared/agent/agent.types';
 import { buildFileFullName } from '@/utils/fileTreeSettings';
+import { committedPluginRenameItems, getPluginRenamePreparedAction } from './agent-published-file';
 
 type ToolPresenter = (
   activity: AgentToolActivitySnapshot,
@@ -243,9 +244,26 @@ export function buildAgentToolPresentation(
           type: 'status',
         }];
   }
+  const pluginSourceBlocks: AgentPresentationBlock[] = activity.pluginSource ? [{ type: 'details', title: '插件来源', entries: [
+    { label: '插件', value: activity.pluginSource.pluginId },
+    { label: '版本', value: activity.pluginSource.pluginVersion },
+    { label: '工具', value: activity.pluginSource.toolId },
+    { label: '包指纹', value: activity.pluginSource.packageFingerprint },
+  ] }] : [];
+  const renameAction = getPluginRenamePreparedAction(activity, libraryId);
+  if (renameAction) {
+    const data = asRecord(activity.result?.data);
+    const state = data?.operationId === renameAction.operationId ? textValue(data?.mutationCommitState) : '';
+    pluginSourceBlocks.push({ type: 'details', title: '提交回执', entries: [
+      { label: '操作 ID', value: renameAction.operationId },
+      { label: '提交状态', value: state === 'committed' && committedPluginRenameItems(activity, libraryId).length ? '已提交'
+        : state === 'uncommitted' && activity.result?.ok === false ? '未提交' : '尚不能确认，请查询回执' },
+    ] });
+  }
   if (activity.status === 'completed') {
     const specific = TOOL_PRESENTERS[activity.call.name]?.(activity, libraryId) || [];
     return [
+      ...pluginSourceBlocks,
       ...specific,
       ...(specific.length === 0 && activity.result?.message
         ? [{ message: activity.result.message, tone: 'success' as const, type: 'notice' as const }]
@@ -259,7 +277,7 @@ export function buildAgentToolPresentation(
         ? '工具执行已取消'
         : '工具执行失败'
   );
-  return [{
+  return [...pluginSourceBlocks, {
     message: fallbackMessage,
     tone: activity.status === 'interrupted' || activity.status === 'cancelled' ? 'warning' : 'danger',
     type: 'notice',

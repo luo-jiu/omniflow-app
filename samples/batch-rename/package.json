@@ -1,0 +1,16 @@
+{
+  "name": "omniflow-example-batch-rename",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "package": "node pack.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@omniflow/plugin-sdk": "0.4.0"
+  }
+}

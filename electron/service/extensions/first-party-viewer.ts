@@ -4,6 +4,7 @@ import path from 'node:path';
 import { PluginDevelopmentHost, type IsolatedPluginInstance } from './isolated-view';
 import { PluginReadingStateMemory, PluginFault } from './resource-broker';
 import { openLibraryResource } from './library-resource';
+import { openLibraryDirectory } from './library-directory';
 import type { PluginViewerOpen, PluginViewerEvent, PluginViewerSnapshot } from '../../../src/shared/plugin-viewer';
 import type { ThemeSnapshot } from '../../../packages/plugin-sdk/index.js';
 
@@ -36,7 +37,9 @@ export function registerFirstPartyViewer(getMainWindow: () => BrowserWindow | nu
     entries.set(input.clientId, entry);
     let stage = 'resource.open';
     try {
-      const resource = await openLibraryResource({ apiBaseUrl: options.apiBaseUrl ?? __OMNIFLOW_API_BASE_URL__, storageOrigins: options.storageOrigins ?? __OMNIFLOW_STORAGE_ORIGINS__,
+      const selectedViewer = spec?.plugin.viewers.find(viewer => viewer.id === input.viewerId);
+      const openResource = selectedViewer?.directoryTypes ? openLibraryDirectory : openLibraryResource;
+      const resource = await openResource({ apiBaseUrl: options.apiBaseUrl ?? __OMNIFLOW_API_BASE_URL__, storageOrigins: options.storageOrigins ?? __OMNIFLOW_STORAGE_ORIGINS__,
         token: input.token, username: input.username, libraryId: input.libraryId, nodeId: input.nodeId, signal: entry.controller.signal, onStage: next => { stage = next; } });
       if (entries.get(input.clientId) !== entry || (spec && !options.manager!.stillAllowed(input.viewerId,spec.plugin.fingerprint))) throw new PluginFault('CANCELLED', 'Closed');
       const state = new PluginReadingStateMemory();

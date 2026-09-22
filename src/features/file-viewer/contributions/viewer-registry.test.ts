@@ -44,3 +44,22 @@ describe('viewer contribution matching', () => {
     expect(readViewerAssociation('user:900001', 900007, { ...facts, fileName: 'sample.txt' })).toBeUndefined();
   });
 });
+
+ describe('comic directory associations', () => {
+  it('offers an explicit directory replacement, keeps fallback and ignores dots in directory names', () => {
+    disposers.push(viewerRegistry.installBuiltIns(() => null));
+    const remove = viewerRegistry.registerBatch('example', [{ id: 'example.comic', title: 'Comic', fileTypes: ['comic'], View: () => null }]);
+    disposers.push(remove);
+    const comic = { ...facts, fileType: 'comic' as const, fileName: 'Volume.1' };
+    expect(resolveViewerContribution(comic).selected?.id).toBe(builtInViewerId('comic'));
+    expect(resolveViewerContribution(comic, 'example.comic').selected?.id).toBe('example.comic');
+    expect(resolveViewerContribution({ ...comic, fileType: 'comic_archive' }).candidates.map(v => v.id)).not.toContain('example.comic');
+    const values = new Map<string, string>();
+    vi.stubGlobal('window', {});
+    vi.stubGlobal('localStorage', { getItem: (key: string) => values.get(key), setItem: (key: string, value: string) => values.set(key, value) });
+    saveViewerAssociation('user:900001', 900007, comic, 'example.comic');
+    expect(readViewerAssociation('user:900001', 900007, { ...comic, fileName: 'Volume.2' })).toBe('example.comic');
+    remove(); expect(resolveViewerContribution(comic, 'example.comic').selected?.id).toBe(builtInViewerId('comic'));
+    expect(readViewerAssociation('user:900001', 900007, comic)).toBe('example.comic');
+  });
+});

@@ -1,0 +1,128 @@
+{
+  "formatVersion": 2,
+  "id": "example.csv-tools",
+  "version": "0.1.0",
+  "sdkVersion": 1,
+  "minHostVersion": "0.2.2",
+  "platforms": [
+    "darwin"
+  ],
+  "entry": "index.html",
+  "activation": [
+    "viewer:example.csv-tools.table",
+    "tool:example.csv-tools.query"
+  ],
+  "permissions": [
+    "resource.read",
+    "agent.tools"
+  ],
+  "viewers": [
+    {
+      "id": "example.csv-tools.table",
+      "title": "CSV 查看与查询样板",
+      "extensions": [
+        "csv"
+      ]
+    }
+  ],
+  "agentTools": [
+    {
+      "id": "example.csv-tools.query",
+      "title": "查询 CSV",
+      "description": "读取单个 UTF-8 CSV，第一行为表头。按从 0 开始的列索引进行精确字符串筛选，返回有界行数据及匹配总数；不计算公式。column 与 equals 必须同时提供，limit 默认为 100。",
+      "entry": "tool.html",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "resource"
+        ],
+        "properties": {
+          "resource": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "nodeId"
+            ],
+            "properties": {
+              "nodeId": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 9007199254740991
+              }
+            }
+          },
+          "column": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 127
+          },
+          "equals": {
+            "type": "string",
+            "maxLength": 256
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "headers",
+          "totalRows",
+          "matchedRows",
+          "rows",
+          "truncated"
+        ],
+        "properties": {
+          "headers": {
+            "type": "array",
+            "maxItems": 128,
+            "items": {
+              "type": "string",
+              "maxLength": 4096
+            }
+          },
+          "totalRows": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9999
+          },
+          "matchedRows": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9999
+          },
+          "rows": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "array",
+              "maxItems": 128,
+              "items": {
+                "type": "string",
+                "maxLength": 4096
+              }
+            }
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        }
+      },
+      "resourceAccess": [
+        {
+          "parameter": "resource",
+          "mode": "read",
+          "kind": "file"
+        }
+      ],
+      "timeoutMs": 30000,
+      "maxResultBytes": 32768
+    }
+  ]
+}

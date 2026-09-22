@@ -1,6 +1,7 @@
 import React from 'react';
 import { IconFolder, IconTerminal } from '@douyinfe/semi-icons';
 import styled from 'styled-components';
+import { workspaceScrollbarStyles } from '@/components/ui/workspace-scrollbar';
 
 import {
   LibraryNodePickerModal,
@@ -10,6 +11,7 @@ import type {
   AgentMediaExtractAudioOutputFormat,
   AgentMediaExtractAudioPreparedActionPublicV1,
   AgentPreparedActionPublic,
+  AgentPluginRenamePreparedActionPublicV1,
   AgentShellPreparedActionPublicV1,
   AgentToolApprovalSnapshot,
 } from '@/shared/agent/agent.types';
@@ -138,6 +140,19 @@ const ConfirmationCard = styled.article`
     overflow-wrap: anywhere;
     direction: ltr;
     unicode-bidi: isolate;
+  }
+
+  .agent-confirmation-rename-changes {
+    max-height: 280px;
+    margin-top: 12px;
+    padding: 0 10px 10px;
+    overflow: auto;
+    border: 1px solid var(--app-border);
+    border-radius: var(--app-radius-small);
+    background: var(--semi-color-fill-0);
+    color: var(--app-text);
+    line-height: 1.5;
+    ${workspaceScrollbarStyles}
   }
 
   .agent-confirmation-destination {
@@ -285,6 +300,16 @@ function isFileBridgePreparedAction(
   }
 }
 
+function normalizeRenamePreparedAction(action: AgentPreparedActionPublic | undefined, libraryId: number, toolName: string): AgentPluginRenamePreparedActionPublicV1 | undefined {
+  if (!action) return undefined;
+  try {
+    const normalized = normalizeAgentPreparedActionPublic(action);
+    return normalized.kind === 'plugin.rename' && normalized.libraryId === libraryId
+      && toolName.length <= 128 && /^[a-z0-9]+(?:[.-][a-z0-9]+)*$/u.test(toolName)
+      && toolName.startsWith(`${normalized.pluginId}.`) ? normalized : undefined;
+  } catch { return undefined; }
+}
+
 function replaceOutputExtension(fileName: string, format: string): string {
   const normalized = String(fileName || '').trim();
   if (!normalized) return `extracted-audio.${format}`;
@@ -314,6 +339,10 @@ export default function AgentConfirmationCard({
     () => isFileBridgePreparedAction(preparation?.action),
     [preparation?.action],
   );
+  const renameAction = React.useMemo(
+    () => normalizeRenamePreparedAction(preparation?.action, libraryId, approval.call.name),
+    [preparation?.action, libraryId, approval.call.name],
+  );
   const [preparedActionDraft, setPreparedActionDraft] = React.useState<PreparedActionDraft | undefined>(
     () => initialAction && preparedActionId
       ? { action: initialAction, preparedActionId }
@@ -324,7 +353,7 @@ export default function AgentConfirmationCard({
     ? preparedActionDraft.action
     : initialAction;
   const unsupportedPreparation = Boolean(
-    preparation && !initialAction && !shellAction && !fileBridgeAction,
+    preparation && !initialAction && !shellAction && !fileBridgeAction && !renameAction,
   );
   const libraryTargetRef = React.useRef<LibraryTargetDraft>({
     parentId: initialAction?.parentId,
@@ -438,6 +467,24 @@ export default function AgentConfirmationCard({
               ))}
             </dl>
           </div>
+        ) : renameAction ? (
+          <div className="agent-confirmation-shell">
+            <dl>
+              <dt>插件</dt><dd>{renameAction.pluginId}@{renameAction.pluginVersion}</dd>
+              <dt>版本指纹</dt><dd>{renameAction.packageFingerprint}</dd>
+              <dt>文件数量</dt><dd>{renameAction.items.length}</dd>
+            </dl>
+            <div className="agent-confirmation-rename-changes" role="region" aria-label="完整重命名预览" tabIndex={0}>
+              <dl>
+                {renameAction.items.map((item, index) => (
+                  <React.Fragment key={item.nodeId}>
+                    <dt>{index + 1}</dt>
+                    <dd><bdi>{item.oldName}</bdi>{' → '}<bdi>{item.newName}</bdi></dd>
+                  </React.Fragment>
+                ))}
+              </dl>
+            </div>
+          </div>
         ) : preparedAction ? (
           <div className="agent-confirmation-editor">
             <div className="agent-confirmation-destination" role="group" aria-label="保存位置">
@@ -542,7 +589,7 @@ export default function AgentConfirmationCard({
             className="agent-confirmation-allow"
             disabled={busy || unsupportedPreparation || Boolean(initialAction && !preparedAction)
               || (preparedAction?.destination === 'library' && !(Number.isSafeInteger(preparedAction.parentId) && Number(preparedAction.parentId) > 0))}
-            onClick={() => onResolve(true, shellAction ? undefined : preparedAction)}
+            onClick={() => onResolve(true, renameAction ?? (shellAction ? undefined : preparedAction))}
             type="button"
           >
             {busy ? '处理中' : '允许'}

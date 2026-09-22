@@ -59,6 +59,7 @@ views -> features -> components / hooks -> service / bridge -> backend or electr
 - `service` 是否开始拼页面状态机
 - `features` 是否偷偷承担页面总控
 - `electron` 是否反向承担 renderer 业务编排
+- 外部文件后缀、类型或方法名用于索引权限白名单时，必须只匹配自有键或使用 Map；不得让 `constructor`、`__proto__` 等继承属性通过能力筛选。
 - embedded browser 页面属于未受信任内容；页面 console、DOM 全局变量或可伪造事件不能直接授权 main 执行下载、写盘、凭据读取等重操作，必须经过 isolated world、不可预测 nonce、可信事件和一次性 capability 校验
 
 ### 2.3 状态双源

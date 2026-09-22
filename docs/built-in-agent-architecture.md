@@ -1,5 +1,15 @@
 # 内置 Agent 架构
 
+受控插件改名已接入 Run 冻结目录、main-owned prepare、审批封印、资料库范围授权与提交结算。`rename-proposal` 沙箱只计算获准文件的名称变化；宿主以 `plugin.rename` public action 展示并批准，完全访问模式也不能跳过具体提案确认。提交使用严格旧值、原子批量和同事务 PostgreSQL 回执；`committed / uncommitted / commit_unknown` 由宿主核对后落入 ToolRun，不由插件或 renderer 自报。真实 gpt-5.5、Win/local-minio 专用合成文件、标准双阶段批准与提交/审计已通过本批限定 macOS 验收，故障边界另经 Electron 和 PG 隔离链路验证，详见 [W0～W2](plugin-system-w0-w2-rename.md)。
+
+改名提交前的取消停止写入；跨过 main commit settlement 边界后，Run 取消仍等待有限收尾，已提交 ToolRun 保持 completed，未知结果保留 failed 与 commit_unknown，不能被普通 cancelled 覆盖。SQLite 继续保存唯一 ToolRun/public action/插件来源事实；private binding 与凭据仅在 main 存活。跨应用重启的自动回执核对、自动重试与撤销尚未实现，恢复审批显示不等于恢复执行能力。
+
+启动恢复会先处理合法来源且 running/approved 的改名 ToolRun，将其持久化为 interrupted＋commit_unknown＋原 operation ID，再结束 Run，避免通用中断 trigger 清除提交不确定性。审批前中断不设置 commit_unknown；已存在且与 action/source 对应的 committed ToolRun 终态保持原样。仍活跃的所属 Run 分别提示核对未知结果或查看已提交回执继续剩余步骤，同一 Run 有未知结果时优先提示核对，均不建议盲目重发改名。此恢复只处理本机持久状态，不做网络查询、自动执行或回执重放。
+
+AT2 修复插件故障终态竞态，并在 App 路由/Auth 边界释放离库的 pure-main Run；macOS 开发环境既定范围已验收完成。真实 Electron 故障矩阵及实际 win 资料库等待授权时离库取消通过，返回同库可恢复取消状态与插件来源审计；小时级性能、发行包和 Windows/Linux 未验收。见 [AT2 故障恢复](plugin-system-at2-fault-recovery.md)。
+
+插件 Tool 已接入每轮冻结目录、会话文件授权与 ToolRun 来源审计，AT1 macOS 核心范围验收完成。除 Electron 合成链路外，真实 gpt-5.5 已在 win 资料库（ID 3、本机 macOS MinIO）完成单文件授权、文件定位和 CSV 插件查询；无需打开 Viewer，插件来源详情可见并持久化。故障闭环与范围限制见上述 AT2 结论；成功链路的实现与证据见 [AT1 插件工具](plugin-system-at1-agent-tools.md)。
+
 会话组、归档与会话级目录授权由main和本机SQLite持有，纯客户端、不做跨设备同步；元数据版本、Run冻结策略、目录检查与归档只读门禁见 [本机会话组与访问](agent-session-groups-and-access.md)。组不是Shell沙箱或历史信息擦除边界。
 
 内部文件删除现已通过 `file.delete` 接入资料库回收站，权限、提交状态和目录/预览同步见 [内部文件操作](agent-internal-file-actions.md)。
@@ -10,7 +20,7 @@
 
 文档检查、PDF 按页读取/渲染、DOCX 正文、可取消 worker 与 Tool 多模态结果适配见 [文件处理调研与实现](agent-document-processing.md)。
 
-main-owned文件发布/上传完成后，renderer按已提交ToolActivity触发父目录刷新和树快照失效；失败刷新不反转写入成功。路径基准、根目录刷新修复及实测见 [发布与目录树同步](agent-publication-refresh.md)。
+main-owned 文件发布/上传完成后，renderer 按已提交 ToolActivity 触发父目录刷新和树快照失效；插件改名的实时完成额外按批准条目及权威回执投影原节点名称，复用已有节点变更通知同步预览标签。历史回执恢复只刷新父目录，不广播可能过期的旧名称。刷新失败不反转写入成功。发布链路实测见 [发布与目录树同步](agent-publication-refresh.md)；W0～W2 已在 Win 专用测试文件验证目录新名、已打开预览标签与底部文件名同步，正文保持不变。
 
 瞬态网络错误重试、只读部分响应续接与长工具任务一次性完成核对见 [运行恢复与完成核对](agent-run-reliability.md)。这些规则继续使用 main Run/assistant item 的规范生命周期，不扩大工具权限或新增 renderer 执行状态。
 

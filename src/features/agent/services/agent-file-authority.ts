@@ -17,6 +17,8 @@ import {
   testProvider,
 } from '@/features/storage-config/services/storage-config.api';
 import { auth } from '@/utils/auth';
+import { API_CONFIG } from '@/config/api';
+import { createAgentOwnerScope, serializeAgentOwnerScope } from '@/shared/agent/agent-owner-scope';
 import { executeAgentLibraryQuery } from './agent-library.api';
 
 function nodeSnapshot(detail: NodeDetailDTO): AgentFileAuthorityNodeSnapshotV1 {
@@ -177,6 +179,41 @@ export async function resolveHealthyLibraryWriteProvider(request: {
 export async function resolveAgentFileAuthority(
   request: AgentFileAuthorityRequestV1,
 ): Promise<AgentFileAuthorityResultV1> {
+  if (request.operation === 'rename-library-files') {
+    if (!Number.isSafeInteger(request.libraryId) || request.libraryId < 1 || typeof request.includeCredentials !== 'boolean'
+      || !Array.isArray(request.nodeIds) || request.nodeIds.length < 1 || request.nodeIds.length > 50
+      || Object.keys(request.nodeIds).length !== request.nodeIds.length
+      || request.nodeIds.some(id => !Number.isSafeInteger(id) || id < 1)
+      || new Set(request.nodeIds).size !== request.nodeIds.length) throw new Error('重命名元数据请求范围无效');
+    const expectedOwner = serializeAgentOwnerScope(request.ownerScope);
+    const assertCurrent = () => {
+      if (!expectedOwner || serializeAgentOwnerScope(createAgentOwnerScope(API_CONFIG.BASE_URL, auth.getUserInfo()?.id)) !== expectedOwner) {
+        throw new Error('当前账号环境已变化，不能继续准备重命名');
+      }
+    };
+    assertCurrent();
+    const nodes: AgentFileAuthorityNodeSnapshotV1[] = [];
+    // The grant is a bounded ordered selection, never a directory enumeration or body read.
+    for (const nodeId of [...request.nodeIds]) {
+      assertCurrent();
+      const detail = await fetchNodeDetailById(nodeId);
+      assertCurrent();
+      if (detail.id !== nodeId || detail.libraryId !== request.libraryId || detail.type !== 'file'
+        || !Number.isSafeInteger(detail.parentId) || detail.parentId < 1
+        || typeof detail.name !== 'string' || !detail.name || detail.name !== detail.name.trim() || detail.name.length > 512
+        || typeof detail.fileSize !== 'number' || !Number.isSafeInteger(detail.fileSize) || detail.fileSize < 0) throw new Error('重命名目标文件已经变化或不可用');
+      nodes.push(nodeSnapshot(detail));
+    }
+    assertCurrent();
+    let credentials: { token: string; username: string } | undefined;
+    if (request.includeCredentials) {
+      const token = String(auth.getToken() || '').trim(), username = String(auth.getUsername() || '').trim();
+      if (!token || !username) throw new Error('登录状态已失效，请重新登录');
+      credentials = { token, username };
+    }
+    assertCurrent();
+    return { operation: 'rename-library-files', version: 1, nodes, ...(credentials ? { credentials } : {}) };
+  }
   if (request.operation === 'query-library-metadata') {
     return { operation: request.operation, version: 1, data: await executeAgentLibraryQuery(request.libraryId, request.query) };
   }

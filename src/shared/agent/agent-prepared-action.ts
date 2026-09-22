@@ -7,6 +7,8 @@ import {
   AGENT_FILE_UPLOAD_PREPARED_ACTION_VERSION,
   AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_KIND,
   AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_VERSION,
+  AGENT_PLUGIN_RENAME_PREPARED_ACTION_KIND,
+  AGENT_PLUGIN_RENAME_PREPARED_ACTION_VERSION,
   AGENT_SHELL_PREPARED_ACTION_VERSION,
   AGENT_SHELL_RUN_TOOL_NAME,
   type AgentFilePublishPreparedActionPublicV1,
@@ -15,6 +17,7 @@ import {
   type AgentMediaExtractAudioOutputFormat,
   type AgentMediaExtractAudioPreparedActionPublicV1,
   type AgentPreparedActionPublic,
+  type AgentPluginRenamePreparedActionPublicV1,
 } from './agent.types';
 import { normalizeAgentShellPreparedActionPublicV1 } from './shell/agent-shell.types';
 
@@ -70,6 +73,51 @@ const MEDIA_EXTRACT_AUDIO_OUTPUT_FORMATS = new Set<AgentMediaExtractAudioOutputF
   'mp3',
   'wav',
 ]);
+const PLUGIN_RENAME_FIELDS = new Set(['kind', 'version', 'libraryId', 'operationId', 'pluginId', 'pluginVersion', 'packageFingerprint', 'items']);
+const PLUGIN_RENAME_ITEM_FIELDS = new Set(['nodeId', 'parentId', 'oldName', 'newName']);
+
+function strictRenameObject(input: unknown, allowed: ReadonlySet<string>): Record<string, unknown> {
+  const source = strictObject(input);
+  if (Reflect.ownKeys(source).length !== allowed.size || Object.getOwnPropertySymbols(source).length
+    || Object.entries(Object.getOwnPropertyDescriptors(source)).some(([key, descriptor]) => !allowed.has(key) || !('value' in descriptor) || !descriptor.enumerable)) {
+    throw new Error('Agent 重命名提案字段无效');
+  }
+  return source;
+}
+
+function renameFileName(value: unknown): string {
+  if (typeof value !== 'string' || !value || value.trim() !== value || value === '.' || value === '..'
+    || UTF8_ENCODER.encode(value).byteLength > 240
+    || Array.from(value).some(character => { const code = character.charCodeAt(0); return character === '/' || character === '\\'
+      || code < 32 || code === 127 || (character.length === 1 && code >= 0xd800 && code <= 0xdfff); })) {
+    throw new Error('Agent 重命名文件名无效');
+  }
+  return value;
+}
+
+export function normalizeAgentPluginRenamePreparedActionPublicV1(input: unknown): AgentPluginRenamePreparedActionPublicV1 {
+  const source = strictRenameObject(input, PLUGIN_RENAME_FIELDS);
+  if (source.kind !== AGENT_PLUGIN_RENAME_PREPARED_ACTION_KIND || source.version !== AGENT_PLUGIN_RENAME_PREPARED_ACTION_VERSION) throw new Error('Agent prepared action 类型或版本不受支持');
+  if (typeof source.operationId !== 'string' || !/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u.test(source.operationId)
+    || typeof source.pluginId !== 'string' || source.pluginId.length > 96 || !/^[a-z0-9]+(?:[.-][a-z0-9]+)*\.[a-z0-9]+(?:[.-][a-z0-9]+)*$/u.test(source.pluginId)
+    || typeof source.pluginVersion !== 'string' || !/^(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})\.(0|[1-9][0-9]{0,5})$/u.test(source.pluginVersion)
+    || typeof source.packageFingerprint !== 'string' || !/^[a-f0-9]{64}$/u.test(source.packageFingerprint)) throw new Error('Agent 重命名提案来源无效');
+  if (!Array.isArray(source.items) || source.items.length < 1 || source.items.length > 50 || Object.keys(source.items).length !== source.items.length
+    || Object.getOwnPropertySymbols(source.items).length || Object.values(Object.getOwnPropertyDescriptors(source.items)).some(descriptor => !('value' in descriptor))) throw new Error('Agent 重命名提案范围无效');
+  const ids = new Set<number>(); const targets = new Set<string>();
+  const items = source.items.map(raw => {
+    const item = strictRenameObject(raw, PLUGIN_RENAME_ITEM_FIELDS);
+    const nodeId = positiveId(item.nodeId, '文件 ID'), parentId = positiveId(item.parentId, '父目录 ID');
+    const oldName = renameFileName(item.oldName), newName = renameFileName(item.newName);
+    const target = JSON.stringify([parentId, newName]);
+    if (ids.has(nodeId) || targets.has(target) || oldName === newName) throw new Error('Agent 重命名提案包含重复或未变化目标');
+    ids.add(nodeId); targets.add(target);
+    return { nodeId, parentId, oldName, newName };
+  });
+  return { kind: AGENT_PLUGIN_RENAME_PREPARED_ACTION_KIND, version: AGENT_PLUGIN_RENAME_PREPARED_ACTION_VERSION,
+    libraryId: positiveId(source.libraryId, '资料库'), operationId: source.operationId, pluginId: source.pluginId,
+    pluginVersion: source.pluginVersion, packageFingerprint: source.packageFingerprint, items };
+}
 
 function strictObject(input: unknown): Record<string, unknown> {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
@@ -364,6 +412,9 @@ export function normalizeAgentPreparedActionPublic(
   input: unknown,
 ): AgentPreparedActionPublic {
   const source = strictObject(input);
+  if (source.kind === AGENT_PLUGIN_RENAME_PREPARED_ACTION_KIND && source.version === AGENT_PLUGIN_RENAME_PREPARED_ACTION_VERSION) {
+    return normalizeAgentPluginRenamePreparedActionPublicV1(source);
+  }
   if (
     source.kind === AGENT_FILE_STAGE_PREPARED_ACTION_KIND
     && source.version === AGENT_FILE_STAGE_PREPARED_ACTION_VERSION

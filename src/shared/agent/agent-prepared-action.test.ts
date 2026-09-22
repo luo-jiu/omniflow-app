@@ -7,11 +7,67 @@ import {
   AGENT_FILE_STAGE_PREPARED_ACTION_VERSION,
   AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_KIND,
   AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_VERSION,
+  AGENT_PREPARED_ACTION_PUBLIC_IDENTITIES,
 } from './agent.types';
 import {
   equalAgentPreparedActionPublic,
   normalizeAgentPreparedActionPublic,
 } from './agent-prepared-action';
+
+function renameAction(overrides: Record<string, unknown> = {}) {
+  return { kind: 'plugin.rename', version: 1, libraryId: 3, operationId: '83fc584b-037d-4c82-8883-a609846ea0d4',
+    pluginId: 'example.rename', pluginVersion: '0.1.0', packageFingerprint: 'a'.repeat(64),
+    items: [{ nodeId: 8, parentId: 2, oldName: 'old.jpg', newName: 'new.jpg' }], ...overrides };
+}
+
+describe('plugin rename prepared action', () => {
+  it('normalizes the exact proposal and registers its persistent public identity', () => {
+    expect(normalizeAgentPreparedActionPublic(renameAction())).toEqual(renameAction());
+    expect(AGENT_PREPARED_ACTION_PUBLIC_IDENTITIES).toContainEqual({ kind: 'plugin.rename', version: 1 });
+    const value = renameAction(); const normalized = normalizeAgentPreparedActionPublic(value);
+    value.items[0].newName = 'changed.jpg';
+    expect(normalized).toMatchObject({ items: [{ newName: 'new.jpg' }] });
+  });
+
+  it.each([
+    { kind: 'plugin.write' }, { version: 2 }, { libraryId: '3' }, { libraryId: 0 },
+    { operationId: 'some-operation' }, { operationId: '00000000-0000-0000-0000-000000000000' },
+    { pluginId: '../evil' }, { pluginId: 'invalid' }, { pluginVersion: '01.0.0' }, { pluginVersion: '1.0' },
+    { packageFingerprint: 'g'.repeat(64) }, { packageFingerprint: 'a'.repeat(63) }, { credentials: 'hidden' },
+    { items: [] }, { items: Array.from({ length: 51 }, (_, i) => ({ nodeId: i + 1, parentId: 100, oldName: 'old.jpg', newName: `${i}.jpg` })) },
+  ])('rejects invalid identity, scope, or extra fields: %j', overrides => {
+    expect(() => normalizeAgentPreparedActionPublic(renameAction(overrides))).toThrow();
+  });
+
+  it('rejects duplicate targets, unchanged names, foreign fields, and invalid node IDs', () => {
+    const item = renameAction().items[0];
+    for (const items of [[item, item], [item, { ...item, nodeId: 9 }], [{ ...item, newName: item.oldName }],
+      [{ ...item, nodeId: 0 }], [{ ...item, parentId: 0 }], [{ ...item, path: '/other' }],
+      [{ ...item, nodeId: Number.MAX_SAFE_INTEGER + 1 }], [{ ...item, oldName: undefined }]]) {
+      expect(() => normalizeAgentPreparedActionPublic(renameAction({ items }))).toThrow();
+    }
+    expect(() => normalizeAgentPreparedActionPublic(renameAction({ items: [item, { ...item, nodeId: 9, parentId: 3 }] }))).not.toThrow();
+  });
+
+  it('bounds names in UTF-8 without truncation, trimming, or accepting paths and controls', () => {
+    const item = renameAction().items[0];
+    for (const name of ['', '.', '..', ' leading.jpg', 'trailing.jpg ', 'a/b.jpg', 'a\\b.jpg', 'a\n.jpg', `a${String.fromCharCode(127)}.jpg`, 'x'.repeat(241), '中'.repeat(81), '\ud800.jpg']) {
+      expect(() => normalizeAgentPreparedActionPublic(renameAction({ items: [{ ...item, newName: name }] }))).toThrow();
+      expect(() => normalizeAgentPreparedActionPublic(renameAction({ items: [{ ...item, oldName: name }] }))).toThrow();
+    }
+    expect(() => normalizeAgentPreparedActionPublic(renameAction({ items: [{ ...item, newName: '中'.repeat(80) }] }))).not.toThrow();
+  });
+
+  it('rejects accessors, sparse arrays, and inherited item identities', () => {
+    const item = renameAction().items[0];
+    const getter = vi.fn(() => 'new.jpg');
+    const accessor = Object.defineProperty({ ...item }, 'newName', { enumerable: true, get: getter });
+    expect(() => normalizeAgentPreparedActionPublic(renameAction({ items: [accessor] }))).toThrow();
+    expect(getter).not.toHaveBeenCalled();
+    expect(() => normalizeAgentPreparedActionPublic(renameAction({ items: new Array(1) }))).toThrow();
+    expect(() => normalizeAgentPreparedActionPublic(renameAction({ items: [Object.create(item)] }))).toThrow();
+  });
+});
 
 function libraryAction(overrides: Record<string, unknown> = {}) {
   return {

@@ -6,6 +6,7 @@ import path from 'node:path';
 import { PluginInstallStore } from './plugin-install-store';
 import { PluginSettingsStore } from './plugin-settings-store';
 import manifestBase from '../../../samples/csv-viewer/manifest.json';
+import renameManifest from '../../../samples/batch-rename/manifest.json';
 const roots:string[]=[];
 async function root(){const value=await mkdtemp(path.join(tmpdir(),'omniflow-d1-test-'));roots.push(value);return value;}
 function manifest(version='1.0.0'){return {...manifestBase,id:'test.csv',version,viewers:[{...manifestBase.viewers[0],id:'test.csv.table'}],activation:['viewer:test.csv.table']};}
@@ -59,5 +60,53 @@ describe('persistent version-isolated settings',()=>{
   await one.set(scope,'display',{compact:true},0,1);await expect(one.set(scope,'display',{},0,1)).rejects.toMatchObject({code:'CONFLICT'});expect(await two.get(scope,'display')).toBeNull();
   const next=new PluginSettingsStore(dir);await next.initialize();expect(await next.forPackage('test.csv','a'.repeat(64)).get(scope,'display')).toMatchObject({value:{compact:true}});
   await next.clearPlugin('test.csv');expect(await next.forPackage('test.csv','a'.repeat(64)).get(scope,'display')).toBeNull();
+ });
+});
+
+describe('independent Agent Tool install approval',()=>{
+ it('persists rename approval only for the current package and resets on upgrade and rollback',async()=>{
+  const dir=await root();const folder=path.join(dir,'store');const store=new PluginInstallStore(folder,'darwin');await store.initialize();
+  async function install(version:string){const review=await store.prepare(await archive(dir,version,zip=>{zip.file('manifest.json',JSON.stringify({...renameManifest,version}));zip.file('tool.html','<p>rename</p>');}));await store.commit(review.ticket,()=>undefined);}
+  await install('1.0.0');expect(store.snapshot().plugins[0].renameApproved).toBe(false);
+  await store.action(renameManifest.id,'approve-rename',()=>undefined);await store.action(renameManifest.id,'approve-tools',()=>undefined);
+  const restart=new PluginInstallStore(folder,'darwin');await restart.initialize();expect(restart.snapshot().plugins[0]).toMatchObject({renameApproved:true,readApproved:false,toolApproved:true});
+  await install('1.0.1');expect(store.snapshot().plugins[0]).toMatchObject({renameApproved:false,readApproved:false,toolApproved:false});
+  await store.action(renameManifest.id,'approve-rename',()=>undefined);await store.action(renameManifest.id,'rollback',()=>undefined);
+  expect(store.snapshot().plugins[0]).toMatchObject({renameApproved:false,toolApproved:false,manifest:{version:'1.0.0'}});
+ });
+ it('migrates missing rename approval to false and rejects a malformed approval value',async()=>{
+  const dir=await root();const folder=path.join(dir,'store');const store=new PluginInstallStore(folder,'darwin');await store.initialize();
+  const review=await store.prepare(await archive(dir));await store.commit(review.ticket,()=>undefined);
+  const index=JSON.parse(await readFile(path.join(folder,'index.json'),'utf8'));delete index.plugins[0].renameApproved;await writeFile(path.join(folder,'index.json'),JSON.stringify(index));
+  const restart=new PluginInstallStore(folder,'darwin');await restart.initialize();expect(restart.snapshot().plugins[0].renameApproved).toBe(false);
+  await expect(restart.action('test.csv','approve-rename',()=>undefined)).rejects.toThrow('CAPABILITY_NOT_DECLARED');
+  index.plugins[0].renameApproved='yes';await writeFile(path.join(folder,'index.json'),JSON.stringify(index));
+  const invalid=new PluginInstallStore(folder,'darwin');await invalid.initialize();expect(invalid.snapshot().safeMode).toBe(true);expect(invalid.recoveryReason).toBeTruthy();
+ });
+ function toolsManifest(id='test.csv',version='1.0.0',toolId=id+'.read'){
+  return {...manifest(version),formatVersion:2,id,viewers:[],activation:['tool:'+toolId],permissions:['resource.read','agent.tools'],agentTools:[{id:toolId,title:'文件分析',description:'分析本次授权文件',entry:'index.html',inputSchema:{type:'object',properties:{resource:{type:'object',properties:{nodeId:{type:'integer',minimum:1,maximum:Number.MAX_SAFE_INTEGER}},required:['nodeId'],additionalProperties:false}},required:['resource'],additionalProperties:false},outputSchema:{type:'object',properties:{},required:[],additionalProperties:false},resourceAccess:[{parameter:'resource',mode:'read',kind:'file'}],timeoutMs:1000,maxResultBytes:1024}]};
+ }
+ it('migrates old records without granting Tools and keeps viewer package integrity valid',async()=>{
+  const dir=await root();const folder=path.join(dir,'store');const store=new PluginInstallStore(folder,'darwin');await store.initialize();
+  const review=await store.prepare(await archive(dir));await store.commit(review.ticket,()=>undefined);await store.action('test.csv','approve-read',()=>undefined);
+  const index=JSON.parse(await readFile(path.join(folder,'index.json'),'utf8'));delete index.plugins[0].toolApproved;delete index.plugins[0].manifest.agentTools;index.bundled={enabled:true,readApproved:true};
+  await writeFile(path.join(folder,'index.json'),JSON.stringify(index));
+  const restart=new PluginInstallStore(folder,'darwin');await restart.initialize();expect(restart.snapshot().plugins[0]).toMatchObject({readApproved:true,toolApproved:false});expect(restart.snapshot().bundled).toMatchObject({toolApproved:false});await restart.verify(restart.snapshot().plugins[0]);
+  await expect(restart.action('test.csv','approve-tools',()=>undefined)).rejects.toThrow('CAPABILITY_NOT_DECLARED');
+ });
+ it('persists separate Tool approval and resets it after update and rollback',async()=>{
+  const dir=await root();const folder=path.join(dir,'store');const store=new PluginInstallStore(folder,'darwin');await store.initialize();
+  const first=await store.prepare(await archive(dir,'1.0.0',zip=>zip.file('manifest.json',JSON.stringify(toolsManifest()))));await store.commit(first.ticket,()=>undefined);
+  await store.action('test.csv','approve-read',()=>undefined);expect(store.snapshot().plugins[0].toolApproved).toBe(false);await store.action('test.csv','approve-tools',()=>undefined);
+  const restart=new PluginInstallStore(folder,'darwin');await restart.initialize();expect(restart.snapshot().plugins[0].toolApproved).toBe(true);
+  const second=await restart.prepare(await archive(dir,'1.0.1',zip=>zip.file('manifest.json',JSON.stringify(toolsManifest('test.csv','1.0.1')))));await restart.commit(second.ticket,()=>undefined);expect(restart.snapshot().plugins[0]).toMatchObject({enabled:false,readApproved:false,toolApproved:false});
+  await restart.action('test.csv','approve-tools',()=>undefined);await restart.action('test.csv','rollback',()=>undefined);expect(restart.snapshot().plugins[0]).toMatchObject({enabled:false,readApproved:false,toolApproved:false,manifest:{version:'1.0.0'}});
+ });
+ it('rejects Provider collisions against installed and reserved tool names before installation',async()=>{
+  const dir=await root();const store=new PluginInstallStore(path.join(dir,'store'),'darwin');await store.initialize();
+  const first=await store.prepare(await archive(dir,'1.0.0',zip=>zip.file('manifest.json',JSON.stringify(toolsManifest('test.a','1.0.0','test.a.b.c')))));await store.commit(first.ticket,()=>undefined);
+  await expect(store.prepare(await archive(dir,'1.0.1',zip=>zip.file('manifest.json',JSON.stringify(toolsManifest('test.a.b','1.0.0','test.a.b.c')))))).rejects.toThrow('DUPLICATE_TOOL_ID');
+  store.setReservedToolNames(['test_new_read']);
+  await expect(store.prepare(await archive(dir,'1.0.2',zip=>zip.file('manifest.json',JSON.stringify(toolsManifest('test.new')))))).rejects.toThrow('PLUGIN_TOOL_PROVIDER_NAME_CONFLICT');
  });
 });

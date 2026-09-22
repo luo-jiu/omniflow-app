@@ -1,3 +1,4 @@
+import { notifyLibraryNodesMutated } from '@/features/file-explorer/services/node-mutation-events';
 import React from 'react';
 import { isAgentRendererMutationTool } from '@/shared/agent/agent-library-actions';
 import { useAgentAttachments } from './useAgentAttachments';
@@ -48,7 +49,7 @@ import {
   upsertAgentToolActivity,
 } from '../agent-tool-activities';
 import { upsertAgentRun } from '../agent-runs';
-import { committedAgentFileParents } from '../agent-published-file';
+import { committedAgentFileParents, committedPluginRenameItems } from '../agent-published-file';
 import { markRepositoryTreeSnapshotDirty } from '@/features/file-explorer/hooks/use-repository-tree/snapshot-store';
 import { refreshDirectoryInTree } from '@/features/file-explorer/services/tree-locate';
 
@@ -152,16 +153,22 @@ export function useAgentSession({
   const isPreparingRef = React.useRef(false);
   const mountedRef = React.useRef(true);
   const refreshedPublicationsRef = React.useRef({ scope: '', ids: new Set<string>() });
+  const liveRenameCompletionsRef = React.useRef(new Set<string>());
   React.useEffect(() => {
     if (!sessionId || sessionIdRef.current !== sessionId || sessionScopeKeyRef.current !== sessionScopeKey) return;
     const scope = `${sessionScopeKey}\u0000${sessionId}`;
     if (refreshedPublicationsRef.current.scope !== scope) refreshedPublicationsRef.current = { scope, ids: new Set() };
     const parents = new Set<number>();
     for (const activity of toolActivities) {
+      const liveRename = liveRenameCompletionsRef.current.delete(`${scope}\u0000${activity.id}`);
       if (activity.sessionId !== sessionId || refreshedPublicationsRef.current.ids.has(activity.id)) continue;
-      const affected = committedAgentFileParents(activity);
+      const affected = committedAgentFileParents(activity, Number(appContext.libraryId));
       if (!affected.length) continue;
       refreshedPublicationsRef.current.ids.add(activity.id);
+      // Historical receipts still invalidate the tree; their names may have changed in a later operation.
+      if (ownerScope && liveRename) for (const item of committedPluginRenameItems(activity, Number(appContext.libraryId))) {
+        notifyLibraryNodesMutated({ ...ownerScope, libraryId: Number(appContext.libraryId), ...item, type: 'file', affectedParentIds: [item.parentId] });
+      }
       affected.forEach(parent => parents.add(parent));
     }
     if (!parents.size) return;
@@ -176,7 +183,7 @@ export function useAgentSession({
         }
       });
     }
-  }, [appContext.libraryId, onRefreshDirectory, sessionId, sessionScopeKey, toolActivities]);
+  }, [appContext.libraryId, onRefreshDirectory, ownerScope, sessionId, sessionScopeKey, toolActivities]);
   const approvalsInFlightRef = React.useRef<Set<string>>(new Set());
   const interactionsInFlightRef = React.useRef<Set<string>>(new Set());
   const rendererPreparationsInFlightRef = React.useRef<Map<string, {
@@ -491,6 +498,9 @@ export function useAgentSession({
         sessionId: event.sessionId,
         status: event.result.ok ? 'completed' as const : 'failed' as const,
       };
+      if (activity.pluginSource && activity.preparation?.action.kind === 'plugin.rename') {
+        liveRenameCompletionsRef.current.add(`${sessionScopeKey}\u0000${activity.sessionId}\u0000${activity.id}`);
+      }
       setToolActivities(current => upsertAgentToolActivity(current, activity));
       return;
     }
@@ -530,6 +540,7 @@ export function useAgentSession({
     onSessionChanged,
     prepareRendererRequest,
     repairAssistantStream,
+    sessionScopeKey,
   ]);
   applyEventRef.current = applyEvent;
 
@@ -541,6 +552,7 @@ export function useAgentSession({
     const assistantRepairTokens = assistantRepairTokensRef.current;
     const rendererPreparationsInFlight = rendererPreparationsInFlightRef.current;
     const rendererExecutionsInFlight = rendererExecutionsInFlightRef.current;
+    const liveRenameCompletions = liveRenameCompletionsRef.current;
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
@@ -551,6 +563,7 @@ export function useAgentSession({
       approvalsInFlight.clear();
       interactionsInFlight.clear();
       desyncedAssistantItemIds.clear();
+      liveRenameCompletions.clear();
       assistantRepairTokens.clear();
       rendererPreparationsInFlight.forEach(preparation => preparation.controller.abort());
       rendererPreparationsInFlight.clear();
@@ -570,6 +583,7 @@ export function useAgentSession({
   }, []);
 
   React.useEffect(() => subscribeAgentChat((event) => {
+    if (!mountedRef.current || sessionScopeKeyRef.current !== sessionScopeKey) return;
     if (event.type === 'session-title-updated') {
       if (serializeAgentOwnerScope(event.ownerScope) === ownerScopeKey && event.libraryId === Number(appContext.libraryId)) {
         onSessionTitleChanged?.();
@@ -593,7 +607,7 @@ export function useAgentSession({
     }
     if (activeSessionId !== event.sessionId) return;
     applyEvent(event);
-  }), [appContext.libraryId, applyEvent, onSessionTitleChanged, ownerScopeKey]);
+  }), [appContext.libraryId, applyEvent, onSessionTitleChanged, ownerScopeKey, sessionScopeKey]);
 
   React.useEffect(() => subscribeAgentFileAuthorityRequests((request) => {
     void resolveAgentFileAuthority(request).then(
@@ -628,6 +642,7 @@ export function useAgentSession({
     restoringSessionIdRef.current = null;
     pendingEventsRef.current.clear();
     assistantRepairTokensRef.current.clear();
+    liveRenameCompletionsRef.current.clear();
     rendererPreparationsInFlightRef.current.forEach(preparation => preparation.controller.abort());
     rendererPreparationsInFlightRef.current.clear();
     const sessionsToStop = new Set<string>();
@@ -682,6 +697,7 @@ export function useAgentSession({
     const preparationToken = preparationTokenRef.current + 1;
     preparationTokenRef.current = preparationToken;
     assistantRepairTokensRef.current.clear();
+    liveRenameCompletionsRef.current.clear();
     restoringSessionIdRef.current = nextSessionId;
     pendingEventsRef.current.clear();
     setPreparing(true);
@@ -1018,6 +1034,7 @@ export function useAgentSession({
     rendererExecutionsInFlightRef.current.clear();
     restoringSessionIdRef.current = null;
     assistantRepairTokensRef.current.clear();
+    liveRenameCompletionsRef.current.clear();
     desyncedAssistantItemIdsRef.current.clear();
     sessionIdRef.current = null;
     optimisticMessageIdRef.current = null;

@@ -2,11 +2,13 @@ export const PROTOCOL_VERSION = 1;
 export const LIMITS = Object.freeze({
   requestBytes: 16384, responseBytes: 131072, concurrentRequests: 8,
   requestsPerSecond: 64, requestsPerInstance: 4096, readChunkBytes: 65536,
+  directoryEntries: 512, directoryPageSize: 64, directoryHandles: 4, directoryReadTotalBytes: 536870912, directoryRequests: 16384,
   readTotalBytes: 33554432, requestTimeoutMs: 4000, clientTimeoutMs: 5000,
   settingBytes: 65536, settingsTotalBytes: 262144, settingsKeys: 32,
   packageBytes: 4194304, packageFiles: 64, packageFileBytes: 1048576,
   snapshotBytes: 32768, snapshotsTotalBytes: 262144, snapshots: 64,
   instances: 4, startupTimeoutMs: 5000, heartbeatMs: 1000, heartbeatTimeoutMs: 4000,
+  toolResultBytes: 32768, toolRequestBytes: 34816, toolTimeoutMs: 30000,
 });
 export class PluginError extends Error {
   constructor(code, message) { super(message); this.name = 'PluginError'; this.code = code; }
@@ -23,7 +25,7 @@ export function createPluginClient(transport = globalThis.omniflowTransport) {
     if (active >= LIMITS.concurrentRequests) throw new PluginError('LIMIT', 'Too many requests');
     const id = crypto.randomUUID();
     const wire = JSON.stringify({ version: PROTOCOL_VERSION, id, method, params });
-    if (new TextEncoder().encode(wire).length > LIMITS.requestBytes) throw new PluginError('LIMIT', 'Request too large');
+    if (new TextEncoder().encode(wire).length > (method === 'tool.complete' ? LIMITS.toolRequestBytes : LIMITS.requestBytes)) throw new PluginError('LIMIT', 'Request too large');
     active += 1;
     let timer;
     let abort;
@@ -61,6 +63,9 @@ export function createPluginClient(transport = globalThis.omniflowTransport) {
   return Object.freeze({
     context: () => request('context.get'),
     ready: () => request('lifecycle.ready'),
+    toolInvocation: () => request('tool.invocation'),
+    completeTool: (invocationId, output) => request('tool.complete', { invocationId, output }),
+    failTool: (invocationId, code) => request('tool.fail', { invocationId, code }),
     read: async (handle, offset, length, options) => {
       const result = await request('resource.read', { handle, offset, length }, options);
       if (!result || typeof result.base64 !== 'string' || !Number.isSafeInteger(result.nextOffset) || result.nextOffset < offset || typeof result.eof !== 'boolean' || typeof result.revision !== 'string') throw new PluginError('BAD_RESPONSE', 'Invalid read response');
@@ -70,6 +75,9 @@ export function createPluginClient(transport = globalThis.omniflowTransport) {
       if (bytes.length > LIMITS.readChunkBytes) throw new PluginError('BAD_RESPONSE', 'Oversized read');
       return { bytes, nextOffset: result.nextOffset, eof: result.eof, revision: result.revision };
     },
+    listDirectory: (handle, offset = 0, options) => request('directory.list', { handle, offset }, options),
+    openDirectoryEntry: (handle, entryId, options) => request('directory.open', { handle, entryId }, options),
+    releaseResource: handle => request('resource.release', { handle }),
     getState: () => request('state.get'),
     setState: (value, expectedRevision, schemaVersion = 1) => request('state.set', { value, expectedRevision, schemaVersion }),
     getSetting: key => request('settings.get', { key }),

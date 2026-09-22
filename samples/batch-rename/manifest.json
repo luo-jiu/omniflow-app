@@ -1,0 +1,99 @@
+{
+  "formatVersion": 2,
+  "id": "example.batch-rename",
+  "version": "0.1.0",
+  "sdkVersion": 1,
+  "minHostVersion": "0.2.2",
+  "platforms": [
+    "darwin"
+  ],
+  "entry": "tool.html",
+  "activation": [
+    "tool:example.batch-rename.propose"
+  ],
+  "permissions": [
+    "resource.rename.propose",
+    "agent.tools"
+  ],
+  "viewers": [],
+  "agentTools": [
+    {
+      "id": "example.batch-rename.propose",
+      "kind": "rename-proposal",
+      "title": "批量改名提案",
+      "description": "为本次授权的1至50个文件添加名称前缀或后缀，保留最后扩展名。不读取正文，只生成改名提案；宿主另行预览确认后才执行。prefix和suffix最多80字符。",
+      "entry": "tool.html",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "resources"
+        ],
+        "properties": {
+          "resources": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 50,
+            "uniqueItems": true,
+            "items": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            }
+          },
+          "prefix": {
+            "type": "string",
+            "maxLength": 80
+          },
+          "suffix": {
+            "type": "string",
+            "maxLength": 80
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "changes"
+        ],
+        "properties": {
+          "changes": {
+            "type": "array",
+            "maxItems": 50,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "id",
+                "name"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 240
+                }
+              }
+            }
+          }
+        }
+      },
+      "resourceAccess": [
+        {
+          "parameter": "resources",
+          "mode": "metadata",
+          "kind": "file",
+          "maxItems": 50
+        }
+      ],
+      "timeoutMs": 10000,
+      "maxResultBytes": 32768
+    }
+  ]
+}

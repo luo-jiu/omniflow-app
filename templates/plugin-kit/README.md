@@ -1,6 +1,6 @@
-# OmniFlow 只读插件开发包
+# OmniFlow 插件开发包
 
-此开发包独立于宿主仓库，包含 SDK tgz、公开类型/schema、工程模板和生成器。需要 Node.js 20 或更新版本；当前只声明 macOS OmniFlow 宿主已经验收。
+此开发包独立于宿主仓库，包含 SDK tgz、公开类型/schema、查看器模板和生成器，以及独立 Tool 样板。需要 Node.js 20 或更新版本；只读功能与受控改名提案已完成各自限定 macOS 验收，实际范围见下文。Windows/Linux 不在当前声明范围。
 
 ## 创建工程
 
@@ -20,15 +20,21 @@ SDK 尚未发布到公开 npm 注册表，不要把 `npm install @omniflow/plugi
 
 ## 独立样板
 
-`examples/csv-viewer` 和 `examples/json-tree-viewer` 含两种功能的完整源码，均只依赖本开发包 SDK。在任一示例目录执行相同的 install/build/package 命令即可得到 ZIP。CSV 示例默认 ID 为随包保留 ID，制作外部副本时先修改 Manifest 的 id、viewers[].id 和 activation；JSON 示例可直接用于本地验证。
+`examples/csv-viewer`、`examples/json-tree-viewer`、`examples/comic-viewer`、`examples/csv-tool` 和 `examples/batch-rename` 分别覆盖文件查看、目录漫画、同包 Viewer/Tool 与元数据改名提案，均只依赖本开发包 SDK。在任一示例目录执行相同的 install/build/package 命令即可得到 ZIP。CSV Viewer 默认 ID 为随包保留 ID，制作外部副本时先修改 Manifest 的 id、viewers[].id 和 activation；Tool 副本还应同步 agentTools[].id 和 tool activation。
+
+开发包当前包含 SDK 0.4.0，格式 2 支持独立 Tool 批准。CSV Tool 已接入内部 Agent 生产工具目录和会话单文件权限，在 macOS 通过真实模型与资料库验收；新安装/启用的 Tool 从后续新 Run 的冻结目录发现。
+
+batch-rename 只声明元数据提案与 Tool 权限，收到随机引用和名称，不能读正文或直接写文件。宿主标准审批卡展示完整提案，批准后使用条件原子接口执行。真实 macOS Agent 与 Win/local-minio 专用合成文件已验证双阶段批准、改名、回执审计和目录/预览同步，完整边界见宿主 W0～W2 验收记录；安装成功不能代替后端兼容与本次批准。生成器仍创建只读 Viewer 工程，改名插件以本样板为起点。
 
 ## 安装与授权
 
 1. 宿主“设置 → 插件管理 → 安装 / 更新本地包”，选择 ZIP。
 2. 核对真实 ID、三段版本、请求/新增能力、未验证来源和 SHA-256 指纹后确认。
-3. 分别启用插件、批准读取能力；然后在匹配文件的“查看器”菜单选择它，并允许读取当前文件。
+3. 启用插件并分别批准声明能力。Viewer 从文件“查看器”菜单选择并授权当前资源；只读 Tool 需要读取和 Agent Tool 批准；改名提案需要 `resource.rename.propose` 与 `agent.tools`，每次还须通过宿主范围及具体提案批准。
 
 权限不能从快照恢复；每次新实例仍需宿主授予当前资源。上下文中的不透明 handle 不是下载 URL，不能访问其他文件或账号。
+
+改名提案的插件完成事件不代表文件已改名；宿主负责 old value 条件、冲突、原子提交和 operation 回执。取消不能撤销已经提交的名称变化，结果不明时由宿主核对，插件不得新建操作盲目重试。本版不提供跨重启自动核对或撤销。
 
 修改、构建、更新时提高 manifest.json 的 version；SDK 主版本、包格式版本和设置 schema 版本独立管理。支持回滚到保留包；各版本设置隔离，新版本不应假设已迁移旧数据。卸载默认保留用户文件、设置和阅读快照；设置清理是单独确认操作。
 

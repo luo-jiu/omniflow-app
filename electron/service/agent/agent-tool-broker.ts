@@ -15,6 +15,7 @@ import type {
 import { normalizeAgentOwnerScope } from '../../../src/shared/agent/agent-owner-scope';
 import {
   agentToolRegistry,
+  type AgentMainCommitSettlement,
   type AgentToolDispatchContext,
   type AgentToolRegistrySnapshot,
 } from './agent-tool-registry';
@@ -31,6 +32,7 @@ const MAX_MAIN_CANCELLATION_SETTLE_TIMEOUT_MS = 90_000;
 const MIN_RENDERER_EXECUTION_TIMEOUT_MS = 1_000;
 const MAX_RENDERER_EXECUTION_TIMEOUT_MS = 6 * 60 * 60 * 1_000;
 const RENDERER_COMMIT_SETTLE_TIMEOUT_MS = 30_000;
+const MAIN_COMMIT_OPERATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export interface AgentToolExecutionOutcome {
   perception?: AgentPerceptionSnapshot;
@@ -137,6 +139,23 @@ export function normalizeAgentToolResult(input: AgentToolResult): AgentToolResul
   };
 }
 
+function normalizeMainCommitResult(input: AgentToolResult, operationId?: string): AgentToolResult {
+  if (!input || typeof input !== 'object' || Array.isArray(input)
+    || ![Object.prototype, null].includes(Object.getPrototypeOf(input))
+    || !Object.prototype.hasOwnProperty.call(input, 'ok') || typeof input.ok !== 'boolean') {
+    throw new Error('无效的 Agent Tool 提交回执');
+  }
+  const result = normalizeAgentToolResult(input);
+  const data = result.data;
+  if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('无效的 Agent Tool 提交回执');
+  const { mutationCommitState: state, operationId: id } = data as Record<string, unknown>;
+  if (typeof id !== 'string' || !MAIN_COMMIT_OPERATION_ID.test(id)
+    || (operationId !== undefined && id !== operationId)
+    || typeof state !== 'string' || !['committed', 'uncommitted', 'commit_unknown'].includes(state)
+    || result.ok !== (state === 'committed')) throw new Error('无效的 Agent Tool 提交回执');
+  return result;
+}
+
 export function createAgentToolBroker(options: AgentToolBrokerOptions = {}) {
   const createId = options.createId || crypto.randomUUID;
   const toolRegistry = options.toolRegistry || agentToolRegistry;
@@ -160,6 +179,8 @@ export function createAgentToolBroker(options: AgentToolBrokerOptions = {}) {
       let cancellationError: Error | undefined;
       let cancellationTimer: ReturnType<typeof setTimeout> | undefined;
       let settled = false;
+      let commitFallback: AgentToolResult | undefined;
+      let commitReceipt: AgentToolResult | undefined;
       const finish = (handler: () => void) => {
         if (settled) return;
         settled = true;
@@ -170,8 +191,13 @@ export function createAgentToolBroker(options: AgentToolBrokerOptions = {}) {
         if (settled || cancellationError) return;
         cancellationError = error;
         controller.abort();
+        if (settled) return;
+        if (commitReceipt) {
+          finish(() => resolve(commitReceipt as AgentToolResult));
+          return;
+        }
         cancellationTimer = setTimeout(() => {
-          finish(() => reject(error));
+          finish(() => commitFallback ? resolve(commitFallback) : reject(error));
         }, boundedCancellationSettleTimeoutMs);
         cancellationTimer.unref?.();
       };
@@ -192,10 +218,30 @@ export function createAgentToolBroker(options: AgentToolBrokerOptions = {}) {
       }
       context.signal.addEventListener('abort', handleAbort, { once: true });
       const executionRegistry = runToolRegistry || toolRegistry;
-      const expectedRegistrationId = context.runCapabilitySnapshot
-        ?.getTool(name, context.activeSkillId)?.registrationId;
-      const executionContext = {
+      const registeredTool = context.runCapabilitySnapshot?.getTool(name, context.activeSkillId);
+      const expectedRegistrationId = registeredTool?.registrationId;
+      const supportsCommitSettlement = registeredTool?.pluginOperation === 'rename'
+        && registeredTool.risk === 'write' && registeredTool.executor === 'main';
+      const commitSettlement: AgentMainCommitSettlement | undefined = supportsCommitSettlement ? {
+        begin: fallback => {
+          if (settled || cancellationError || controller.signal.aborted) throw abortError('Agent Tool 提交请求已失效');
+          if (commitFallback) throw new Error('Agent Tool 提交已经开始');
+          const normalized = normalizeMainCommitResult(fallback);
+          if ((normalized.data as Record<string, unknown>).mutationCommitState !== 'commit_unknown') {
+            throw new Error('Agent Tool 提交开始必须保留未知回执');
+          }
+          commitFallback = normalized;
+        },
+        settle: receipt => {
+          if (settled || !commitFallback || commitReceipt) throw new Error('Agent Tool 提交回执不存在或已经结束');
+          commitReceipt = normalizeMainCommitResult(receipt, (commitFallback.data as Record<string, unknown>).operationId as string);
+          if (cancellationError) finish(() => resolve(commitReceipt as AgentToolResult));
+        },
+      } : undefined;
+      const executionContext: AgentToolDispatchContext = {
         ...context,
+        // This fresh main-owned closure never inherits authority from an upstream context.
+        commitSettlement,
         onProgress: (progress: AgentToolProgress) => {
           if (!settled && !cancellationError) context.onProgress(progress);
         },
@@ -206,9 +252,11 @@ export function createAgentToolBroker(options: AgentToolBrokerOptions = {}) {
         : executionRegistry.execute(name, input, executionContext, expectedRegistrationId)
       ).then(
         result => finish(() => (
-          cancellationError ? reject(cancellationError) : resolve(result)
+          commitReceipt || commitFallback ? resolve((commitReceipt || commitFallback) as AgentToolResult)
+            : cancellationError ? reject(cancellationError) : resolve(result)
         )),
-        error => finish(() => reject(cancellationError || error)),
+        error => finish(() => commitReceipt || commitFallback
+          ? resolve((commitReceipt || commitFallback) as AgentToolResult) : reject(cancellationError || error)),
       );
     });
   }

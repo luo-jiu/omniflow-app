@@ -15,6 +15,6 @@ export function registerPluginManagementIpc(manager: PluginManager,getMainWindow
   bind('catalog',()=>manager.catalog());
   bind('choose',async()=>{const parent=getMainWindow()!;const result=await dialog.showOpenDialog(parent,{title:'选择 OmniFlow 插件包',properties:['openFile'],filters:[{name:'OmniFlow 插件 ZIP',extensions:['zip']}]});if(result.canceled||result.filePaths.length!==1)return null;return manager.prepare(result.filePaths[0]);});
   bind('commit',(ticket:string)=>manager.commit(ticket));bind('discard',(ticket:string)=>manager.discard(ticket));
-  bind('action',(id:string,action:PluginManagementAction)=>{if(typeof id!=='string'||id.length>128||!['enable','disable','approve-read','revoke-read','uninstall','rollback','clear-data'].includes(action))throw new Error('INVALID_ACTION');return manager.action(id,action);});
+  bind('action',(id:string,action:PluginManagementAction)=>{if(typeof id!=='string'||id.length>128||!['enable','disable','approve-read','revoke-read','approve-tools','revoke-tools','approve-rename','revoke-rename','uninstall','rollback','clear-data'].includes(action))throw new Error('INVALID_ACTION');return manager.action(id,action);});
   bind('safe-mode',(enabled:boolean)=>{if(typeof enabled!=='boolean')throw new Error('INVALID_INPUT');return manager.safeMode(enabled);});
 }
