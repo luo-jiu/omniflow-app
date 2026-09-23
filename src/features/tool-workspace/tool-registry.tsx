@@ -12,6 +12,9 @@ import ToolWorkspaceMedia from './ToolWorkspaceMedia';
 import ToolWorkspaceQQMusicLyrics from './ToolWorkspaceQQMusicLyrics';
 import LibraryMediaTool from '@/features/media-tools/LibraryMediaTool';
 import AIServiceWorkspace from '@/features/ai-services/AIServiceWorkspace';
+import PluginCommandWorkspace from '@/features/plugin-commands/PluginCommandWorkspace';
+import { PLUGIN_COMMAND_WORKSPACE_ID } from '@/features/plugin-commands/command-open-request';
+import { Puzzle } from 'lucide-react';
 
 const views: Record<BuiltInToolId, React.ComponentType<ToolContributionContext>> = {
   'ai-services': () => <AIServiceWorkspace />,
@@ -86,3 +89,13 @@ export const toolRegistry = new ContributionRegistry<ToolContribution>((tool, ow
   if ((!legacy && (!isNamespacedContributionId(tool.id) || !tool.id.startsWith(`${owner}.`))) || !tool.title.trim() || tool.title.length > 128 || typeof tool.View !== 'function') throw new Error('Invalid tool contribution');
 });
 toolRegistry.registerBatch('omniflow', BUILT_IN_TOOL_DEFINITIONS.map(tool => ({ id: tool.id, title: tool.title, icon: icons[tool.icon], View: views[tool.id] })));
+toolRegistry.registerBatch('omniflow', [{
+  id: PLUGIN_COMMAND_WORKSPACE_ID,
+  title: '插件工具',
+  icon: <Puzzle size={18} aria-hidden="true" />,
+  View: ({ libraryId, rootNodeId, selectedTreeNode, selectedNodeIds, pluginCommandRequest, onRefreshDirectory }) => (
+    <PluginCommandWorkspace libraryId={libraryId} rootNodeId={rootNodeId}
+      selectedTreeNode={selectedTreeNode} selectedNodeIds={selectedNodeIds}
+      request={pluginCommandRequest} onRefreshDirectory={onRefreshDirectory} />
+  ),
+}]);

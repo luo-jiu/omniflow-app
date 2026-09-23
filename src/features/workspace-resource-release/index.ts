@@ -27,6 +27,7 @@ import {
   clearToolWorkspaceState,
 } from '@/features/tool-workspace/tool-workspace.state';
 import { releaseAgentOwnerRuns } from '@/features/agent/services/agent.api';
+import { pluginCommandApi } from '@/service/plugins/plugin-command.api';
 import {
   beginLibraryDisposing,
   beginSessionDisposing,
@@ -104,6 +105,9 @@ export async function disposeLibraryWorkspace(
   const endLibraryDisposing = beginLibraryDisposing(normalizedLibraryId);
 
   try {
+    await pluginCommandApi.releaseLibrary(normalizedLibraryId).catch(() => {
+      runtimeLogger.warn('release plugin commands during library release failed');
+    });
     const cacheKey = workspaceCacheKey(normalizedLibraryId);
     const workspaceState = loadLibraryDetailWorkspaceState(cacheKey);
     const browserTabIds = workspaceState.browserTabs.map((tab) => tab.id);
@@ -141,6 +145,9 @@ export async function disposeLibraryWorkspace(
 export async function disposeSessionWorkspaces() {
   const endSessionDisposing = beginSessionDisposing();
   try {
+    await pluginCommandApi.releaseAll().catch(() => {
+      runtimeLogger.warn('release plugin commands during session release failed');
+    });
     if (hasWindow() && window.electronEmbeddedBrowser) {
       await window.electronEmbeddedBrowser.closeAll().catch((error: unknown) => {
         runtimeLogger.warn('close all embedded browser tabs during session release failed', error);

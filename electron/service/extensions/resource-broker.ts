@@ -111,14 +111,18 @@ export class PluginResourceBroker {
   readonly stateScope: string;
   constructor(readonly manifest: PluginManifest, readonly resource: PluginResourceAuthority, private theme: ThemeSnapshot,
     private settings: PluginSettingsAccess, private diagnostic: (event: { method: string; code: string; elapsedMs: number; requestTag?: string }) => void = () => undefined, private readingState: PluginReadingStateStore = new PluginReadingStateMemory(), private execution?: PluginToolExecution) {
+    // Manager/runtime authorize the caller; a declared manual entry does not require AI discovery permission.
+    const toolEntryDeclared = manifest.permissions.includes('agent.tools') || Boolean(execution
+      && manifest.agentTools?.some(tool => tool.id === execution.contribution.id)
+      && manifest.commands?.some(command => command.toolId === execution.contribution.id && command.id.startsWith(`${manifest.id}.`)));
     if (isMetadataResourceAuthority(resource)) {
       validateMetadataResourceAuthority(resource);
-      if (execution?.contribution.kind !== 'rename-proposal' || !manifest.permissions.includes('agent.tools')
+      if (execution?.contribution.kind !== 'rename-proposal' || !toolEntryDeclared
         || !manifest.permissions.includes('resource.rename.propose') || manifest.permissions.includes('resource.read') || manifest.permissions.includes('directory.read')) throw new Error('Invalid Tool metadata scope');
     } else {
       if (!resource.accountScope || !integer(resource.libraryId, 1, Number.MAX_SAFE_INTEGER) || !integer(resource.nodeId, 1, Number.MAX_SAFE_INTEGER)
         || !integer(resource.size, 0, LIMITS.readTotalBytes) || !resource.revision || resource.revision.length > 256 || resource.name.length > 512) throw new Error('Invalid host resource scope');
-      if (execution && (execution.contribution.kind === 'rename-proposal' || resource.directory || !manifest.permissions.includes('agent.tools') || !manifest.permissions.includes('resource.read'))) throw new Error('Invalid Tool resource scope');
+      if (execution && (execution.contribution.kind === 'rename-proposal' || resource.directory || !toolEntryDeclared || !manifest.permissions.includes('resource.read'))) throw new Error('Invalid Tool resource scope');
       if (execution?.contribution.kind === 'file-output' && !manifest.permissions.includes('resource.output.propose')) throw new Error('Invalid file output scope');
     }
     this.theme = validateTheme(theme);

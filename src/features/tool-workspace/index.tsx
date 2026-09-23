@@ -1,6 +1,7 @@
 import { toolCommands } from './tool-commands';
 import { Toast } from '@douyinfe/semi-ui';
 import { toolRegistry } from './tool-registry';
+import { PLUGIN_COMMAND_WORKSPACE_ID, type PluginCommandOpenRequest } from '@/features/plugin-commands/command-open-request';
 import React from 'react';
 import { IconDoubleChevronLeft } from '@douyinfe/semi-icons';
 
@@ -47,6 +48,8 @@ type ToolWorkspaceProps = {
   libraryMediaProcessingRequest?: ToolWorkspaceLibraryMediaRequest | null;
   rootNodeId: number | null;
   selectedTreeNode: SelectedTreeNode | null;
+  selectedNodeIds?: number[];
+  pluginCommandRequest?: PluginCommandOpenRequest | null;
   mediaProcessingRequest?: ToolWorkspaceMediaRequest | null;
   onRefreshDirectory?: (directoryId: number) => Promise<void> | void;
 };
@@ -58,6 +61,8 @@ const ToolWorkspace: React.FC<ToolWorkspaceProps> = ({
   onRefreshDirectory,
   rootNodeId,
   selectedTreeNode,
+  selectedNodeIds,
+  pluginCommandRequest,
 }) => {
   const { layout, saveNavWidth, saveToolOrder } = useToolWorkspaceLayout();
   const [workspaceState, setWorkspaceState] = React.useState<ToolWorkspaceState>(() => (
@@ -168,6 +173,10 @@ const ToolWorkspace: React.FC<ToolWorkspaceProps> = ({
       Toast.warning('此工具当前不可用，请选择其他工具');
     }
   }, []);
+
+  React.useEffect(() => {
+    if (pluginCommandRequest) openTool(PLUGIN_COMMAND_WORKSPACE_ID);
+  }, [pluginCommandRequest, openTool]);
 
   React.useEffect(() => {
     if (toolNavResizeRef.current) return;
@@ -356,6 +365,8 @@ const ToolWorkspace: React.FC<ToolWorkspaceProps> = ({
           libraryId={libraryId}
           rootNodeId={rootNodeId}
           selectedTreeNode={selectedTreeNode}
+          selectedNodeIds={selectedNodeIds}
+          pluginCommandRequest={pluginCommandRequest}
           onRefreshDirectory={onRefreshDirectory}
           subtitleTranslation={subtitleTranslation}
           mediaProcessingMode={mediaProcessingMode}

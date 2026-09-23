@@ -75,6 +75,7 @@ export const DirectoryContextMenuOverlayAdapter: React.FC<
           onAction={(action) => onResolve({ type: 'action', action })}
           boundaryRect={props.boundaryRect}
           deleteCount={props.deleteCount}
+          pluginCommands={props.pluginCommands}
           submenuPreferredHorizontal={props.submenuPreferredHorizontal}
           getPopupContainer={() => document.body}
         />

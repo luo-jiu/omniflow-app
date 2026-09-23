@@ -46,6 +46,7 @@ import {
 import { resolveTextSaveFeedback, saveTextWithRevision, TextFileConflictError } from './text-viewer-save';
 import { notifyLibraryFileContentChanged } from '@/features/file-viewer/services/file-content-events';
 import { API_CONFIG } from '@/config/api';
+import { readTextResource } from '@/service/request/read-text-resource';
 import '@fontsource/jetbrains-mono/400.css';
 import '@fontsource/jetbrains-mono/700.css';
 
@@ -59,11 +60,6 @@ interface TextViewerProps {
   reloadToken?: number;
   tabId: string;
   url: string;
-}
-
-interface IpcTextFetchResponse {
-  status?: number;
-  body?: unknown;
 }
 
 interface DraftRecoveryState {
@@ -102,12 +98,6 @@ interface CursorPosition {
 
 function clampFontSize(size: number): number {
   return Math.min(Math.max(Math.round(size), MIN_FONT_SIZE), MAX_FONT_SIZE);
-}
-
-function readTextResponseBody(body: unknown): string {
-  if (typeof body === 'string') return body;
-  if (body === null || body === undefined) return '';
-  return String(body);
 }
 
 function normalizeProvidedRevision(value: string | null): string | null {
@@ -445,14 +435,11 @@ const TextViewer: React.FC<TextViewerProps> = ({
           return;
         }
         if (cancelled) return;
-        const response = url.startsWith('data:text/plain;')
-          ? { status: 200, body: new TextDecoder('utf-8', { fatal: true }).decode(
+        const remoteContent = url.startsWith('data:text/plain;')
+          ? new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(
             Uint8Array.from(atob(url.slice(url.indexOf(',') + 1)), char => char.charCodeAt(0)),
-          ) }
-          : await window.electronAPI.fetch(url, { method: 'GET' }) as IpcTextFetchResponse;
-        const status = Number(response?.status ?? 0);
-        if (status >= 400) throw new Error(`HTTP ${status}`);
-        const remoteContent = readTextResponseBody(response?.body);
+          )
+          : await readTextResource(url);
         let contentHashRevision: string | null = null;
         try {
           contentHashRevision = await createTextContentRevision(remoteContent);

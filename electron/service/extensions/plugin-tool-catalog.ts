@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { PluginToolContribution } from '../../../packages/plugin-sdk/index.js';
-import type { ManagedPlugin } from '../../../src/shared/plugin-management';
+import { isPluginCommandAllowed, type ManagedPlugin } from '../../../src/shared/plugin-management';
 import { toAgentProviderToolName } from '../agent/agent-provider-tool-name';
 
 export interface PluginToolRegistration {
@@ -11,6 +11,7 @@ export interface PluginToolRegistration {
   readonly providerName: string;
   readonly contribution: PluginToolContribution;
 }
+export type PluginToolInvocationMode = 'agent' | 'command';
 
 /** Run 组合目录在发出模型请求前统一校验，不能覆盖已有的内置或插件 Tool。 */
 export function assertPluginToolNames(tools: ReadonlyArray<Pick<PluginToolContribution, 'id'>>, reservedToolNames: readonly string[] = []): void {
@@ -43,14 +44,19 @@ export function isPluginToolAllowed(plugin: ManagedPlugin, contribution: PluginT
     : Boolean(plugin.readApproved && plugin.permissions.includes('resource.read'));
 }
 
+export function isPluginCommandToolAllowed(plugin: ManagedPlugin, contribution: PluginToolContribution): boolean {
+  return Boolean(plugin.commands?.some(command => command.toolId === contribution.id && isPluginCommandAllowed(plugin, command)));
+}
+
 /** 这里只冻结候选贡献与代码身份，不注册执行器，也不授予某个 Agent Run 文件权限。 */
-export function createPluginToolSnapshot(plugins: readonly ManagedPlugin[], reservedToolNames: readonly string[] = []): readonly PluginToolRegistration[] {
-  const registrations = plugins.flatMap(plugin => (plugin.agentTools ?? []).filter(contribution => isPluginToolAllowed(plugin, contribution)).map(contribution => ({
+export function createPluginToolSnapshot(plugins: readonly ManagedPlugin[], reservedToolNames: readonly string[] = [], mode: PluginToolInvocationMode = 'agent'): readonly PluginToolRegistration[] {
+  const allowed = mode === 'command' ? isPluginCommandToolAllowed : isPluginToolAllowed;
+  const registrations = plugins.flatMap(plugin => (plugin.agentTools ?? []).filter(contribution => allowed(plugin, contribution)).map(contribution => ({
       pluginId: plugin.id,
       pluginVersion: plugin.version,
       fingerprint: plugin.fingerprint,
       // 包指纹包含执行代码；同名声明不能把旧 Run 偷换成新实现。
-      registrationId: `plugin-tool:${createHash('sha256').update(JSON.stringify(['omniflow-agent-tool-v1', plugin.id, plugin.version, plugin.fingerprint, contribution.id])).digest('hex')}`,
+      registrationId: `plugin-tool:${createHash('sha256').update(JSON.stringify([mode === 'command' ? 'omniflow-command-tool-v1' : 'omniflow-agent-tool-v1', plugin.id, plugin.version, plugin.fingerprint, contribution.id])).digest('hex')}`,
       providerName: toAgentProviderToolName(contribution.id),
       contribution: structuredClone(contribution),
     })));

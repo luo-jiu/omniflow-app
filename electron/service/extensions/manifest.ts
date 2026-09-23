@@ -6,9 +6,9 @@ import { createHash } from 'node:crypto';
 import schema from '../../../packages/plugin-sdk/manifest.schema.json';
 import { LIMITS } from '../../../packages/plugin-sdk/index.js';
 import { validateIconSvg } from '../../../src/features/appearance/svg-assets';
-import type { PluginToolContribution } from '../../../packages/plugin-sdk/index.js';
+import type { PluginCommandContribution, PluginToolContribution } from '../../../packages/plugin-sdk/index.js';
 import { validateToolContribution } from './tool-schema';
-export type { PluginToolContribution, PluginToolSchema } from '../../../packages/plugin-sdk/index.js';
+export type { PluginCommandContribution, PluginToolContribution, PluginToolSchema } from '../../../packages/plugin-sdk/index.js';
 
 export interface PluginManifest {
   formatVersion: 1 | 2; id: string; version: string; sdkVersion: 1; minHostVersion: string;
@@ -16,6 +16,7 @@ export interface PluginManifest {
   activation: string[]; permissions: Array<'resource.read' | 'directory.read' | 'agent.tools' | 'resource.rename.propose' | 'resource.output.propose'>;
   viewers: Array<{ id: string; title: string; extensions: string[]; directoryTypes?: Array<'COMIC'> }>;
   agentTools?: PluginToolContribution[];
+  commands?: PluginCommandContribution[];
 }
 const validate = new Ajv({ allErrors: true }).compile<PluginManifest>(schema);
 export function isPackagePath(value: string): boolean {
@@ -39,13 +40,20 @@ export function parsePluginManifest(input: unknown, platform: string, hostVersio
     if (!tool.id.startsWith(`${input.id}.`) || !/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/.test(tool.id) || ids.has(tool.id)) throw new Error('Invalid or duplicate tool id');
     if (!isPackagePath(tool.entry) || !tool.entry.endsWith('.html')) throw new Error('Invalid tool entry');
     if (tool.kind === 'rename-proposal') {
-      if (!input.permissions.includes('agent.tools') || !input.permissions.includes('resource.rename.propose')
+      if (!input.permissions.includes('resource.rename.propose')
         || input.permissions.includes('resource.read') || input.permissions.includes('directory.read') || input.viewers?.length) throw new Error('Proposal Tool requires metadata-only permissions');
-    } else if (!input.permissions.includes('agent.tools') || !input.permissions.includes('resource.read') || input.permissions.includes('directory.read')) throw new Error('Tool requires single-file read permissions');
+    } else if (!input.permissions.includes('resource.read') || input.permissions.includes('directory.read')) throw new Error('Tool requires single-file read permissions');
     if (tool.kind === 'file-output' && !input.permissions.includes('resource.output.propose')) throw new Error('File output requires independent proposal permission');
     validateToolContribution(tool);
     ids.add(tool.id); activation.add(`tool:${tool.id}`);
   }
+  const manualTools = new Set<string>();
+  for (const command of input.commands ?? []) {
+    if (!command.id.startsWith(`${input.id}.`) || !/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/.test(command.id) || ids.has(command.id)) throw new Error('Invalid or duplicate command id');
+    if (!input.agentTools?.some(tool => tool.id === command.toolId)) throw new Error('Command requires a tool from the same package');
+    ids.add(command.id); manualTools.add(command.toolId);
+  }
+  if (!input.permissions.includes('agent.tools') && input.agentTools?.some(tool => !manualTools.has(tool.id))) throw new Error('Tool requires Agent permission or a manual command');
   if (input.permissions.includes('agent.tools') && !input.agentTools?.length) throw new Error('Tool permission requires a tool contribution');
   if (input.permissions.includes('resource.rename.propose') && !input.agentTools?.some(tool => tool.kind === 'rename-proposal')) throw new Error('Proposal permission requires a proposal contribution');
   if (input.permissions.includes('resource.output.propose') && !input.agentTools?.some(tool => tool.kind === 'file-output')) throw new Error('Output permission requires an output contribution');

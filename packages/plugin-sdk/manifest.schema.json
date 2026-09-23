@@ -308,6 +308,48 @@
           }
         ]
       }
+    },
+    "commands": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "title",
+          "toolId",
+          "locations"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "toolId": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "locations": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 2,
+            "uniqueItems": true,
+            "items": {
+              "enum": [
+                "file-menu",
+                "tool-workspace"
+              ]
+            }
+          }
+        }
+      }
     }
   },
   "allOf": [
@@ -346,7 +388,8 @@
           "activation": {
             "type": "array",
             "maxItems": 8
-          }
+          },
+          "commands": false
         }
       }
     },

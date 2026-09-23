@@ -135,6 +135,7 @@ function normalizeTarget(input: AgentMediaArtifactUploadTarget): AgentMediaArtif
   }
   return {
     conflictPolicy,
+    ...(input.strictParent === true ? { strictParent: true } : {}),
     ...(contentType ? { contentType } : {}),
     fileName: boundedText(input?.fileName, 'Agent 上传文件名', 512),
     libraryId: positiveInteger(input?.libraryId, 'Agent 资料库 ID'),

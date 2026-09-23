@@ -179,6 +179,13 @@ describe('Agent media artifact main-owned upload transaction', () => {
     expect(onSettlementStarted).toHaveBeenCalledWith(operationId);
   });
 
+  it('preserves strict destination validation when normalizing a plugin output target', async () => {
+    const { controlPlane, input, manager } = await fixture();
+    await manager.upload({ ...input, target: { ...input.target, strictParent: true } });
+    expect(controlPlane.init).toHaveBeenCalledWith(input.credentials,
+      expect.objectContaining({ parentId: TARGET.parentId, strictParent: true }), input.signal);
+  });
+
   it.each(['', 'not-an-operation', 'A'.repeat(64), '0'.repeat(63), '00000000-0000-0000-0000-000000000000', ' e43b4b4c-f9ca-4488-a4ec-2015c8a9d370'])('rejects invalid explicit operation identity %j before any request', async operationId => {
     const { controlPlane, input, manager } = await fixture();
     await expect(manager.upload({ ...input, operationId })).rejects.toThrow('操作 ID 无效');

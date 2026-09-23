@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { PluginResourceBroker, PluginSettingsMemory, type OpenedResourceAuthority } from './resource-broker';
+import { PluginResourceBroker, PluginSettingsMemory, type OpenedResourceAuthority, type PluginResourceAuthority } from './resource-broker';
 import { parsePluginManifest } from './manifest';
 import { createPluginClient } from '../../../packages/plugin-sdk/index.js';
 import manifestJSON from '../../../samples/csv-tool/manifest.json';
+import renameJSON from '../../../samples/batch-rename/manifest.json';
+import outputJSON from '../../../samples/csv-export/manifest.json';
 
 function fixture() {
   let allowed = true, revision = 'r1';
@@ -17,6 +19,28 @@ function fixture() {
 }
 const output = { headers: ['name'], totalRows: 1, matchedRows: 1, rows: [['测试']], truncated: false };
 describe('Tool broker protocol', () => {
+  it.each([manifestJSON, renameJSON, outputJSON])('runs manual-only $id through the same resource broker without AI permission', async sample => {
+    const toolId = sample.agentTools[0].id;
+    const manifest = parsePluginManifest({ ...sample, permissions: sample.permissions.filter(permission => permission !== 'agent.tools'),
+      commands: [{ id: `${sample.id}.run`, title: '手动处理', toolId, locations: ['file-menu'] }] }, 'darwin');
+    const contribution = manifest.agentTools![0];
+    const resource: PluginResourceAuthority = contribution.kind === 'rename-proposal'
+      ? { kind: 'metadata', accountScope: 'a', libraryId: 3, revision: 'r1', files: [{ id: 'file-a', name: 'a.csv' }], authorize: async () => true, currentRevision: async () => 'r1' }
+      : { accountScope: 'a', libraryId: 3, nodeId: 10, name: 'a.csv', size: 3, revision: 'r1', authorize: async () => true, currentRevision: async () => 'r1', readRange: async () => Buffer.from('a,b') };
+    const execution = { contribution, invocationId: 'manual-a', input: {}, complete: vi.fn(), fail: vi.fn(), reject: vi.fn() };
+    const theme = { schemaVersion: 1 as const, revision: 1, mode: 'light' as const, colors: {} };
+    const create = (value = manifest) => new PluginResourceBroker(value, resource, theme, new PluginSettingsMemory(), undefined, undefined, execution);
+    expect(() => create({ ...manifest, commands: [] })).toThrow(/scope/);
+    expect(() => create({ ...manifest, permissions: [] })).toThrow(/scope/);
+    const broker = create(); broker.setReadGrant(true);
+    const client = createPluginClient({ exchange: raw => broker.exchange(raw), subscribe: () => () => undefined });
+    await client.ready();
+    expect(await client.toolInvocation()).toEqual({ invocationId: 'manual-a', toolId, input: {} });
+    expect((await client.context()).capabilities).not.toContain('agent.tools');
+    if (contribution.kind === 'rename-proposal') await expect(client.read(broker.handle, 0, 3)).rejects.toMatchObject({ code: 'UNSUPPORTED' });
+    else expect((await client.read(broker.handle, 0, 3)).bytes).toEqual(new Uint8Array(Buffer.from('a,b')));
+    client.dispose(); broker.dispose();
+  });
   it('exposes only Tool invocation data and refuses Viewer state/settings and directory APIs', async () => {
     const f = fixture(); await f.client.ready();
     const context = await f.client.context();

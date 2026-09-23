@@ -17,6 +17,8 @@ const MAX_RENAME_AUTHORITY_RESULT_BYTES = 256 * 1024;
 interface AgentFileAuthorityBrokerOptions {
   createId?: () => string;
   timeoutMs?: number;
+  /** Host-selected transport; manual commands use their own request/completion channel. */
+  requestChannel?: string;
 }
 
 const COMPLETION_FIELDS = [
@@ -347,7 +349,7 @@ export function createAgentFileAuthorityBroker(options: AgentFileAuthorityBroker
       });
       input.signal.addEventListener('abort', handleAbort, { once: true });
       try {
-        input.sender.send('agent:file-authority:requested', requestPayload);
+        input.sender.send(options.requestChannel ?? 'agent:file-authority:requested', requestPayload);
       } catch {
         pending.get(authorityId)?.reject(new Error('Agent 资料库文件授权请求发送失败'));
       }

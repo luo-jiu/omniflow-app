@@ -13,6 +13,15 @@ const MAX_INDEX_BYTES = 2 * 1024 * 1024;
 const empty = (): Index => ({ schemaVersion: 1, safeMode: false, plugins: [] });
 const fingerprintValid = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 function newer(a: string, b: string) { return a.split('.').map((part, index) => Number(part) - Number(b.split('.')[index])).find(delta => delta !== 0) ?? 0; }
+function assertCommandIds(manifests: readonly PluginManifest[], reservedToolNames: readonly string[] = []) {
+  const ids = new Set(['example.csv.table', ...reservedToolNames, ...manifests.flatMap(manifest => [
+    ...manifest.viewers.map(viewer => viewer.id), ...(manifest.agentTools ?? []).map(tool => tool.id),
+  ])]);
+  for (const command of manifests.flatMap(manifest => manifest.commands ?? [])) {
+    if (ids.has(command.id)) throw new Error('DUPLICATE_COMMAND_ID');
+    ids.add(command.id);
+  }
+}
 export class PluginInstallStore {
   private state = empty(); private ready = false;
   private pending = new Map<string, { root: string; package: LoadedPluginPackage; expected: string | null; expires: number; review: PluginInstallReview }>();
@@ -49,6 +58,7 @@ export class PluginInstallStore {
         }
       }
       assertPluginToolNames(input.plugins.flatMap(item => item.manifest.agentTools ?? []));
+      assertCommandIds(input.plugins.map(item => item.manifest));
       this.state = input;
     } catch (error) {
       if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) { this.state = { ...empty(), safeMode: true, recoveryPackages: (await readdir(path.join(this.root,'packages'))).filter(fingerprintValid).slice(0,66) }; this.recoveryReason = '安装记录损坏，已阻止第三方运行。原包和数据保留，可重新安装。'; }
@@ -61,6 +71,7 @@ export class PluginInstallStore {
   directory(fingerprint: string) { if (!fingerprintValid(fingerprint)) throw new Error('INVALID_FINGERPRINT'); return path.join(this.root, 'packages', fingerprint); }
   private checkContributionIds(manifest: PluginManifest) { const ids = new Set(['example.csv.table', ...this.state.plugins.filter(item => item.manifest.id !== manifest.id).flatMap(item => item.manifest.viewers.map(viewer => viewer.id))]); if(manifest.viewers.some(viewer => ids.has(viewer.id)))throw new Error('DUPLICATE_VIEWER_ID');
     assertPluginToolNames([...this.state.plugins.filter(item => item.manifest.id !== manifest.id).flatMap(item => item.manifest.agentTools ?? []), ...(manifest.agentTools ?? [])], this.reservedToolNames);
+    assertCommandIds([...this.state.plugins.filter(item => item.manifest.id !== manifest.id).map(item => item.manifest), manifest], this.reservedToolNames);
   }
   async verify(item: Version) { const loaded = await loadPluginPackage(this.directory(item.fingerprint), this.platform); if (loaded.fingerprint !== item.fingerprint || JSON.stringify(loaded.manifest) !== JSON.stringify(item.manifest)) throw new Error('INTEGRITY_FAILED'); return loaded; }
   private serial<T>(action: () => Promise<T>): Promise<T> { if (!this.ready) return Promise.reject(new Error('STORE_UNAVAILABLE')); const next = this.tail.then(action, action); this.tail = next.catch(() => undefined); return next; }

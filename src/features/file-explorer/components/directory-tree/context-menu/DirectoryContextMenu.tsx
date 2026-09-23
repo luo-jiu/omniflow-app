@@ -3,6 +3,7 @@ import React from 'react';
 import ContextMenu, { ContextMenuItem } from '@/components/ui/context-menu';
 import type { OverlayBoundaryRect } from '@/components/ui/context-menu/overlay';
 import { getDirectoryBuiltInIcon } from '@/features/file-explorer/utils/file-node-icon';
+import { PLUGIN_COMMAND_MENU_PREFIX } from '@/features/plugin-commands/command-menu';
 
 interface DirectoryContextMenuProps {
   node: any;
@@ -11,6 +12,7 @@ interface DirectoryContextMenuProps {
   onClose?: () => void;
   boundaryRect?: OverlayBoundaryRect | null;
   deleteCount?: number;
+  pluginCommands?: Array<{ id: string; title: string }>;
   submenuPreferredHorizontal?: 'left' | 'right';
   getPopupContainer?: () => HTMLElement;
 }
@@ -109,6 +111,7 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
   onAction,
   onClose,
   boundaryRect,
+  pluginCommands = [],
   submenuPreferredHorizontal = 'left',
   getPopupContainer: getPopupContainerProp,
 }) => {
@@ -153,6 +156,16 @@ const DirectoryContextMenu: React.FC<DirectoryContextMenuProps> = ({
     : [
       ...commandItems('file.basic'),
     ];
+
+  if (!isFolder && pluginCommands.length) {
+    items.push({
+      key: 'plugin-commands', label: '插件工具',
+      children: pluginCommands.map(command => ({
+        key: `${PLUGIN_COMMAND_MENU_PREFIX}${command.id}`, label: command.title,
+        onClick: () => onAction(`${PLUGIN_COMMAND_MENU_PREFIX}${command.id}`, node),
+      })),
+    });
+  }
 
   // 文件夹：基础信息组后加分隔线，再进入模式设置组
   if (isFolder) {

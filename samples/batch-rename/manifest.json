@@ -1,7 +1,7 @@
 {
   "formatVersion": 2,
   "id": "example.batch-rename",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "sdkVersion": 1,
   "minHostVersion": "0.2.2",
   "platforms": [
@@ -94,6 +94,17 @@
       ],
       "timeoutMs": 10000,
       "maxResultBytes": 32768
+    }
+  ],
+  "commands": [
+    {
+      "id": "example.batch-rename.run",
+      "title": "批量改名",
+      "toolId": "example.batch-rename.propose",
+      "locations": [
+        "file-menu",
+        "tool-workspace"
+      ]
     }
   ]
 }

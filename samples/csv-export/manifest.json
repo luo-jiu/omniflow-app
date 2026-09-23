@@ -1,7 +1,7 @@
 {
   "formatVersion": 2,
   "id": "example.csv-export",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "sdkVersion": 1,
   "minHostVersion": "0.2.2",
   "platforms": [
@@ -100,6 +100,17 @@
         }
       ],
       "timeoutMs": 30000
+    }
+  ],
+  "commands": [
+    {
+      "id": "example.csv-export.run",
+      "title": "CSV 处理并另存",
+      "toolId": "example.csv-export.export",
+      "locations": [
+        "file-menu",
+        "tool-workspace"
+      ]
     }
   ]
 }

@@ -965,3 +965,23 @@ contextBridge.exposeInMainWorld('electronPluginManagement', {
     return () => ipcRenderer.removeListener('plugin-management:changed', handler);
   },
 });
+
+contextBridge.exposeInMainWorld('electronPluginCommands', {
+  prepare: (input: import('../src/shared/plugins/manual-command.types').PluginCommandPrepareRequest) => ipcRenderer.invoke('plugin-commands:prepare', input),
+  approve: (input: import('../src/shared/plugins/manual-command.types').PluginCommandExecutionRequest) => ipcRenderer.invoke('plugin-commands:approve', input),
+  cancel: (input: import('../src/shared/plugins/manual-command.types').PluginCommandExecutionRequest) => ipcRenderer.invoke('plugin-commands:cancel', input),
+  list: (input: import('../src/shared/plugins/manual-command.types').PluginCommandScope) => ipcRenderer.invoke('plugin-commands:list', input),
+  reconcile: (input: import('../src/shared/plugins/manual-command.types').PluginCommandReconcileRequest) => ipcRenderer.invoke('plugin-commands:reconcile', input),
+  release: (input: import('../src/shared/plugins/manual-command.types').PluginCommandScope) => ipcRenderer.invoke('plugin-commands:release', input),
+  subscribe: (listener: (execution: import('../src/shared/plugins/manual-command.types').PluginCommandExecution) => void) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, execution: import('../src/shared/plugins/manual-command.types').PluginCommandExecution) => listener(execution);
+    ipcRenderer.on('plugin-commands:changed', wrapped);
+    return () => ipcRenderer.removeListener('plugin-commands:changed', wrapped);
+  },
+  onFileAuthorityRequest: (listener: (request: AgentFileAuthorityRequestV1) => void) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, request: AgentFileAuthorityRequestV1) => listener(request);
+    ipcRenderer.on('plugin-commands:file-authority:requested', wrapped);
+    return () => ipcRenderer.removeListener('plugin-commands:file-authority:requested', wrapped);
+  },
+  completeFileAuthority: (input: AgentFileAuthorityCompletionV1) => ipcRenderer.invoke('plugin-commands:file-authority:complete', input),
+} satisfies import('../src/shared/plugins/manual-command.types').PluginCommandsBridge);

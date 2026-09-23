@@ -117,6 +117,7 @@ export type DirectoryContextMenuNodeSnapshot = {
 };
 
 export type DirectoryContextMenuOverlayProps = {
+  pluginCommands?: Array<{ id: string; title: string }>;
   boundaryRect: OverlayBoundaryRect | null;
   deleteCount: number;
   isFolder: boolean;

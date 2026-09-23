@@ -1,5 +1,6 @@
 import { fetchNodeDetailById, getFileLink, updateNodeFileContent } from '@/features/file-explorer/services/file.api';
 import { IpcRequestError } from '@/service/request/ipcRequest';
+import { readTextResource } from '@/service/request/read-text-resource';
 import { createTextContentRevision } from './text-viewer-session';
 
 export class TextFileConflictError extends Error {
@@ -10,11 +11,7 @@ export async function saveTextWithRevision(input: {
   nodeId: number; libraryId: number; content: string; baseRevision: string | null; assertCurrent: () => void;
 }, deps = {
   detail: fetchNodeDetailById, link: getFileLink, update: updateNodeFileContent,
-  read: async (url: string) => {
-    const response = await window.electronAPI.fetch(url, { method: 'GET' }) as { status: number; body?: unknown };
-    if (response.status >= 400 || typeof response.body !== 'string') throw new Error('无法核对最新文件正文，未保存');
-    return response.body;
-  },
+  read: readTextResource,
 }) {
   if (!input.baseRevision) throw new Error('文件缺少读取版本，请重新加载后再保存');
   input.assertCurrent();

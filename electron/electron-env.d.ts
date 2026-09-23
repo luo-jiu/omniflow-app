@@ -28,6 +28,7 @@ declare namespace NodeJS {
 
 // Used in Renderer process, expose in `preload.ts`
 interface Window {
+  electronPluginCommands: import('../src/shared/plugins/manual-command.types').PluginCommandsBridge;
   electronPluginManagement: import('../src/shared/plugin-management').PluginManagementBridge;
   electronPluginViewer: import('../src/shared/plugin-viewer').PluginViewerBridge;
   ipcRenderer: import('electron').IpcRenderer
@@ -556,6 +557,7 @@ type EmbeddedBrowserCatchToolkitState = {
 };
 
 interface Window {
+  electronPluginCommands: import('../src/shared/plugins/manual-command.types').PluginCommandsBridge;
   electronPluginManagement: import('../src/shared/plugin-management').PluginManagementBridge;
   electronPluginViewer: import('../src/shared/plugin-viewer').PluginViewerBridge;
   electronEmbeddedBrowser: {

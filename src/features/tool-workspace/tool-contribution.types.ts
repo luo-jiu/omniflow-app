@@ -3,11 +3,14 @@ import type { SelectedTreeNode } from '@/features/file-explorer';
 import type { EmbeddedBrowserCapturedResource } from '@/features/embedded-browser/resources/types';
 import type { useSubtitleTranslation } from './hooks/useSubtitleTranslation';
 import type { ToolWorkspaceToolId, ToolWorkspaceLibraryMediaRequest, ToolWorkspaceMediaHlsRequest, ToolWorkspaceMediaMpdRequest, ToolWorkspaceMediaMode } from './types';
+import type { PluginCommandOpenRequest } from '@/features/plugin-commands/command-open-request';
 
 export interface ToolContributionContext {
   libraryId: number;
   rootNodeId: number | null;
   selectedTreeNode: SelectedTreeNode | null;
+  selectedNodeIds?: number[];
+  pluginCommandRequest?: PluginCommandOpenRequest | null;
   onRefreshDirectory?: (id: number) => void | Promise<void>;
   subtitleTranslation: ReturnType<typeof useSubtitleTranslation>;
   mediaProcessingMode: ToolWorkspaceMediaMode;

@@ -43,7 +43,7 @@ async function mount(loading = false) {
   mocks.upload.mockResolvedValue({ id: 3 });
   mocks.cleanup.mockResolvedValue(true);
   vi.stubGlobal('window', { addEventListener: vi.fn(), removeEventListener: vi.fn(), electronAPI: {
-    fetch: loading ? () => new Promise(() => undefined) : async (url: string) => ({ status: 200, body: `${url} body` }),
+    fetchBinary: loading ? () => new Promise(() => undefined) : async (url: string) => ({ status: 200, base64: Buffer.from(`${url} body`).toString('base64'), truncated: false }),
     createStagedTextFile: mocks.stage, cleanupStagedTextFile: mocks.cleanup,
     saveDownloadFile: mocks.dialog,
   } });

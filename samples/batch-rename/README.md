@@ -1,10 +1,10 @@
 # 批量改名提案样板
 
-本包仅声明 macOS；格式 2、SDK 包版本 `0.4.0`。它只提供 `example.batch-rename.propose`，无需 Viewer 标签页。
+本包仅声明 macOS；格式 2、SDK 包版本 `0.6.0`。`example.batch-rename@0.1.1` 提供 `example.batch-rename.propose` 与手动命令 `example.batch-rename.run`，无需 Viewer 标签页。
 
 ## 能力与边界
 
-- 分别批准 `resource.rename.propose` 与 `agent.tools` 后，内部 Agent 可在新 Run 发现此工具；仍需本次资源授权。
+- 启用并批准 `resource.rename.propose` 后，可从文件菜单或工具区选择 1～50 个文件运行手动命令；不需要批准 Agent Tool。另行批准 `agent.tools` 后，内部 Agent 可在新 Run 发现同一工具；仍需 Agent 本次资源授权。
 - 宿主将 1～50 个节点转换为调用内随机 ID 与完整文件名。插件收到 `{parameters:{prefix?,suffix?},files:[{id,name}]}`，没有真实节点 ID、路径、正文 handle、凭据或网络能力；`context.resource` 为 `null`。
 - 插件返回 `{changes:[{id,name}]}`，只包含发生变化的文件。实际改名由宿主校验、展示旧名→新名并另行确认执行。批准提案能力不等于批准文件写入。
 - prefix/suffix 各不超过 80 字符；保留最后一个扩展名及大小写，如 `archive.tar.gz` 添加后缀后为 `archive.tar-终稿.gz`。无扩展名与仅有开头点的 `.env` 整体视为文件名；`.config.json` 则保留 `.json`。
@@ -16,7 +16,7 @@
 将本目录复制到独立目录，并使用开发包提供的 SDK tarball 安装依赖：
 
 ```sh
-npm install --offline --ignore-scripts --no-audit --no-fund /path/to/omniflow-plugin-sdk-0.4.0.tgz
+npm install --offline --ignore-scripts --no-audit --no-fund /path/to/omniflow-plugin-sdk-0.6.0.tgz
 npm run build
 npm run package
 ```

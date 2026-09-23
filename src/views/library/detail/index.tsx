@@ -87,6 +87,8 @@ import { matchesLibraryMutationScope, subscribeLibraryNodesMutated } from '@/fea
 import { API_CONFIG } from '@/config/api';
 import BrowserSettingsWorkspace, { type BrowserSettingsSection } from './BrowserSettingsWorkspace';
 import ToolWorkspace from "@/features/tool-workspace";
+import type { PluginCommandOpenRequest } from '@/features/plugin-commands/command-open-request';
+import { pluginCommandApi } from '@/service/plugins/plugin-command.api';
 import SystemWorkspace, {
   type SystemWorkspaceReturnMode,
   type SystemWorkspaceView,
@@ -287,6 +289,8 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   const [searchMode, setSearchMode] = React.useState<SearchWorkspaceMode>(initialWorkspaceState.searchMode);
   const [searchDraft] = React.useState(initialWorkspaceState.searchDraft);
   const [selectedTreeNode, setSelectedTreeNode] = React.useState<SelectedTreeNode | null>(null);
+  const [selectedTreeNodeIds, setSelectedTreeNodeIds] = React.useState<number[]>([]);
+  const [pluginCommandRequest, setPluginCommandRequest] = React.useState<PluginCommandOpenRequest | null>(null);
   React.useEffect(() => subscribeLibraryFilesDeleted(event => {
     if (!matchesLibraryMutationScope(event, agentOwnerScope?.accountScope ?? null, API_CONFIG.BASE_URL, libraryId)) return;
     setSelectedTreeNode(previous => previous && event.nodeIds.includes(previous.id) ? null : previous);
@@ -1661,6 +1665,19 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     void window.electronEmbeddedBrowser.deactivate();
   }, []);
 
+  const openPluginCommandWorkspace = React.useCallback((request: PluginCommandOpenRequest) => {
+    setPluginCommandRequest(request);
+    setBrowserModeOpen(false);
+    setWorkspaceDisplayMode('tools');
+    void window.electronEmbeddedBrowser.deactivate();
+  }, []);
+
+  React.useEffect(() => {
+    setPluginCommandRequest(null);
+    setSelectedTreeNodeIds([]);
+    return () => { void pluginCommandApi.releaseLibrary(libraryId).catch(() => undefined); };
+  }, [libraryId]);
+
   const openHlsDownloadWorkspace = React.useCallback((
     resource: EmbeddedBrowserCapturedResource,
     manifest: EmbeddedBrowserHlsManifest,
@@ -2572,9 +2589,11 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
             libraryId={libraryId}
             onFileOpen={handleFileOpen}
             onOpenMediaTool={openLibraryMediaProcessingWorkspace}
+            onOpenPluginCommand={openPluginCommandWorkspace}
             onRootNodeIdChange={setTreeRootNodeId}
             onSelectionChange={(payload) => {
               setSelectedTreeNode(payload.primaryNode);
+              setSelectedTreeNodeIds(payload.selectedNodeIds);
             }}
             onOpenFileInBrowser={handleOpenFileInBrowser}
             browserModeOpen={browserModeOpen}
@@ -3095,6 +3114,8 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
           ) : workspaceDisplayMode === 'tools' ? (
             <div className="workspace-pane active">
               <ToolWorkspace
+                pluginCommandRequest={pluginCommandRequest}
+                selectedNodeIds={selectedTreeNodeIds}
                 libraryMediaProcessingRequest={libraryMediaProcessingRequest}
                 libraryId={libraryId}
                 mediaProcessingRequest={mediaProcessingRequest}

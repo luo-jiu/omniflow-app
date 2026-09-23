@@ -1,6 +1,6 @@
 # OmniFlow App 插件化实施计划
 
-更新时间：2026-09-22
+更新时间：2026-09-23
 
 适用范围：`omniflow-app` 的外观协议、贡献入口、桌面插件宿主、查看器 SDK、内部 Agent Tool 和受控改名提案。
 
@@ -275,7 +275,8 @@ Agent Tool 插件作为独立后续能力推进，AT0 契约与隔离底座已�
 | W0 写入契约调研与冻结 | 已验证完成 | 1～50 文件范围、精确旧值条件、原子事务、operation 回执与 CLI 已冻结；开发库迁移及生成代码完成 |
 | W1 只读变更提案 | 已验证完成 | SDK 0.4.0、独立提案权限、无正文元数据沙箱、标准预览及独立样板已通过自动与 Electron 验证 |
 | W2 宿主受控提交与 Agent 接入 | 已验证完成 | 本批限定 macOS 范围：真实 gpt-5.5、Win/local-minio 专用文件、范围及提案批准、原子改名、PG/SQLite 审计与目录/预览同步；复杂故障另由 Electron/PG 隔离证据覆盖 |
-| W4 第二处理插件复用 | 进行中 | `example.json-transform` 已完成独立样板、动态能力展示和离线构建；真实 UI 端到端验收待完成，strict parent 后端硬化已接入 |
+| W4 第二处理插件复用 | 已验证完成 | `example.json-transform@0.1.1` 已完成独立样板、离线构建及真实 Win/local-minio 新文件保存；范围见 [W4](plugin-system-w4-json-transform.md) |
+| M1 手动插件命令 | 已验证完成 | SDK0.6、文件菜单/工具页、独立执行记录及既有写入链复用；真实 Win/local-minio JSON 手动拒绝/另存通过，范围见 [M1](plugin-system-m1-manual-commands.md) |
 
 W0 已确认旧 `file.rename`/`library.batch` 无法提供本批需要的条件原子提交与回执，因而补充通用后端 API，未将旧无条件链路公开给插件。只保存成功回执，不把网络超时、取消或 not_found 当作未提交；本轮没有跨重启自动核对、自动续作或撤销。完整契约和验收边界以 [W0～W2](plugin-system-w0-w2-rename.md) 为准。
 

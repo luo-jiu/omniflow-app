@@ -1,6 +1,6 @@
 # OmniFlow Plugin SDK
 
-版本 `0.5.0`，wire 协议与 `sdkVersion` 继续为 `1`，Manifest 支持 `formatVersion: 1 | 2`，分别管理。此包为独立 ESM JavaScript + TypeScript 声明，无运行时依赖，不导入宿主源码。当前提供 macOS 受限只读插件、重命名提案与单文件文本产物协议；本地安装见 D1，目录扩展见 E1，独立 Agent Tool 契约见下文。
+版本 `0.6.0`，wire 协议与 `sdkVersion` 继续为 `1`，Manifest 支持 `formatVersion: 1 | 2`，分别管理。此包为独立 ESM JavaScript + TypeScript 声明，无运行时依赖，不导入宿主源码。当前提供 macOS 受限只读插件、重命名提案、单文件文本产物与手动命令声明；本地安装见 D1，目录扩展见 E1，独立 Agent Tool 契约见下文。
 
 ## 构建与使用
 
@@ -68,7 +68,7 @@ D1 本地安装、预检/权限、版本回滚与恢复流程见宿主文档 `do
 
 每个 Tool 声明 `id`、`title`、`description`、`entry`、`inputSchema`、`outputSchema`、`resourceAccess`、`timeoutMs`、`maxResultBytes`。ID 必须处于插件命名空间且与包内其它贡献 ID 不重复；`activation` 精确列出所有 `viewer:<id>` 与 `tool:<id>`，不能用 Viewer 激活条件代替 Tool。最多 8 个 Viewer 和 8 个 Tool。
 
-原单文件读取 Tool 省略 `kind`，必须同时声明 `resource.read` 与 `agent.tools`；含此 Tool 的包不能声明 `directory.read`。`resourceAccess` 固定为 `[{ "parameter": "resource", "mode": "read", "kind": "file" }]`，只接受当前调用的单个资料库文件。Tool 的安装授权不等于 Agent 会话授权；读取、取消及结果交付由宿主绑定调用与当前访问权。
+原单文件读取 Tool 省略 `kind`，需要 `resource.read`；向内部 Agent 提供工具时还需要 `agent.tools`（仅手动调用见 0.6.0 节）；含此 Tool 的包不能声明 `directory.read`。`resourceAccess` 固定为 `[{ "parameter": "resource", "mode": "read", "kind": "file" }]`，只接受当前调用的单个资料库文件。Tool 的安装授权不等于 Agent 会话授权；读取、取消及结果交付由宿主绑定调用与当前访问权。
 
 Schema 使用严格有限子集：根必须为 object；所有 object 都显式声明 `properties`、`required`（允许空数组）与 `additionalProperties: false`；string 必须有 `maxLength`（最多 4096）；array 必须有 `items` 和 `maxItems`（最多 256），可声明 `uniqueItems`；number/integer 必须有有限的 `minimum`/`maximum`，integer 边界必须是安全整数。另允许 `boolean`、`null`、有界的 `description`、`minLength`、`minItems` 和最多 32 项的同类型标量 `enum`。不支持 `$ref`、`pattern`、`format`、`const`、组合条件或默认值，也不做类型转换。
 
@@ -84,7 +84,7 @@ SDK 仅暴露协议；单文件读取 Tool 已在宿主 AT1/AT2 接入 Agent 发
 
 ## 元数据重命名提案（0.4.0 / Manifest v2）
 
-Tool 显式声明 `kind: "rename-proposal"`，包权限为 `resource.rename.propose` 与 `agent.tools`。首版提案包不能同时声明 `resource.read`、`directory.read` 或 Viewer；旧读权限不会获得多文件提案能力。`resourceAccess` 固定为 `[{ "parameter": "resources", "mode": "metadata", "kind": "file", "maxItems": 50 }]`。
+Tool 显式声明 `kind: "rename-proposal"`，需要 `resource.rename.propose`；向内部 Agent 提供工具时还需要 `agent.tools`（仅手动调用见 0.6.0 节）。首版提案包不能同时声明 `resource.read`、`directory.read` 或 Viewer；旧读权限不会获得多文件提案能力。`resourceAccess` 固定为 `[{ "parameter": "resources", "mode": "metadata", "kind": "file", "maxItems": 50 }]`。
 
 模型侧 `inputSchema` 必填 `resources`：数组的 `minItems: 1`、`maxItems: 50`、`uniqueItems: true`，条目为 `minimum: 1`、`maximum: 9007199254740991` 的 integer。其他业务参数继续使用有界 schema；禁止声明旧 `resource` 字段。输入必须是同一资料库内获准的普通文件，宿主承担验证，沙箱不会看到这些真实 nodeId。
 
@@ -96,7 +96,7 @@ Tool 显式声明 `kind: "rename-proposal"`，包权限为 `resource.rename.prop
 
 ## 单源文件产物（0.5.0 / Manifest v2）
 
-`kind: "file-output"` 同时要求 `resource.read`、`resource.output.propose` 与 `agent.tools`，文件产物必须独立批准；升级或回滚会清除批准。贡献使用 `output:{mediaTypes,maxBytes}`，mediaTypes为`text/csv`、`application/json`的非空无重复子集，maxBytes为1至1048576；不声明outputSchema/maxResultBytes，不提高旧Tool的任意JSON结果预算。
+`kind: "file-output"` 要求 `resource.read` 与 `resource.output.propose`，向内部 Agent 提供工具时另需 `agent.tools`；文件产物必须独立批准；升级或回滚会清除批准。贡献使用 `output:{mediaTypes,maxBytes}`，mediaTypes为`text/csv`、`application/json`的非空无重复子集，maxBytes为1至1048576；不声明outputSchema/maxResultBytes，不提高旧Tool的任意JSON结果预算。
 
 inputSchema必填原有`resource:{nodeId}`以及`destination:{parentId,fileName}`；目标对象封闭，parentId为正安全整数，fileName为长度1～240的字符串，宿主另验240 UTF-8字节上限。资源ID、目标目录和文件名由宿主冻结并剥除，插件仅收到处理参数；源正文继续通过当前单文件句柄读取。`context()`额外投影贡献的output声明和`resource.output.propose`能力，目标身份不进入沙箱。
 
@@ -109,3 +109,16 @@ inputSchema必填原有`resource:{nodeId}`以及`destination:{parentId,fileName}
 OmniFlow 宿主通过标准 Agent 审批卡展示完整旧名→新名，即使会话完全访问也明确询问。批准前重新准备并校验目标，批准后由宿主调用通用条件批量 API，插件不接触提交凭据或回执查询。旧后端不支持接口时拒绝执行，不降级为无条件改名。取消后已发生的提交不会由 SDK 撤销；不应将工具终止理解为用户文件未改动。
 
 独立样板 `samples/batch-rename` 与开发包示例提供 prefix/suffix 规则。W0～W2 已通过本批限定 macOS 功能验收：真实 Agent、标准审批、Win/local-minio 专用合成文件、条件原子提交、服务端/本机审计和目录/预览同步；故障证据另有真实 Electron＋合成 HTTP/模型与真实 PostgreSQL 临时表。详细范围以宿主 `docs/plugin-system-w0-w2-rename.md` 为准；跨重启自动回执核对与撤销尚未实现。
+
+
+## 手动命令（0.6.0 / Manifest v2）
+
+Manifest v2 可新增 `commands` 数组，每包最多 8 项。每项只含 `id`、`title`、`toolId`、`locations`：ID 必须位于包命名空间，不能与任何已安装贡献 ID 重复；标题 1～80 字符；`toolId` 必须引用同包 `agentTools` 中已有的工具；`locations` 为 `file-menu`、`tool-workspace` 的非空、无重复子集。
+
+命令是已有工具的手动入口，复用其 inputSchema、资源限制和隔离 HTML 入口。不增加 `command:` 激活事件，`activation` 仍精确列出 `viewer:` / `tool:`；不声明执行脚本、任意菜单位置、HTML 或 React 组件。宿主在文件菜单或工具区展示入口，生成参数表单并管理选择的文件、另存目录和目标文件名；插件仍只收到原有去除宿主身份字段的调用输入。
+
+`agentTools` 名称为兼容已有清单保留，但 `agent.tools` 现在只控制内部 Agent 发现与调用。若所有工具均有手动命令，可省略 `agent.tools`，此包不能批准 Agent Tool 或进入模型工具目录。若包同时声明 `agent.tools`，用户也可仅批准读文件 / 改名提案 / 文件产物能力来手动调用，无须先批准 Agent Tool。工具没有命令入口且包也未声明 `agent.tools` 时，安装失败。
+
+手动调用仍要求插件已启用、无恢复/故障阻止、包指纹有效及对应资源能力已批准；撤销这些能力、停用或升级会使旧调用失效。Agent 与手动调用使用分开的注册身份。手动选择与宿主操作上下文只授权本次资源；改名与新文件仍必须展示提案并批准，不能把命令点击当作最终写入批准。
+
+三个现有样板提供双入口：`example.batch-rename.run`、`example.csv-export.run`、`example.json-transform.run`。升级包需更高版本，宿主会按现有安装策略清除旧批准。不含 `commands` 的格式 1/2 包保持原行为；不认识 `commands` 的旧宿主会拒绝新包，不得通过删去能力声明伪装兼容。

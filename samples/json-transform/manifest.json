@@ -1,7 +1,7 @@
 {
   "formatVersion": 2,
   "id": "example.json-transform",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "sdkVersion": 1,
   "minHostVersion": "0.2.2",
   "platforms": [
@@ -21,7 +21,7 @@
       "id": "example.json-transform.export",
       "kind": "file-output",
       "title": "JSON 转换并另存",
-      "description": "读取一个 UTF-8 JSON 文件，可选择顶层字段、筛选数组对象，并将结果完整输出为新的 JSON 文件。",
+      "description": "读取一个 UTF-8 JSON 文件，可选择对象根或数组中对象的顶层字段，并将结果完整输出为新的 JSON 文件。",
       "entry": "tool.html",
       "inputSchema": {
         "type": "object",
@@ -93,6 +93,17 @@
         }
       ],
       "timeoutMs": 30000
+    }
+  ],
+  "commands": [
+    {
+      "id": "example.json-transform.run",
+      "title": "JSON 转换并另存",
+      "toolId": "example.json-transform.export",
+      "locations": [
+        "file-menu",
+        "tool-workspace"
+      ]
     }
   ]
 }

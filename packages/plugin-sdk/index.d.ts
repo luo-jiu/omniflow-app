@@ -57,6 +57,11 @@ export interface PluginFileOutputToolContribution extends PluginToolContribution
   outputSchema?: never; maxResultBytes?: never;
 }
 export type PluginToolContribution = PluginReadToolContribution | PluginRenameProposalToolContribution | PluginFileOutputToolContribution;
+export type PluginCommandLocation = 'file-menu' | 'tool-workspace';
+/** Declarative manual entry for one tool in the same package; it grants no resource access. */
+export interface PluginCommandContribution {
+  id: string; title: string; toolId: string; locations: PluginCommandLocation[];
+}
 export interface PluginMetadataFile { id: string; name: string; }
 export interface PluginRenameProposal { changes: Array<{ id: string; name: string }>; }
 export interface PluginRenameProposalInput { parameters: Record<string, unknown>; files: PluginMetadataFile[]; }

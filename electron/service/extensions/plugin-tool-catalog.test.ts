@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { PluginToolContribution } from '../../../packages/plugin-sdk/index.js';
 import type { ManagedPlugin } from '../../../src/shared/plugin-management';
-import { assertPluginToolNames, createPluginToolSnapshot } from './plugin-tool-catalog';
+import { assertPluginToolNames, createPluginToolSnapshot, isPluginCommandToolAllowed } from './plugin-tool-catalog';
 import renameManifest from '../../../samples/batch-rename/manifest.json';
 import { parsePluginManifest } from './manifest';
 
@@ -29,6 +29,21 @@ describe('frozen plugin tool catalog', () => {
       expect(createPluginToolSnapshot([plugin(change)])).toEqual([]);
     }
     expect(createPluginToolSnapshot([plugin()])).toHaveLength(1);
+  });
+  it('allows only declared manual commands while retaining resource approvals and separate Agent identities', () => {
+    const commands = [{ id: 'test.csv.run', title: '查询 CSV', toolId: tool.id, locations: ['file-menu' as const] }];
+    const manual = plugin({ commands, toolApproved: false, permissions: ['resource.read'] });
+    expect(createPluginToolSnapshot([manual])).toEqual([]);
+    const snapshot = createPluginToolSnapshot([manual], [], 'command');
+    expect(snapshot).toHaveLength(1);
+    expect(snapshot[0].registrationId).not.toBe(createPluginToolSnapshot([plugin({ commands })])[0].registrationId);
+    for (const changes of [{ enabled: false }, { readApproved: false }, { commands: [] }, { blockedReason: 'recovery' }, { permissions: [] }, { commands: [{ ...commands[0], toolId: 'other.tool' }] }, { commands: [{ ...commands[0], id: 'other.run' }] }]) {
+      expect(isPluginCommandToolAllowed({ ...manual, ...changes }, tool)).toBe(false);
+    }
+    const rename = parsePluginManifest(renameManifest, 'darwin');
+    const renamePlugin = plugin({ id: rename.id, agentTools: rename.agentTools, commands: rename.commands, readApproved: false, toolApproved: false, renameApproved: true, permissions: ['resource.rename.propose'] });
+    expect(createPluginToolSnapshot([renamePlugin], [], 'command')).toHaveLength(1);
+    expect(createPluginToolSnapshot([{ ...renamePlugin, renameApproved: false }], [], 'command')).toEqual([]);
   });
   it('freezes copied declarations and binds code fingerprint into registration identity', () => {
     const original = plugin(); const snapshot = createPluginToolSnapshot([original]);

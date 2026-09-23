@@ -71,6 +71,8 @@
 
 目录菜单的基础动作已由 B1 改用稳定命令 ID，返回字段仍为现有 action 字符串；主 renderer 使用原节点上下文执行适配，不新增 IPC channel。旧动态模式/排序动作兼容规则见 [B1 贡献入口](plugin-system-b1-contributions.md)。
 
+M1 的目录菜单 props 增加可选 `pluginCommands: {id,title}[]`，仍只返回 action 字符串。主窗口对照捕获的列表和最新 catalog 检查，再携带原选择进入插件工具页；overlay 不提供资源 ID、写参数或执行能力。切库、账号变化或原目录组件卸载后忽略迟到菜单结果。
+
 `src/service/overlay/overlay.api.ts` 提供类型安全的唯一入口:
 
 ```ts

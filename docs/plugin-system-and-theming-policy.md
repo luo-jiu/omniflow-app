@@ -32,6 +32,8 @@
 
 ## 2. 当前基础与缺口
 
+M1 增量：SDK 0.6.0 增加已安装包的声明式命令，文件右键和工具工作区使用同一宿主表单与独立执行记录。手动入口复用读取/改名/产物能力及批准流程，不依赖模型或 Agent Tool 批准。真实 Win/local-minio 的 JSON 手动拒绝/另存已验证；不开放任意自定义 React 页面或任意宿主命令，范围见 [M1](plugin-system-m1-manual-commands.md)。
+
 W3 增量：SDK 0.5.0 的 `file-output`、独立文件产物权限、main 私有 artifact 与新文件批准/上传已完成本批限定 macOS 验收。真实 gpt-5.5 在 Win/local-minio 将 CSV 完整另存 JSON，字节、摘要、回执及源元数据保持已核对；宿主固定回执查询是显式只读网络动作，其本机终态核对有 CAS 审计。未知查询 UI 仅自动化覆盖，真实故障/重启后点击未手验；不扩大覆盖写入、多产物或自动续作能力，见 [W3](plugin-system-w3-file-output.md)。
 
 W0～W2 增量：SDK 0.4.0 的独立元数据改名提案、标准 Agent 批准、同库条件原子提交与服务端持久回执已完成本批限定 macOS 功能验收。真实 gpt-5.5、Win/local-minio 专用合成文件、范围及提案批准、提交审计和目录/预览同步通过；故障边界另由真实 Electron＋合成服务和 PG 临时影子表验证。该窄范围由插件提供规则、宿主执行写入，不开放正文保存、删除、移动或任意网络。未覆盖范围及恢复限制见 [W0～W2](plugin-system-w0-w2-rename.md)。

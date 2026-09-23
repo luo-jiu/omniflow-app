@@ -7,6 +7,7 @@ import { useDesktopAutoImport } from './hooks/useDesktopAutoImport';
 import { TREE_REFRESH_DIRECTORY_EVENT, type TreeRefreshDirectoryDetail } from './services/tree-locate';
 import type { FileViewerFileType } from '@/shared/file-viewer-types';
 import type { FileViewerOpenOptions } from '@/contexts/file-viewer.context';
+import type { PluginCommandOpenRequest } from '@/features/plugin-commands/command-open-request';
 
 interface Props {
   libraryId: number;
@@ -23,6 +24,7 @@ interface Props {
     nodeId: number;
   }) => void | Promise<void>;
   onOpenMediaTool?: (node: SelectedTreeNode) => void | Promise<void>;
+  onOpenPluginCommand?: (request: PluginCommandOpenRequest) => void;
   onSelectionChange?: (payload: {
     primaryNode: SelectedTreeNode | null;
     rootNodeId: number | null;
@@ -68,6 +70,7 @@ const DirectorySidebar = React.forwardRef<DirectorySidebarHandle, Props>(({
   onFileOpen,
   onOpenFileInBrowser,
   onOpenMediaTool,
+  onOpenPluginCommand,
   onRootNodeIdChange,
   onSelectionChange,
   browserModeOpen = false,
@@ -195,6 +198,7 @@ const DirectorySidebar = React.forwardRef<DirectorySidebarHandle, Props>(({
       <div className="sidebar-container">
         <DirectoryTree
           treeData={currentTreeData}
+          onOpenPluginCommand={onOpenPluginCommand}
           expandedKeys={expandedKeys}
           onExpand={handleExpand}
           onDoubleClick={handleDoubleClick}

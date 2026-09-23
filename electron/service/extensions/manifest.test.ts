@@ -4,6 +4,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { isPackagePath, loadPluginPackage, parsePluginManifest } from './manifest';
 import csvManifest from '../../../samples/csv-viewer/manifest.json';
+import renameManifest from '../../../samples/batch-rename/manifest.json';
+import outputManifest from '../../../samples/csv-export/manifest.json';
+import jsonManifest from '../../../samples/json-transform/manifest.json';
 import { createPluginClient, type PluginToolContribution } from '../../../packages/plugin-sdk/index.js';
 // Keep the original v1 compatibility fixture even as the sample evolves to a mixed package.
 const manifest = { formatVersion: 1, id: csvManifest.id, version: '0.1.0', sdkVersion: 1, minHostVersion: '0.2.2', platforms: ['darwin'], entry: 'index.html', activation: ['viewer:example.csv.table'], permissions: ['resource.read'], viewers: [{ id: 'example.csv.table', title: 'CSV 开发样板', extensions: ['csv'] }] };
@@ -35,6 +38,29 @@ describe('plugin manifest and package', () => {
   it('rejects unsafe, incomplete or falsely activated Tool contributions', () => {
     for (const patch of [{ permissions: ['resource.read'] }, { permissions: ['agent.tools'] }, { permissions: ['resource.read', 'directory.read', 'agent.tools'] }, { activation: ['viewer:example.csv.query'] }, { activation: ['tool:example.csv.query', 'tool:missing'] }, { agentTools: [] }, { agentTools: [tool, tool] }]) expect(() => parsePluginManifest({ ...toolManifest, ...patch }, 'darwin')).toThrow();
     for (const patch of [{ id: 'other.query' }, { entry: '../query.html' }, { entry: 'query.js' }, { timeoutMs: 30001 }, { maxResultBytes: 32769 }, { resourceAccess: [{ parameter: 'resource', mode: 'write', kind: 'file' }] }, { inputSchema: { ...tool.inputSchema, $ref: 'https://invalid.test/schema' } }]) expect(() => parsePluginManifest({ ...toolManifest, agentTools: [{ ...tool, ...patch }] }, 'darwin')).toThrow();
+  });
+  it('accepts bounded manual aliases without granting Agent access or another activation entry', () => {
+    const command = { id: 'example.csv.run', title: '查询 CSV', toolId: tool.id, locations: ['file-menu', 'tool-workspace'] };
+    const manual = { ...toolManifest, permissions: ['resource.read'], commands: [command] };
+    expect(parsePluginManifest(manual, 'darwin')).toMatchObject({ commands: [command], permissions: ['resource.read'] });
+    expect(() => parsePluginManifest({ ...manual, activation: [...manual.activation, `command:${command.id}`] }, 'darwin')).toThrow();
+    expect(() => parsePluginManifest({ ...manifest, commands: [command] }, 'darwin')).toThrow();
+    const second = { ...tool, id: 'example.csv.other' };
+    expect(() => parsePluginManifest({ ...manual, agentTools: [tool, second], activation: [...manual.activation, `tool:${second.id}`] }, 'darwin')).toThrow();
+    expect(parsePluginManifest({ ...manual, permissions: ['resource.read', 'agent.tools'], agentTools: [tool, second], activation: [...manual.activation, `tool:${second.id}`] }, 'darwin').agentTools).toHaveLength(2);
+    for (const sample of [renameManifest, outputManifest, jsonManifest]) {
+      const parsed = parsePluginManifest({ ...sample, permissions: sample.permissions.filter(permission => permission !== 'agent.tools') }, 'darwin');
+      expect(parsed.commands?.[0].toolId).toBe(parsed.agentTools?.[0].id);
+    }
+  });
+  it('rejects foreign targets, duplicate names and arbitrary command locations', () => {
+    const command = { id: 'example.csv.run', title: '查询 CSV', toolId: tool.id, locations: ['file-menu'] };
+    for (const patch of [{ id: tool.id }, { id: 'other.run' }, { toolId: 'other.plugin.read' }, { locations: [] }, { locations: ['file-menu', 'file-menu'] }, { locations: ['arbitrary-menu'] }, { locations: ['tool-workspace'], execute: 'code' }]) {
+      expect(() => parsePluginManifest({ ...toolManifest, commands: [{ ...command, ...patch }] }, 'darwin')).toThrow();
+    }
+    expect(() => parsePluginManifest({ ...toolManifest, commands: [command, command] }, 'darwin')).toThrow();
+    const commands = Array.from({ length: 9 }, (_, index) => ({ ...command, id: `example.csv.run${index}` }));
+    expect(() => parsePluginManifest({ ...toolManifest, commands }, 'darwin')).toThrow();
   });
   it('loads and fingerprints the real Tool entry, rejecting a missing Tool asset', async () => {
     const root = await fixture(); await writeFile(path.join(root, 'manifest.json'), JSON.stringify(toolManifest));

@@ -1,5 +1,5 @@
 import type { WebContents } from 'electron';
-import type { AgentPluginOperationReconcileRequest, AgentToolActivitySnapshot, AgentToolResult } from '../../../src/shared/agent/agent.types';
+import type { AgentPluginOperationReconcileRequest, AgentToolActivitySnapshot, AgentToolResult, AgentPreparedActionPublic } from '../../../src/shared/agent/agent.types';
 import { normalizeAgentPreparedActionPublic } from '../../../src/shared/agent/agent-prepared-action';
 import { normalizeAgentOwnerScope } from '../../../src/shared/agent/agent-owner-scope';
 import type { AgentSessionStore } from './agent-session-store';
@@ -55,34 +55,7 @@ export function createAgentPluginReceiptService(options: {
       else await upload.verifyAccount(authentication, Number(owner.accountScope.slice(5)), signal);
       if (previousState === 'committed' && activity.result?.ok === true) return activity;
       if (previousState === 'uncommitted') throw new Error('该操作已有明确未提交回执');
-      let result: AgentToolResult;
-      if (action.kind === 'plugin.rename') {
-        const receipt = await rename.statusForAction(action, authentication, signal);
-        result = receipt ? { ok: true, message: `已查询回执：原子改名 ${receipt.items.length} 个文件已提交`, data: {
-          mutationCommitState: 'committed', operationId: action.operationId, libraryId: action.libraryId, atomic: true,
-          affectedParentIds: receipt.affectedParentIds, items: receipt.items.map(item => ({ nodeId: item.nodeId, parentId: item.parentId,
-            name: item.current.name, ext: item.current.ext, updatedAt: item.current.updatedAt, status: 'committed' })),
-        } } : { ok: false, message: '尚未查到改名回执，提交结果仍未知；请勿重复提交新操作', data: {
-          mutationCommitState: 'commit_unknown', operationId: action.operationId, libraryId: action.libraryId, atomic: true,
-        } };
-      } else {
-        const receipt = await upload.reconcile(authentication, action.operationId, signal);
-        // Older servers called an in-flight pending upload "uncommitted"; absence is never proof of rejection.
-        const state = receipt.state === 'committed' ? 'committed' : 'commit_unknown';
-        const data = { mutationCommitState: state, uploadCommitState: state, operationId: action.operationId, libraryId: action.libraryId };
-        if (state === 'committed') {
-          const node = record(receipt.node);
-          const extension = action.mediaType === 'text/csv' ? 'csv' : 'json';
-          if (!positive(node.id) || node.id === action.sourceNodeId || node.libraryId !== action.libraryId || node.parentId !== action.parentId || node.type !== 'file'
-            || node.ext !== extension || typeof node.name !== 'string' || `${node.name}.${node.ext}` !== action.fileName
-            || node.storageProvider !== action.providerId || node.fileSize !== action.sizeBytes
-            || typeof node.mimeType !== 'string' || node.mimeType.split(';')[0].trim().toLowerCase() !== action.mediaType) throw new Error('上传回执文件与已批准目标不匹配，未改变结算状态');
-          result = { ok: true, message: `已查询回执：${action.fileName} 已保存`, data: { ...data,
-            destination: { kind: 'library', nodeId: node.id, parentId: action.parentId }, createdNodeId: node.id,
-            fileName: action.fileName, name: action.fileName, mediaType: action.mediaType, sizeBytes: action.sizeBytes,
-            sha256: action.sha256, affectedParentIds: [action.parentId] } };
-        } else result = { ok: false, message: '上传回执仍未知或已过期，请勿重复提交新操作', data };
-      }
+      const result = await queryApprovedPluginOperationReceipt(action, authentication, signal, { rename, upload });
       signal.throwIfAborted();
       if (sender.isDestroyed()) throw new Error('回执查询窗口已关闭');
       return store.reconcilePluginToolRun({ ...request, operationId: action.operationId, result, checkedAt: options.now?.() ?? new Date().toISOString() });
@@ -92,4 +65,45 @@ export function createAgentPluginReceiptService(options: {
 
 export async function reconcileAgentPluginOperation(store: AgentSessionStore, sender: WebContents, input: AgentPluginOperationReconcileRequest): Promise<AgentToolActivitySnapshot> {
   return createAgentPluginReceiptService({ apiBaseUrl: API_BASE })(store, sender, input);
+}
+
+/** Shared receipt validation for approved model-driven and manual plugin operations. */
+export async function queryApprovedPluginOperationReceipt(
+  action: Extract<AgentPreparedActionPublic, { kind: 'plugin.rename' | 'plugin.file-output' }>,
+  authentication: { token: string; username: string }, signal: AbortSignal,
+  services: {
+    rename: Pick<ReturnType<typeof createPluginRenameTransport>, 'statusForAction'>;
+    upload: Pick<ReturnType<typeof createAgentMediaUploadControlPlane>, 'reconcile'>;
+  },
+): Promise<AgentToolResult> {
+  const { rename, upload } = services;
+  let result: AgentToolResult;
+  if (action.kind === 'plugin.rename') {
+    const receipt = await rename.statusForAction(action, authentication, signal);
+    result = receipt ? { ok: true, message: `已查询回执：原子改名 ${receipt.items.length} 个文件已提交`, data: {
+      mutationCommitState: 'committed', operationId: action.operationId, libraryId: action.libraryId, atomic: true,
+      affectedParentIds: receipt.affectedParentIds, items: receipt.items.map(item => ({ nodeId: item.nodeId, parentId: item.parentId,
+        name: item.current.name, ext: item.current.ext, updatedAt: item.current.updatedAt, status: 'committed' })),
+    } } : { ok: false, message: '尚未查到改名回执，提交结果仍未知；请勿重复提交新操作', data: {
+      mutationCommitState: 'commit_unknown', operationId: action.operationId, libraryId: action.libraryId, atomic: true,
+    } };
+  } else {
+    const receipt = await upload.reconcile(authentication, action.operationId, signal);
+    // Older servers called an in-flight pending upload "uncommitted"; absence is never proof of rejection.
+    const state = receipt.state === 'committed' ? 'committed' : 'commit_unknown';
+    const data = { mutationCommitState: state, uploadCommitState: state, operationId: action.operationId, libraryId: action.libraryId };
+    if (state === 'committed') {
+      const node = record(receipt.node);
+      const extension = action.mediaType === 'text/csv' ? 'csv' : 'json';
+      if (!positive(node.id) || node.id === action.sourceNodeId || node.libraryId !== action.libraryId || node.parentId !== action.parentId || node.type !== 'file'
+        || node.ext !== extension || typeof node.name !== 'string' || `${node.name}.${node.ext}` !== action.fileName
+        || node.storageProvider !== action.providerId || node.fileSize !== action.sizeBytes
+        || typeof node.mimeType !== 'string' || node.mimeType.split(';')[0].trim().toLowerCase() !== action.mediaType) throw new Error('上传回执文件与已批准目标不匹配，未改变结算状态');
+      result = { ok: true, message: `已查询回执：${action.fileName} 已保存`, data: { ...data,
+        destination: { kind: 'library', nodeId: node.id, parentId: action.parentId }, createdNodeId: node.id,
+        fileName: action.fileName, name: action.fileName, mediaType: action.mediaType, sizeBytes: action.sizeBytes,
+        sha256: action.sha256, affectedParentIds: [action.parentId] } };
+    } else result = { ok: false, message: '上传回执仍未知或已过期，请勿重复提交新操作', data };
+  }
+  return result;
 }

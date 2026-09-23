@@ -1,3 +1,4 @@
+import { registerPluginCommandIpc, disposePluginCommandService } from './service/extensions/plugin-command-ipc'
 import { configureAgentPluginService, disposeAgentPluginService } from './service/agent/agent-plugin-service'
 import { PluginManager } from './service/extensions/plugin-manager'
 import { registerPluginManagementIpc } from './service/extensions/plugin-management-ipc'
@@ -419,6 +420,7 @@ const appGracefulShutdown = createAppGracefulShutdown({
     overlayWindowController.destroy()
     systemVideoWindowController.destroy()
     let agentSettled = await agentOrchestrator.shutdown()
+    disposePluginCommandService()
     disposeAgentPluginService()
     await clearFileTransferRuntime()
     await disposeAgentShellServiceRuntime()
@@ -498,6 +500,7 @@ app.whenReady().then(async () => {
     registerPluginManagementIpc(manager, () => mainWindow)
     registerFirstPartyViewer(() => mainWindow, { manager })
     configureAgentPluginService({ manager, getMainWindow: () => mainWindow })
+    registerPluginCommandIpc(manager, () => mainWindow, path.join(app.getPath('userData'), 'plugin-command-history-v1.json'))
   }
   registerWindowControlIpcHandlers({
     getMainWindow: () => mainWindow,

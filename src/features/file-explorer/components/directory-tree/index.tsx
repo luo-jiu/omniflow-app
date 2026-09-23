@@ -1,5 +1,8 @@
 import { directoryCommands, isDirectoryMediaFile } from '@/features/file-explorer/directory-commands';
 import { isNamespacedContributionId } from '@/features/extensions/contribution-registry';
+import { pluginManagementApi } from '@/service/plugins/plugin-management.api';
+import { getPluginCommandMenuItems, resolvePluginCommandMenuAction } from '@/features/plugin-commands/command-menu';
+import type { PluginCommandOpenRequest } from '@/features/plugin-commands/command-open-request';
 import React, { ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { Tree, Toast, Input } from '@douyinfe/semi-ui';
 import { IconChevronRightStroked } from '@douyinfe/semi-icons';
@@ -112,6 +115,7 @@ interface DirectoryTreeProps {
     nodeId: number;
   }) => void | Promise<void>;
   onOpenMediaTool?: (node: any) => void | Promise<void>;
+  onOpenPluginCommand?: (request: PluginCommandOpenRequest) => void;
   onSelectionChange?: (payload: {
     primaryNode: any | null;
     selectedNodeIds: number[];
@@ -192,6 +196,7 @@ export default function DirectoryTree({
   isAudioArchiveSubtitlesVisible,
   onOpenFileInBrowser,
   onOpenMediaTool,
+  onOpenPluginCommand,
   onSelectionChange,
   loadData,
   libraryId,
@@ -200,6 +205,12 @@ export default function DirectoryTree({
 }: DirectoryTreeProps) {
   const { closeTabByNodeId, tabs } = useFileViewer();
   const viewerAccountScope = useViewerAccountScope();
+  const menuScopeRef = useRef(0);
+  useEffect(() => {
+    pluginManagementApi.start();
+    menuScopeRef.current += 1;
+    return () => { menuScopeRef.current += 1; };
+  }, [libraryId, viewerAccountScope]);
 
   // 外部文件拖拽：悬停高亮 & 延迟展开
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
@@ -2229,6 +2240,14 @@ export default function DirectoryTree({
     const boundaryRect = resolveTreeBoundaryRect();
     const position = resolveMenuPosition(x, y, boundaryRect);
     const deleteCount = Math.max(1, resolveDeleteSelection(node).length);
+    const menuScope = menuScopeRef.current;
+    const commandNodeIds = node && !isFolder
+      ? [...new Set(selectedNodeIds.includes(Number(node.id)) ? selectedNodeIds : [Number(node.id)])]
+      : [];
+    const fileCount = commandNodeIds.every(id => resolveNodeType(findNodeById(treeDataRef.current || [], id)) === 'file')
+      ? commandNodeIds.length : 0;
+    const pluginCommands = onOpenPluginCommand
+      ? getPluginCommandMenuItems(pluginManagementApi.getSnapshot(), fileCount) : [];
 
     void (async () => {
       let result: DirectoryContextMenuResult;
@@ -2237,6 +2256,7 @@ export default function DirectoryTree({
         result = await openOverlay('directory-context-menu', {
           boundaryRect,
           deleteCount,
+          pluginCommands,
           isFolder,
           node: createContextMenuNodeSnapshot(node),
           position: position as OverlayContextMenuPosition,
@@ -2250,12 +2270,16 @@ export default function DirectoryTree({
         return;
       }
 
-      if (result.type !== 'action') {
+      if (result.type !== 'action' || menuScopeRef.current !== menuScope) {
         return;
       }
 
       try {
-        if (directoryCommands.get(result.action)) {
+        const pluginCommandId = resolvePluginCommandMenuAction(result.action, pluginCommands,
+          getPluginCommandMenuItems(pluginManagementApi.getSnapshot(), fileCount));
+        if (pluginCommandId) {
+          onOpenPluginCommand?.({ id: crypto.randomUUID(), commandId: pluginCommandId, nodeIds: commandNodeIds });
+        } else if (directoryCommands.get(result.action)) {
           await directoryCommands.executeHost(result.action, undefined, {
             location: node === null ? 'root' : isFolder ? 'folder' : 'file',
             isMediaFile: isDirectoryMediaFile(node),

@@ -64,7 +64,7 @@ Markdown 默认进入渲染模式；底部使用单个图标按钮在渲染与 C
 
 ### 3.1 加载
 
-`text-viewer` 收到 `url + reloadToken` 后直接 `fetch(url)` 读取文本。签名 URL 不作为 session 或 draft identity；稳定身份来自账号 scope、`libraryId` 和 `nodeId`。
+`text-viewer` 收到 `url + reloadToken` 后通过 `readTextResource` 复用宿主 `fetchBinary` 读取原始字节，再一次性按 UTF-8 解码；保存前的 revision 核对使用同一路径。普通 `http:fetch` 会自动解析 JSON，不能用于文件正文，否则对象会变成 `[object Object]`、数组和大整数会失真，原有缩进与换行也会丢失。文本读取保留 BOM，遇到截断或无效 UTF-8 则失败，不把残缺内容当作可保存基线。签名 URL 不作为 session 或 draft identity；稳定身份来自账号 scope、`libraryId` 和 `nodeId`。
 
 外部写入通过 FileViewerProvider 更新现存 tab 的链接及 reloadToken，不创建或切换 tab。刷新前必须先 flush 当前内存草稿；失败则保留缓冲区并停止刷新。成功后按新正文 revision 与已保存草稿比较，复用“恢复草稿 / 使用最新文件”的冲突交互，不静默覆盖草稿。
 

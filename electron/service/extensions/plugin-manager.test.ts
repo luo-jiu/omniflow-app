@@ -35,6 +35,35 @@ describe('plugin admission and recovery',()=>{
 });
 
 describe('plugin tool admission and runtime broadcasts',()=>{
+ it('projects manual commands and checks their own capability grants without authorizing the Agent',async()=>{
+  const f=await fixture();const manager=new PluginManager(path.join(f.root,'store'),f.bundled);await manager.initialize();
+  const archive=new JSZip();archive.file('manifest.json',JSON.stringify({...outputManifest,permissions:['resource.read','resource.output.propose']}));archive.file('tool.html','<p>manual export</p>');
+  const source=path.join(f.root,'manual-export.zip');await writeFile(source,await archive.generateAsync({type:'nodebuffer'}));
+  const review=await manager.prepare(source);await manager.commit(review.ticket);
+  for(const action of ['enable','approve-read'] as const)await manager.action(outputManifest.id,action);
+  const toolId=outputManifest.agentTools[0].id;
+  expect(()=>manager.resolveTool(toolId,undefined,'command')).toThrow('PLUGIN_BLOCKED');
+  await manager.action(outputManifest.id,'approve-output');
+  const current=manager.resolveTool(toolId,undefined,'command');
+  expect(current.plugin).toMatchObject({commands:outputManifest.commands,toolApproved:false});
+  expect(manager.stillToolAllowed(toolId,current.plugin.fingerprint,'command')).toBe(true);
+  expect(manager.stillToolAllowed(toolId,current.plugin.fingerprint)).toBe(false);
+  expect(()=>manager.resolveTool(toolId)).toThrow('PLUGIN_BLOCKED');
+  await expect(manager.action(outputManifest.id,'approve-tools')).rejects.toThrow('CAPABILITY_NOT_DECLARED');
+  expect(()=>manager.resolveTool(toolId,'0'.repeat(64),'command')).toThrow('PLUGIN_VERSION_CHANGED');
+  await manager.safeMode(true);expect(manager.stillToolAllowed(toolId,current.plugin.fingerprint,'command')).toBe(false);
+  await manager.safeMode(false);expect(manager.stillToolAllowed(toolId,current.plugin.fingerprint,'command')).toBe(true);
+  await manager.action(outputManifest.id,'revoke-output');expect(manager.stillToolAllowed(toolId,current.plugin.fingerprint,'command')).toBe(false);
+ });
+ it('rejects a command that collides with another installed contribution in a nested namespace',async()=>{
+  const f=await fixture();const manager=new PluginManager(path.join(f.root,'store'),f.bundled);await manager.initialize();
+  const existing=await manager.prepare(await zip(f.root,'test.tools.child'));await manager.commit(existing.ticket);
+  const archive=await JSZip.loadAsync(await readFile(await toolZip(f.root)));
+  const manifest=JSON.parse(await archive.file('manifest.json')!.async('string'));
+  manifest.commands=[{id:'test.tools.child.table',title:'冲突入口',toolId:'test.tools.read',locations:['file-menu']}];
+  archive.file('manifest.json',JSON.stringify(manifest));const source=path.join(f.root,'conflicting-command.zip');await writeFile(source,await archive.generateAsync({type:'nodebuffer'}));
+  await expect(manager.prepare(source)).rejects.toThrow('DUPLICATE_COMMAND_ID');
+ });
  it('requires independent file output approval in addition to read and Agent Tool grants',async()=>{
   const f=await fixture();const manager=new PluginManager(path.join(f.root,'store'),f.bundled);await manager.initialize();
   const archive=new JSZip();archive.file('manifest.json',JSON.stringify(outputManifest));archive.file('tool.html','<p>export</p>');

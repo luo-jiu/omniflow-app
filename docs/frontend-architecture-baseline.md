@@ -331,6 +331,8 @@ QQ 音乐歌词使用独立的 `window.electronQQMusicLyrics` bridge，提供 `s
 
 插件安装事实由 `PluginManager/PluginInstallStore` 持有；renderer 通过 catalog 派生可用贡献与版本组件类型。D1 管理及恢复见 [本地插件管理](plugin-system-d1-management.md)，设置按包指纹/账号/库持久化，阅读快照继续由 B2 管理。
 
+M1 手动插件命令使用独立 `electronPluginCommands` bridge，经 `plugin-command.api.ts` 消费。main 的 `PluginCommandService/PluginCommandStore` 拥有执行、审批和提交记录；renderer 只负责表单与结果投影。它复用插件 Tool 隔离和受控资源/写入服务，不创建模型 Session/Run，也不经过模型请求；契约及恢复限制见 [M1](plugin-system-m1-manual-commands.md)。
+
 ### 6.3 Electron Main
 
 主进程里的目录语义应保持：
