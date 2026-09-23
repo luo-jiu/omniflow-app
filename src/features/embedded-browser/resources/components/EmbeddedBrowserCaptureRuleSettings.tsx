@@ -2,6 +2,7 @@ import React from 'react'
 import { Button, Input, Modal, Spin, Switch, TextArea, Toast } from '@douyinfe/semi-ui'
 import { IconArrowLeft, IconDelete, IconPlus } from '@douyinfe/semi-icons'
 import styled from 'styled-components'
+import { workspaceScrollbarStyles } from '@/components/ui/workspace-scrollbar'
 
 import type {
   EmbeddedBrowserCaptureRegexRule,
@@ -501,6 +502,7 @@ function CaptureRuleEditor({ onChange, onDelete, rule }: CaptureRuleEditorProps)
 }
 
 const CaptureRuleSettingsContainer = styled.div`
+  ${workspaceScrollbarStyles}
   display: flex;
   flex-direction: column;
   gap: 22px;
@@ -510,6 +512,10 @@ const CaptureRuleSettingsContainer = styled.div`
   padding: 30px 32px 40px;
   overflow: auto;
   background: var(--app-bg);
+
+  textarea {
+    ${workspaceScrollbarStyles}
+  }
 
   .capture-header {
     display: flex;

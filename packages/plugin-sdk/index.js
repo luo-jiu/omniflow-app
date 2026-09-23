@@ -64,6 +64,12 @@ export function createPluginClient(transport = globalThis.omniflowTransport) {
   return Object.freeze({
     context: () => request('context.get'),
     ready: () => request('lifecycle.ready'),
+    prepareWorkspaceCommand: async parameters => {
+      const result = await request('workspace.prepare', { parameters });
+      if (!result || typeof result !== 'object' || Array.isArray(result) || Object.keys(result).length !== 1
+        || typeof result.requestId !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(result.requestId)) throw new PluginError('BAD_RESPONSE', 'Invalid workspace preparation response');
+      return { requestId: result.requestId };
+    },
     toolInvocation: () => request('tool.invocation'),
     completeTool: (invocationId, output) => request('tool.complete', { invocationId, output }),
     completeFileOutput: async (invocationId, output) => {

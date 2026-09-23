@@ -1,6 +1,6 @@
 # OmniFlow App 前端交接索引
 
-更新时间：2026-09-13
+更新时间：2026-09-23
 
 适用对象：继续维护 `omniflow-app` 前端、Electron 主进程、IPC、桌面交互和前端文档的开发者或 Coding Agent。
 
@@ -85,6 +85,10 @@
   - [W3 文件产物](../docs/plugin-system-w3-file-output.md)（SDK 0.5.0，独立 output 批准、封存私有正文、标准产物卡及复用上传事务；真实 gpt-5.5 的 205 行 CSV→JSON 另存/打开及摘要/回执通过。固定查询动作有终态 CAS/原结果保留，未知查询 UI 仅自动化，真机故障与重启后点击未手验）
 - 插件手动命令、文件菜单与宿主表单：
   - [M1 手动执行](../docs/plugin-system-m1-manual-commands.md)（独立 main 执行记录、能力批准与 Agent 授权分离；最新验证状态见专题）
+- 插件独立工具页面、资源选择和宿主审批接线：
+  - [M2 工具工作区](../docs/plugin-system-m2-tool-workspaces.md)（动态贡献、共享隔离宿主及 JSON 交互样板；最新验证状态见专题）
+- 下一轮主题优化：
+  - [外观系统](../docs/appearance-system.md)、[颜色契约](../docs/plugin-system-a1-color-contract.md)及[显示基线](../docs/ui-display-readability-baseline.md)（当前强调色只覆盖主色、链接和焦点边框；宿主滚动条除左侧目录树外按溢出常驻。后续继续复用唯一主题 owner 与跨窗口快照，内部图标库重绘由用户另行安排）
 - 当前云端、Tailscale、多 MinIO 和发布方式：
   - `docs/current-deployment-topology.md`
 - macOS / Windows 窗口策略、平台 bridge 和构建验证：

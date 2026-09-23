@@ -45,3 +45,5 @@ export function registerPluginCommandIpc(manager: PluginManager, getMainWindow: 
   bind('reconcile', 'reconcile'); bind('release', 'release'); bind('completeFileAuthority', 'file-authority:complete');
 }
 export function disposePluginCommandService() { service?.dispose(); service = undefined; }
+/** Main-only access: workspaces reuse the same manual execution owner and audit store. */
+export function getPluginCommandService() { return service; }

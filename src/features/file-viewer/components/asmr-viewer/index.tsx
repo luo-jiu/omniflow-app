@@ -19,7 +19,7 @@ import {
 import { fetchTags, type TagItem } from '@/features/tag-management/services/tag.api';
 import { getFileNodeIcon, isImageExtension } from '@/features/file-explorer/utils/file-node-icon';
 import { resolveNodeFileIdentity } from '@/features/file-identity';
-import { AsmrViewerWrapper } from './style';
+import { AsmrCoverPickerList, AsmrViewerWrapper } from './style';
 import { useFileViewer } from '@/hooks/useFileViewer';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 import { parseAsmrRouteInfo, resolveAsmrOwnerKey } from '@/features/file-viewer/utils/asmr-owner-key';
@@ -1427,7 +1427,7 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
                 })}
               </div>
 
-              <div style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: 6 }}>
+              <AsmrCoverPickerList>
                 {coverPickerLoading ? (
                   <div style={{ height: 190, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                     <Spin size="middle" />
@@ -1495,7 +1495,7 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
                     })}
                   </div>
                 )}
-              </div>
+              </AsmrCoverPickerList>
             </div>
           </div>
         )}

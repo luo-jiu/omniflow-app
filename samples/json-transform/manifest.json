@@ -1,14 +1,15 @@
 {
   "formatVersion": 2,
   "id": "example.json-transform",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "sdkVersion": 1,
   "minHostVersion": "0.2.2",
   "platforms": [
     "darwin"
   ],
   "activation": [
-    "tool:example.json-transform.export"
+    "tool:example.json-transform.export",
+    "workspace:example.json-transform.workspace"
   ],
   "permissions": [
     "resource.read",
@@ -93,6 +94,14 @@
         }
       ],
       "timeoutMs": 30000
+    }
+  ],
+  "workspaces": [
+    {
+      "id": "example.json-transform.workspace",
+      "title": "JSON 转换",
+      "entry": "workspace.html",
+      "commandId": "example.json-transform.run"
     }
   ],
   "commands": [

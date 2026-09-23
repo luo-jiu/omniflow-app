@@ -73,6 +73,8 @@
 
 M1 的目录菜单 props 增加可选 `pluginCommands: {id,title}[]`，仍只返回 action 字符串。主窗口对照捕获的列表和最新 catalog 检查，再携带原选择进入插件工具页；overlay 不提供资源 ID、写参数或执行能力。切库、账号变化或原目录组件卸载后忽略迟到菜单结果。
 
+M2 独立插件工具页沿用原生隔离视图；宿主文件/目录选择器打开及准备、审批期间先隐藏该 view，关闭选择器或终态返回编辑时恢复布局。最终确认卡位于宿主内容区，插件没有批准 API，不得让第三方页面遮挡或替代它。其他原生浮层仍沿用既有 overlay 通路，范围见 [M2](plugin-system-m2-tool-workspaces.md)。
+
 `src/service/overlay/overlay.api.ts` 提供类型安全的唯一入口:
 
 ```ts

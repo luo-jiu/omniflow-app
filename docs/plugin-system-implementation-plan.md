@@ -2,7 +2,7 @@
 
 更新时间：2026-09-23
 
-适用范围：`omniflow-app` 的外观协议、贡献入口、桌面插件宿主、查看器 SDK、内部 Agent Tool 和受控改名提案。
+适用范围：`omniflow-app` 的外观协议、贡献入口、桌面插件宿主、查看器 SDK、内部 Agent Tool、受控改名/文件产物、手动命令和独立工具工作区。
 
 状态：**A0 macOS 基础基线、A1 内置外观、B1 内置贡献入口及 B2 查看器状态兼容已完成，C1 最小 SDK 与隔离实验、C2 第一方 CSV 完整链路已通过 macOS 验收；D1 本地安装、管理与恢复已完成 macOS 验证；D2 第二样板与独立开发交付已完成，本轮 macOS 只读插件工程收口。** 当前事实见 [外观系统](appearance-system.md)，已验证与剩余项见 [A1 验收记录](plugin-system-a1-acceptance.md)。本地受限只读包的安装/执行已在 macOS 验证，发行包及其他平台未验收。C1 当前契约与证据见 [SDK 与隔离实验](plugin-system-c1-sdk-isolation.md)。
 
@@ -13,6 +13,10 @@
 后续 **E1 普通漫画目录查看器**已完成核心交互验收（长漫画性能待验收）：新增受控目录枚举与直属图片读取，复用打开方式和 Session；范围与验收见 [E1 目录查看器](plugin-system-e1-directory-viewer.md)。A0～D2 的既有验收结论保持，E1 不自动扩展其平台声明。
 
 **W3 已完成本批限定 macOS 功能验收。** SDK 0.5.0、单源 CSV→CSV/JSON 样板、main 私有产物/批准/新文件上传及宿主查询回执已接入；真实 gpt-5.5 在 Win/local-minio 另存 JSON，205 行完整性、批准 SHA、服务端/SQLite 回执和源元数据保持通过。显式未知回执查询 UI 仅有自动化，真实故障/重启后点击未手验。W0～W2 既有验收不变，完整范围见 [W3 文件产物](plugin-system-w3-file-output.md)。
+
+**当前阶段收口至 M2（2026-09-23）。** [W4](plugin-system-w4-json-transform.md)、[M1](plugin-system-m1-manual-commands.md)及 [M2](plugin-system-m2-tool-workspaces.md)均已完成各自限定的 macOS 验收；SDK 当前为 0.7.0，JSON 转换样板为 0.1.3。设置共享标签栏、外观字段说明和宿主常驻滚动条已同步收尾，左侧目录树保留原显隐规则。最终 `lint`、421 文件/3282 项测试及 `build` 通过（3 文件/7 项跳过），代表界面与未手验组合见[验证矩阵](frontend-validation-matrix.md#32-library-detail-工作区)。
+
+下一轮按用户安排推进主题优化：先从[外观系统](appearance-system.md)、[颜色契约](plugin-system-a1-color-contract.md)及[显示基线](ui-display-readability-baseline.md)核对当前控制范围，再按实际设计调整。继续使用唯一主题 owner、预览/保存/取消和跨窗口快照；内部图标库重绘由用户另行安排。开发者文档整合、真实业务迁移及更多插件能力后续单独确定范围；发行包、Windows/Linux 和小时级性能继续暂缓，不扩大已有验收声明。
 
 ## 1. 目标、范围与完成定义
 
@@ -118,7 +122,7 @@ A0～D2 的初始范围不开放文件写入、批量改名执行、任意网络
 - 预览不写持久偏好；取消恢复已提交选择；账号切换终止旧预览与迟到保存；主题缺失/非法回退内置，保留可诊断原因。旧 `app-theme` 和历史用户模式继续有兼容读写语义。
 - 主窗口解析，main 仅缓存/转发最新快照并应用必要的原生颜色投影；overlay 首次握手、重建和切换均收到完整快照，拒绝旧 revision。不得在各窗口重新解析同一主题；首帧默认主题作为加载兜底，不作为第二 owner。
 - 图标解析产出语义键与状态，再选择资产，最后叠加宿主必要提示。颜色选择与图标选择互不修改；目录开合取现有 expanded 投影，不写回节点事实。
-- 首批使用内置声明式主题与图标包验证；外部包安装在 D1 开放。资产和颜色校验与后续包加载复用，拒绝脚本、远程引用、越界路径和危险 SVG。
+- 首批使用内置声明式主题与图标包验证；D1 已开放功能插件安装，第三方主题/图标包尚未开放，后续单独推进。资产和颜色校验供后续外观包加载复用，拒绝脚本、远程引用、越界路径和危险 SVG。
 - 暂不公开单节点外观持久化和复杂用户关联编辑器，但解析接口保留方针规定的优先级；未提供的层级直接跳过，不伪造可用功能。
 
 退出：两种颜色方案 × 两套图标组合、明/暗/系统、缺 token/缺图标、预览取消、缺失回退、主窗口/overlay/编辑器都通过；目录类型、双击、展开和现有标题栏透明策略不变。
@@ -277,6 +281,7 @@ Agent Tool 插件作为独立后续能力推进，AT0 契约与隔离底座已�
 | W2 宿主受控提交与 Agent 接入 | 已验证完成 | 本批限定 macOS 范围：真实 gpt-5.5、Win/local-minio 专用文件、范围及提案批准、原子改名、PG/SQLite 审计与目录/预览同步；复杂故障另由 Electron/PG 隔离证据覆盖 |
 | W4 第二处理插件复用 | 已验证完成 | `example.json-transform@0.1.1` 已完成独立样板、离线构建及真实 Win/local-minio 新文件保存；范围见 [W4](plugin-system-w4-json-transform.md) |
 | M1 手动插件命令 | 已验证完成 | SDK0.6、文件菜单/工具页、独立执行记录及既有写入链复用；真实 Win/local-minio JSON 手动拒绝/另存通过，范围见 [M1](plugin-system-m1-manual-commands.md) |
+| M2 插件独立工具工作区 | 已验证完成 | SDK0.7、隔离工具页面及 M1 准备/批准复用；macOS Win/local-minio JSON 字段预览、拒绝、批准另存和打开结果通过，范围见 [M2](plugin-system-m2-tool-workspaces.md) |
 
 W0 已确认旧 `file.rename`/`library.batch` 无法提供本批需要的条件原子提交与回执，因而补充通用后端 API，未将旧无条件链路公开给插件。只保存成功回执，不把网络超时、取消或 not_found 当作未提交；本轮没有跨重启自动核对、自动续作或撤销。完整契约和验收边界以 [W0～W2](plugin-system-w0-w2-rename.md) 为准。
 

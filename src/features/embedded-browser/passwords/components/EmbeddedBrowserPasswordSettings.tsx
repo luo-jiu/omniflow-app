@@ -2,6 +2,7 @@ import React from 'react'
 import { Input, Modal, Spin, Toast } from '@douyinfe/semi-ui'
 import { IconArrowLeft, IconChevronDown, IconChevronRight, IconDelete, IconSearch } from '@douyinfe/semi-icons'
 import styled from 'styled-components'
+import { workspaceScrollbarStyles } from '@/components/ui/workspace-scrollbar'
 import {
   deleteAllSavedPasswords,
   deleteSavedPassword,
@@ -438,6 +439,7 @@ const PasswordSettingsContainer = styled.div`
   }
 
   .pwd-list {
+    ${workspaceScrollbarStyles}
     flex: 1;
     min-height: 0;
     overflow-y: auto;

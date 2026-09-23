@@ -125,6 +125,7 @@ const ConfirmationCard = styled.article`
   }
 
   .agent-confirmation-shell-command {
+    ${workspaceScrollbarStyles}
     max-height: 240px;
     margin: 0;
     padding: 10px 12px;

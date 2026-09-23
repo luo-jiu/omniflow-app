@@ -1,6 +1,7 @@
 import React from 'react';
 import { Empty, Modal, Spin } from '@douyinfe/semi-ui';
 import styled from 'styled-components';
+import { workspaceScrollbarStyles } from '@/components/ui/workspace-scrollbar';
 import { getChildrenByNodeId, getLibraryRootNodeId } from '@/features/file-explorer/services/file.api';
 import type { EmbeddedBrowserDownloadEvent, LibraryFolderEntry } from '../types';
 
@@ -73,6 +74,7 @@ const BrowserDownloadImportModalBody = styled.div`
   }
 
   .folder-panel {
+    ${workspaceScrollbarStyles}
     min-height: 340px;
     max-height: 340px;
     overflow: auto;

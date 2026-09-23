@@ -1,9 +1,11 @@
 import styled from 'styled-components';
+import { workspaceScrollbarStyles } from '@/components/ui/workspace-scrollbar';
 
 export const CommandWorkspaceBody = styled.div`
   flex: 1;
   min-height: 0;
   overflow: auto;
+  ${workspaceScrollbarStyles}
   padding: 12px 14px 16px;
   color: var(--app-text);
   font-size: 12px;
@@ -47,4 +49,7 @@ export const CommandWorkspaceBody = styled.div`
   .hash { font-size: 11px; font-family: monospace; }
   details summary { cursor: pointer; }
   .read-result { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; overflow: auto; margin: 0; }
+  .source-list, .rename-list, .read-result {
+    ${workspaceScrollbarStyles}
+  }
 `;

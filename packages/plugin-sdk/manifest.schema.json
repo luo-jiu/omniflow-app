@@ -55,7 +55,7 @@
     "activation": {
       "type": "array",
       "minItems": 1,
-      "maxItems": 16,
+      "maxItems": 24,
       "uniqueItems": true,
       "items": {
         "type": "string",
@@ -350,6 +350,40 @@
           }
         }
       }
+    },
+    "workspaces": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "title",
+          "entry",
+          "commandId"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "maxLength": 128
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "entry": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "commandId": {
+            "type": "string",
+            "maxLength": 128
+          }
+        }
+      }
     }
   },
   "allOf": [
@@ -389,7 +423,8 @@
             "type": "array",
             "maxItems": 8
           },
-          "commands": false
+          "commands": false,
+          "workspaces": false
         }
       }
     },

@@ -7,6 +7,7 @@ import { PluginManager } from './plugin-manager';
 import base from '../../../samples/csv-viewer/manifest.json';
 import renameManifest from '../../../samples/batch-rename/manifest.json';
 import outputManifest from '../../../samples/csv-export/manifest.json';
+import { isPluginWorkspaceAllowed } from '../../../src/shared/plugin-management';
 const roots:string[]=[];
 async function fixture(){const root=await mkdtemp(path.join(tmpdir(),'plugin-manager-test-'));roots.push(root);const bundled=path.join(root,'bundled');await mkdir(bundled);await writeFile(path.join(bundled,'manifest.json'),JSON.stringify(base));await writeFile(path.join(bundled,'index.html'),'<p>bundled</p>');return {root,bundled};}
 async function zip(root:string,id:string,viewerId=id+'.table'){const archive=new JSZip();archive.file('manifest.json',JSON.stringify({...base,id,version:'1.0.0',viewers:[{...base.viewers[0],id:viewerId}],activation:['viewer:'+viewerId]}));archive.file('index.html','<p>local</p>');const file=path.join(root,id+'.zip');await writeFile(file,await archive.generateAsync({type:'nodebuffer'}));return file;}
@@ -35,6 +36,28 @@ describe('plugin admission and recovery',()=>{
 });
 
 describe('plugin tool admission and runtime broadcasts',()=>{
+ it('projects and resolves workspace pages through manual capability grants and package identity',async()=>{
+  const f=await fixture();const root=path.join(f.root,'store');const manager=new PluginManager(root,f.bundled);await manager.initialize();
+  const workspace={id:outputManifest.id+'.workspace',title:'Export',entry:'workspace.html',commandId:outputManifest.commands[0].id};
+  const archive=new JSZip();archive.file('manifest.json',JSON.stringify({...outputManifest,permissions:['resource.read','resource.output.propose'],workspaces:[workspace],activation:[...outputManifest.activation,'workspace:'+workspace.id]}));archive.file('tool.html','<p>export</p>');archive.file('workspace.html','<p>workspace</p>');
+  const source=path.join(f.root,'workspace.zip');await writeFile(source,await archive.generateAsync({type:'nodebuffer'}));const review=await manager.prepare(source);await manager.commit(review.ticket);
+  expect(()=>manager.resolveWorkspace(workspace.id)).toThrow('PLUGIN_BLOCKED');
+  for(const action of ['enable','approve-read'] as const)await manager.action(outputManifest.id,action);
+  expect(()=>manager.resolveWorkspace(workspace.id)).toThrow('PLUGIN_BLOCKED');await manager.action(outputManifest.id,'approve-output');
+  const current=manager.resolveWorkspace(workspace.id,review.fingerprint);
+  expect(current).toMatchObject({plugin:{workspaces:[workspace],toolApproved:false},workspace});
+  expect(isPluginWorkspaceAllowed(current.plugin,{...workspace,entry:'foreign.html'})).toBe(false);
+  expect(isPluginWorkspaceAllowed({...current.plugin,commands:[]},workspace)).toBe(false);
+  expect(isPluginWorkspaceAllowed({...current.plugin,workspaces:[]},workspace)).toBe(false);
+  expect(manager.stillWorkspaceAllowed(workspace.id,review.fingerprint)).toBe(true);
+  expect(manager.stillWorkspaceAllowed(workspace.id,'f'.repeat(64))).toBe(false);
+  expect(()=>manager.resolveWorkspace(workspace.id,'f'.repeat(64))).toThrow('PLUGIN_VERSION_CHANGED');
+  expect(manager.toolSnapshot()).toEqual([]);
+  const restart=new PluginManager(root,f.bundled);await restart.initialize();expect(restart.resolveWorkspace(workspace.id).workspace).toEqual(workspace);
+  const stopped=vi.fn();manager.attachRuntime(stopped);await manager.action(outputManifest.id,'revoke-output');
+  expect(stopped).toHaveBeenCalledWith(outputManifest.id);expect(manager.stillWorkspaceAllowed(workspace.id,review.fingerprint)).toBe(false);
+  await manager.action(outputManifest.id,'approve-output');await manager.safeMode(true);expect(manager.stillWorkspaceAllowed(workspace.id,review.fingerprint)).toBe(false);
+ });
  it('projects manual commands and checks their own capability grants without authorizing the Agent',async()=>{
   const f=await fixture();const manager=new PluginManager(path.join(f.root,'store'),f.bundled);await manager.initialize();
   const archive=new JSZip();archive.file('manifest.json',JSON.stringify({...outputManifest,permissions:['resource.read','resource.output.propose']}));archive.file('tool.html','<p>manual export</p>');

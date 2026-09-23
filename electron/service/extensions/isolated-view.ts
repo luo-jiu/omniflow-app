@@ -3,7 +3,7 @@ import { app, BrowserWindow, WebContentsView, ipcMain, protocol } from 'electron
 import { randomUUID } from 'node:crypto';
 import { LIMITS, type ThemeSnapshot } from '../../../packages/plugin-sdk/index.js';
 import { loadPluginPackage, type LoadedPluginPackage } from './manifest';
-import { PluginResourceBroker, PluginSettingsMemory, PluginReadingStateMemory, validateTheme, isMetadataResourceAuthority, type PluginSettingsAccess, type PluginReadingStateStore, type PluginResourceAuthority, type PluginToolExecution } from './resource-broker';
+import { PluginResourceBroker, PluginSettingsMemory, PluginReadingStateMemory, validateTheme, isMetadataResourceAuthority, type PluginSettingsAccess, type PluginReadingStateStore, type PluginResourceAuthority, type PluginToolExecution, type PluginWorkspaceExecution } from './resource-broker';
 
 const SCHEME = 'omniflow-extension';
 const CHANNEL = 'omniflow-plugin:rpc';
@@ -45,7 +45,7 @@ export interface IsolatedPluginLoadOptions {
   viewerId?: string; externalLayout?: boolean; onStop?: (reason: string) => void;
   readingState?: PluginReadingStateStore; settings?: PluginSettingsAccess;
   expectedFingerprint?: string; memoryLimitKiB?: number; onDiagnostic?: (event: PluginDiagnostic) => void;
-  toolExecution?: PluginToolExecution; signal?: AbortSignal;
+  toolExecution?: PluginToolExecution; workspaceExecution?: PluginWorkspaceExecution; signal?: AbortSignal;
 }
 
 // 共同隔离底座；生产调用仍必须由宿主提供已授权资源。
@@ -86,7 +86,13 @@ export class PluginDevelopmentHost {
     if ([...this.instances.values()].some(item => item.package.manifest.id === loaded.manifest.id && item.package.fingerprint !== loaded.fingerprint)) throw new Error('Stop previous package version before reload');
     let entry = loaded.manifest.entry;
     const execution = options.toolExecution;
-    if (execution) {
+    const workspaceExecution = options.workspaceExecution;
+    if (workspaceExecution) {
+      const workspace = loaded.manifest.workspaces?.find(item => item.id === workspaceExecution.contribution.id);
+      if (execution || options.viewerId || !workspace || JSON.stringify(workspace) !== JSON.stringify(workspaceExecution.contribution)
+        || isMetadataResourceAuthority(resource) || resource.directory) throw new Error('Unknown workspace contribution');
+      entry = workspace.entry;
+    } else if (execution) {
       const tool = loaded.manifest.agentTools?.find(item => item.id === execution.contribution.id);
       if (!tool || JSON.stringify(tool) !== JSON.stringify(execution.contribution)
         || (isMetadataResourceAuthority(resource) ? tool.kind !== 'rename-proposal' : tool.kind === 'rename-proposal' || resource.directory)) throw new Error('Unknown Tool contribution');
@@ -102,7 +108,7 @@ export class PluginDevelopmentHost {
     if (!entry) throw new Error('Plugin entry not found');
     if (!options.expectedFingerprint) { this.sources.set(loaded.manifest.id, loaded.source); this.activationCount += 1; }
     const id = randomUUID();
-    const broker = new PluginResourceBroker(loaded.manifest, resource, theme, options.settings ?? this.settings, event => { const diagnostic = { type: 'rpc', instanceId: id, ...event }; this.record(diagnostic); if(event.code !== 'OK') options.onDiagnostic?.(diagnostic); }, options.readingState ?? this.readingState, execution);
+    const broker = new PluginResourceBroker(loaded.manifest, resource, theme, options.settings ?? this.settings, event => { const diagnostic = { type: 'rpc', instanceId: id, ...event }; this.record(diagnostic); if(event.code !== 'OK') options.onDiagnostic?.(diagnostic); }, options.readingState ?? this.readingState, execution, workspaceExecution);
     broker.setReadGrant(granted);
     const lease = await acquirePluginSession();
     const isolatedSession = lease.session;

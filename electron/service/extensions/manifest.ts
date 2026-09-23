@@ -6,9 +6,9 @@ import { createHash } from 'node:crypto';
 import schema from '../../../packages/plugin-sdk/manifest.schema.json';
 import { LIMITS } from '../../../packages/plugin-sdk/index.js';
 import { validateIconSvg } from '../../../src/features/appearance/svg-assets';
-import type { PluginCommandContribution, PluginToolContribution } from '../../../packages/plugin-sdk/index.js';
+import type { PluginCommandContribution, PluginToolContribution, PluginWorkspaceContribution } from '../../../packages/plugin-sdk/index.js';
 import { validateToolContribution } from './tool-schema';
-export type { PluginCommandContribution, PluginToolContribution, PluginToolSchema } from '../../../packages/plugin-sdk/index.js';
+export type { PluginCommandContribution, PluginToolContribution, PluginToolSchema, PluginWorkspaceContribution } from '../../../packages/plugin-sdk/index.js';
 
 export interface PluginManifest {
   formatVersion: 1 | 2; id: string; version: string; sdkVersion: 1; minHostVersion: string;
@@ -17,6 +17,7 @@ export interface PluginManifest {
   viewers: Array<{ id: string; title: string; extensions: string[]; directoryTypes?: Array<'COMIC'> }>;
   agentTools?: PluginToolContribution[];
   commands?: PluginCommandContribution[];
+  workspaces?: PluginWorkspaceContribution[];
 }
 const validate = new Ajv({ allErrors: true }).compile<PluginManifest>(schema);
 export function isPackagePath(value: string): boolean {
@@ -52,6 +53,14 @@ export function parsePluginManifest(input: unknown, platform: string, hostVersio
     if (!command.id.startsWith(`${input.id}.`) || !/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/.test(command.id) || ids.has(command.id)) throw new Error('Invalid or duplicate command id');
     if (!input.agentTools?.some(tool => tool.id === command.toolId)) throw new Error('Command requires a tool from the same package');
     ids.add(command.id); manualTools.add(command.toolId);
+  }
+  for (const workspace of input.workspaces ?? []) {
+    if (!workspace.id.startsWith(`${input.id}.`) || !/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/.test(workspace.id) || ids.has(workspace.id)) throw new Error('Invalid or duplicate workspace id');
+    if (!isPackagePath(workspace.entry) || !workspace.entry.endsWith('.html')) throw new Error('Invalid workspace entry');
+    const command = input.commands?.find(item => item.id === workspace.commandId);
+    const tool = input.agentTools?.find(item => item.id === command?.toolId);
+    if (!command || !tool || tool.kind === 'rename-proposal') throw new Error('Workspace requires a single-file command from the same package');
+    ids.add(workspace.id); activation.add(`workspace:${workspace.id}`);
   }
   if (!input.permissions.includes('agent.tools') && input.agentTools?.some(tool => !manualTools.has(tool.id))) throw new Error('Tool requires Agent permission or a manual command');
   if (input.permissions.includes('agent.tools') && !input.agentTools?.length) throw new Error('Tool permission requires a tool contribution');
@@ -106,7 +115,7 @@ export async function loadPluginPackage(directory: string, platform = process.pl
   const manifestBytes = assets.get('manifest.json')?.bytes;
   if (!manifestBytes || manifestBytes.length > LIMITS.requestBytes) throw new Error('Missing or oversized manifest');
   if (JSON.stringify(parsePluginManifest(JSON.parse(manifestBytes.toString('utf8')), platform)) !== JSON.stringify(manifest)) throw new Error('Manifest changed during loading');
-  if ((manifest.entry !== undefined && !assets.has(manifest.entry)) || manifest.agentTools?.some(tool => !assets.has(tool.entry))) throw new Error('Plugin entry not found');
+  if ((manifest.entry !== undefined && !assets.has(manifest.entry)) || manifest.agentTools?.some(tool => !assets.has(tool.entry)) || manifest.workspaces?.some(workspace => !assets.has(workspace.entry))) throw new Error('Plugin entry not found');
   const source = await realpath(root);
   const hash = createHash('sha256').update('omniflow-package-v1\n');
   for (const [key, asset] of [...assets].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) {

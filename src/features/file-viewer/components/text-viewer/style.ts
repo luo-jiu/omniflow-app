@@ -113,7 +113,14 @@ export const TextViewerWrapper = styled.div`
     ul, ol { padding-left: 28px; }
     blockquote { margin: 1em 0; padding: 4px 16px; border-left: 3px solid var(--app-accent); color: var(--app-text-secondary); }
     code { padding: 2px 5px; border-radius: 4px; background: var(--app-bg-elevated); font-family: 'JetBrains Mono', monospace; font-size: 13px; }
-    pre { padding: 14px 16px; overflow: auto; border: 1px solid var(--app-border); border-radius: 6px; background: var(--app-bg-elevated); }
+    pre {
+      padding: 14px 16px;
+      overflow: auto;
+      border: 1px solid var(--app-border);
+      border-radius: 6px;
+      background: var(--app-bg-elevated);
+      ${workspaceScrollbarStyles}
+    }
     pre code { padding: 0; background: transparent; }
     table { width: 100%; border-collapse: collapse; } th, td { padding: 7px 10px; border: 1px solid var(--app-border); text-align: left; }
     img { max-width: 100%; height: auto; }

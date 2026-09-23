@@ -1,5 +1,6 @@
 import React from 'react';
 import styled, { createGlobalStyle, css } from 'styled-components';
+import { workspaceScrollbarStyles } from '@/components/ui/workspace-scrollbar';
 import {
   BOOKMARK_FONT_SIZE,
   BOOKMARK_ICON_SIZE,
@@ -466,15 +467,12 @@ export const ContentToolbar = styled.div`
     margin-left: 3px;
     overflow-x: auto;
     overflow-y: hidden;
-    scrollbar-width: none;
+    ${workspaceScrollbarStyles}
+    &::-webkit-scrollbar { height: 6px; }
   }
 
   .browser-tabs-list.scroll-mode {
     -webkit-app-region: no-drag;
-  }
-
-  .browser-tabs-list::-webkit-scrollbar {
-    display: none;
   }
 
   .browser-tabs-add {
@@ -868,6 +866,7 @@ export const BookmarkManagerContent = styled.div`
   min-height: 310px;
   max-height: 350px;
   overflow: auto;
+  ${workspaceScrollbarStyles}
   padding: 2px 0;
 
   .bookmark-manager-toolbar {
@@ -1063,6 +1062,7 @@ export const BrowserSettingsContent = styled.div`
   min-width: 0;
   min-height: 0;
   overflow: auto;
+  ${workspaceScrollbarStyles}
   display: flex;
   flex-direction: column;
   gap: 16px;

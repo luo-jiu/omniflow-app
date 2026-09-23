@@ -2,6 +2,8 @@ import { toolCommands } from './tool-commands';
 import { Toast } from '@douyinfe/semi-ui';
 import { toolRegistry } from './tool-registry';
 import { PLUGIN_COMMAND_WORKSPACE_ID, type PluginCommandOpenRequest } from '@/features/plugin-commands/command-open-request';
+import PluginWorkspace from '@/features/plugin-workspaces/PluginWorkspace';
+import { installManagedWorkspaceContributions } from '@/features/plugin-workspaces/installed-workspaces';
 import React from 'react';
 import { IconDoubleChevronLeft } from '@douyinfe/semi-icons';
 
@@ -65,6 +67,7 @@ const ToolWorkspace: React.FC<ToolWorkspaceProps> = ({
   pluginCommandRequest,
 }) => {
   const { layout, saveNavWidth, saveToolOrder } = useToolWorkspaceLayout();
+  React.useEffect(() => installManagedWorkspaceContributions(PluginWorkspace), []);
   const [workspaceState, setWorkspaceState] = React.useState<ToolWorkspaceState>(() => (
     loadToolWorkspaceState(libraryId)
   ));

@@ -1,4 +1,5 @@
 import styled from 'styled-components';
+import { workspaceScrollbarStyles } from '@/components/ui/workspace-scrollbar';
 
 /**
  * 全屏不透明页面容器。
@@ -6,6 +7,7 @@ import styled from 'styled-components';
  * 非侧边栏页面需要此容器恢复不透明背景。
  */
 const OpaquePageContainer = styled.div`
+  ${workspaceScrollbarStyles}
   width: 100%;
   height: 100%;
   overflow: auto;

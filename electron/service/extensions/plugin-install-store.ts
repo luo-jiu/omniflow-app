@@ -21,6 +21,10 @@ function assertCommandIds(manifests: readonly PluginManifest[], reservedToolName
     if (ids.has(command.id)) throw new Error('DUPLICATE_COMMAND_ID');
     ids.add(command.id);
   }
+  for (const workspace of manifests.flatMap(manifest => manifest.workspaces ?? [])) {
+    if (ids.has(workspace.id)) throw new Error('DUPLICATE_WORKSPACE_ID');
+    ids.add(workspace.id);
+  }
 }
 export class PluginInstallStore {
   private state = empty(); private ready = false;

@@ -1,4 +1,5 @@
 import styled from 'styled-components';
+import { workspaceScrollbarStyles } from '@/components/ui/workspace-scrollbar';
 
 const PanelShell = styled.aside`
   width: 100%;
@@ -179,6 +180,7 @@ const PanelShell = styled.aside`
   }
 
   .resource-panel-body {
+    ${workspaceScrollbarStyles}
     flex: 1;
     min-height: 0;
     overflow: auto;

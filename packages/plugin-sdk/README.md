@@ -1,6 +1,6 @@
 # OmniFlow Plugin SDK
 
-版本 `0.6.0`，wire 协议与 `sdkVersion` 继续为 `1`，Manifest 支持 `formatVersion: 1 | 2`，分别管理。此包为独立 ESM JavaScript + TypeScript 声明，无运行时依赖，不导入宿主源码。当前提供 macOS 受限只读插件、重命名提案、单文件文本产物与手动命令声明；本地安装见 D1，目录扩展见 E1，独立 Agent Tool 契约见下文。
+版本 `0.7.0`，wire 协议与 `sdkVersion` 继续为 `1`，Manifest 支持 `formatVersion: 1 | 2`，分别管理。此包为独立 ESM JavaScript + TypeScript 声明，无运行时依赖，不导入宿主源码。当前提供 macOS 受限只读插件、重命名提案、单文件文本产物、手动命令与独立工具页面声明；本地安装见 D1，目录扩展见 E1，独立 Agent Tool 契约见下文。
 
 ## 构建与使用
 
@@ -10,7 +10,7 @@
 
 ## 契约
 
-- `context()`：插件 ID、执行贡献 ID、能力、主题、当前资源的不透明句柄/名称/长度/版本及读取授权标志。Viewer 继续返回原有 `viewerId`；Tool 返回 `kind: 'tool'`、`toolId`。不会返回账号、库/节点 ID、Run 身份、URL、Cookie 或令牌。能看见上下文不等于可以读正文。
+- `context()`：插件 ID、执行贡献 ID、能力、主题、当前资源的不透明句柄/名称/长度/版本及读取授权标志。Viewer 继续返回原有 `viewerId`；Tool 返回 `kind: 'tool'`、`toolId`；Workspace 返回 `kind: 'workspace'`、`workspaceId`、`commandId`。不会返回账号、库/节点 ID、Run 身份、URL、Cookie 或令牌。能看见上下文不等于可以读正文。
 - `ready()`：声明就绪；读取/设置/阅读状态操作要求先就绪。
 - `read(handle, offset, length, {signal})`：读取当前打开资源，返回字节、下一偏移、是否结束、内容版本。上限 64 KiB/块，普通文件实例 32 MiB 累计读取；目录实例每文件 32 MiB、累计 512 MiB。重复读也消耗预算。
 - `getSetting(key)` / `setSetting(key, value, expectedRevision, schemaVersion=1)`：仅当前插件 + 账号 + 库的设置；不存在时返回 null、初始 revision 为 0。写成功返回新 revision。
@@ -66,7 +66,7 @@ D1 本地安装、预检/权限、版本回滚与恢复流程见宿主文档 `do
 
 旧 `formatVersion: 1` Viewer 包继续保留原结构；只有新 v2 允许声明 `agentTools`。v2 可以只提供 Tool，此时无需顶层 `entry` 或 `viewers`，宿主将缺少的 `viewers` 规范化为 `[]`。混合包中只要存在 Viewer，顶层 HTML `entry` 仍必需。每个 Tool 有自己的 HTML `entry`，不伪造 Viewer ID、不要求打开文件标签。旧宿主会明确拒绝 v2。
 
-每个 Tool 声明 `id`、`title`、`description`、`entry`、`inputSchema`、`outputSchema`、`resourceAccess`、`timeoutMs`、`maxResultBytes`。ID 必须处于插件命名空间且与包内其它贡献 ID 不重复；`activation` 精确列出所有 `viewer:<id>` 与 `tool:<id>`，不能用 Viewer 激活条件代替 Tool。最多 8 个 Viewer 和 8 个 Tool。
+每个 Tool 声明 `id`、`title`、`description`、`entry`、`inputSchema`、`outputSchema`、`resourceAccess`、`timeoutMs`、`maxResultBytes`。ID 必须处于插件命名空间且与包内其它贡献 ID 不重复；`activation` 精确列出所有 `viewer:<id>`、`tool:<id>` 及 0.7.0 新增的 `workspace:<id>`，不能用 Viewer 激活条件代替 Tool。最多 8 个 Viewer、8 个 Tool 和 8 个 Workspace。
 
 原单文件读取 Tool 省略 `kind`，需要 `resource.read`；向内部 Agent 提供工具时还需要 `agent.tools`（仅手动调用见 0.6.0 节）；含此 Tool 的包不能声明 `directory.read`。`resourceAccess` 固定为 `[{ "parameter": "resource", "mode": "read", "kind": "file" }]`，只接受当前调用的单个资料库文件。Tool 的安装授权不等于 Agent 会话授权；读取、取消及结果交付由宿主绑定调用与当前访问权。
 
@@ -115,10 +115,22 @@ OmniFlow 宿主通过标准 Agent 审批卡展示完整旧名→新名，即使�
 
 Manifest v2 可新增 `commands` 数组，每包最多 8 项。每项只含 `id`、`title`、`toolId`、`locations`：ID 必须位于包命名空间，不能与任何已安装贡献 ID 重复；标题 1～80 字符；`toolId` 必须引用同包 `agentTools` 中已有的工具；`locations` 为 `file-menu`、`tool-workspace` 的非空、无重复子集。
 
-命令是已有工具的手动入口，复用其 inputSchema、资源限制和隔离 HTML 入口。不增加 `command:` 激活事件，`activation` 仍精确列出 `viewer:` / `tool:`；不声明执行脚本、任意菜单位置、HTML 或 React 组件。宿主在文件菜单或工具区展示入口，生成参数表单并管理选择的文件、另存目录和目标文件名；插件仍只收到原有去除宿主身份字段的调用输入。
+命令是已有工具的手动入口，复用其 inputSchema、资源限制和隔离 HTML 入口。不增加 `command:` 激活事件，`activation` 精确列出 `viewer:` / `tool:` 及可选 `workspace:`；命令自身不声明执行脚本、任意菜单位置、HTML 或 React 组件。宿主在文件菜单或工具区展示入口，生成参数表单并管理选择的文件、另存目录和目标文件名；插件仍只收到原有去除宿主身份字段的调用输入。
 
 `agentTools` 名称为兼容已有清单保留，但 `agent.tools` 现在只控制内部 Agent 发现与调用。若所有工具均有手动命令，可省略 `agent.tools`，此包不能批准 Agent Tool 或进入模型工具目录。若包同时声明 `agent.tools`，用户也可仅批准读文件 / 改名提案 / 文件产物能力来手动调用，无须先批准 Agent Tool。工具没有命令入口且包也未声明 `agent.tools` 时，安装失败。
 
 手动调用仍要求插件已启用、无恢复/故障阻止、包指纹有效及对应资源能力已批准；撤销这些能力、停用或升级会使旧调用失效。Agent 与手动调用使用分开的注册身份。手动选择与宿主操作上下文只授权本次资源；改名与新文件仍必须展示提案并批准，不能把命令点击当作最终写入批准。
 
 三个现有样板提供双入口：`example.batch-rename.run`、`example.csv-export.run`、`example.json-transform.run`。升级包需更高版本，宿主会按现有安装策略清除旧批准。不含 `commands` 的格式 1/2 包保持原行为；不认识 `commands` 的旧宿主会拒绝新包，不得通过删去能力声明伪装兼容。
+
+## 独立工具页面（0.7.0 / Manifest v2）
+
+可选 `workspaces` 每包 1～8 项，每项仅含 `id`、`title`、`entry`、`commandId`。ID 位于包命名空间，并与 Viewer、Tool、命令及其它工具页面 ID 分开；标题为 1～80 字符，entry 为包内 HTML 路径。commandId 必须指向同包已有命令，所对应 Tool 只能为普通单文件只读或 `file-output`；不支持 `rename-proposal`、目录或无资源页面。每项必须有精确的 `workspace:<id>` 激活声明，全部 activation 最多 24 项。独立页面使用自己的入口和上下文，不需要 Viewer，也不是 Tool 的隐藏执行实例。
+
+`context()` 的 kind 为 `workspace`，含 workspaceId、commandId、标准单文件 resource、readGranted、theme；能力仅为 `resource.read`、`theme`、`lifecycle`、`workspace.prepare`。页面先 `ready()`，再用 `read()` 读取宿主选定文件，接收主题/活动事件。读取授权、每次访问权/版本验证、来源绑定、字节/请求预算、沙箱网络和生命周期限制与已有隔离环境相同。不开放 state/settings、目录、Tool invocation/completion、输出提交、任意 IPC 或文件选择器。
+
+`prepareWorkspaceCommand(parameters)` 将业务参数交给可信宿主，快速返回 `{requestId}`，表示受理准备请求，不代表处理完成或文件已保存。参数必须为有界 JSON 对象；完整请求仍限 16 KiB，深度最多 22、值节点最多 4096，拒绝原型保留键。顶层不能含 `resource`、`resources` 或 `destination`；不能在请求信封里附加批准、目录、文件名或执行身份。真实源文件、目标目录/名称、完整 schema 校验和后续执行由宿主持有。
+
+处理与准备结果在可信宿主区域展示。写入仍复用手动命令的完整预览、显式批准和回执路径；工具页面不能批准自己的请求，返回 requestId 不获得后续提交权。页面本地预览可以用于交互，但不会替代宿主批准时的重新准备。可用性继承声明命令的独立读取/产物批准；不要求 `agent.tools` 或 Agent Tool 批准。停用、撤权、升级或资源范围变化后旧页面实例失效。
+
+独立样板复用 `samples/json-transform`。完整宿主行为与实际 macOS 验收范围见 `docs/plugin-system-m2-tool-workspaces.md`（以宿主仓库发布的专题为准）。

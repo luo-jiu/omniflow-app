@@ -985,3 +985,18 @@ contextBridge.exposeInMainWorld('electronPluginCommands', {
   },
   completeFileAuthority: (input: AgentFileAuthorityCompletionV1) => ipcRenderer.invoke('plugin-commands:file-authority:complete', input),
 } satisfies import('../src/shared/plugins/manual-command.types').PluginCommandsBridge);
+
+
+contextBridge.exposeInMainWorld('electronPluginWorkspace', {
+  open: (input: import('../src/shared/plugins/workspace.types').PluginWorkspaceOpen) => ipcRenderer.invoke('plugin-workspace:open', input),
+  close: (id: string) => ipcRenderer.invoke('plugin-workspace:close', id),
+  release: () => ipcRenderer.invoke('plugin-workspace:release'),
+  layout: (id: string, bounds: Electron.Rectangle | null) => ipcRenderer.invoke('plugin-workspace:layout', id, bounds),
+  theme: (id: string, theme: import('../packages/plugin-sdk/index.js').ThemeSnapshot) => ipcRenderer.invoke('plugin-workspace:theme', id, theme),
+  destination: (id: string, destination: import('../src/shared/plugins/workspace.types').PluginWorkspaceDestination | null) => ipcRenderer.invoke('plugin-workspace:destination', id, destination),
+  subscribe: (listener: (event: import('../src/shared/plugins/workspace.types').PluginWorkspaceEvent) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, value: import('../src/shared/plugins/workspace.types').PluginWorkspaceEvent) => listener(value);
+    ipcRenderer.on('plugin-workspace:event', handler);
+    return () => ipcRenderer.removeListener('plugin-workspace:event', handler);
+  },
+} satisfies import('../src/shared/plugins/workspace.types').PluginWorkspaceBridge);

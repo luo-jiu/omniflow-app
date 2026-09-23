@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>JSON 转换</title>
+  <link rel="stylesheet" href="./workspace.css">
+</head>
+<body>
+  <main>
+    <header>
+      <p class="eyebrow">JSON 转换</p>
+      <h1 id="source-name">等待选择源文件</h1>
+      <p id="source-summary" class="muted">选择顶层字段，预览结果，再另存为新文件。</p>
+    </header>
+    <div class="workspace-grid">
+      <section aria-labelledby="options-title">
+        <h2 id="options-title">转换选项</h2>
+        <fieldset id="options" disabled>
+          <label class="option"><input type="checkbox" id="all-fields" checked>保留全部字段</label>
+          <p class="hint">取消后可勾选最多 64 个顶层字段。数组中的非对象项保持原样。</p>
+          <div id="fields" class="fields" aria-label="顶层字段"></div>
+          <p id="field-note" class="hint"></p>
+          <label class="option pretty"><input type="checkbox" id="pretty" checked>使用缩进和换行</label>
+        </fieldset>
+      </section>
+      <section class="preview-section" aria-labelledby="preview-title">
+        <div class="section-title"><h2 id="preview-title">结果预览</h2><span id="preview-size" class="muted"></span></div>
+        <pre id="preview" tabindex="0" aria-label="JSON 结果预览">源文件读取后将在这里显示结果。</pre>
+        <p id="preview-note" class="hint"></p>
+      </section>
+    </div>
+    <footer>
+      <p id="status" role="status" aria-live="polite">正在连接工作区…</p>
+      <button id="prepare" type="button" disabled>准备另存</button>
+    </footer>
+    <p class="hint save-hint">先选好保存位置，再准备并确认保存提案。源文件不会被覆盖。</p>
+  </main>
+  <script type="module" src="./workspace.js"></script>
+</body>
+</html>

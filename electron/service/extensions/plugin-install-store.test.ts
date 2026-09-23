@@ -121,4 +121,16 @@ describe('independent Agent Tool install approval',()=>{
   store.setReservedToolNames(['test_new_read']);
   await expect(store.prepare(await archive(dir,'1.0.2',zip=>zip.file('manifest.json',JSON.stringify(toolsManifest('test.new')))))).rejects.toThrow('PLUGIN_TOOL_PROVIDER_NAME_CONFLICT');
  });
+ it('rejects workspace IDs that collide with installed workspace, command or Viewer identities',async()=>{
+  const dir=await root();const store=new PluginInstallStore(path.join(dir,'store'),'darwin');await store.initialize();
+  function workspaceManifest(id:string,workspaceId:string){const base=toolsManifest(id);return {...base,commands:[{id:id+'.run',title:'Run',toolId:base.agentTools[0].id,locations:['tool-workspace']}],workspaces:[{id:workspaceId,title:'Page',entry:'index.html',commandId:id+'.run'}],activation:[...base.activation,'workspace:'+workspaceId]};}
+  const first=workspaceManifest('test.a','test.a.b.page');const review=await store.prepare(await archive(dir,'1.0.0',zip=>zip.file('manifest.json',JSON.stringify(first))));await store.commit(review.ticket,()=>undefined);
+  await expect(store.prepare(await archive(dir,'1.0.1',zip=>zip.file('manifest.json',JSON.stringify(workspaceManifest('test.a.b','test.a.b.page')))))).rejects.toThrow('DUPLICATE_WORKSPACE_ID');
+  const viewer={...manifest(),id:'test.a.b',viewers:[{id:'test.a.b.page',title:'CSV',extensions:['csv']}],activation:['viewer:test.a.b.page']};
+  await expect(store.prepare(await archive(dir,'1.0.2',zip=>zip.file('manifest.json',JSON.stringify(viewer))))).rejects.toThrow('DUPLICATE_WORKSPACE_ID');
+  const command={...toolsManifest('test.a.b'),commands:[{id:'test.a.b.page',title:'Run',toolId:'test.a.b.read',locations:['tool-workspace']}]};
+  await expect(store.prepare(await archive(dir,'1.0.3',zip=>zip.file('manifest.json',JSON.stringify(command))))).rejects.toThrow('DUPLICATE_WORKSPACE_ID');
+  expect(store.snapshot().plugins).toHaveLength(1);
+  const restart=new PluginInstallStore(path.join(dir,'store'),'darwin');await restart.initialize();expect(restart.snapshot().plugins[0].manifest.workspaces).toEqual(first.workspaces);
+ });
 });

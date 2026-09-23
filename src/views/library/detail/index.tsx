@@ -2864,7 +2864,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
             {!isWindows ? fileRefreshButton : null}
           </div>
         </ContentToolbar>
-        {!browserModeOpen && workspaceDisplayMode === 'file-viewer' ? (
+        {!browserModeOpen && (workspaceDisplayMode === 'file-viewer' || workspaceDisplayMode === 'system') ? (
           <FileTabsBar
             tabs={tabs}
             activeTabId={workspaceDisplayMode === 'file-viewer' ? activeTabId : null}

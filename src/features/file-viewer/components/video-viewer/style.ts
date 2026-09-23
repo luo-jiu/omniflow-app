@@ -1,4 +1,5 @@
 import styled from 'styled-components';
+import { workspaceScrollbarStyles } from '@/components/ui/workspace-scrollbar';
 
 export const VideoViewerWrapper = styled.div`
   --video-font-caption: 10px;
@@ -206,6 +207,12 @@ export const VideoViewerWrapper = styled.div`
 
   body[theme-mode="dark"] & .console-panel {
     background: linear-gradient(180deg, rgba(27, 31, 38, 0.98), rgba(20, 23, 29, 0.96));
+  }
+
+  .console-body,
+  .subtitle-source-list,
+  .playlist-panel-list {
+    ${workspaceScrollbarStyles}
   }
 
   .console-body {
@@ -784,7 +791,6 @@ export const VideoViewerWrapper = styled.div`
     flex-direction: column;
     gap: 4px;
     padding-right: 2px;
-    scrollbar-width: thin;
   }
 
   .playlist-panel-item {

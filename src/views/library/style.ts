@@ -1,4 +1,5 @@
 import styled from 'styled-components'
+import { workspaceScrollbarStyles } from '@/components/ui/workspace-scrollbar'
 
 export const LibraryWrapper = styled.div`
   position: relative;
@@ -52,9 +53,7 @@ export const SideMenuList = styled.div`
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  -ms-overflow-style: none;
-  scrollbar-width: none;
-  &::-webkit-scrollbar { display: none; }
+  ${workspaceScrollbarStyles}
 `
 
 export const SideMenuItem = styled.div`
@@ -259,13 +258,7 @@ export const CardScroll = styled.div`
   overflow-x: hidden;
   padding: 12px 16px 0;
 
-  -ms-overflow-style: none;
-  scrollbar-width: none;
-  &::-webkit-scrollbar {
-    width: 0;
-    height: 0;
-    display: none;
-  }
+  ${workspaceScrollbarStyles}
 `
 
 export const LibrarySystemScroll = styled.div`

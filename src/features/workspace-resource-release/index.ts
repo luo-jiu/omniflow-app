@@ -28,6 +28,7 @@ import {
 } from '@/features/tool-workspace/tool-workspace.state';
 import { releaseAgentOwnerRuns } from '@/features/agent/services/agent.api';
 import { pluginCommandApi } from '@/service/plugins/plugin-command.api';
+import { pluginWorkspaceApi } from '@/service/plugins/plugin-workspace.api';
 import {
   beginLibraryDisposing,
   beginSessionDisposing,
@@ -105,6 +106,9 @@ export async function disposeLibraryWorkspace(
   const endLibraryDisposing = beginLibraryDisposing(normalizedLibraryId);
 
   try {
+    await pluginWorkspaceApi.releaseLibrary(normalizedLibraryId).catch(() => {
+      runtimeLogger.warn('release plugin views during library release failed');
+    });
     await pluginCommandApi.releaseLibrary(normalizedLibraryId).catch(() => {
       runtimeLogger.warn('release plugin commands during library release failed');
     });
@@ -145,6 +149,9 @@ export async function disposeLibraryWorkspace(
 export async function disposeSessionWorkspaces() {
   const endSessionDisposing = beginSessionDisposing();
   try {
+    await pluginWorkspaceApi.release().catch(() => {
+      runtimeLogger.warn('release plugin views during session release failed');
+    });
     await pluginCommandApi.releaseAll().catch(() => {
       runtimeLogger.warn('release plugin commands during session release failed');
     });

@@ -1,5 +1,6 @@
 import React, { useLayoutEffect } from 'react';
 import styled from 'styled-components';
+import { workspaceScrollbarStyles } from '@/components/ui/workspace-scrollbar';
 import { FileQuestion } from 'lucide-react';
 import { LOCAL_PREVIEW_PREFIX } from '@/features/file-viewer/services/local-preview';
 import type { FileViewerTab } from '@/contexts/file-viewer.context';
@@ -48,8 +49,6 @@ const TAB_LAYOUT_FLIP_DURATION_MS = 180;
 const TAB_CLOSE_COLLAPSE_MS = 160;
 const TAB_CLOSE_REMOVE_DELAY_MS = TAB_CLOSE_COLLAPSE_MS + 70;
 const TAB_TOP_SCROLLBAR_HEIGHT = 7;
-const TAB_TOP_SCROLLBAR_HIDE_DELAY_MS = 900;
-const TAB_TOP_SCROLLBAR_HIDE_DELAY_ON_LEAVE_MS = 260;
 const TAB_DEFAULT_WIDTH = 168;
 const TAB_MIN_WIDTH = 96;
 // Match the toolbar's right inset (7 + 4) and half of its 28px refresh button.
@@ -75,22 +74,12 @@ const TAB_MEMORY_FALLBACK_BY_TYPE: Record<string, number> = {
   other: 36 * 1024 * 1024,
 };
 
-const TabsFrame = styled.div<{ $scrollVisible: boolean }>`
+const TabsFrame = styled.div`
   width: 100%;
   min-width: 0;
   display: flex;
   flex-direction: column;
   position: relative;
-
-  ${({ $scrollVisible }) => $scrollVisible ? `
-    .tabs-top-scroll {
-      scrollbar-color: var(--app-scrollbar-thumb) var(--app-scrollbar-track);
-    }
-
-    .tabs-top-scroll::-webkit-scrollbar-thumb {
-      background: var(--app-scrollbar-thumb);
-    }
-  ` : ''}
 `;
 
 const TabsTopScroll = styled.div<{ $visible: boolean }>`
@@ -112,7 +101,7 @@ const TabsTopScroll = styled.div<{ $visible: boolean }>`
   pointer-events: ${({ $visible }) => ($visible ? 'auto' : 'none')};
   scrollbar-gutter: stable both-edges;
   scrollbar-width: auto;
-  scrollbar-color: transparent transparent;
+  scrollbar-color: var(--app-scrollbar-thumb) var(--app-scrollbar-track);
 
   &::-webkit-scrollbar {
     height: 7px;
@@ -123,25 +112,11 @@ const TabsTopScroll = styled.div<{ $visible: boolean }>`
   }
 
   &::-webkit-scrollbar-thumb {
-    background: transparent;
+    background: var(--app-scrollbar-thumb);
     border-radius: 999px;
   }
 
-  &:hover,
-  &:focus-within,
-  &:active {
-    scrollbar-color: var(--app-scrollbar-thumb) var(--app-scrollbar-track);
-  }
-
-  &:hover::-webkit-scrollbar-thumb,
-  &:focus-within::-webkit-scrollbar-thumb,
-  &:active::-webkit-scrollbar-thumb {
-    background: var(--app-scrollbar-thumb);
-  }
-
-  &:hover::-webkit-scrollbar-thumb:hover,
-  &:focus-within::-webkit-scrollbar-thumb:hover,
-  &:active::-webkit-scrollbar-thumb:hover {
+  &::-webkit-scrollbar-thumb:hover {
     background: var(--app-scrollbar-thumb-hover);
   }
 `;
@@ -464,6 +439,7 @@ const OverflowTrigger = styled.button<{ $open: boolean; $disabled: boolean }>`
 `;
 
 const OverflowMenu = styled.div`
+  ${workspaceScrollbarStyles}
   position: absolute;
   top: calc(100% - 2px);
   right: 0;
@@ -649,7 +625,6 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
   const [dropTarget, setDropTarget] = React.useState<{ tabId: string; position: 'before' | 'after' } | null>(null);
   const [dragGhost, setDragGhost] = React.useState<{ left: number; top: number; width: number } | null>(null);
   const [hasHorizontalOverflow, setHasHorizontalOverflow] = React.useState(false);
-  const [topScrollVisible, setTopScrollVisible] = React.useState(false);
   const [tabsScrollWidth, setTabsScrollWidth] = React.useState(0);
   const [overflowMenuTabIds, setOverflowMenuTabIds] = React.useState<string[]>([]);
   const [overflowMenuOpen, setOverflowMenuOpen] = React.useState(false);
@@ -668,9 +643,7 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
   const tabsWrapperRef = React.useRef<HTMLDivElement | null>(null);
   const overflowMenuRef = React.useRef<HTMLDivElement | null>(null);
   const overflowTriggerRef = React.useRef<HTMLButtonElement | null>(null);
-  const topScrollHideTimerRef = React.useRef<number | null>(null);
   const closeTimerRef = React.useRef<Map<string, number>>(new Map());
-  const tabsHoveringRef = React.useRef(false);
   const tabButtonRefMap = React.useRef(new Map<string, HTMLDivElement>());
   const tabSampleTimerRef = React.useRef<number | null>(null);
   const hoverTabIdRef = React.useRef<string | null>(null);
@@ -744,6 +717,7 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
     });
     return nextItems;
   }, [closingItemSnapshots, liveTabItemIds, tabItems]);
+  const hasRenderedTabs = renderedTabItems.length > 0;
 
   const checkHorizontalOverflow = React.useCallback(() => {
     const wrapper = tabsWrapperRef.current;
@@ -809,62 +783,16 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
     setOverflowMenuTabIds((prev) => (areSameStringArray(prev, nextTabIds) ? prev : nextTabIds));
   }, [collectHiddenTabIds]);
 
-  const clearTopScrollHideTimer = React.useCallback(() => {
-    if (topScrollHideTimerRef.current !== null) {
-      window.clearTimeout(topScrollHideTimerRef.current);
-      topScrollHideTimerRef.current = null;
-    }
-  }, []);
-
-  const revealTopScrollTemporarily = React.useCallback(() => {
-    if (!hasHorizontalOverflow) {
-      clearTopScrollHideTimer();
-      setTopScrollVisible(false);
-      return;
-    }
-    setTopScrollVisible(true);
-    clearTopScrollHideTimer();
-    if (tabsHoveringRef.current) {
-      return;
-    }
-    topScrollHideTimerRef.current = window.setTimeout(() => {
-      setTopScrollVisible(false);
-      topScrollHideTimerRef.current = null;
-    }, TAB_TOP_SCROLLBAR_HIDE_DELAY_MS);
-  }, [clearTopScrollHideTimer, hasHorizontalOverflow]);
-
-  const hideTopScrollSoon = React.useCallback(() => {
-    clearTopScrollHideTimer();
-    if (tabsHoveringRef.current) {
-      return;
-    }
-    topScrollHideTimerRef.current = window.setTimeout(() => {
-      setTopScrollVisible(false);
-      topScrollHideTimerRef.current = null;
-    }, TAB_TOP_SCROLLBAR_HIDE_DELAY_ON_LEAVE_MS);
-  }, [clearTopScrollHideTimer]);
-
-  const hideTopScrollAfterAction = React.useCallback(() => {
-    tabsHoveringRef.current = false;
-    clearTopScrollHideTimer();
-    window.requestAnimationFrame(() => {
-      clearTopScrollHideTimer();
-      topScrollHideTimerRef.current = window.setTimeout(() => {
-        setTopScrollVisible(false);
-        topScrollHideTimerRef.current = null;
-      }, TAB_TOP_SCROLLBAR_HIDE_DELAY_ON_LEAVE_MS);
-    });
-  }, [clearTopScrollHideTimer]);
-
   React.useEffect(() => {
     activeTabIdRef.current = activeTabId;
   }, [activeTabId]);
 
   React.useLayoutEffect(() => {
     checkHorizontalOverflow();
-  }, [checkHorizontalOverflow, tabItems]);
+  }, [checkHorizontalOverflow, renderedTabItems]);
 
   React.useEffect(() => {
+    if (!hasRenderedTabs) return undefined;
     const wrapper = tabsWrapperRef.current;
     if (!wrapper) return undefined;
     const observer = new ResizeObserver(() => {
@@ -872,7 +800,7 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
     });
     observer.observe(wrapper);
     return () => observer.disconnect();
-  }, [checkHorizontalOverflow]);
+  }, [checkHorizontalOverflow, hasRenderedTabs]);
 
   React.useEffect(() => {
     const onWindowResize = () => {
@@ -883,6 +811,7 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
   }, [checkHorizontalOverflow]);
 
   React.useEffect(() => {
+    if (!hasRenderedTabs) return undefined;
     const wrapper = tabsWrapperRef.current;
     if (!wrapper) return undefined;
     const onScroll = () => {
@@ -890,16 +819,16 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
       if (topScroll && Math.abs(topScroll.scrollLeft - wrapper.scrollLeft) > 1) {
         topScroll.scrollLeft = wrapper.scrollLeft;
       }
-      revealTopScrollTemporarily();
       if (overflowMenuOpen) {
         refreshOverflowMenuTabIds();
       }
     };
     wrapper.addEventListener('scroll', onScroll, { passive: true });
     return () => wrapper.removeEventListener('scroll', onScroll);
-  }, [overflowMenuOpen, refreshOverflowMenuTabIds, revealTopScrollTemporarily]);
+  }, [hasRenderedTabs, overflowMenuOpen, refreshOverflowMenuTabIds]);
 
   React.useEffect(() => {
+    if (!hasRenderedTabs) return undefined;
     const wrapper = tabsWrapperRef.current;
     if (!wrapper) return undefined;
     const onWheel = (event: WheelEvent) => {
@@ -912,11 +841,10 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
       if (topScroll && Math.abs(topScroll.scrollLeft - wrapper.scrollLeft) > 1) {
         topScroll.scrollLeft = wrapper.scrollLeft;
       }
-      revealTopScrollTemporarily();
     };
     wrapper.addEventListener('wheel', onWheel, { passive: false });
     return () => wrapper.removeEventListener('wheel', onWheel);
-  }, [revealTopScrollTemporarily]);
+  }, [hasRenderedTabs]);
 
   React.useEffect(() => {
     if (!activeScrollTargetId) return;
@@ -970,19 +898,6 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
       setOverflowMenuTabIds([]);
     }
   }, [hasHorizontalOverflow, overflowMenuOpen]);
-
-  React.useEffect(() => {
-    if (hasHorizontalOverflow) {
-      revealTopScrollTemporarily();
-      return;
-    }
-    clearTopScrollHideTimer();
-    setTopScrollVisible(false);
-  }, [clearTopScrollHideTimer, hasHorizontalOverflow, revealTopScrollTemporarily]);
-
-  React.useEffect(() => () => {
-    clearTopScrollHideTimer();
-  }, [clearTopScrollHideTimer]);
 
   React.useEffect(() => {
     if (!overflowMenuOpen) return;
@@ -1165,8 +1080,7 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
     if (!wrapper || !topScroll) return;
     if (Math.abs(wrapper.scrollLeft - topScroll.scrollLeft) <= 1) return;
     wrapper.scrollLeft = topScroll.scrollLeft;
-    revealTopScrollTemporarily();
-  }, [revealTopScrollTemporarily]);
+  }, []);
 
   const captureTabLayouts = React.useCallback(() => {
     const layouts = new Map<string, TabLayoutSnapshot>();
@@ -1419,27 +1333,16 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
     });
   }, [captureTabLayouts, draggingTabId, reorderTick, tabItems]);
 
-  if (tabItems.length === 0 && renderedTabItems.length === 0) return null;
+  if (!hasRenderedTabs) return null;
   const draggingItem = draggingTabId ? (renderedTabItems.find(item => item.id === draggingTabId) ?? null) : null;
 
   return (
     <>
-      <TabsFrame
-        className="file-tabs-bar"
-        $scrollVisible={hasHorizontalOverflow && topScrollVisible}
-        onMouseEnter={() => {
-          tabsHoveringRef.current = true;
-          revealTopScrollTemporarily();
-        }}
-        onMouseLeave={() => {
-          tabsHoveringRef.current = false;
-          hideTopScrollSoon();
-        }}
-      >
+      <TabsFrame className="file-tabs-bar">
         <TabsTopScroll
           ref={topScrollRef}
           className="tabs-top-scroll"
-          $visible={hasHorizontalOverflow && topScrollVisible}
+          $visible={hasHorizontalOverflow}
           onScroll={handleTopScroll}
         >
           <TabsTopScrollInner style={{ width: `${Math.max(tabsScrollWidth, 0)}px` }} />
@@ -1657,7 +1560,6 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
                         onClick={() => {
                           item.tab.onActivate();
                           setOverflowMenuOpen(false);
-                          hideTopScrollAfterAction();
                         }}
                       >
                         <SystemTabIcon />
@@ -1673,7 +1575,6 @@ const FileTabsBar: React.FC<FileTabsBarProps> = ({
                       onClick={() => {
                         onActivate(item.tab.id);
                         setOverflowMenuOpen(false);
-                        hideTopScrollAfterAction();
                       }}
                     >
                       <FileTabIcon tab={item.tab} />

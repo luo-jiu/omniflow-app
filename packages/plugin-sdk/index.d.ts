@@ -18,7 +18,8 @@ export interface ResourceReference { kind?: 'file' | 'directory'; handle: string
 interface PluginContextBase { pluginId: string; capabilities: readonly string[]; resource: ResourceReference | null; readGranted: boolean; theme: ThemeSnapshot; }
 export interface PluginViewerContext extends PluginContextBase { kind?: 'viewer'; viewerId: string; }
 export interface PluginToolContext extends PluginContextBase { kind: 'tool'; toolId: string; output?: PluginFileOutputDeclaration; }
-export type PluginContext = PluginViewerContext | PluginToolContext;
+export interface PluginWorkspaceContext extends PluginContextBase { kind: 'workspace'; workspaceId: string; commandId: string; }
+export type PluginContext = PluginViewerContext | PluginToolContext | PluginWorkspaceContext;
 export interface PluginToolSchema {
   type: 'object' | 'array' | 'string' | 'integer' | 'number' | 'boolean' | 'null';
   description?: string;
@@ -62,6 +63,8 @@ export type PluginCommandLocation = 'file-menu' | 'tool-workspace';
 export interface PluginCommandContribution {
   id: string; title: string; toolId: string; locations: PluginCommandLocation[];
 }
+/** Isolated custom UI for a single-file manual command in the same package. */
+export interface PluginWorkspaceContribution { id: string; title: string; entry: string; commandId: string; }
 export interface PluginMetadataFile { id: string; name: string; }
 export interface PluginRenameProposal { changes: Array<{ id: string; name: string }>; }
 export interface PluginRenameProposalInput { parameters: Record<string, unknown>; files: PluginMetadataFile[]; }
@@ -72,6 +75,8 @@ export type PluginEvent = { version: 1; type: 'theme'; theme: ThemeSnapshot } | 
 export interface PluginClient {
   context(): Promise<PluginContext>;
   ready(): Promise<null>;
+  /** Requests host-owned preparation only; no output destination or write approval is accepted. */
+  prepareWorkspaceCommand(parameters: Record<string, unknown>): Promise<{ requestId: string }>;
   toolInvocation(): Promise<PluginToolInvocation>;
   completeTool(invocationId: string, output: unknown): Promise<null>;
   completeFileOutput(invocationId: string, output: PluginFileOutput): Promise<null>;

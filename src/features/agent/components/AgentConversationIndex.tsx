@@ -1,5 +1,6 @@
 import React from 'react';
 import OutlineIcon from '@/components/ui/outline-icon';
+import { workspaceScrollbarStyles } from '@/components/ui/workspace-scrollbar';
 import styled from 'styled-components';
 import type { AgentMessage, AgentRunSnapshot } from '@/shared/agent/agent.types';
 import { buildConversationIndex, indexMilestone, parseIndexMarks, resolveIndexPreviewTop } from '../agent-conversation-index';
@@ -26,10 +27,12 @@ const Dial = styled.aside`
     --dial-green: #397c5a; --dial-yellow: #98721e; --dial-red: #bd4646;
     --dial-violet: var(--workspace-nav-accent, #7850b8); --dial-rose-light: #bd5d7b;
   }
-  .dial-scroll { height: 100%; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-width: none; }
-  .dial-scroll::-webkit-scrollbar { display: none; }
+  .dial-scroll {
+    height: 100%; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain;
+    ${workspaceScrollbarStyles}
+  }
   .dial-tick {
-    position: relative; width: 44px; height: ${TICK_HEIGHT}px;
+    position: relative; width: 100%; height: ${TICK_HEIGHT}px;
     padding: 0 0 0 14px; border: 0; display: flex;
     align-items: center; justify-content: flex-start; background: transparent; cursor: pointer;
     color: var(--tick-color, var(--app-text-muted));
@@ -45,6 +48,7 @@ const Dial = styled.aside`
   .dial-tick[data-hovered='true'] .dial-stroke { opacity: 1; }
   .dial-tick:focus-visible { outline: 1px solid var(--semi-color-primary); outline-offset: -1px; }
   .dial-preview {
+    ${workspaceScrollbarStyles}
     position: absolute; left: 44px; top: var(--preview-top); width: min(310px, calc(100vw - 96px));
     padding: 12px; border: 1px solid var(--app-border); border-radius: 8px;
     background: var(--app-bg-elevated); color: var(--app-text); box-shadow: var(--app-shadow);

@@ -1,4 +1,5 @@
 import styled from 'styled-components';
+import { workspaceScrollbarStyles } from '@/components/ui/workspace-scrollbar';
 
 export const ComicArchiveViewerWrapper = styled.div`
   --archive-card-width: 275px;
@@ -43,40 +44,7 @@ export const ComicArchiveViewerWrapper = styled.div`
     scrollbar-gutter: stable;
     padding: 13px 13px 15px;
     background: var(--app-bg);
-    scrollbar-width: thin;
-    scrollbar-color: transparent transparent;
-  }
-
-  .table-surface::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
-  }
-
-  .table-surface::-webkit-scrollbar-track {
-    background: var(--app-scrollbar-track);
-  }
-
-  .table-surface::-webkit-scrollbar-thumb {
-    background: transparent;
-    border-radius: 999px;
-  }
-
-  .table-surface:hover,
-  .table-surface:focus-within,
-  .table-surface:active {
-    scrollbar-color: var(--app-scrollbar-thumb) var(--app-scrollbar-track);
-  }
-
-  .table-surface:hover::-webkit-scrollbar-thumb,
-  .table-surface:focus-within::-webkit-scrollbar-thumb,
-  .table-surface:active::-webkit-scrollbar-thumb {
-    background: var(--app-scrollbar-thumb);
-  }
-
-  .table-surface:hover::-webkit-scrollbar-thumb:hover,
-  .table-surface:focus-within::-webkit-scrollbar-thumb:hover,
-  .table-surface:active::-webkit-scrollbar-thumb:hover {
-    background: var(--app-scrollbar-thumb-hover);
+    ${workspaceScrollbarStyles}
   }
 
   .state-wrap {

@@ -4,6 +4,7 @@ import { PluginSettingsStore } from './plugin-settings-store';
 import { loadPluginPackage, type LoadedPluginPackage } from './manifest';
 import { createPluginToolSnapshot, isPluginCommandToolAllowed, isPluginToolAllowed, type PluginToolInvocationMode } from './plugin-tool-catalog';
 import type { ManagedPlugin, PluginCatalog, PluginInstallReview, PluginManagementAction } from '../../../src/shared/plugin-management';
+import { isPluginWorkspaceAllowed } from '../../../src/shared/plugin-management';
 
 export type PluginRuntimeStopReason = 'operation' | 'fault';
 
@@ -51,10 +52,10 @@ export class PluginManager {
     const runtimeBlock = this.runtimeUnavailable ? '运行时停止失败，请重启应用后检查。' : this.resettingSettings ? '正在重置插件设置' : undefined;
     const plugins: ManagedPlugin[] = state.plugins.map(item => ({ id:item.manifest.id,version:item.manifest.version,fingerprint:item.fingerprint,
       enabled:item.enabled,readApproved:item.readApproved,toolApproved:item.toolApproved,renameApproved:item.renameApproved,outputApproved:item.outputApproved,source:'local',installedAt:item.installedAt,previousVersion:item.previous?.manifest.version,
-      viewers:item.manifest.viewers,agentTools:item.manifest.agentTools ?? [],commands:item.manifest.commands ?? [],permissions:item.manifest.permissions,running:this.running.get(item.manifest.id)??0,
+      viewers:item.manifest.viewers,agentTools:item.manifest.agentTools ?? [],commands:item.manifest.commands ?? [],workspaces:item.manifest.workspaces ?? [],permissions:item.manifest.permissions,running:this.running.get(item.manifest.id)??0,
       blockedReason:runtimeBlock??(this.operating.has(item.manifest.id)?'操作进行中':this.blocked.get(item.manifest.id)??(item.failure?'运行异常：'+item.failure:undefined)??(safeMode?'恢复模式阻止第三方运行':undefined)) }));
     if(this.bundled) { const flags=state.bundled??{enabled:true,readApproved:true,toolApproved:false};plugins.unshift({id:this.bundled.manifest.id,version:this.bundled.manifest.version,fingerprint:this.bundled.fingerprint,
-      ...flags,toolApproved:flags.toolApproved && flags.toolFingerprint===this.bundled.fingerprint,renameApproved:Boolean(flags.renameApproved && flags.renameFingerprint===this.bundled.fingerprint),outputApproved:Boolean(flags.outputApproved && flags.outputFingerprint===this.bundled.fingerprint),source:'bundled',installedAt:'随应用提供',viewers:this.bundled.manifest.viewers,agentTools:this.bundled.manifest.agentTools ?? [],commands:this.bundled.manifest.commands ?? [],permissions:this.bundled.manifest.permissions,running:this.running.get(this.bundled.manifest.id)??0,
+      ...flags,toolApproved:flags.toolApproved && flags.toolFingerprint===this.bundled.fingerprint,renameApproved:Boolean(flags.renameApproved && flags.renameFingerprint===this.bundled.fingerprint),outputApproved:Boolean(flags.outputApproved && flags.outputFingerprint===this.bundled.fingerprint),source:'bundled',installedAt:'随应用提供',viewers:this.bundled.manifest.viewers,agentTools:this.bundled.manifest.agentTools ?? [],commands:this.bundled.manifest.commands ?? [],workspaces:this.bundled.manifest.workspaces ?? [],permissions:this.bundled.manifest.permissions,running:this.running.get(this.bundled.manifest.id)??0,
       blockedReason:runtimeBlock??(this.operating.has(this.bundled.manifest.id)?'操作进行中':this.blocked.get(this.bundled.manifest.id)??(flags.failure?'运行异常：'+flags.failure:undefined))}); }
     return { revision:this.revision,safeMode,settingsRecoveryRequired:this.settings.needsRecovery,recoveryReason:this.forcedSafeMode?'启动参数强制禁用第三方，移除参数并重启后才能解除。':this.installs.recoveryReason,plugins,logs:structuredClone(this.logs) };
   }
@@ -64,6 +65,14 @@ export class PluginManager {
     return { plugin, directory:plugin.source==='bundled'?this.bundledDirectory:this.installs.directory(plugin.fingerprint) };
   }
   stillAllowed(viewerId: string, fingerprint: string) { try{return this.resolve(viewerId).plugin.fingerprint===fingerprint;}catch{return false;} }
+  resolveWorkspace(workspaceId: string, expectedFingerprint?: string) {
+    const plugin = this.catalog().plugins.find(item => item.workspaces?.some(workspace => workspace.id === workspaceId));
+    const workspace = plugin?.workspaces?.find(item => item.id === workspaceId);
+    if (!plugin || !workspace || !isPluginWorkspaceAllowed(plugin, workspace)) throw new Error('PLUGIN_BLOCKED');
+    if (expectedFingerprint !== undefined && plugin.fingerprint !== expectedFingerprint) throw new Error('PLUGIN_VERSION_CHANGED');
+    return { plugin, workspace, directory:plugin.source === 'bundled' ? this.bundledDirectory : this.installs.directory(plugin.fingerprint) };
+  }
+  stillWorkspaceAllowed(workspaceId: string, fingerprint: string) { try { return this.resolveWorkspace(workspaceId, fingerprint).plugin.fingerprint === fingerprint; } catch { return false; } }
   toolSnapshot(reservedToolNames: readonly string[] = [], mode: PluginToolInvocationMode = 'agent') { return createPluginToolSnapshot(this.catalog().plugins, reservedToolNames, mode); }
   resolveTool(toolId: string, expectedFingerprint?: string, mode: PluginToolInvocationMode = 'agent') {
     const registration = this.toolSnapshot([], mode).find(item => item.contribution.id === toolId);

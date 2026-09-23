@@ -32,6 +32,8 @@
 
 ## 2. 当前基础与缺口
 
+M2 增量：SDK 0.7.0 增加 `workspaces` 贡献，已安装插件可在工具导航提供独立隔离页面。宿主绑定来源、账号、库、包版本和另存目标，插件请求准备后复用 M1 审批/执行；JSON 转换样板新增字段勾选及结果预览。此能力不向主窗口注入 React、不开放插件直接提交，实际验收范围见 [M2](plugin-system-m2-tool-workspaces.md)。
+
 M1 增量：SDK 0.6.0 增加已安装包的声明式命令，文件右键和工具工作区使用同一宿主表单与独立执行记录。手动入口复用读取/改名/产物能力及批准流程，不依赖模型或 Agent Tool 批准。真实 Win/local-minio 的 JSON 手动拒绝/另存已验证；不开放任意自定义 React 页面或任意宿主命令，范围见 [M1](plugin-system-m1-manual-commands.md)。
 
 W3 增量：SDK 0.5.0 的 `file-output`、独立文件产物权限、main 私有 artifact 与新文件批准/上传已完成本批限定 macOS 验收。真实 gpt-5.5 在 Win/local-minio 将 CSV 完整另存 JSON，字节、摘要、回执及源元数据保持已核对；宿主固定回执查询是显式只读网络动作，其本机终态核对有 CAS 审计。未知查询 UI 仅自动化覆盖，真实故障/重启后点击未手验；不扩大覆盖写入、多产物或自动续作能力，见 [W3](plugin-system-w3-file-output.md)。

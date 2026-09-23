@@ -180,7 +180,7 @@ export function createPluginCommandService(options: PluginCommandServiceOptions)
       checkSender(sender); exact(input, ['ownerScope', 'libraryId']); const bound = scope(input);
       return options.store.all().filter(record => sameScope(record, bound)).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     },
-    async prepare(sender: WebContents, input: PluginCommandPrepareRequest): Promise<PluginCommandExecution> {
+    async prepare(sender: WebContents, input: PluginCommandPrepareRequest, onCreated?: (execution: PluginCommandExecution) => void): Promise<PluginCommandExecution> {
       checkSender(sender); exact(input, ['ownerScope', 'libraryId', 'pluginId', 'commandId', 'nodeIds', 'parameters', 'destination']);
       const bound = scope(input);
       if (active.size >= 8) throw new Error('正在执行的插件命令过多，请稍后再试');
@@ -210,6 +210,7 @@ export function createPluginCommandService(options: PluginCommandServiceOptions)
       active.set(record.id, execution);
       try {
         publish(record);
+        onCreated?.(structuredClone(record));
         if (execution.kind !== 'rename-proposal' && execution.kind !== 'file-output') {
           const request = requestFor(execution);
           const resource = await openResource(request.authority, request.assertCurrent);

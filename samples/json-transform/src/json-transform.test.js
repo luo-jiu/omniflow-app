@@ -3,7 +3,7 @@ import { JsonTransformError, transformJson, validateTransformInput } from './jso
 import { runJsonTransform } from './tool-runner.js';
 
 describe('JSON transform sample', () => {
-  it('supports object and array roots, field selection, equality filtering and pretty output', () => {
+  it('supports object and array roots, field selection and pretty output', () => {
     expect(transformJson('{"name":"Omni","secret":1}', { select: ['name'] })).toEqual({ mediaType: 'application/json', text: '{"name":"Omni"}' });
     expect(JSON.parse(transformJson('[{"name":"a"},{"name":"b"}]', { pretty: true }).text)).toEqual([{ name: 'a' }, { name: 'b' }]);
   });

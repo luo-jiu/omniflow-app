@@ -2,6 +2,7 @@ import React from 'react'
 import { Input, Modal, Spin, Toast } from '@douyinfe/semi-ui'
 import { IconArrowLeft, IconChevronDown, IconChevronRight, IconDelete, IconSearch } from '@douyinfe/semi-icons'
 import styled from 'styled-components'
+import { workspaceScrollbarStyles } from '@/components/ui/workspace-scrollbar'
 import {
   fetchEmbeddedBrowserCookies,
   groupCookiesByDomain,
@@ -439,6 +440,7 @@ const CookieSettingsContainer = styled.div`
   }
 
   .cookie-list {
+    ${workspaceScrollbarStyles}
     flex: 1;
     min-height: 0;
     overflow-y: auto;
@@ -611,6 +613,7 @@ const CookieSettingsContainer = styled.div`
     user-select: text;
 
     &.scrollable {
+      ${workspaceScrollbarStyles}
       max-height: 120px;
       overflow-y: auto;
       padding: 8px 10px;

@@ -2,6 +2,7 @@ import React from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import OutlineIcon from '@/components/ui/outline-icon';
+import { workspaceScrollbarStyles } from '@/components/ui/workspace-scrollbar';
 import { Toast } from '@douyinfe/semi-ui';
 import styled from 'styled-components';
 import { resolveCodeFenceLanguage } from '@/components/code/language';
@@ -43,6 +44,7 @@ const Content = styled.div`
   }
   pre { padding: 12px; margin: 0; overflow: auto; max-height: min(330px, 42vh); white-space: pre; }
   .agent-table { max-width: 100%; overflow: auto; }
+  pre, .agent-table { ${workspaceScrollbarStyles} }
   table { border-collapse: collapse; } th, td { border: 1px solid var(--app-border); padding: 6px 10px; }
   button { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px;
     border: 0; border-radius: 4px; background: transparent; color: var(--app-text-muted); cursor: pointer; }

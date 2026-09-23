@@ -2,6 +2,7 @@ import React from 'react';
 import styled, { createGlobalStyle } from 'styled-components';
 import { Empty, Modal, Spin } from '@douyinfe/semi-ui';
 import { IconFile, IconFolder } from '@douyinfe/semi-icons';
+import { workspaceScrollbarStyles } from '@/components/ui/workspace-scrollbar';
 
 import {
   getChildrenByNodeId,
@@ -109,6 +110,7 @@ const ModalBody = styled.div`
     height: clamp(260px, 38vh, 318px);
     min-height: 0;
     overflow: auto;
+    ${workspaceScrollbarStyles}
     border: 1px solid var(--app-border);
     border-radius: 8px;
     background: var(--app-bg-elevated);

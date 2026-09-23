@@ -1,4 +1,5 @@
 import styled from 'styled-components';
+import { workspaceScrollbarStyles } from '@/components/ui/workspace-scrollbar';
 
 export const GalleryViewerWrapper = styled.div`
   width: 100%;
@@ -100,34 +101,7 @@ export const GalleryViewerWrapper = styled.div`
     scrollbar-gutter: stable;
     padding: 18px 24px 28px;
     display: block;
-    scrollbar-width: thin;
-    scrollbar-color: transparent transparent;
-  }
-
-  .gallery-grid::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
-  }
-
-  .gallery-grid::-webkit-scrollbar-track {
-    background: var(--app-scrollbar-track);
-  }
-
-  .gallery-grid::-webkit-scrollbar-thumb {
-    background: transparent;
-    border-radius: 999px;
-  }
-
-  .gallery-grid:hover,
-  .gallery-grid:focus-within,
-  .gallery-grid:active {
-    scrollbar-color: var(--app-scrollbar-thumb) var(--app-scrollbar-track);
-  }
-
-  .gallery-grid:hover::-webkit-scrollbar-thumb,
-  .gallery-grid:focus-within::-webkit-scrollbar-thumb,
-  .gallery-grid:active::-webkit-scrollbar-thumb {
-    background: var(--app-scrollbar-thumb);
+    ${workspaceScrollbarStyles}
   }
 
   .gallery-card {

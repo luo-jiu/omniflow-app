@@ -7,6 +7,7 @@ import {
   IconFolder,
 } from '@douyinfe/semi-icons';
 import styled from 'styled-components';
+import { workspaceScrollbarStyles } from '@/components/ui/workspace-scrollbar';
 import { formatSize } from '@/utils/formatSize';
 import { DirectoryTreeCompactModalStyle } from './compact-modal-style';
 import { formatStorageProviderAlias } from './storage-provider-display';
@@ -144,6 +145,7 @@ const Content = styled.div`
   .file-list {
     max-height: 180px;
     overflow-y: auto;
+    ${workspaceScrollbarStyles}
     border: 0;
     padding: 0;
     background: transparent;

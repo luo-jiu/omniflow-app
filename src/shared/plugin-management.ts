@@ -1,4 +1,4 @@
-import type { PluginCommandContribution, PluginToolContribution } from '../../packages/plugin-sdk/index.js';
+import type { PluginCommandContribution, PluginToolContribution, PluginWorkspaceContribution } from '../../packages/plugin-sdk/index.js';
 
 export interface ManagedPlugin {
   id: string; version: string; fingerprint: string; enabled: boolean; readApproved: boolean; toolApproved?: boolean; renameApproved?: boolean; outputApproved?: boolean;
@@ -6,6 +6,7 @@ export interface ManagedPlugin {
   viewers: Array<{ id: string; title: string; extensions: string[]; directoryTypes?: Array<'COMIC'> }>;
   agentTools?: PluginToolContribution[];
   commands?: PluginCommandContribution[];
+  workspaces?: PluginWorkspaceContribution[];
   permissions: string[]; blockedReason?: string; running: number;
 }
 /** Manual commands use declared resource capabilities; Agent access remains an independent grant. */
@@ -19,6 +20,14 @@ export function isPluginCommandAllowed(plugin: ManagedPlugin, command: PluginCom
     : tool.kind === 'file-output'
       ? Boolean(plugin.readApproved && plugin.outputApproved && plugin.permissions.includes('resource.read') && plugin.permissions.includes('resource.output.propose'))
       : Boolean(plugin.readApproved && plugin.permissions.includes('resource.read'));
+}
+/** A workspace may only prepare its declared single-file command through the trusted host. */
+export function isPluginWorkspaceAllowed(plugin: ManagedPlugin, workspace: PluginWorkspaceContribution): boolean {
+  if (!workspace.id.startsWith(`${plugin.id}.`) || !plugin.workspaces?.some(item => item.id === workspace.id
+    && item.commandId === workspace.commandId && item.entry === workspace.entry && item.title === workspace.title)) return false;
+  const command = plugin.commands?.find(item => item.id === workspace.commandId);
+  const tool = plugin.agentTools?.find(item => item.id === command?.toolId);
+  return Boolean(command && tool && tool.kind !== 'rename-proposal' && isPluginCommandAllowed(plugin, command));
 }
 export interface PluginCatalog { revision: number; safeMode: boolean; settingsRecoveryRequired?: boolean; recoveryReason?: string; plugins: ManagedPlugin[]; logs: Array<{ time: string; pluginId?: string; action: string; code: string; instanceId?: string; requestTag?: string }> }
 export interface PluginInstallReview { ticket: string; id: string; version: string; fingerprint: string; previousVersion?: string; permissions: string[]; addedPermissions: string[]; fileName: string }

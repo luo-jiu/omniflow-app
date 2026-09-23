@@ -1,4 +1,5 @@
 import styled from 'styled-components';
+import { workspaceScrollbarStyles } from '@/components/ui/workspace-scrollbar';
 
 export const GalleryArchiveViewerWrapper = styled.div`
   --archive-card-width: 220px;
@@ -19,34 +20,7 @@ export const GalleryArchiveViewerWrapper = styled.div`
     scrollbar-gutter: stable;
     padding: 18px;
     background: var(--app-bg);
-    scrollbar-width: thin;
-    scrollbar-color: transparent transparent;
-  }
-
-  .gallery-archive-surface::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
-  }
-
-  .gallery-archive-surface::-webkit-scrollbar-track {
-    background: var(--app-scrollbar-track);
-  }
-
-  .gallery-archive-surface::-webkit-scrollbar-thumb {
-    background: transparent;
-    border-radius: 999px;
-  }
-
-  .gallery-archive-surface:hover,
-  .gallery-archive-surface:focus-within,
-  .gallery-archive-surface:active {
-    scrollbar-color: var(--app-scrollbar-thumb) var(--app-scrollbar-track);
-  }
-
-  .gallery-archive-surface:hover::-webkit-scrollbar-thumb,
-  .gallery-archive-surface:focus-within::-webkit-scrollbar-thumb,
-  .gallery-archive-surface:active::-webkit-scrollbar-thumb {
-    background: var(--app-scrollbar-thumb);
+    ${workspaceScrollbarStyles}
   }
 
   .gallery-archive-grid {

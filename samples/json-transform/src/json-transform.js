@@ -27,12 +27,17 @@ function project(value, select) {
   return Object.fromEntries(select.filter(key => own(value, key)).map(key => [key, value[key]]));
 }
 
-export function transformJson(text, input, maxBytes = MAX_OUTPUT_BYTES) {
-  const options = validateTransformInput(input);
+export function parseJsonSource(text) {
   if (typeof text !== 'string' || !text.trim()) throw new JsonTransformError('UNSUPPORTED_FORMAT', 'JSON 文件不能为空');
   let value;
   try { value = JSON.parse(text); } catch { throw new JsonTransformError('UNSUPPORTED_FORMAT', 'JSON 格式无效'); }
   if (value === null || (typeof value !== 'object')) throw new JsonTransformError('UNSUPPORTED_FORMAT', 'JSON 根必须是对象或数组');
+  return value;
+}
+
+export function transformJson(text, input, maxBytes = MAX_OUTPUT_BYTES) {
+  const options = validateTransformInput(input);
+  const value = parseJsonSource(text);
   const result = project(value, options.select);
   const output = JSON.stringify(result, null, options.pretty ? 2 : 0);
   const bytes = new TextEncoder().encode(output);

@@ -1,6 +1,6 @@
 import { randomUUID, createHash } from 'node:crypto';
 import { LIMITS, type PluginMetadataFile, type ThemeSnapshot } from '../../../packages/plugin-sdk/index.js';
-import type { PluginManifest, PluginToolContribution } from './manifest';
+import type { PluginManifest, PluginToolContribution, PluginWorkspaceContribution } from './manifest';
 import { validateToolOutput } from './tool-schema';
 import { decodeFileOutput } from './file-output';
 
@@ -11,6 +11,10 @@ export interface PluginToolExecution {
   complete(output: unknown): void;
   reject(error: PluginFault): void;
   fail(code: 'INVALID_INPUT' | 'UNSUPPORTED_FORMAT' | 'FAILED'): void;
+}
+export interface PluginWorkspaceExecution {
+  contribution: PluginWorkspaceContribution;
+  prepare(parameters: Record<string, unknown>, signal: AbortSignal): Promise<{ requestId: string }> | { requestId: string };
 }
 
 export class PluginFault extends Error { constructor(readonly code: string, message: string) { super(message); } }
@@ -83,6 +87,20 @@ function fields(params: Record<string, unknown>, names: string[]) {
 }
 function integer(value: unknown, min: number, max: number): value is number { return typeof value === 'number' && Number.isSafeInteger(value) && value >= min && value <= max; }
 function settingKey(value: unknown): value is string { return typeof value === 'string' && /^[a-z][a-z0-9.-]{0,63}$/.test(value); }
+function workspaceParameters(value: unknown): asserts value is Record<string, unknown> {
+  if (!object(value) || ['resource', 'resources', 'destination'].some(key => Object.prototype.hasOwnProperty.call(value, key))) throw new PluginFault('BAD_REQUEST', 'Invalid workspace parameters');
+  let nodes = 0;
+  function visit(item: unknown, depth: number): void {
+    if (++nodes > 4096 || depth > 22) throw new PluginFault('LIMIT', 'Workspace parameters exceeded budget');
+    if (item === null || typeof item === 'string' || typeof item === 'boolean' || (typeof item === 'number' && Number.isFinite(item))) return;
+    if (!Array.isArray(item) && !object(item)) throw new PluginFault('BAD_REQUEST', 'Invalid workspace parameters');
+    for (const [key, child] of Object.entries(item)) {
+      if (['__proto__', 'constructor', 'prototype'].includes(key)) throw new PluginFault('BAD_REQUEST', 'Invalid workspace parameter key');
+      visit(child, depth + 1);
+    }
+  }
+  visit(value, 0);
+}
 
 export function validateTheme(theme: ThemeSnapshot): ThemeSnapshot {
   if (!theme || theme.schemaVersion !== 1 || !Number.isSafeInteger(theme.revision) || theme.revision < 0
@@ -110,7 +128,15 @@ export class PluginResourceBroker {
   readonly settingsScope: string;
   readonly stateScope: string;
   constructor(readonly manifest: PluginManifest, readonly resource: PluginResourceAuthority, private theme: ThemeSnapshot,
-    private settings: PluginSettingsAccess, private diagnostic: (event: { method: string; code: string; elapsedMs: number; requestTag?: string }) => void = () => undefined, private readingState: PluginReadingStateStore = new PluginReadingStateMemory(), private execution?: PluginToolExecution) {
+    private settings: PluginSettingsAccess, private diagnostic: (event: { method: string; code: string; elapsedMs: number; requestTag?: string }) => void = () => undefined, private readingState: PluginReadingStateStore = new PluginReadingStateMemory(), private execution?: PluginToolExecution, private workspaceExecution?: PluginWorkspaceExecution) {
+    if (workspaceExecution) {
+      const workspace = manifest.workspaces?.find(item => item.id === workspaceExecution.contribution.id);
+      const command = manifest.commands?.find(item => item.id === workspace?.commandId);
+      const tool = manifest.agentTools?.find(item => item.id === command?.toolId);
+      if (execution || !workspace || JSON.stringify(workspace) !== JSON.stringify(workspaceExecution.contribution) || !command || !tool
+        || tool.kind === 'rename-proposal' || isMetadataResourceAuthority(resource) || resource.directory
+        || !manifest.permissions.includes('resource.read') || (tool.kind === 'file-output' && !manifest.permissions.includes('resource.output.propose'))) throw new Error('Invalid workspace resource scope');
+    }
     // Manager/runtime authorize the caller; a declared manual entry does not require AI discovery permission.
     const toolEntryDeclared = manifest.permissions.includes('agent.tools') || Boolean(execution
       && manifest.agentTools?.some(tool => tool.id === execution.contribution.id)
@@ -127,7 +153,7 @@ export class PluginResourceBroker {
     }
     this.theme = validateTheme(theme);
     this.settingsScope = JSON.stringify([manifest.id, resource.accountScope, resource.libraryId]);
-    this.stateScope = execution || isMetadataResourceAuthority(resource) ? '' : JSON.stringify([manifest.id, resource.accountScope, resource.libraryId, resource.nodeId, manifest.viewers[0].id, resource.revision]);
+    this.stateScope = execution || workspaceExecution || isMetadataResourceAuthority(resource) ? '' : JSON.stringify([manifest.id, resource.accountScope, resource.libraryId, resource.nodeId, manifest.viewers[0].id, resource.revision]);
   }
   setReadGrant(granted: boolean) { this.granted = granted; if (!granted) { this.children.clear(); for (const controller of this.inFlight.values()) controller.abort(); } }
   setTheme(theme: ThemeSnapshot) { const next = validateTheme(theme); if (next.revision <= this.theme.revision) return false; this.theme = next; return true; }
@@ -193,7 +219,7 @@ export class PluginResourceBroker {
       }
       const messages: Record<string, string> = { BAD_REQUEST: 'Invalid request', LIMIT: 'Capability limit reached', FORBIDDEN: 'Access denied', UNAVAILABLE: 'Instance unavailable', CANCELLED: 'Request cancelled', TIMEOUT: 'Request timed out', CONTENT_CHANGED: 'Resource changed', CONFLICT: 'Setting revision changed', UNSUPPORTED: 'Capability unavailable', INTERNAL: 'Host request failed' };
       const code = Object.prototype.hasOwnProperty.call(messages, fault.code) ? fault.code : 'INTERNAL';
-      const safeMethod = ['context.get', 'tool.invocation', 'tool.complete', 'tool.output.complete', 'tool.fail', 'directory.list', 'directory.open', 'resource.release', 'resource.read', 'settings.get', 'settings.set', 'state.get', 'state.set', 'lifecycle.ready', 'lifecycle.pong', 'request.cancel'].includes(method) ? method : 'unknown';
+      const safeMethod = ['context.get', 'workspace.prepare', 'tool.invocation', 'tool.complete', 'tool.output.complete', 'tool.fail', 'directory.list', 'directory.open', 'resource.release', 'resource.read', 'settings.get', 'settings.set', 'state.get', 'state.set', 'lifecycle.ready', 'lifecycle.pong', 'request.cancel'].includes(method) ? method : 'unknown';
       this.diagnostic({ method: safeMethod, code, elapsedMs: Date.now() - start, requestTag: id ? createHash('sha256').update(id).digest('hex').slice(0,12) : undefined });
       return JSON.stringify({ version: 1, id, ok: false, error: { code, message: messages[code] } });
     }
@@ -203,6 +229,10 @@ export class PluginResourceBroker {
       fields(params, []);
       if (isMetadataResourceAuthority(this.resource)) return { kind: 'tool', pluginId: this.manifest.id, toolId: this.execution!.contribution.id,
         capabilities: ['resource.rename.propose', 'tool.invoke', 'lifecycle'], resource: null, readGranted: false, theme: this.theme };
+      if (this.workspaceExecution) return { kind: 'workspace', pluginId: this.manifest.id, workspaceId: this.workspaceExecution.contribution.id, commandId: this.workspaceExecution.contribution.commandId,
+        capabilities: ['resource.read', 'theme', 'lifecycle', 'workspace.prepare'],
+        resource: { kind: 'file', handle: this.handle, name: this.resource.name, size: this.resource.size, revision: this.resource.revision },
+        readGranted: this.granted, theme: this.theme };
       if (this.execution) return { kind: 'tool', pluginId: this.manifest.id, toolId: this.execution.contribution.id,
         capabilities: ['resource.read', ...(this.execution.contribution.kind === 'file-output' ? ['resource.output.propose'] : []), 'tool.invoke', 'lifecycle'],
         ...(this.execution.contribution.kind === 'file-output' ? { output: structuredClone(this.execution.contribution.output) } : {}),
@@ -213,6 +243,21 @@ export class PluginResourceBroker {
     if (method === 'lifecycle.ready') { fields(params, []); this.ready = true; this.lastPong = Date.now(); return null; }
     if (method === 'lifecycle.pong') { fields(params, ['nonce']); if (params.nonce !== this.heartbeatNonce) throw new PluginFault('BAD_REQUEST', 'Invalid heartbeat'); this.lastPong = Date.now(); return null; }
     if (!this.ready) throw new PluginFault('UNAVAILABLE', 'Instance not ready');
+    if (this.workspaceExecution) {
+      if (method === 'workspace.prepare') {
+        fields(params, ['parameters']); workspaceParameters(params.parameters);
+        if (!this.granted || !await this.resource.authorize(signal)) throw new PluginFault('FORBIDDEN', 'Workspace access revoked');
+        if (await this.resource.currentRevision(signal) !== this.resource.revision) throw new PluginFault('CONTENT_CHANGED', 'Workspace resource changed');
+        this.checkActive(signal);
+        if (!this.granted) throw new PluginFault('FORBIDDEN', 'Workspace access revoked');
+        const result = await this.workspaceExecution.prepare(structuredClone(params.parameters), signal);
+        this.checkActive(signal);
+        if (!object(result) || Object.keys(result).length !== 1 || typeof result.requestId !== 'string'
+          || !/^[a-zA-Z0-9_-]{1,64}$/.test(result.requestId)) throw new PluginFault('INTERNAL', 'Invalid preparation response');
+        return { requestId: result.requestId };
+      }
+      if (method !== 'resource.read') throw new PluginFault('UNSUPPORTED', 'Workspace capability unavailable');
+    }
     if (this.execution) {
       if (this.toolTerminal !== 'open') throw new PluginFault('UNAVAILABLE', 'Tool already settled');
       if (method === 'tool.invocation' || method === 'tool.complete' || method === 'tool.output.complete' || method === 'tool.fail') {

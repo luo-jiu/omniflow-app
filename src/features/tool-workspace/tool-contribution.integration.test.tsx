@@ -11,6 +11,7 @@ vi.mock('./ToolWorkspaceMedia', () => ({ default: () => null }));
 vi.mock('./ToolWorkspaceQQMusicLyrics', () => ({ default: () => null }));
 vi.mock('@/features/media-tools/LibraryMediaTool', () => ({ default: () => null }));
 vi.mock('@/features/ai-services/AIServiceWorkspace', () => ({ default: () => null }));
+vi.mock('@/features/plugin-workspaces/PluginWorkspace', () => ({ default: () => null }));
 vi.mock('@/features/plugin-commands/PluginCommandWorkspace', () => ({ default: ({ request, selectedNodeIds }: { request?: { commandId: string }; selectedNodeIds?: number[] }) => (
   <div data-testid="manual-command-view" data-command={request?.commandId} data-selection={selectedNodeIds?.join(',')} />
 ) }));

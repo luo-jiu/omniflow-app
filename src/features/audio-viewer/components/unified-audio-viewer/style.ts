@@ -1,4 +1,5 @@
 import styled from 'styled-components';
+import { workspaceScrollbarStyles } from '@/components/ui/workspace-scrollbar';
 
 export const UnifiedAudioViewerWrapper = styled.div`
   /* Shared by bare audio, semantic audio folders, and audio archives. */
@@ -18,34 +19,7 @@ export const UnifiedAudioViewerWrapper = styled.div`
     min-height: 0;
     overflow: auto;
     padding: 12px 10px 92px;
-    scrollbar-width: thin;
-    scrollbar-color: transparent transparent;
-  }
-
-  .archive-main::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
-  }
-
-  .archive-main::-webkit-scrollbar-track {
-    background: var(--app-scrollbar-track);
-  }
-
-  .archive-main::-webkit-scrollbar-thumb {
-    background: transparent;
-    border-radius: 999px;
-  }
-
-  .archive-main:hover,
-  .archive-main:focus-within,
-  .archive-main:active {
-    scrollbar-color: var(--app-scrollbar-thumb) var(--app-scrollbar-track);
-  }
-
-  .archive-main:hover::-webkit-scrollbar-thumb,
-  .archive-main:focus-within::-webkit-scrollbar-thumb,
-  .archive-main:active::-webkit-scrollbar-thumb {
-    background: var(--app-scrollbar-thumb);
+    ${workspaceScrollbarStyles}
   }
 
   .archive-header {
@@ -612,14 +586,14 @@ export const UnifiedAudioViewerWrapper = styled.div`
     height: clamp(250px, 42vh, 420px);
     min-height: 0;
     overflow: auto;
-    scrollbar-width: none;
-    mask-image: linear-gradient(180deg, transparent 0%, #000 15%, #000 85%, transparent 100%);
-  }
-
-  .lyrics-stage::-webkit-scrollbar {
-    width: 0;
-    height: 0;
-    display: none;
+    ${workspaceScrollbarStyles}
+    /* Fade the lyrics while keeping the right-hand scrollbar visible at both ends. */
+    mask-image:
+      linear-gradient(180deg, transparent 0%, #000 15%, #000 85%, transparent 100%),
+      linear-gradient(#000, #000);
+    mask-size: 100% 100%, 8px 100%;
+    mask-position: left top, right top;
+    mask-repeat: no-repeat;
   }
 
   .lyric-roller {

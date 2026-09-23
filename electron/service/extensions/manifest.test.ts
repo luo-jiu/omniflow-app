@@ -17,6 +17,8 @@ const tool: PluginToolContribution = {
   resourceAccess: [{ parameter: 'resource', mode: 'read', kind: 'file' }], timeoutMs: 30000, maxResultBytes: 32768,
 };
 const toolManifest = { ...manifest, formatVersion: 2, entry: undefined, viewers: undefined, permissions: ['resource.read', 'agent.tools'], activation: ['tool:example.csv.query'], agentTools: [tool] };
+const workspace = { id: 'example.csv.workspace', title: 'CSV workspace', entry: 'workspace.html', commandId: 'example.csv.run' };
+const workspaceManifest = { ...toolManifest, permissions: ['resource.read'], commands: [{ id: workspace.commandId, title: 'Run', toolId: tool.id, locations: ['tool-workspace'] }], workspaces: [workspace], activation: [...toolManifest.activation, `workspace:${workspace.id}`] };
 const roots: string[] = [];
 async function fixture() { const root = await mkdtemp(path.join(tmpdir(), 'plugin-manifest-test-')); roots.push(root); await writeFile(path.join(root, 'manifest.json'), JSON.stringify(manifest)); await writeFile(path.join(root, 'index.html'), '<p>test</p>'); return root; }
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
@@ -61,6 +63,46 @@ describe('plugin manifest and package', () => {
     expect(() => parsePluginManifest({ ...toolManifest, commands: [command, command] }, 'darwin')).toThrow();
     const commands = Array.from({ length: 9 }, (_, index) => ({ ...command, id: `example.csv.run${index}` }));
     expect(() => parsePluginManifest({ ...toolManifest, commands }, 'darwin')).toThrow();
+  });
+  it('accepts explicit single-file workspace entries without a Viewer or Agent permission', () => {
+    expect(parsePluginManifest(workspaceManifest, 'darwin')).toMatchObject({ viewers: [], workspaces: [workspace], permissions: ['resource.read'] });
+    const outputWorkspace = { ...workspace, id: `${outputManifest.id}.workspace`, commandId: outputManifest.commands[0].id };
+    expect(parsePluginManifest({ ...outputManifest, workspaces: [outputWorkspace], activation: [...outputManifest.activation, `workspace:${outputWorkspace.id}`] }, 'darwin').workspaces).toEqual([outputWorkspace]);
+    const renameWorkspace = { ...workspace, id: `${renameManifest.id}.workspace`, commandId: renameManifest.commands[0].id };
+    expect(() => parsePluginManifest({ ...renameManifest, workspaces: [renameWorkspace], activation: [...renameManifest.activation, `workspace:${renameWorkspace.id}`] }, 'darwin')).toThrow(/single-file/);
+  });
+  it('rejects undeclared, foreign, duplicate and unsafe workspace contributions', () => {
+    for (const patch of [{ formatVersion: 1 }, { commands: undefined }, { activation: toolManifest.activation }, { workspaces: [workspace, workspace] }]) {
+      expect(() => parsePluginManifest({ ...workspaceManifest, ...patch }, 'darwin')).toThrow();
+    }
+    for (const patch of [{ id: tool.id }, { id: workspace.commandId }, { id: 'other.workspace' }, { commandId: 'other.command' }, { entry: '../page.html' }, { entry: 'workspace.js' }, { allowWrite: true }]) {
+      expect(() => parsePluginManifest({ ...workspaceManifest, workspaces: [{ ...workspace, ...patch }] }, 'darwin')).toThrow();
+    }
+    const workspaces = Array.from({ length: 9 }, (_, index) => ({ ...workspace, id: `example.csv.page${index}` }));
+    expect(() => parsePluginManifest({ ...workspaceManifest, workspaces, activation: [...toolManifest.activation, ...workspaces.map(item => `workspace:${item.id}`)] }, 'darwin')).toThrow();
+  });
+  it('requires the workspace entry asset and includes its bytes in integrity checks', async () => {
+    const root = await fixture();
+    const value = { ...workspaceManifest, agentTools: [{ ...tool, entry: 'index.html' }] };
+    await writeFile(path.join(root, 'manifest.json'), JSON.stringify(value));
+    await expect(loadPluginPackage(root, 'darwin')).rejects.toThrow(/entry not found/);
+    await writeFile(path.join(root, workspace.entry), '<p>workspace</p>');
+    const first = await loadPluginPackage(root, 'darwin');
+    await writeFile(path.join(root, workspace.entry), '<p>new workspace</p>');
+    expect((await loadPluginPackage(root, 'darwin')).fingerprint).not.toBe(first.fingerprint);
+  });
+  it('uses the workspace SDK preparation envelope and rejects malformed host receipts', async () => {
+    const requests: unknown[] = []; let requestId: unknown = 'prepare-1';
+    const client = createPluginClient({ subscribe: () => () => undefined, exchange: async raw => {
+      const wire = JSON.parse(raw); requests.push(wire);
+      return JSON.stringify({ version: 1, id: wire.id, ok: true, value: { requestId } });
+    } });
+    expect(await client.prepareWorkspaceCommand({ fields: ['name'] })).toEqual({ requestId: 'prepare-1' });
+    expect(requests[0]).toMatchObject({ method: 'workspace.prepare', params: { parameters: { fields: ['name'] } } });
+    requestId = { token: 'invalid' };
+    await expect(client.prepareWorkspaceCommand({})).rejects.toMatchObject({ code: 'BAD_RESPONSE' });
+    await expect(client.prepareWorkspaceCommand({ huge: 'x'.repeat(16384) })).rejects.toMatchObject({ code: 'LIMIT' });
+    client.dispose();
   });
   it('loads and fingerprints the real Tool entry, rejecting a missing Tool asset', async () => {
     const root = await fixture(); await writeFile(path.join(root, 'manifest.json'), JSON.stringify(toolManifest));

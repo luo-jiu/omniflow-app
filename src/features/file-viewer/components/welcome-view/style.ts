@@ -1,4 +1,5 @@
 import styled from 'styled-components';
+import { workspaceScrollbarStyles } from '@/components/ui/workspace-scrollbar';
 
 export const WelcomeWrapper = styled.div`
   width: 100%;
@@ -8,6 +9,7 @@ export const WelcomeWrapper = styled.div`
   justify-content: center;
   padding: 24px;
   overflow: auto;
+  ${workspaceScrollbarStyles}
 
   .panel {
     width: min(600px, 100%);

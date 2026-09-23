@@ -5,6 +5,7 @@ import type { LoadedPluginPackage } from './manifest';
 import type { MetadataResourceAuthority, OpenedResourceAuthority } from './resource-broker';
 import type { PluginRenameProposalToolContribution } from '../../../packages/plugin-sdk/index.js';
 import { RENAME_PROPOSAL_OUTPUT_SCHEMA } from './tool-schema';
+import outputManifest from '../../../samples/csv-export/manifest.json';
 
 const mocks = vi.hoisted(() => ({
   handle: vi.fn(), removeHandler: vi.fn(), createView: vi.fn(), acquire: vi.fn(), loadPackage: vi.fn(),
@@ -60,6 +61,33 @@ beforeEach(() => {
 afterEach(() => { for (const item of hosts.splice(0)) item.dispose(); });
 
 describe('isolated plugin host cleanup and source routing', () => {
+  it('loads a workspace entry with visible layout and the shared source router independently of Viewer and Tool entries', async () => {
+    const owner = parent(); const runtime = host(owner); const lease = sessionLease(); mocks.acquire.mockResolvedValue(lease);
+    const workspace = { id: `${outputManifest.id}.workspace`, title: 'Export', entry: 'workspace.html', commandId: outputManifest.commands[0].id };
+    const { parsePluginManifest } = await vi.importActual<typeof import('./manifest')>('./manifest');
+    const manifest = parsePluginManifest({ ...outputManifest, workspaces: [workspace], activation: [...outputManifest.activation, `workspace:${workspace.id}`] }, 'darwin');
+    mocks.loadPackage.mockResolvedValue({ source: '/test/workspace', fingerprint: 'fingerprint', assets: new Map(), manifest });
+    const workspaceExecution = { contribution: workspace, prepare: vi.fn(() => ({ requestId: 'prepare-1' })) };
+    await expect(runtime.load('/test/workspace', resource, theme, true)).rejects.toThrow('Unknown viewer contribution');
+    await expect(runtime.load('/test/workspace', resource, theme, true, { workspaceExecution: { ...workspaceExecution, contribution: { ...workspace, entry: 'tool.html' } } })).rejects.toThrow('Unknown workspace contribution');
+    await expect(runtime.load('/test/workspace', resource, theme, true, { workspaceExecution, viewerId: workspace.id })).rejects.toThrow('Unknown workspace contribution');
+    const instance = await runtime.load('/test/workspace', resource, theme, true, { workspaceExecution, externalLayout: true });
+    expect(instance.view.webContents.loadURL).toHaveBeenCalledWith(expect.stringMatching(/\/workspace\.html$/));
+    expect(owner.contentView.addChildView).toHaveBeenCalledWith(instance.view);
+    expect(instance.view.setVisible).toHaveBeenLastCalledWith(false);
+    const bounds = { x: 10, y: 20, width: 500, height: 300 };
+    instance.setBounds(bounds); expect(instance.view.setBounds).toHaveBeenLastCalledWith(bounds);
+    expect(instance.view.setVisible).toHaveBeenLastCalledWith(true);
+    instance.setActive(false);
+    expect(instance.view.webContents.send).toHaveBeenCalledWith('omniflow-plugin:event', JSON.stringify({ version: 1, type: 'activity', active: false }));
+    instance.setTheme({ ...theme, revision: 2, mode: 'dark' });
+    const route = mocks.handle.mock.calls[0][1]; const sender = instance.view.webContents;
+    const raw = JSON.stringify({ version: 1, id: 'context', method: 'context.get', params: {} });
+    expect(JSON.parse(await route({ sender, senderFrame: sender.mainFrame }, raw))).toMatchObject({ ok: true, value: { kind: 'workspace', workspaceId: workspace.id, theme: { mode: 'dark' } } });
+    expect(JSON.parse(await route({ sender, senderFrame: { url: sender.mainFrame.url } }, raw))).toMatchObject({ ok: false, error: { code: 'FORBIDDEN' } });
+    instance.stop(); expect(lease.release).toHaveBeenCalledOnce(); expect(runtime.size).toBe(0);
+    expect(JSON.parse(await route({ sender, senderFrame: sender.mainFrame }, raw))).toMatchObject({ ok: false, error: { code: 'FORBIDDEN' } });
+  });
   it('runs an explicit metadata proposal entry in the existing hidden sandbox without a Viewer', async () => {
     const owner = parent(); const runtime = host(owner);
     const tool: PluginRenameProposalToolContribution = { kind: 'rename-proposal', id: 'test.rename.rule', title: 'Rename', description: 'Metadata proposal', entry: 'rename.html',

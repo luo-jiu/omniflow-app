@@ -333,6 +333,8 @@ QQ 音乐歌词使用独立的 `window.electronQQMusicLyrics` bridge，提供 `s
 
 M1 手动插件命令使用独立 `electronPluginCommands` bridge，经 `plugin-command.api.ts` 消费。main 的 `PluginCommandService/PluginCommandStore` 拥有执行、审批和提交记录；renderer 只负责表单与结果投影。它复用插件 Tool 隔离和受控资源/写入服务，不创建模型 Session/Run，也不经过模型请求；契约及恢复限制见 [M1](plugin-system-m1-manual-commands.md)。
 
+M2 的 `electronPluginWorkspace` bridge 仅供可信主窗口管理工作区视图、来源与目标，renderer 经 `plugin-workspace.api.ts` 使用。main 校验当前窗口、服务端账号、资料库、源文件和包指纹后复用隔离宿主。插件仅能读当前资源并请求准备所关联命令，主进程快速返回请求 ID，实际执行仍由 M1 owner 持有；界面隐藏原生 view 后展示宿主确认卡。工作区无独立提交历史，详见 [M2](plugin-system-m2-tool-workspaces.md)。
+
 ### 6.3 Electron Main
 
 主进程里的目录语义应保持：
