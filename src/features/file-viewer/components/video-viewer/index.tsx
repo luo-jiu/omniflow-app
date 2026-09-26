@@ -1610,6 +1610,10 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
 
                 <div className="controls-row">
                   <div className="left-controls">
+                    <span className="time-text">{formatTime(visibleCurrentTime)} / {formatTime(duration)}</span>
+                  </div>
+
+                  <div className="center-controls">
                     <Button
                       className="video-icon-button"
                       icon={<IconBackward />}
@@ -1635,18 +1639,18 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
                       title={`前进 ${SEEK_SECONDS} 秒`}
                       aria-label={`前进 ${SEEK_SECONDS} 秒`}
                     />
-                    <span className="time-text">{formatTime(visibleCurrentTime)} / {formatTime(duration)}</span>
                   </div>
 
                   <div className="right-controls">
                 {hasPlaylist && (
-                  <div className="control-popover-box" ref={playlistControlRef}>
+                  <div className="control-popover-box playlist-control-box" ref={playlistControlRef}>
                     <Button
                       className="video-icon-button"
                       icon={<IconVideoListStroked />}
-                      theme={isPlaylistPanelOpen ? 'solid' : 'borderless'}
-                      type={isPlaylistPanelOpen ? 'primary' : 'tertiary'}
+                      theme="borderless"
+                      type="tertiary"
                       onClick={togglePlaylistPanel}
+                      aria-expanded={isPlaylistPanelOpen}
                       title="播放列表"
                       aria-label="播放列表"
                     />
@@ -1771,9 +1775,10 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
                 <Button
                   className="video-icon-button"
                   icon={<span className="video-control-icon"><IconMiniPlayer /></span>}
-                  theme={isVideoHostedOutsideInline ? 'solid' : 'borderless'}
-                  type={isVideoHostedOutsideInline ? 'primary' : 'tertiary'}
+                  theme="borderless"
+                  type="tertiary"
                   onClick={requestFloatingVideo}
+                  aria-pressed={isVideoHostedOutsideInline}
                   title={isVideoHostedOutsideInline ? '收回播放器' : '桌面小窗'}
                   aria-label={isVideoHostedOutsideInline ? '收回播放器' : '桌面小窗'}
                 />
@@ -1781,9 +1786,10 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
                 <Button
                   className="video-icon-button"
                   icon={<span className="video-control-icon">{isWideMode ? <WideModeExitIcon /> : <WideModeEnterIcon />}</span>}
-                  theme={isWideMode ? 'solid' : 'borderless'}
-                  type={isWideMode ? 'primary' : 'tertiary'}
+                  theme="borderless"
+                  type="tertiary"
                   onClick={toggleWideMode}
+                  aria-pressed={isWideMode}
                   title={isWideMode ? '退出宽屏模式' : '宽屏模式'}
                   aria-label={isWideMode ? '退出宽屏模式' : '宽屏模式'}
                 />

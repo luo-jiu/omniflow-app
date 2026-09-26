@@ -73,6 +73,7 @@ const VideoSubtitlePanel: React.FC<VideoSubtitlePanelProps> = ({
             key={source.id}
             type="button"
             className={`subtitle-source-item ${loadedSubtitleSourceId === source.id ? 'active' : ''}`}
+            aria-pressed={loadedSubtitleSourceId === source.id}
             title={source.fileName}
             onClick={() => loadLibrarySubtitle(source)}
           >

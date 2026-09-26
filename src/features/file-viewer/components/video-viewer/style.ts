@@ -1,5 +1,12 @@
 import styled from 'styled-components';
 import { workspaceScrollbarStyles } from '@/components/ui/workspace-scrollbar';
+import {
+  focusVisibleStyles,
+  interactiveItemStyles,
+  selectedItemStyles,
+  surfaceStyles,
+  textToneStyles,
+} from '@/components/ui/theme-foundation-styles';
 
 export const VideoViewerWrapper = styled.div`
   --video-font-caption: 10px;
@@ -51,6 +58,7 @@ export const VideoViewerWrapper = styled.div`
   }
 
   .video-shell {
+    container: video-stage / inline-size;
     width: 100%;
     height: 100%;
     border-radius: 0;
@@ -189,8 +197,9 @@ export const VideoViewerWrapper = styled.div`
     right: 0;
     bottom: 0;
     width: 260px;
-    border-left: 1px solid var(--semi-color-border);
-    background: linear-gradient(180deg, rgba(247, 249, 252, 0.98), rgba(241, 244, 248, 0.96));
+    border-left: 1px solid var(--app-border);
+    ${surfaceStyles('app')}
+    ${textToneStyles('primary')}
     display: flex;
     flex-direction: column;
     min-height: 0;
@@ -203,10 +212,6 @@ export const VideoViewerWrapper = styled.div`
     transform: translateX(100%);
     opacity: 0;
     pointer-events: none;
-  }
-
-  body[theme-mode="dark"] & .console-panel {
-    background: linear-gradient(180deg, rgba(27, 31, 38, 0.98), rgba(20, 23, 29, 0.96));
   }
 
   .console-body,
@@ -226,8 +231,8 @@ export const VideoViewerWrapper = styled.div`
   }
 
   .console-section {
-    border: 1px solid var(--semi-color-border);
-    background: var(--semi-color-bg-1);
+    border: 1px solid var(--app-border);
+    ${surfaceStyles('panel')}
     border-radius: 8px;
     padding: 10px;
     display: flex;
@@ -245,12 +250,12 @@ export const VideoViewerWrapper = styled.div`
   .section-title {
     font-size: var(--video-font-title);
     font-weight: 700;
-    color: var(--semi-color-text-0);
+    ${textToneStyles('primary')}
   }
 
   .section-meta {
     font-size: var(--video-font-body);
-    color: var(--semi-color-text-2);
+    ${textToneStyles('muted')}
     text-align: right;
     max-width: 116px;
     overflow: hidden;
@@ -262,7 +267,7 @@ export const VideoViewerWrapper = styled.div`
     margin: 0;
     font-size: var(--video-font-body);
     line-height: 1.6;
-    color: var(--semi-color-text-2);
+    ${textToneStyles('secondary')}
   }
 
   .section-actions {
@@ -279,7 +284,7 @@ export const VideoViewerWrapper = styled.div`
 
   .info-card {
     border-radius: 7px;
-    background: var(--semi-color-fill-0);
+    background: var(--app-fill-subtle);
     padding: 8px 9px;
     display: flex;
     flex-direction: column;
@@ -289,19 +294,19 @@ export const VideoViewerWrapper = styled.div`
 
   .info-label {
     font-size: var(--video-font-caption);
-    color: var(--semi-color-text-2);
+    ${textToneStyles('secondary')}
   }
 
   .info-value {
     font-size: var(--video-font-control);
-    color: var(--semi-color-text-0);
+    ${textToneStyles('primary')}
     font-weight: 600;
     word-break: break-word;
   }
 
   .subtitle-source-list {
     border-radius: 7px;
-    background: var(--semi-color-fill-0);
+    background: var(--app-fill-subtle);
     padding: 8px;
     display: flex;
     flex-direction: column;
@@ -316,19 +321,20 @@ export const VideoViewerWrapper = styled.div`
     justify-content: space-between;
     gap: 8px;
     font-size: var(--video-font-caption);
-    color: var(--semi-color-text-2);
+    ${textToneStyles('secondary')}
   }
 
   .subtitle-source-title strong {
     font-size: var(--video-font-caption);
-    color: var(--semi-color-text-1);
+    ${textToneStyles('secondary')}
   }
 
   .subtitle-source-item {
-    border: 1px solid var(--semi-color-border);
+    border: 1px solid var(--app-border);
     border-radius: 6px;
-    background: var(--semi-color-bg-1);
-    color: var(--semi-color-text-1);
+    ${surfaceStyles('panel')}
+    ${textToneStyles('primary')}
+    ${interactiveItemStyles}
     min-height: 26px;
     padding: 0 8px;
     font-size: var(--video-font-body);
@@ -345,15 +351,9 @@ export const VideoViewerWrapper = styled.div`
     white-space: nowrap;
   }
 
-  .subtitle-source-item:hover {
-    border-color: var(--semi-color-primary-light-default);
-    color: var(--semi-color-primary);
-  }
-
   .subtitle-source-item.active {
+    ${selectedItemStyles}
     border-color: transparent;
-    background: var(--semi-color-primary-light-default);
-    color: var(--semi-color-primary);
     font-weight: 700;
   }
 
@@ -365,8 +365,8 @@ export const VideoViewerWrapper = styled.div`
   }
 
   .inline-alert.error {
-    background: rgba(255, 77, 79, 0.12);
-    color: var(--semi-color-danger);
+    background: var(--app-danger-bg);
+    color: var(--app-danger-text);
   }
 
   .slider-field {
@@ -374,7 +374,7 @@ export const VideoViewerWrapper = styled.div`
     flex-direction: column;
     gap: 5px;
     font-size: var(--video-font-body);
-    color: var(--semi-color-text-1);
+    ${textToneStyles('secondary')}
   }
 
   .slider-row {
@@ -386,12 +386,13 @@ export const VideoViewerWrapper = styled.div`
 
   .slider-row input[type='range'] {
     width: 100%;
-    accent-color: var(--semi-color-primary);
+    accent-color: var(--app-accent);
+    ${focusVisibleStyles}
   }
 
   .slider-row strong {
     font-size: var(--video-font-body);
-    color: var(--semi-color-text-0);
+    ${textToneStyles('primary')}
     min-width: 43px;
     text-align: right;
   }
@@ -411,7 +412,7 @@ export const VideoViewerWrapper = styled.div`
 
   .console-empty {
     border-radius: 8px;
-    background: var(--semi-color-fill-0);
+    background: var(--app-fill-subtle);
     padding: 8px;
   }
 
@@ -439,9 +440,9 @@ export const VideoViewerWrapper = styled.div`
     border-radius: 999px;
     padding: 5px 9px;
     font-size: var(--video-font-body);
-    color: var(--semi-color-text-1);
-    background: var(--semi-color-fill-0);
-    border: 1px dashed var(--semi-color-border);
+    ${textToneStyles('secondary')}
+    background: var(--app-fill-subtle);
+    border: 1px dashed var(--app-border);
   }
 
   .controls-panel {
@@ -544,33 +545,60 @@ export const VideoViewerWrapper = styled.div`
   }
 
   .controls-row {
+    position: relative;
     margin-top: 9px;
-    display: flex;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    grid-template-areas: 'left center right';
     align-items: center;
     gap: 10px;
-    justify-content: space-between;
   }
 
   .left-controls,
+  .center-controls,
   .right-controls {
+    min-width: 0;
     display: flex;
     align-items: center;
     gap: 6px;
   }
 
+  .left-controls {
+    grid-area: left;
+  }
+
+  .center-controls {
+    grid-area: center;
+    justify-self: center;
+  }
+
+  .right-controls {
+    grid-area: right;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+  }
+
   .controls-row .semi-button {
+    flex-shrink: 0;
     min-width: 32px;
     min-height: 30px;
     height: 32px;
     font-size: var(--video-font-control);
     padding: 0 8px;
-    border-radius: 5px;
+    border-radius: var(--app-radius-medium);
     color: rgba(255, 255, 255, 0.84);
+    background: transparent;
   }
 
-  .controls-row .semi-button:hover {
+  .controls-row .semi-button:hover:not(:disabled),
+  .controls-row .semi-button:focus-visible:not(:disabled) {
     color: #fff;
     background: rgba(255, 255, 255, 0.12);
+  }
+
+  .controls-row .semi-button:focus-visible {
+    outline: 2px solid var(--semi-color-primary);
+    outline-offset: 2px;
   }
 
   .controls-row .video-icon-button {
@@ -583,7 +611,7 @@ export const VideoViewerWrapper = styled.div`
     width: 32px;
     height: 32px;
     border: 0;
-    border-radius: 5px;
+    border-radius: var(--app-radius-medium);
     color: rgba(255, 255, 255, 0.9);
     background: transparent;
     display: inline-flex;
@@ -591,10 +619,11 @@ export const VideoViewerWrapper = styled.div`
     justify-content: center;
     padding: 0;
     cursor: pointer;
-    transition: background 0.16s ease, transform 0.16s ease;
+    transition: background 0.16s ease;
   }
 
-  .video-play-toggle-button:hover {
+  .video-play-toggle-button:hover,
+  .video-play-toggle-button:focus-visible {
     color: #fff;
     background: rgba(255, 255, 255, 0.12);
   }
@@ -671,6 +700,7 @@ export const VideoViewerWrapper = styled.div`
     display: inline-flex;
     align-items: center;
     line-height: 1;
+    white-space: nowrap;
   }
 
   .floating-control-panel {
@@ -745,10 +775,15 @@ export const VideoViewerWrapper = styled.div`
     gap: 7px;
   }
 
+  .playlist-control-box {
+    position: static;
+  }
+
   .playlist-panel {
     right: 0;
     left: auto;
-    width: min(360px, calc(100vw - 48px));
+    width: min(360px, 100%);
+    box-sizing: border-box;
     max-height: 320px;
     display: flex;
     flex-direction: column;
@@ -888,7 +923,7 @@ export const VideoViewerWrapper = styled.div`
   .floating-action-chip.active {
     background: var(--semi-color-primary);
     border-color: transparent;
-    color: #fff;
+    color: var(--app-accent-foreground);
   }
 
   .floating-action-chip:hover {
@@ -896,6 +931,7 @@ export const VideoViewerWrapper = styled.div`
   }
 
   .console-section .semi-button {
+    ${focusVisibleStyles}
     min-height: 30px;
     font-size: var(--video-font-body);
     padding: 0 10px;
@@ -929,15 +965,27 @@ export const VideoViewerWrapper = styled.div`
     .console-panel {
       width: 220px;
     }
+  }
 
+  @container video-stage (max-width: 700px) {
     .controls-row {
-      flex-wrap: wrap;
-      gap: 7px;
+      grid-template-columns: minmax(0, 1fr) auto;
+      grid-template-areas:
+        'center center'
+        'left right';
+      gap: 7px 10px;
+    }
+  }
+
+  @container video-stage (max-width: 480px) {
+    .controls-row {
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-areas: 'center' 'left' 'right';
     }
 
+    .left-controls,
     .right-controls {
-      width: 100%;
-      justify-content: space-between;
+      justify-content: center;
     }
   }
 `;
