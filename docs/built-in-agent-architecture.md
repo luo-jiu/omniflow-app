@@ -286,6 +286,7 @@ Run / ToolRun 每次成功状态 mutation 都在同一条 SQL 中执行 `revisio
 - 当前目录和选中节点每轮重新感知，数据库里的历史上下文不作为当前文件事实。
 - 活跃 Run 不能删除；同一个 Session 同时只允许一个 Run 进入启动或运行阶段。
 - 普通工作区切换允许纯 main Run 留在后台继续。Renderer 写操作在后端确认创建节点前，页面卸载或 scope 切换会中止上传并停止 Run；已经提交 authoritative result 后不再撤销已完成的写入，而是等待最终结果回执后停止 Run。注销、401 清理或主窗口销毁必须取消该窗口的全部 Run，不能把旧账号任务带入新认证会话。
+- 同库工作区切换在首次打开 Agent 后保留其 renderer 实例及事件/工具桥订阅，只切换 UI 可见性；切页不再触发上述卸载清理。离库、换账号或实际卸载仍按原生命周期释放，未新增 Session 缓存或执行 owner。可见性与浮层规则见 UI 契约。
 - 每个 Run 在启动边界读取一次 AI Service 连接快照并锁定来源配置；后续 Tool 轮次和无 Tool fallback 均使用同一份 provider、Base URL 和 Key。完成、失败、停止或 owner 销毁后释放锁。
 - 应用启动时先由唯一 Schema Coordinator 原子 bootstrap 并自检完整 Agent schema，再统一打开 Session、Memory、Quota、Shell workspace 和 Shell log persistence runtime；任一环节失败会反向关闭已打开资源并允许后续重试。正常退出的第一次 `before-quit` 会被 main 阻止，只启动一次 cleanup：拒绝新 Agent Run、取消并等待活跃任务和本机保存收口，然后依次关闭文件传输与 Agent SQLite，最后发起第二次 authoritative quit。若活跃任务在取消预算内仍未收口，main 不主动关闭它仍可能使用的 SQLite 连接，而是记录错误并交给进程退出；下次启动按 `interrupted` 恢复。清理失败不会让应用永久卡在退出中。
 
