@@ -1,11 +1,16 @@
 import styled from 'styled-components';
+import { floatingViewerDockSurfaceStyles } from '@/components/ui/floating-viewer-dock-styles';
+import { interactiveItemStyles } from '@/components/ui/theme-foundation-styles';
 import { workspaceScrollbarStyles } from '@/components/ui/workspace-scrollbar';
+import { AUDIO_DOCK_RADIUS } from './audio-dock-progress-geometry';
 
 export const UnifiedAudioViewerWrapper = styled.div`
   /* Shared by bare audio, semantic audio folders, and audio archives. */
   width: 100%;
   height: 100%;
   min-height: 0;
+  container: audio-viewer / inline-size;
+  --audio-dock-width: min(900px, calc(100% - 32px));
   display: flex;
   flex-direction: column;
   color: var(--semi-color-text-0);
@@ -561,7 +566,7 @@ export const UnifiedAudioViewerWrapper = styled.div`
 
   .expanded-spectrum {
     grid-column: 1 / -1;
-    width: min(100%, 980px);
+    width: min(100%, var(--audio-dock-width));
     height: 100%;
     min-height: 0;
     justify-self: center;
@@ -587,12 +592,17 @@ export const UnifiedAudioViewerWrapper = styled.div`
     min-height: 0;
     overflow: auto;
     ${workspaceScrollbarStyles}
-    /* Fade the lyrics while keeping the right-hand scrollbar visible at both ends. */
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    &::-webkit-scrollbar {
+      width: 0;
+      height: 0;
+    }
+    /* Keep the lyric fade without reserving a visible scrollbar strip. */
     mask-image:
-      linear-gradient(180deg, transparent 0%, #000 15%, #000 85%, transparent 100%),
-      linear-gradient(#000, #000);
-    mask-size: 100% 100%, 8px 100%;
-    mask-position: left top, right top;
+      linear-gradient(180deg, transparent 0%, #000 15%, #000 85%, transparent 100%);
+    mask-size: 100% 100%;
+    mask-position: left top;
     mask-repeat: no-repeat;
   }
 
@@ -696,6 +706,243 @@ export const UnifiedAudioViewerWrapper = styled.div`
 
     .expanded-cover-wrap {
       justify-content: center;
+    }
+  }
+
+  &[data-viewer-mode='archive'],
+  &[data-viewer-mode='folder'] {
+    position: relative;
+    --audio-dock-width: min(900px, calc(100% - 32px));
+
+    .archive-main {
+      padding-bottom: 128px;
+    }
+
+    .expanded-player {
+      /* Keep the spectrum close to the floating dock without letting it overlap. */
+      padding-bottom: 120px;
+      overflow: auto;
+      ${workspaceScrollbarStyles}
+    }
+
+    .audio-player-bar {
+      ${floatingViewerDockSurfaceStyles}
+      --player-dock-bottom: 28px;
+      position: absolute;
+      z-index: 5;
+      left: 50%;
+      bottom: var(--player-dock-bottom);
+      transform: translateX(-50%);
+      box-sizing: border-box;
+      width: var(--audio-dock-width);
+      height: auto;
+      min-height: 76px;
+      grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+      align-content: center;
+      column-gap: 12px;
+      row-gap: 0;
+      padding: 12px 16px 10px;
+      border-radius: ${AUDIO_DOCK_RADIUS}px;
+    }
+
+    .audio-dock-progress {
+      position: absolute;
+      /* Match the dock's border box, including its 1px surface border. */
+      inset: -1px;
+      z-index: 2;
+      visibility: hidden;
+      pointer-events: none;
+    }
+
+    .audio-dock-progress[data-visible='true'] {
+      visibility: visible;
+    }
+
+    .audio-dock-progress-svg {
+      display: block;
+      width: 100%;
+      height: 100%;
+      overflow: visible;
+      pointer-events: none;
+    }
+
+    .audio-dock-progress-track {
+      stroke: var(--semi-color-fill-1);
+    }
+
+    .audio-player-bar[data-meteor-active='true'] .audio-dock-progress-fill { opacity: 0; }
+    .audio-dock-meteor {
+      position: absolute;
+      inset: -1px;
+      width: calc(100% + 2px);
+      height: calc(100% + 2px);
+      overflow: visible;
+      pointer-events: none;
+      z-index: 3;
+    }
+    .audio-dock-meteor-light {
+      transition: color 260ms linear;
+      filter: drop-shadow(0 0 3px currentColor);
+    }
+
+    .audio-dock-progress-keyboard {
+      position: absolute;
+      top: -6px;
+      left: ${AUDIO_DOCK_RADIUS}px;
+      width: calc(100% - ${AUDIO_DOCK_RADIUS * 2}px);
+      height: 14px;
+      margin: 0;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .audio-dock-progress-keyboard:focus-visible + .audio-dock-progress-svg .audio-dock-progress-track {
+      stroke: var(--app-accent);
+      stroke-width: 5px;
+    }
+
+    .audio-dock-progress-hit {
+      cursor: pointer;
+      touch-action: none;
+    }
+
+    .player-cover-trigger,
+    .audio-player-bar .semi-button {
+      color: var(--app-text-secondary);
+      background: transparent;
+      border-radius: var(--app-radius-medium);
+      box-shadow: none;
+      ${interactiveItemStyles}
+
+      &:not(:disabled):not([aria-disabled='true']):hover {
+        color: var(--app-text);
+      }
+    }
+
+    .player-brief {
+      cursor: default;
+    }
+
+    .player-cover-trigger {
+      padding: 0;
+      border: 0;
+      cursor: pointer;
+    }
+
+    .player-cover-toggle,
+    .player-brief:hover .player-cover-toggle {
+      opacity: 0;
+      transform: translateY(2px);
+    }
+
+    .player-cover-trigger:hover .player-cover-toggle,
+    .player-cover-trigger:focus-visible .player-cover-toggle {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .player-controls {
+      grid-column: 2;
+    }
+
+    .audio-player-bar .semi-button.play-main:not(:disabled):not([aria-disabled='true']) {
+      &, &:hover, &:active, &:focus-visible { color: var(--app-accent); }
+    }
+
+    .player-extra {
+      display: flex;
+      flex-wrap: wrap;
+      row-gap: 6px;
+    }
+
+    @container audio-viewer (max-width: 760px) {
+      .archive-main {
+        padding-bottom: 148px;
+      }
+
+      .audio-player-bar {
+        --player-dock-bottom: 24px;
+        --audio-dock-width: calc(100% - 24px);
+        width: var(--audio-dock-width);
+        column-gap: 10px;
+      }
+
+      .expanded-player {
+        padding-bottom: 128px;
+      }
+
+      .player-extra {
+        grid-column: 1 / -1;
+        justify-content: center;
+        flex-wrap: wrap;
+        margin-top: 6px;
+        row-gap: 6px;
+      }
+
+      .song-row,
+      .song-list-header {
+        grid-template-columns: 28px 40px minmax(0, 1fr) 46px;
+        gap: 9px;
+      }
+
+      .song-album,
+      .row-icon-button,
+      .song-list-header span:nth-child(4),
+      .song-list-header span:nth-child(5) {
+        display: none;
+      }
+
+      .expanded-player {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: auto minmax(220px, 1fr) 76px;
+        align-items: start;
+        gap: 18px;
+        padding: 28px 20px 128px;
+      }
+
+      .expanded-cover-wrap {
+        justify-content: center;
+      }
+
+      .audio-cover.large {
+        width: min(260px, 100%);
+        height: auto;
+        min-width: 0;
+        min-height: 0;
+        aspect-ratio: 1;
+      }
+    }
+
+    @container audio-viewer (max-width: 440px) {
+      .archive-main,
+      .expanded-player {
+        padding-bottom: 220px;
+      }
+
+      .audio-player-bar {
+        --player-dock-bottom: 20px;
+        grid-template-columns: minmax(0, 1fr);
+        padding-inline: 12px;
+      }
+
+      .expanded-player {
+        padding-bottom: 176px;
+      }
+
+      .player-brief {
+        justify-content: center;
+      }
+
+      .player-controls {
+        grid-column: 1;
+        margin-top: 6px;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .player-cover-toggle {
+        transition: none;
+      }
     }
   }
 `;

@@ -2,8 +2,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Popover, Spin } from '@douyinfe/semi-ui';
 import {
   IconBackward,
-  IconChevronDown,
-  IconChevronUp,
   IconFastForward,
   IconList,
   IconLoopTextStroked,
@@ -22,6 +20,7 @@ import {
 import { runtimeLogger } from '@/utils/runtimeLogger';
 import { useGlobalAudioPlayback } from '@/features/file-viewer/hooks/useGlobalAudioPlayback';
 import { isOwnedGlobalAudioPlaying } from '@/features/file-viewer/services/global-audio-retention';
+import { isGlobalAudioOwnedBy } from '@/features/file-viewer/services/global-audio-owner';
 import { useTimedText } from '@/features/file-viewer/timed-text/useTimedText';
 import type { TimedTextCue } from '@/features/file-viewer/timed-text/subtitle';
 import type {
@@ -41,6 +40,7 @@ import {
   type AudioArchiveSidecarIndex,
 } from './audio-viewer-content';
 import { UnifiedAudioViewerWrapper } from './style';
+import { AudioDockMeteor, type AudioDockMeteorEvent } from './AudioDockMeteor';
 import {
   ARCHIVE_CARD_SESSION_ESTIMATED_BYTES,
   ARCHIVE_CARD_SESSION_SCHEMA_VERSION,
@@ -58,8 +58,10 @@ import {
   releaseExternalKeyboardFocus,
 } from '@/features/file-viewer/utils/media-keyboard-target';
 import { useAudioCardPlayback } from './use-audio-card-playback';
+import { AudioDockProgress } from './audio-dock-progress';
 import {
   AudioCover,
+  AudioPlayerBrief,
   ExpandedLyricsRoller,
 } from './audio-viewer-presenters';
 
@@ -176,6 +178,9 @@ const UnifiedAudioViewer: React.FC<UnifiedAudioViewerProps> = ({
   const [currentCardId, setCurrentCardId] = useState<number | null>(null);
   const [currentAudioUrl, setCurrentAudioUrl] = useState<string | null>(null);
   const [repeatMode, setRepeatMode] = useState<AudioRepeatMode>('list-loop');
+  const [meteor, setMeteor] = useState<AudioDockMeteorEvent | null>(null);
+  const meteorSerialRef = useRef(0);
+  const pendingMeteorRef = useRef<Omit<AudioDockMeteorEvent, 'id' | 'src'> | null>(null);
   const [expanded, setExpanded] = useState(singleFolderMode || bareAudioMode);
   const [seekingTime, setSeekingTime] = useState<number | null>(null);
   const [activeSubtitleSources, setActiveSubtitleSources] = useState<FileViewerSubtitleSource[] | undefined>(undefined);
@@ -225,6 +230,24 @@ const UnifiedAudioViewer: React.FC<UnifiedAudioViewerProps> = ({
   const currentTime = isCurrentAudioSource ? playerState.currentTime : 0;
   const duration = isCurrentAudioSource ? playerState.duration : 0;
   const visibleCurrentTime = seekingTime ?? currentTime;
+  const readLiveProgressTime = useCallback(() => {
+    const live = getPlayerState();
+    return live.src === currentAudioUrl && isGlobalAudioOwnedBy(live, { ownerType: 'default', ownerKey: audioOwnerKey, tabId, libraryId })
+      ? live.currentTime : null;
+  }, [audioOwnerKey, currentAudioUrl, getPlayerState, libraryId, tabId]);
+  const progressVisualRef = useRef({ fromColor: spectrumColors.primary, ratio: 0 });
+  progressVisualRef.current = {
+    fromColor: spectrumColors.primary,
+    ratio: duration > 0 ? Math.min(Math.max(currentTime / duration, 0), 1) : 1,
+  };
+  const showMeteor = Boolean(viewerMode === 'archive' && meteor && active && isCurrentAudioSource && playerState.isPlaying && meteor.src === currentAudioUrl);
+  useEffect(() => { if (!showMeteor) setMeteor(null); }, [showMeteor]);
+  // The service marks this only after native play() succeeds, and resets it on
+  // source release/replacement. Metadata loading must not reveal archive seek.
+  const dockProgressMode = viewerMode === 'archive' || viewerMode === 'folder';
+  const showPlayerProgress = dockProgressMode
+    ? (isCurrentAudioSource && playerState.hasStarted)
+    : true;
 
   const {
     subtitleCues,
@@ -575,18 +598,25 @@ const UnifiedAudioViewer: React.FC<UnifiedAudioViewerProps> = ({
     endedSerial,
     subtitleSources,
     url,
+    automatic,
   }: {
     card: AudioArchiveCard;
     endedSerial: number;
     subtitleSources: FileViewerSubtitleSource[] | undefined;
     url: string;
+    automatic: boolean;
   }) => {
     setCurrentCardId(card.id);
     setSelectedCardId(card.id);
     setCurrentAudioUrl(url);
     setActiveSubtitleSources(subtitleSources);
     lastHandledEndedSerialRef.current = endedSerial;
-  }, []);
+    const previous = pendingMeteorRef.current;
+    pendingMeteorRef.current = null;
+    setMeteor(automatic && activeRef.current && viewerMode === 'archive' && previous
+      ? { ...previous, id: ++meteorSerialRef.current, src: url }
+      : null);
+  }, [viewerMode]);
   const getEndedSerial = useCallback(
     () => getPlayerState().endedSerial,
     [getPlayerState],
@@ -619,8 +649,13 @@ const UnifiedAudioViewer: React.FC<UnifiedAudioViewerProps> = ({
 
   const playNextCard = useCallback((fromEnded = false) => {
     if (cards.length === 0) return;
+    const start = (card: AudioArchiveCard) => {
+      pendingMeteorRef.current = fromEnded ? { ...progressVisualRef.current } : null;
+      if (!fromEnded) setMeteor(null);
+      void playCard(card, { automatic: fromEnded, restart: fromEnded });
+    };
     if (repeatMode === 'single-loop' && currentCard && fromEnded) {
-      void playCard(currentCard);
+      start(currentCard);
       return;
     }
     let nextIndex = currentCardIndex >= 0 ? currentCardIndex + 1 : 0;
@@ -635,7 +670,7 @@ const UnifiedAudioViewer: React.FC<UnifiedAudioViewerProps> = ({
       nextIndex = 0;
     }
     const nextCard = cards[nextIndex];
-    if (nextCard) void playCard(nextCard);
+    if (nextCard) start(nextCard);
   }, [cards, currentCard, currentCardIndex, playCard, repeatMode]);
 
   const playPrevCard = useCallback(() => {
@@ -985,7 +1020,11 @@ const UnifiedAudioViewer: React.FC<UnifiedAudioViewerProps> = ({
   }, [clearPendingCoverClick]);
 
   return (
-    <UnifiedAudioViewerWrapper ref={viewerRootRef} className={expanded ? 'is-expanded' : ''}>
+    <UnifiedAudioViewerWrapper
+      ref={viewerRootRef}
+      className={expanded ? 'is-expanded' : ''}
+      data-viewer-mode={viewerMode}
+    >
       {expanded && (
         <section className="expanded-player" aria-label="展开播放器">
           {listLoading ? (
@@ -1137,58 +1176,62 @@ const UnifiedAudioViewer: React.FC<UnifiedAudioViewerProps> = ({
         )}
       </div>
 
-      <footer className="audio-player-bar">
-        <div
-          className="player-progress"
-          style={{
-            '--player-progress-end': spectrumColors.primary,
-            '--player-progress-start': spectrumColors.mirrored,
-          } as AudioProgressStyle}
-        >
-          <input
-            type="range"
-            min={0}
-            max={Math.max(duration, 0)}
-            step={0.1}
-            value={Math.min(visibleCurrentTime, Math.max(duration, 0))}
+      <footer className="audio-player-bar" data-progress-visible={showPlayerProgress} data-meteor-active={showMeteor}>
+        {showMeteor && meteor && <AudioDockMeteor key={meteor.id} event={meteor} color={spectrumColors.primary}
+          onFinish={() => setMeteor(current => current?.id === meteor.id ? null : current)} />}
+        {dockProgressMode ? (
+          <AudioDockProgress
+            key={currentAudioUrl || ''}
+            visible={showPlayerProgress}
             disabled={!isCurrentAudioSource || duration <= 0}
-            onChange={(event) => updatePendingSeek(Number(event.currentTarget.value))}
-            onPointerUp={commitPendingSeek}
-            onPointerCancel={cancelPendingSeek}
-            onKeyUp={commitPendingSeek}
-            onBlur={commitPendingSeek}
-            aria-label="播放进度"
+            duration={duration}
+            value={visibleCurrentTime}
+            startColor={spectrumColors.mirrored}
+            endColor={spectrumColors.primary}
+            smooth={active && playerState.isPlaying && seekingTime === null && !showMeteor}
+            readTime={readLiveProgressTime}
+            onPreview={time => { setMeteor(null); updatePendingSeek(time); }}
+            onCommit={commitPendingSeek}
+            onCancel={cancelPendingSeek}
           />
-          <span className="player-progress-track" aria-hidden="true">
-            <span style={{ width: `${progressPercent}%` }} />
-          </span>
-        </div>
-        <button
-          type="button"
-          className="player-brief"
-          disabled={bareAudioMode}
-          onClick={bareAudioMode ? undefined : () => setExpanded(prev => !prev)}
-          title={bareAudioMode ? effectiveCard?.title : expanded ? '收起播放器' : '展开播放器'}
-          aria-label={bareAudioMode ? effectiveCard?.title || '当前音频' : expanded ? '收起播放器' : '展开播放器'}
-        >
-          <span className="player-cover-trigger">
-            <AudioCover
-              coverUrl={effectiveCard?.coverUrl}
-              title={effectiveCard?.title || '音频'}
-              className="mini"
-              showPlaceholder={!bareAudioMode}
+        ) : (
+          <div
+            className="player-progress"
+            aria-hidden={!showPlayerProgress}
+            style={{
+              '--player-progress-end': spectrumColors.primary,
+              '--player-progress-start': spectrumColors.mirrored,
+            } as AudioProgressStyle}
+          >
+            <input
+              type="range"
+              min={0}
+              max={Math.max(duration, 0)}
+              step={0.1}
+              value={Math.min(visibleCurrentTime, Math.max(duration, 0))}
+              disabled={!showPlayerProgress || !isCurrentAudioSource || duration <= 0}
+              tabIndex={showPlayerProgress ? 0 : -1}
+              onChange={(event) => updatePendingSeek(Number(event.currentTarget.value))}
+              onPointerUp={commitPendingSeek}
+              onPointerCancel={cancelPendingSeek}
+              onKeyUp={commitPendingSeek}
+              onBlur={commitPendingSeek}
+              aria-label="播放进度"
             />
-            {!bareAudioMode && (
-              <span className="player-cover-toggle" aria-hidden="true">
-                {expanded ? <IconChevronDown /> : <IconChevronUp />}
-              </span>
-            )}
-          </span>
-          <div className="player-track">
-            <span className="player-title" title={effectiveCard?.title || ''}>{effectiveCard?.title || '选择一首歌'}</span>
-            <span className="player-artist">{subtitleFileName || '未知艺术家'}</span>
+            <span className="player-progress-track" aria-hidden="true">
+              <span style={{ width: `${progressPercent}%` }} />
+            </span>
           </div>
-        </button>
+        )}
+        <AudioPlayerBrief
+          archiveMode={viewerMode === 'archive'}
+          bareAudioMode={bareAudioMode}
+          coverUrl={effectiveCard?.coverUrl}
+          expanded={expanded}
+          onToggleExpanded={() => setExpanded(prev => !prev)}
+          subtitleFileName={subtitleFileName}
+          title={effectiveCard?.title}
+        />
 
         <div className="player-controls">
           <Button
@@ -1202,10 +1245,11 @@ const UnifiedAudioViewer: React.FC<UnifiedAudioViewerProps> = ({
           <Button
             className="play-main"
             icon={isCurrentAudioSource && playerState.isPlaying ? <IconPause /> : <IconPlay />}
-            theme="solid"
+            theme={viewerMode === 'archive' ? 'borderless' : 'solid'}
             shape="circle"
             onClick={togglePlay}
             disabled={cards.length === 0}
+            data-playing={isCurrentAudioSource && playerState.isPlaying}
             title={isCurrentAudioSource && playerState.isPlaying ? '暂停' : '播放'}
             aria-label={isCurrentAudioSource && playerState.isPlaying ? '暂停' : '播放'}
           />

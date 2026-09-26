@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react';
-import { useTheme } from '@/hooks/useTheme';
+import { useContext, useEffect, useMemo, useState } from 'react';
+import { AppearanceViewContext } from '@/features/appearance/appearance.context';
+import { DEFAULT_COLOR_TOKENS } from '@/features/appearance/color-theme';
 import {
   loadCoverSpectrumColors,
   resolveDefaultSpectrumColors,
@@ -7,19 +8,20 @@ import {
 } from './audio-spectrum-cover-color';
 
 export function useAudioSpectrumColors(coverUrl?: string | null): SpectrumColors {
-  const { resolvedTheme } = useTheme();
-  const [colors, setColors] = useState<SpectrumColors>(
-    () => resolveDefaultSpectrumColors(resolvedTheme),
-  );
+  const appearance = useContext(AppearanceViewContext);
+  const resolvedTheme = appearance?.mode ?? 'light';
+  const accent = (appearance?.colors ?? DEFAULT_COLOR_TOKENS[resolvedTheme])['accent.default'];
+  // Canvas receives resolved colors, never a transient computed CSS animation frame.
+  const fallback = useMemo(() => resolveDefaultSpectrumColors(accent), [accent]);
+  const [cover, setCover] = useState<{ url: string; mode: string; colors: SpectrumColors } | null>(null);
 
   useEffect(() => {
     let disposed = false;
-    setColors(resolveDefaultSpectrumColors(resolvedTheme));
     if (!coverUrl) return undefined;
 
     const abortController = new AbortController();
     void loadCoverSpectrumColors(coverUrl, resolvedTheme, abortController.signal).then((nextColors) => {
-      if (!disposed && nextColors) setColors(nextColors);
+      if (!disposed) setCover(nextColors ? { url: coverUrl, mode: resolvedTheme, colors: nextColors } : null);
     });
     return () => {
       disposed = true;
@@ -27,5 +29,5 @@ export function useAudioSpectrumColors(coverUrl?: string | null): SpectrumColors
     };
   }, [coverUrl, resolvedTheme]);
 
-  return colors;
+  return cover && cover.url === coverUrl && cover.mode === resolvedTheme ? cover.colors : fallback;
 }

@@ -173,14 +173,14 @@ describe('audio spectrum cover colors', () => {
     )).toBeNull();
   });
 
-  it('uses the blue pairing as the default in both themes', () => {
-    expect(resolveDefaultSpectrumColors('dark')).toEqual({
-      primary: '#62a8f5',
-      mirrored: '#3e679f',
+  it('uses the resolved theme accent with a darker mirrored layer', () => {
+    expect(resolveDefaultSpectrumColors('#c3a0f6')).toEqual({
+      primary: '#c3a0f6',
+      mirrored: 'color-mix(in srgb, #c3a0f6 65%, #000)',
     });
-    expect(resolveDefaultSpectrumColors('light')).toEqual({
-      primary: '#4e8fdc',
-      mirrored: '#315f9f',
+    expect(resolveDefaultSpectrumColors('rgb(60, 150, 100)')).toEqual({
+      primary: 'rgb(60, 150, 100)',
+      mirrored: 'color-mix(in srgb, rgb(60, 150, 100) 65%, #000)',
     });
   });
 

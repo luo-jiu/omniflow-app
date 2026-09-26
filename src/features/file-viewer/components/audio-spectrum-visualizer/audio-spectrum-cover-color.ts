@@ -134,11 +134,10 @@ function ensureThemeContrast(
   return adjusted;
 }
 
-export function resolveDefaultSpectrumColors(theme: string): SpectrumColors {
-  const dark = theme === 'dark';
+export function resolveDefaultSpectrumColors(accent: string): SpectrumColors {
   return {
-    primary: dark ? '#62a8f5' : '#4e8fdc',
-    mirrored: dark ? '#3e679f' : '#315f9f',
+    primary: accent,
+    mirrored: `color-mix(in srgb, ${accent} 65%, #000)`,
   };
 }
 

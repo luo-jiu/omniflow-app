@@ -31,6 +31,7 @@ interface UseAudioCardPlaybackOptions {
     endedSerial: number;
     subtitleSources: FileViewerSubtitleSource[] | undefined;
     url: string;
+    automatic: boolean;
   }) => void;
   play: (playbackRequestId?: number) => Promise<boolean>;
   seekTo: (time: number) => void;
@@ -68,7 +69,7 @@ export function useAudioCardPlayback({
 
   const playCard = useCallback(async (
     card: AudioArchiveCard,
-    options: { restart?: boolean } = {},
+    options: { restart?: boolean; automatic?: boolean } = {},
   ): Promise<boolean> => {
     if (!libraryId || !audioOwnerKey) {
       Toast.error('当前库参数异常');
@@ -104,6 +105,7 @@ export function useAudioCardPlayback({
         endedSerial: getEndedSerial(),
         subtitleSources,
         url: nextUrl,
+        automatic: options.automatic === true,
       });
       return true;
     } catch (error: any) {

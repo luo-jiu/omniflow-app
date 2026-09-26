@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { IconMusic } from '@douyinfe/semi-icons';
+import { IconChevronDown, IconChevronUp, IconMusic } from '@douyinfe/semi-icons';
 import {
   resolveFocusedTimedTextCueIndex,
   resolveTimedTextCueSweepPercent,
@@ -20,6 +20,66 @@ export const AudioCover: React.FC<{
     ) : null}
   </div>
 );
+
+export const AudioPlayerBrief: React.FC<{
+  archiveMode: boolean;
+  bareAudioMode: boolean;
+  coverUrl?: string | null;
+  expanded: boolean;
+  onToggleExpanded: () => void;
+  subtitleFileName?: string | null;
+  title?: string | null;
+}> = ({ archiveMode, bareAudioMode, coverUrl, expanded, onToggleExpanded, subtitleFileName, title }) => {
+  const toggleLabel = expanded ? '收起播放器' : '展开播放器';
+  const cover = (
+    <>
+      <AudioCover coverUrl={coverUrl} title={title || '音频'} className="mini" showPlaceholder={!bareAudioMode} />
+      {!bareAudioMode && (
+        <span className="player-cover-toggle" aria-hidden="true">
+          {expanded ? <IconChevronDown /> : <IconChevronUp />}
+        </span>
+      )}
+    </>
+  );
+  const track = (
+    <div className="player-track">
+      <span className="player-title" title={title || ''}>{title || '选择一首歌'}</span>
+      <span className="player-artist">{subtitleFileName || '未知艺术家'}</span>
+    </div>
+  );
+
+  if (archiveMode) {
+    return (
+      <div className="player-brief">
+        <button
+          type="button"
+          className="player-cover-trigger"
+          onClick={onToggleExpanded}
+          title={toggleLabel}
+          aria-label={toggleLabel}
+          aria-expanded={expanded}
+        >
+          {cover}
+        </button>
+        {track}
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      className="player-brief"
+      disabled={bareAudioMode}
+      onClick={bareAudioMode ? undefined : onToggleExpanded}
+      title={bareAudioMode ? title || undefined : toggleLabel}
+      aria-label={bareAudioMode ? title || '当前音频' : toggleLabel}
+    >
+      <span className="player-cover-trigger">{cover}</span>
+      {track}
+    </button>
+  );
+};
 
 export const ExpandedLyricsRoller: React.FC<{
   currentAudioUrl: string | null;
