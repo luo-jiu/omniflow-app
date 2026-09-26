@@ -1,6 +1,14 @@
 import styled from 'styled-components';
 
 import { workspaceScrollbarStyles } from '@/components/ui/workspace-scrollbar';
+import {
+  buttonStyles,
+  focusVisibleStyles,
+  interactiveItemStyles,
+  selectedItemStyles,
+  surfaceStyles,
+  textToneStyles,
+} from '@/components/ui/theme-foundation-styles';
 import { getToolNavCollapseButtonLeft } from './tool-workspace.layout';
 
 export const Wrapper = styled.div<{ $toolNavCollapsed: boolean; $toolNavWidth: number }>`
@@ -17,7 +25,7 @@ export const Wrapper = styled.div<{ $toolNavCollapsed: boolean; $toolNavWidth: n
   grid-template-columns: var(--tool-nav-width) minmax(0, 1fr);
   height: 100%;
   min-height: 0;
-  background: var(--app-bg);
+  ${surfaceStyles('app')}
   position: relative;
   transition: grid-template-columns var(--tool-nav-motion-duration) cubic-bezier(0.4, 0, 0.2, 1);
 
@@ -47,7 +55,7 @@ export const ToolNav = styled.aside`
     padding-right: 28px;
     font-size: 14px;
     font-weight: 700;
-    color: var(--app-text);
+    ${textToneStyles('primary')}
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -62,17 +70,14 @@ export const ToolNav = styled.aside`
     height: 32px;
     border-radius: 8px;
     border: 1px solid var(--app-border);
-    background: color-mix(in srgb, var(--app-bg-elevated) 88%, transparent);
+    ${surfaceStyles('elevated')}
+    ${interactiveItemStyles}
     overflow: hidden;
   }
 
   .tool-card.is-active {
-    border-color: var(--semi-color-primary);
-    background: var(--semi-color-primary-light-default);
-  }
-
-  .tool-card:disabled {
-    cursor: default;
+    ${selectedItemStyles}
+    border-color: var(--app-accent);
   }
 
   .tool-card.is-dragging {
@@ -90,6 +95,7 @@ export const ToolNav = styled.aside`
 
   .tool-card-action,
   .tool-card-handle {
+    ${focusVisibleStyles}
     appearance: none;
     border: 0;
     background: transparent;
@@ -106,12 +112,6 @@ export const ToolNav = styled.aside`
     cursor: pointer;
   }
 
-  .tool-card-action:focus-visible,
-  .tool-card-handle:focus-visible {
-    outline: 1px solid var(--semi-color-primary);
-    outline-offset: -2px;
-  }
-
   .tool-card-handle {
     display: inline-flex;
     width: 28px;
@@ -119,19 +119,19 @@ export const ToolNav = styled.aside`
     align-items: center;
     justify-content: center;
     padding: 0;
-    color: var(--app-text-muted);
+    ${textToneStyles('muted')}
     cursor: grab;
     touch-action: none;
     opacity: 0.62;
   }
 
-  .tool-card-handle:hover,
-  .tool-card-handle:focus-visible {
-    color: var(--app-text);
+  .tool-card-handle:not(:disabled):not([aria-disabled='true']):hover,
+  .tool-card-handle:not(:disabled):not([aria-disabled='true']):focus-visible {
+    ${textToneStyles('primary')}
     opacity: 1;
   }
 
-  .tool-card-handle:active {
+  .tool-card-handle:not(:disabled):not([aria-disabled='true']):active {
     cursor: grabbing;
   }
 
@@ -166,7 +166,7 @@ export const ToolNav = styled.aside`
     width: 100%;
     font-size: 12px;
     font-weight: 700;
-    color: var(--app-text);
+    ${textToneStyles('primary')}
   }
 
   .tool-card-icon {
@@ -272,6 +272,7 @@ export const ToolNav = styled.aside`
 `;
 
 export const ToolNavCollapseButton = styled.button`
+  ${buttonStyles('quiet')}
   appearance: none;
   position: absolute;
   top: 10px;
@@ -281,8 +282,7 @@ export const ToolNavCollapseButton = styled.button`
   padding: 0;
   border: 0;
   border-radius: 50%;
-  background: transparent;
-  color: var(--semi-color-primary);
+  ${textToneStyles('accent')}
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -293,17 +293,8 @@ export const ToolNavCollapseButton = styled.button`
     transform 140ms ease;
   z-index: 5;
 
-  &:hover {
-    background: var(--semi-color-primary-light-default);
-  }
-
-  &:active {
+  &:not(:disabled):not([aria-disabled='true']):active {
     transform: scale(0.94);
-  }
-
-  &:focus-visible {
-    outline: 2px solid var(--semi-color-primary);
-    outline-offset: 2px;
   }
 
   svg {
@@ -381,14 +372,14 @@ export const WorkspaceHeader = styled.div`
   .header-title {
     font-size: 22px;
     font-weight: 700;
-    color: var(--app-text);
+    ${textToneStyles('primary')}
     line-height: 1.2;
   }
 
   .header-desc {
     font-size: 11px;
     line-height: 1.55;
-    color: var(--app-text-muted);
+    ${textToneStyles('secondary')}
   }
 
   .header-tags {
@@ -413,20 +404,20 @@ export const WorkspaceBody = styled.div`
 export const Panel = styled.section`
   border: 1px solid var(--app-border);
   border-radius: 8px;
-  background: color-mix(in srgb, var(--app-bg-elevated) 92%, transparent);
+  ${surfaceStyles('elevated')}
   padding: 12px;
 
   .panel-title {
     font-size: 14px;
     font-weight: 700;
-    color: var(--app-text);
+    ${textToneStyles('primary')}
     margin-bottom: 8px;
   }
 
   .panel-desc {
     font-size: 11px;
     line-height: 1.55;
-    color: var(--app-text-muted);
+    ${textToneStyles('secondary')}
     margin-bottom: 9px;
   }
 `;
@@ -450,7 +441,7 @@ export const ConfigGrid = styled.div`
   .label {
     font-size: 11px;
     font-weight: 600;
-    color: var(--app-text-muted);
+    ${textToneStyles('secondary')}
   }
 
   .models-row {
@@ -505,10 +496,10 @@ export const ActionRow = styled.div`
   .merge-status {
     font-size: 11px;
     line-height: 1.5;
-    color: var(--app-text-muted);
+    ${textToneStyles('secondary')}
   }
 
   .merge-status.ok {
-    color: var(--app-text);
+    ${textToneStyles('primary')}
   }
 `;

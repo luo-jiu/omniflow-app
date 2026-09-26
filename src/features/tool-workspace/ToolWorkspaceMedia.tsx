@@ -53,6 +53,7 @@ import {
   WorkspaceBody,
   WorkspaceHeader,
 } from './styles';
+import { buttonStyles, selectedItemStyles } from '@/components/ui/theme-foundation-styles';
 
 const MediaResourceList = styled.div`
   border: 1px solid var(--app-border);
@@ -98,27 +99,21 @@ const ToolModeSwitch = styled.div`
   flex-wrap: wrap;
 
   .mode-btn {
+    ${buttonStyles('secondary')}
     min-height: 30px;
     padding: 0 11px;
     border-radius: 6px;
     border: 1px solid var(--app-border);
-    background: color-mix(in srgb, var(--app-bg) 88%, var(--app-bg-elevated));
-    color: var(--app-text-muted);
     font-size: 11px;
     font-weight: 600;
+    line-height: 1.15;
     cursor: pointer;
     transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease;
   }
 
   .mode-btn.is-active {
-    border-color: var(--semi-color-primary);
-    background: color-mix(in srgb, var(--semi-color-primary-light-default) 82%, var(--app-bg));
-    color: var(--app-text);
-  }
-
-  .mode-btn:disabled {
-    cursor: default;
-    opacity: 0.48;
+    ${selectedItemStyles}
+    border-color: var(--app-accent);
   }
 `;
 
@@ -209,6 +204,7 @@ const MediaActionComposer = styled.div`
   }
 
   .transcode-pill {
+    ${buttonStyles('secondary')}
     height: 24px;
     border: 1px solid color-mix(in srgb, var(--app-border) 82%, transparent);
     border-radius: 999px;
@@ -216,27 +212,13 @@ const MediaActionComposer = styled.div`
     font-size: 10px;
     font-weight: 600;
     line-height: 1;
-    background: color-mix(in srgb, var(--app-bg) 86%, var(--app-bg-elevated));
-    color: var(--app-text-muted);
     cursor: pointer;
     transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease, box-shadow 150ms ease;
   }
 
-  .transcode-pill:hover:not(:disabled) {
-    color: var(--app-text);
-    border-color: color-mix(in srgb, var(--semi-color-primary) 52%, var(--app-border));
-  }
-
   .transcode-pill.active {
-    background: color-mix(in srgb, var(--semi-color-primary) 20%, var(--app-bg-elevated));
-    border-color: color-mix(in srgb, var(--semi-color-primary) 68%, transparent);
-    color: color-mix(in srgb, var(--semi-color-primary) 86%, var(--app-text));
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--semi-color-primary) 38%, transparent);
-  }
-
-  .transcode-pill:disabled {
-    cursor: not-allowed;
-    opacity: 0.56;
+    ${selectedItemStyles}
+    border-color: var(--app-accent);
   }
 
   @media (max-width: 1400px) {
@@ -636,6 +618,7 @@ const ToolWorkspaceMedia: React.FC<MediaProcessingToolProps> = ({
             <button
               type="button"
               className={`mode-btn ${activeMode === 'resources' ? 'is-active' : ''}`}
+              aria-pressed={activeMode === 'resources'}
               disabled={resources.length === 0}
               onClick={() => onModeChange('resources')}
             >
@@ -644,6 +627,7 @@ const ToolWorkspaceMedia: React.FC<MediaProcessingToolProps> = ({
             <button
               type="button"
               className={`mode-btn ${activeMode === 'hls-download' ? 'is-active' : ''}`}
+              aria-pressed={activeMode === 'hls-download'}
               disabled={!hlsRequest}
               onClick={() => onModeChange('hls-download')}
             >
@@ -652,6 +636,7 @@ const ToolWorkspaceMedia: React.FC<MediaProcessingToolProps> = ({
             <button
               type="button"
               className={`mode-btn ${activeMode === 'mpd-download' ? 'is-active' : ''}`}
+              aria-pressed={activeMode === 'mpd-download'}
               disabled={!mpdRequest}
               onClick={() => onModeChange('mpd-download')}
             >
@@ -721,6 +706,7 @@ const ToolWorkspaceMedia: React.FC<MediaProcessingToolProps> = ({
                             key={format}
                             type="button"
                             className={`transcode-pill ${normalizedTranscodeFormat === format ? 'active' : ''}`}
+                            aria-pressed={normalizedTranscodeFormat === format}
                             disabled={transcoding}
                             onClick={() => setTranscodeFormatDraft(format)}
                           >

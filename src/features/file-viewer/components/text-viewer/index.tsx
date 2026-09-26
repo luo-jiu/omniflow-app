@@ -820,11 +820,15 @@ const TextViewer: React.FC<TextViewerProps> = ({
       '&': {
         fontFamily: "'JetBrains Mono', monospace",
         fontSize: `${fontSize}px`,
+        fontVariantLigatures: 'none',
+        fontFeatureSettings: '"liga" 0, "calt" 0',
       },
       '.cm-content': {
         fontFamily: "'JetBrains Mono', monospace",
         fontSize: `${fontSize}px`,
         lineHeight: '1.65',
+        fontVariantLigatures: 'none',
+        fontFeatureSettings: '"liga" 0, "calt" 0',
       },
       '.cm-gutters': {
         fontSize: `${Math.max(fontSize - 2, 11)}px`,

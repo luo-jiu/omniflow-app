@@ -32,7 +32,7 @@ type ToolWorkspaceNavProps = {
 };
 
 const COLLAPSED_TOOLTIP_STYLE: React.CSSProperties = {
-  background: 'var(--app-bg-elevated)',
+  background: 'var(--app-bg-popover)',
   border: '1px solid var(--app-border-strong)',
   boxShadow: 'var(--app-shadow)',
   color: 'var(--app-text)',
@@ -74,6 +74,7 @@ const SortableToolItem: React.FC<SortableToolItemProps> = ({
       <button
         type="button"
         aria-label={item.title}
+        aria-current={active ? 'page' : undefined}
         className="tool-card-action"
         onClick={onSelect}
       >

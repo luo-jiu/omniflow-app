@@ -184,7 +184,7 @@ const TabButton = styled.div<{
   align-items: center;
   gap: 6px;
   border: 1px solid ${({ $active }) => ($active ? 'var(--semi-color-primary)' : 'var(--app-border)')};
-  background: ${({ $active }) => ($active ? 'var(--semi-color-primary-light-default)' : 'var(--app-bg-elevated)')};
+  background: ${({ $active }) => ($active ? 'var(--app-control-selected-bg)' : 'var(--app-bg-elevated)')};
   color: var(--app-text);
   border-radius: 8px;
   padding: 0 7px;
@@ -272,7 +272,7 @@ const DragGhost = styled.div`
   align-items: center;
   gap: 6px;
   border: 1px solid var(--semi-color-primary);
-  background: var(--semi-color-primary-light-default);
+  background: var(--app-control-selected-bg);
   color: var(--app-text);
   border-radius: 8px;
   padding: 0 7px;
@@ -404,8 +404,8 @@ const OverflowSlot = styled.div`
   justify-content: center;
   background: linear-gradient(
     to right,
-    color-mix(in srgb, var(--app-bg-1) 0%, transparent),
-    var(--app-bg-1) 24%
+    color-mix(in srgb, var(--app-bg) 0%, transparent),
+    var(--app-bg) 24%
   );
   pointer-events: none;
 `;
@@ -416,7 +416,7 @@ const OverflowTrigger = styled.button<{ $open: boolean; $disabled: boolean }>`
   border: 0;
   border-radius: var(--app-radius-medium);
   background: transparent;
-  color: ${({ $disabled }) => ($disabled ? 'var(--app-text-faint)' : 'var(--app-text-muted)')};
+  color: ${({ $disabled }) => ($disabled ? 'var(--app-text-disabled)' : 'var(--app-text-muted)')};
   cursor: ${({ $disabled }) => ($disabled ? 'default' : 'pointer')};
   opacity: ${({ $disabled }) => ($disabled ? 0.72 : 1)};
   display: inline-flex;
@@ -426,7 +426,7 @@ const OverflowTrigger = styled.button<{ $open: boolean; $disabled: boolean }>`
 
   &:hover {
     background: ${({ $disabled }) => ($disabled ? 'transparent' : 'var(--app-bg-elevated)')};
-    color: ${({ $disabled }) => ($disabled ? 'var(--app-text-faint)' : 'var(--app-text)')};
+    color: ${({ $disabled }) => ($disabled ? 'var(--app-text-disabled)' : 'var(--app-text)')};
   }
 
   .dot-stack {
@@ -450,7 +450,7 @@ const OverflowMenu = styled.div`
   padding: 5px;
   border-radius: 8px;
   border: 1px solid var(--app-border);
-  background: var(--app-bg-elevated);
+  background: var(--app-bg-popover);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.14);
   pointer-events: auto;
 `;
@@ -458,7 +458,7 @@ const OverflowMenu = styled.div`
 const OverflowMenuItem = styled.button<{ $active: boolean }>`
   width: 100%;
   border: 1px solid ${({ $active }) => ($active ? 'var(--semi-color-primary)' : 'transparent')};
-  background: ${({ $active }) => ($active ? 'var(--semi-color-primary-light-default)' : 'transparent')};
+  background: ${({ $active }) => ($active ? 'var(--app-control-selected-bg)' : 'transparent')};
   border-radius: 6px;
   padding: 5px 7px;
   margin: 0;

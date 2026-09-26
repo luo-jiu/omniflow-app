@@ -356,13 +356,13 @@ const Manager = styled.section`
 
   .agent-memory-button.is-primary {
     background: var(--semi-color-primary);
-    color: #fff;
+    color: var(--app-accent-foreground);
   }
 
   .agent-memory-button.is-primary:hover,
   .agent-memory-button.is-primary:focus-visible {
     background: var(--semi-color-primary-hover);
-    color: #fff;
+    color: var(--app-accent-foreground);
   }
 
   .agent-memory-button.is-danger {

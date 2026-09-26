@@ -156,7 +156,7 @@ const BrowserSurface = styled.div`
     border-radius: 8px;
     border: none;
     background: var(--semi-color-primary);
-    color: #fff;
+    color: var(--app-accent-foreground);
     padding: 0 13px;
     cursor: pointer;
     flex-shrink: 0;

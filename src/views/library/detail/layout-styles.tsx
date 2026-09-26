@@ -60,8 +60,7 @@ export const ArchiveReturnIconSlot = styled.span`
 `;
 
 export const DetailWrapper = styled.div`
-  --workspace-nav-accent: #7850b8;
-  body[theme-mode="dark"] & { --workspace-nav-accent: #bd9af2; }
+  --workspace-nav-accent: var(--app-nav-active);
   display: flex;
   width: 100%;
   height: 100%;
@@ -166,14 +165,11 @@ export const SidePanel = styled.div`
   max-width: var(--side-panel-max-width, 80vw);
   display: flex;
   flex-direction: column;
-  background: var(--app-sidebar-vibrancy);
+  /* macOS 原生 sidebar vibrancy 自己负责材质与透色，目录树不再叠加主题色蒙版。 */
+  background: transparent;
   flex-shrink: 0;
   height: 100%;
   overflow: hidden;
-
-  body[theme-mode="dark"] & {
-    background: var(--app-sidebar-vibrancy);
-  }
 
   html[data-platform="windows"] & {
     background: var(--app-bg-sidebar);
@@ -190,7 +186,7 @@ export const ResizeHandle = styled.div`
   z-index: 10;
 
   &:hover {
-    background: rgba(0, 0, 0, 0.04);
+    background: var(--app-hover-bg);
   }
 `;
 
@@ -402,7 +398,7 @@ const toolbarBackButtonStyles = css`
   }
 
   .toolbar-back-btn:hover {
-    background: rgba(0, 0, 0, 0.05);
+    background: var(--app-hover-bg);
     color: var(--app-text);
   }
 `;
@@ -546,7 +542,7 @@ export const ContentToolbar = styled.div`
 
   .browser-tab-btn.active {
     border-color: var(--semi-color-primary);
-    background: var(--semi-color-primary-light-default);
+    background: var(--app-control-selected-bg);
     color: var(--app-text);
   }
 
@@ -690,7 +686,7 @@ export const BookmarkToolbar = styled.div`
 
   .bookmark-item.drop-inside {
     border-color: var(--semi-color-primary);
-    background: var(--semi-color-primary-light-default);
+    background: var(--app-control-selected-bg);
   }
 
   .bookmark-favicon {
@@ -1256,6 +1252,6 @@ export const BrowserWorkspaceAsideResizeHandle = styled.div`
   z-index: 2;
 
   &:hover {
-    background: rgba(0, 0, 0, 0.04);
+    background: var(--app-hover-bg);
   }
 `;

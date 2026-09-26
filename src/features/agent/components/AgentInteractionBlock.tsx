@@ -147,7 +147,7 @@ const Interaction = styled.section`
     border: 0;
     border-radius: var(--app-radius-large);
     background: var(--semi-color-primary);
-    color: #fff;
+    color: var(--app-accent-foreground);
     font: inherit;
     font-size: 13px;
     cursor: pointer;

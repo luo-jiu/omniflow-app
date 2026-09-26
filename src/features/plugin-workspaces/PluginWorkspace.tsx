@@ -1,5 +1,6 @@
 import React from 'react';
 import { AppearanceViewContext } from '@/features/appearance/appearance.context';
+import { toPluginThemeSnapshot } from '@/features/appearance/plugin-theme';
 import { LibraryNodePickerModal, type LibraryNodePickerSelection, type SelectedTreeNode } from '@/features/file-explorer';
 import { fetchNodeDetailById } from '@/features/file-explorer/services/file.api';
 import { CommandExecutionCard } from '@/features/plugin-commands/CommandExecutionCard';
@@ -13,7 +14,6 @@ import { serializeAgentOwnerScope } from '@/shared/agent/agent-owner-scope';
 import { isPluginWorkspaceAllowed } from '@/shared/plugin-management';
 import type { PluginCommandExecution } from '@/shared/plugins/manual-command.types';
 import type { PluginWorkspaceDestination } from '@/shared/plugins/workspace.types';
-import type { ThemeSnapshot } from '../../../packages/plugin-sdk/index.js';
 import { PluginWorkspaceBody } from './styles';
 
 export interface PluginWorkspaceProps {
@@ -80,9 +80,7 @@ function PluginWorkspaceInner({ workspaceId, libraryId, rootNodeId, selectedTree
   const syncedDestination = React.useRef('');
   latestDestination.current = output && destination && fileName.trim() ? { parentId: destination.id, fileName: fileName.trim() } : null;
   const themeRevision = React.useRef(0);
-  const theme: ThemeSnapshot = React.useMemo(() => ({ schemaVersion: 1, revision: ++themeRevision.current,
-    mode: appearance?.mode ?? 'light', colors: { 'surface.app': appearance?.colors['surface.app'] ?? '#ffffff',
-      'text.primary': appearance?.colors['text.primary'] ?? '#222222' } }), [appearance]);
+  const theme = React.useMemo(() => toPluginThemeSnapshot(appearance, ++themeRevision.current), [appearance]);
   const latestTheme = React.useRef(theme); latestTheme.current = theme;
 
   const accept = React.useCallback((execution: PluginCommandExecution, live: boolean) => {

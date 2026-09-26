@@ -1,6 +1,7 @@
 import React from 'react';
 import styled from 'styled-components';
 import { IconDownload, IconFolder } from '@douyinfe/semi-icons';
+import { focusVisibleStyles, inputAppearanceStyles, textToneStyles } from '@/components/ui/theme-foundation-styles';
 
 import { Panel } from './styles';
 
@@ -42,6 +43,7 @@ const SaveTargetComposer = styled.div`
   }
 
   .save-target-mode-btn {
+    ${focusVisibleStyles}
     height: 30px;
     min-width: 128px;
     border: none;
@@ -76,11 +78,6 @@ const SaveTargetComposer = styled.div`
 
   .save-target-mode-btn:active {
     transform: translateY(0);
-  }
-
-  .save-target-mode-btn:focus-visible {
-    outline: 2px solid color-mix(in srgb, var(--semi-color-primary) 66%, transparent);
-    outline-offset: 2px;
   }
 
   .save-target-mode-label {
@@ -150,36 +147,25 @@ const SaveTargetComposer = styled.div`
   }
 
   .save-path-trigger {
+    ${inputAppearanceStyles}
     flex: 1;
     min-width: 154px;
     height: 30px;
-    border: 1px solid color-mix(in srgb, var(--app-border) 82%, transparent);
+    border: 1px solid var(--app-border);
     border-radius: 6px;
-    background: color-mix(in srgb, var(--app-bg) 90%, var(--app-bg-elevated));
-    color: var(--app-text);
     padding: 0 8px;
     text-align: left;
     cursor: pointer;
     transition: border-color 150ms ease, box-shadow 150ms ease, background-color 150ms ease;
   }
 
-  .save-path-trigger:hover {
-    border-color: color-mix(in srgb, var(--semi-color-primary) 52%, var(--app-border));
-  }
-
-  .save-path-trigger:focus-visible {
-    outline: 2px solid color-mix(in srgb, var(--semi-color-primary) 66%, transparent);
-    outline-offset: 2px;
-  }
-
   .save-path-trigger.is-empty {
-    color: var(--app-text-muted);
+    ${textToneStyles('muted')}
   }
 
   .save-path-trigger.is-error {
-    border-color: color-mix(in srgb, #db4652 80%, transparent);
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, #db4652 36%, transparent);
-    background: color-mix(in srgb, #db4652 10%, var(--app-bg));
+    box-shadow: inset 0 0 0 1px var(--app-danger-border);
+    background: var(--app-danger-bg);
   }
 
   .save-path-value {
@@ -195,7 +181,7 @@ const SaveTargetComposer = styled.div`
   .save-path-required {
     font-size: 10px;
     font-weight: 600;
-    color: #db4652;
+    color: var(--app-danger-text);
     white-space: nowrap;
   }
 `;
@@ -218,58 +204,63 @@ const ToolWorkspaceSaveTarget: React.FC<ToolWorkspaceSaveTargetProps> = ({
   onToggleSaveTargetType,
   savePathDisplay,
   saveTargetType,
-}) => (
-  <Panel>
-    <div className="panel-title">结果出口</div>
-    <div className="panel-desc">
-      先切换处理结果的出口：保存到本地，或导入到资源库。路径点一下就能改；资源库目录没选时会提示“必须选择”，
-      成品会先落到临时目录，再自动导入到你选中的目录里。
-    </div>
-    <SaveTargetComposer>
-      <div className="save-lane">
-        <div className="action-cluster save-target-cluster">
-          <span className="cluster-label">结果出口</span>
-          <button
-            type="button"
-            className={`save-target-mode-btn ${isLocalSaveTarget ? 'local' : 'internal'}`}
-            onClick={onToggleSaveTargetType}
-            onKeyDown={(event) => {
-              if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
-                event.preventDefault();
-                onToggleSaveTargetType();
-              }
-            }}
-            aria-label="切换结果出口"
-            title="切换结果出口"
-          >
-            <span className="save-target-mode-label">
-              <span className="save-target-mode-icon" aria-hidden>
-                <IconDownload className={`mode-icon ${isLocalSaveTarget ? 'active' : ''}`} />
-                <IconFolder className={`mode-icon ${isLocalSaveTarget ? '' : 'active'}`} />
-              </span>
-              {isLocalSaveTarget ? '保存到本地' : '导入到资源库'}
-            </span>
-            <span className="save-target-mode-switch">⇄</span>
-          </button>
-          <div className="save-path-line">
+}) => {
+  const requiredMessageId = React.useId();
+  return (
+    <Panel>
+      <div className="panel-title">结果出口</div>
+      <div className="panel-desc">
+        先切换处理结果的出口：保存到本地，或导入到资源库。路径点一下就能改；资源库目录没选时会提示“必须选择”，
+        成品会先落到临时目录，再自动导入到你选中的目录里。
+      </div>
+      <SaveTargetComposer>
+        <div className="save-lane">
+          <div className="action-cluster save-target-cluster">
+            <span className="cluster-label">结果出口</span>
             <button
               type="button"
-              className={`save-path-trigger ${saveTargetType === 'internal' && !savePathDisplay ? 'is-empty' : ''} ${internalPathRequired && internalTargetMissing ? 'is-error' : ''}`}
-              onClick={onPickSavePath}
-              title={savePathDisplay || (saveTargetType === 'local' ? '点击选择本地保存路径' : '点击选择资源库目录')}
+              className={`save-target-mode-btn ${isLocalSaveTarget ? 'local' : 'internal'}`}
+              onClick={onToggleSaveTargetType}
+              onKeyDown={(event) => {
+                if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+                  event.preventDefault();
+                  onToggleSaveTargetType();
+                }
+              }}
+              aria-label="切换结果出口"
+              title="切换结果出口"
             >
-              <span className="save-path-value">
-                {savePathDisplay || (saveTargetType === 'local' ? '点击选择本地保存路径' : '点击选择资源库目录')}
+              <span className="save-target-mode-label">
+                <span className="save-target-mode-icon" aria-hidden>
+                  <IconDownload className={`mode-icon ${isLocalSaveTarget ? 'active' : ''}`} />
+                  <IconFolder className={`mode-icon ${isLocalSaveTarget ? '' : 'active'}`} />
+                </span>
+                {isLocalSaveTarget ? '保存到本地' : '导入到资源库'}
               </span>
+              <span className="save-target-mode-switch">⇄</span>
             </button>
-            {internalPathRequired && internalTargetMissing ? (
-              <span className="save-path-required">必须选择资源库目录</span>
-            ) : null}
+            <div className="save-path-line">
+              <button
+                type="button"
+                className={`save-path-trigger ${saveTargetType === 'internal' && !savePathDisplay ? 'is-empty' : ''} ${internalPathRequired && internalTargetMissing ? 'is-error' : ''}`}
+                aria-invalid={internalPathRequired && internalTargetMissing}
+                aria-describedby={internalPathRequired && internalTargetMissing ? requiredMessageId : undefined}
+                onClick={onPickSavePath}
+                title={savePathDisplay || (saveTargetType === 'local' ? '点击选择本地保存路径' : '点击选择资源库目录')}
+              >
+                <span className="save-path-value">
+                  {savePathDisplay || (saveTargetType === 'local' ? '点击选择本地保存路径' : '点击选择资源库目录')}
+                </span>
+              </button>
+              {internalPathRequired && internalTargetMissing ? (
+                <span id={requiredMessageId} className="save-path-required">必须选择资源库目录</span>
+              ) : null}
+            </div>
           </div>
         </div>
-      </div>
-    </SaveTargetComposer>
-  </Panel>
-);
+      </SaveTargetComposer>
+    </Panel>
+  );
+};
 
 export default ToolWorkspaceSaveTarget;

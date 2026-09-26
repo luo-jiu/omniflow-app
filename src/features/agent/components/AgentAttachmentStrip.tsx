@@ -30,7 +30,7 @@ const Strip = styled.div<{ $composer: boolean }>`
   .attachment-remove svg, .attachment-remove svg * { color: inherit; }
   .attachment-preview-trigger { cursor: zoom-in; }
   .attachment-preview-trigger:focus-visible { outline: 2px solid var(--app-accent); outline-offset: -2px; }
-  .attachment-error { color: var(--app-danger, #c64848); font-size: 11px; line-height: 16px; overflow-wrap: anywhere; }
+  .attachment-error { color: var(--app-danger-text); font-size: 11px; line-height: 16px; overflow-wrap: anywhere; }
 `;
 
 export function AgentAttachmentStrip({ entries, onRemove, scope, sessionId }: {

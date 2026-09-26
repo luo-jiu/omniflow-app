@@ -1,10 +1,12 @@
 import { css } from 'styled-components';
+import { buttonStyles } from '@/components/ui/theme-foundation-styles';
 import {
   SIDE_PANEL_TOGGLE_ICON_SIZE,
   SIDE_PANEL_TOGGLE_SIZE,
 } from './layout-constants';
 
 const sidePanelIconButtonInteractiveStyles = css`
+  ${buttonStyles('quiet')}
   border-radius: 6px;
   border: 1px solid transparent;
   background: transparent;
@@ -16,8 +18,7 @@ const sidePanelIconButtonInteractiveStyles = css`
   cursor: pointer;
   user-select: none;
 
-  &:hover {
-    background: color-mix(in srgb, var(--app-text) 8%, transparent);
+  &:not(:disabled):not([aria-disabled='true']):hover {
     color: var(--app-text);
   }
 `;

@@ -2,7 +2,7 @@ import React, { useLayoutEffect, useMemo, useState, type ReactNode } from 'react
 import { ThemeProvider as StyledThemeProvider } from 'styled-components';
 import { AppearanceViewContext } from '@/features/appearance/appearance.context';
 import { validateThemeView, type ThemeView } from '@/features/appearance/theme-view';
-import { applyThemeView } from '@/features/appearance/theme-dom';
+import { applyThemeView, cancelThemeTransition } from '@/features/appearance/theme-dom';
 import { subscribeAppearance } from '@/service/appearance/appearance.api';
 import { createThemeState, createThemeSnapshot } from '@/features/appearance/theme-state';
 import { toThemeView } from '@/features/appearance/theme-view';
@@ -18,6 +18,7 @@ export const OverlayThemeBridge: React.FC<{ children: ReactNode }> = ({ children
     setView(current => incoming.ownerEpoch === current.ownerEpoch && incoming.revision <= current.revision ? current : incoming);
   }), []);
   useLayoutEffect(() => { applyThemeView(view); }, [view]);
+  useLayoutEffect(() => () => cancelThemeTransition(), []);
   const styledTheme = useMemo(() => ({ ...legacyStyledTheme, color: { primary: view.colors['accent.default'], secondary: view.colors['accent.active'] } }), [view]);
   return <AppearanceViewContext.Provider value={view}><StyledThemeProvider theme={styledTheme}>{children}</StyledThemeProvider></AppearanceViewContext.Provider>;
 };

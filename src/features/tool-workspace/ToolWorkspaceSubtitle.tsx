@@ -20,6 +20,7 @@ import {
 
 import type { SelectedTreeNode } from '@/features/file-explorer';
 import { workspaceScrollbarStyles } from '@/components/ui/workspace-scrollbar';
+import { buttonStyles, focusVisibleStyles, interactiveItemStyles, textToneStyles } from '@/components/ui/theme-foundation-styles';
 
 import type { RunnerSnapshot } from './subtitle-translation.runner';
 import { selectSingleDroppedSubtitleFile } from './subtitle-translation.service';
@@ -92,18 +93,20 @@ const SubtitleHeaderActions = styled.div`
   }
 
   .semi-button {
+    ${interactiveItemStyles}
     width: 28px;
     min-width: 28px;
     min-height: 28px;
     height: 28px;
     padding: 0;
     border-radius: 50%;
-    color: var(--app-text-muted);
+    ${textToneStyles('muted')}
+    background: transparent;
   }
 
-  .semi-button:not(.semi-button-disabled):hover,
-  .semi-button:not(.semi-button-disabled):focus-visible {
-    color: var(--app-text);
+  .semi-button:not(:disabled):not([aria-disabled='true']):hover,
+  .semi-button:not(:disabled):not([aria-disabled='true']):focus-visible {
+    ${textToneStyles('primary')}
   }
 
   svg {
@@ -141,9 +144,9 @@ const TitleWithHelp = styled.div`
 `;
 
 const HelpTrigger = styled.button`
+  ${buttonStyles('quiet')}
   padding: 0;
   border: 0;
-  background: transparent;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -151,17 +154,12 @@ const HelpTrigger = styled.button`
   height: 16px;
   flex: none;
   border-radius: 50%;
-  color: var(--app-text-muted);
+  ${textToneStyles('muted')}
   cursor: default;
 
-  &:hover,
-  &:focus-visible {
-    color: var(--semi-color-primary);
-  }
-
-  &:focus-visible {
-    outline: 2px solid var(--semi-color-primary-light-active);
-    outline-offset: 1px;
+  &:not(:disabled):not([aria-disabled='true']):hover,
+  &:not(:disabled):not([aria-disabled='true']):focus-visible {
+    ${textToneStyles('accent')}
   }
 
   svg {
@@ -177,7 +175,7 @@ const HelpContent = styled.div`
 `;
 
 const HELP_TOOLTIP_STYLE: React.CSSProperties = {
-  background: 'var(--app-bg-elevated)',
+  background: 'var(--app-bg-popover)',
   border: '1px solid var(--app-border-strong)',
   boxShadow: 'var(--app-shadow)',
   color: 'var(--app-text)',
@@ -340,6 +338,7 @@ const SubtitleTable = styled.div`
   }
 
   .translation-cell textarea {
+    ${focusVisibleStyles}
     height: 32px;
     font-size: 12px;
     line-height: 1.45;
@@ -350,15 +349,15 @@ const SubtitleTable = styled.div`
   }
 
   .translation-preview {
+    ${buttonStyles('quiet')}
     width: 100%;
     min-height: 32px;
     padding: 6px 8px;
     border: 0;
     border-radius: 999px;
-    background: transparent;
     font-size: 12px;
     line-height: 1.45;
-    color: var(--app-text);
+    text-align: left;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -367,12 +366,8 @@ const SubtitleTable = styled.div`
     align-items: center;
   }
 
-  .translation-preview:hover {
-    background: var(--semi-color-fill-0);
-  }
-
   .translation-preview.placeholder {
-    color: var(--app-text-muted);
+    ${textToneStyles('muted')}
   }
 
   .row-actions {
@@ -385,19 +380,20 @@ const SubtitleTable = styled.div`
   }
 
   .row-actions .semi-button {
+    ${interactiveItemStyles}
     min-height: 28px;
     width: 28px;
     min-width: 28px;
     height: 28px;
     padding: 0;
     border-radius: 50%;
-    color: var(--app-text-muted);
+    ${textToneStyles('muted')}
     background: transparent;
   }
 
-  .row-actions .semi-button:hover {
-    background: var(--semi-color-fill-1);
-    color: var(--app-text);
+  .row-actions .semi-button:not(:disabled):not([aria-disabled='true']):hover,
+  .row-actions .semi-button:not(:disabled):not([aria-disabled='true']):focus-visible {
+    ${textToneStyles('primary')}
   }
 
   .row-actions .semi-button.semi-button-disabled,
@@ -455,6 +451,7 @@ const SubtitleTableRow = React.memo(({
     <div className="cell translation-cell">
       {isEditing ? (
         <TextArea
+          aria-label={`编辑第 ${row.index} 句译文`}
           autoFocus
           autosize={{ minRows: 1, maxRows: 1 }}
           value={row.translatedText}
@@ -464,13 +461,14 @@ const SubtitleTableRow = React.memo(({
           onFocus={placeCaretAtTextEnd}
         />
       ) : (
-        <div
+        <button
+          type="button"
           className={`translation-preview ${String(row.translatedText || '').trim() ? '' : 'placeholder'}`}
           onClick={() => onToggleEditingRow(row.id)}
           title={String(row.translatedText || '').trim() || '点击编辑译文'}
         >
           {String(row.translatedText || '').trim() || '点击编辑译文'}
-        </div>
+        </button>
       )}
     </div>
     <div className="cell row-actions">

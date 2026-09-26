@@ -28,20 +28,12 @@ const Content = styled.div`
   .agent-code-language { color: var(--app-text-muted); font-size: 11px; }
   .agent-code-body { color: var(--app-text); }
   .agent-code-body, .agent-code-body span { transition: none; }
-  .agent-code-body .tok-keyword, .agent-code-body .tok-operator { color: #7850b8; }
-  .agent-code-body .tok-string, .agent-code-body .tok-regexp { color: #27724b; }
-  .agent-code-body .tok-number, .agent-code-body .tok-bool, .agent-code-body .tok-null { color: #a15b20; }
-  .agent-code-body .tok-comment { color: #71777d; }
-  .agent-code-body .tok-typeName, .agent-code-body .tok-propertyName { color: #236e92; }
-  .agent-code-body .tok-meta { color: #a04766; }
-  body[theme-mode='dark'] & {
-    .agent-code-body .tok-keyword, .agent-code-body .tok-operator { color: #c5a3ee; }
-    .agent-code-body .tok-string, .agent-code-body .tok-regexp { color: #9dc6a5; }
-    .agent-code-body .tok-number, .agent-code-body .tok-bool, .agent-code-body .tok-null { color: #e1b88c; }
-    .agent-code-body .tok-comment { color: #9a9fa6; }
-    .agent-code-body .tok-typeName, .agent-code-body .tok-propertyName { color: #8bc4dc; }
-    .agent-code-body .tok-meta { color: #dda1b8; }
-  }
+  .agent-code-body .tok-keyword, .agent-code-body .tok-operator { color: var(--app-agent-syntax-keyword); }
+  .agent-code-body .tok-string, .agent-code-body .tok-regexp { color: var(--app-agent-syntax-string); }
+  .agent-code-body .tok-number, .agent-code-body .tok-bool, .agent-code-body .tok-null { color: var(--app-agent-syntax-number); }
+  .agent-code-body .tok-comment { color: var(--app-agent-syntax-comment); }
+  .agent-code-body .tok-typeName, .agent-code-body .tok-propertyName { color: var(--app-agent-syntax-type); }
+  .agent-code-body .tok-meta { color: var(--app-agent-syntax-meta); }
   pre { padding: 12px; margin: 0; overflow: auto; max-height: min(330px, 42vh); white-space: pre; }
   .agent-table { max-width: 100%; overflow: auto; }
   pre, .agent-table { ${workspaceScrollbarStyles} }

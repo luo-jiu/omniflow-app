@@ -18,14 +18,16 @@ const Dial = styled.aside`
   width: 44px;
   height: var(--dial-height);
   max-height: calc(100% - 100px);
+  --dial-muted: #a0a0a0;
   --dial-green: #9fcab4;
   --dial-yellow: #dbbb77;
   --dial-red: #df8585;
   --dial-violet: var(--workspace-nav-accent, #bd9af2);
   --dial-rose-light: #e8a7bc;
   body[theme-mode='light'] & {
-    --dial-green: #397c5a; --dial-yellow: #98721e; --dial-red: #bd4646;
-    --dial-violet: var(--workspace-nav-accent, #7850b8); --dial-rose-light: #bd5d7b;
+    --dial-muted: #707070;
+    --dial-green: #2f865d; --dial-yellow: #9b6b00; --dial-red: #bd3f3f;
+    --dial-violet: var(--workspace-nav-accent, #7040a8); --dial-rose-light: #a94f70;
   }
   .dial-scroll {
     height: 100%; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain;
@@ -41,7 +43,7 @@ const Dial = styled.aside`
   .dial-stroke {
     display: block; height: 2px; width: var(--tick-width);
     background: var(--tick-color, var(--app-text-muted));
-    opacity: var(--tick-opacity, 0.55);
+    opacity: var(--tick-opacity, 0.72);
     transition: width 100ms linear, opacity 100ms linear, background-color 100ms linear;
   }
   .dial-tick[aria-current='true'] .dial-stroke, .dial-tick:focus-visible .dial-stroke,
@@ -220,7 +222,7 @@ export default function AgentConversationIndex({ messages, runs, scrollRef, stor
           data-milestone={indexMilestone(entry.ordinal)} data-marked={Object.prototype.hasOwnProperty.call(marks, entry.id)}
           data-hovered={hovered === index} data-wave={waveStrength > 0}
           style={{ '--tick-width': `${INDEX_BASE_WIDTH + strength * (INDEX_PEAK_WIDTH - INDEX_BASE_WIDTH)}px`,
-            '--tick-color': colors[index], '--tick-opacity': baseColors[index] ? 1 : 0.55 + strength * 0.45 } as React.CSSProperties}
+            '--tick-color': colors[index], '--tick-opacity': baseColors[index] ? 1 : 0.72 + strength * 0.28 } as React.CSSProperties}
           onClick={() => navigate(index)} onFocus={() => setHovered(index)} onKeyDown={event => {
             if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
             event.preventDefault();

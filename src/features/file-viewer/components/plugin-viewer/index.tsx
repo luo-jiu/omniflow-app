@@ -1,11 +1,11 @@
 import { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { pluginViewerApi } from '@/service/plugins/plugin-viewer.api';
 import { AppearanceViewContext } from '@/features/appearance/appearance.context';
+import { toPluginThemeSnapshot } from '@/features/appearance/plugin-theme';
 import { useViewerSession } from '../../session/useViewerSession';
 import { builtInViewerId } from '@/shared/viewer-contribution-id';
 import type { FileDispatcherProps } from '../../contributions/viewer.types';
 import type { PluginViewerSnapshot } from '@/shared/plugin-viewer';
-import type { ThemeSnapshot } from '../../../../../packages/plugin-sdk/index.js';
 export function PluginViewer(props: FileDispatcherProps) {
   const directory = props.fileType === 'comic';
   const appearance = useContext(AppearanceViewContext);
@@ -19,8 +19,7 @@ export function PluginViewer(props: FileDispatcherProps) {
   if (snapshotScope.current !== scopeKey) { snapshotScope.current = scopeKey; snapshot.current = null; }
   const activeRef = useRef(active); activeRef.current = active;
   const themeRevision = useRef(1);
-  const theme: ThemeSnapshot = useMemo(() => ({ schemaVersion: 1, revision: ++themeRevision.current, mode: appearance?.mode ?? 'light',
-    colors: { 'surface.app': appearance?.colors['surface.app'] ?? '#ffffff', 'text.primary': appearance?.colors['text.primary'] ?? '#222222' } }), [appearance]);
+  const theme = useMemo(() => toPluginThemeSnapshot(appearance, ++themeRevision.current), [appearance]);
   const latestTheme = useRef(theme); latestTheme.current = theme;
   const adapter = useMemo(() => ({ capture: () => snapshot.current, restore: (value: PluginViewerSnapshot) => { snapshot.current = value; },
     suspend: () => undefined, resume: () => undefined, estimateSnapshotBytes: () => JSON.stringify(snapshot.current).length * 2,

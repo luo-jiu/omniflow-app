@@ -5,6 +5,7 @@ import type { PluginInstallReview, PluginManagementAction } from '@/shared/plugi
 import { AppearanceControlContext } from '@/features/appearance/appearance.context';
 import { defaultSelection } from '@/features/appearance/appearance-storage';
 import { openCompactConfirm } from '@/components/ui/compact-confirm';
+import { buttonStyles, focusVisibleStyles, surfaceStyles, textToneStyles } from '@/components/ui/theme-foundation-styles';
 import type { PluginFileOutputMediaType, PluginToolContribution } from '../../../packages/plugin-sdk/index.js';
 function formatBytes(bytes: number): string {
   if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(bytes % (1024 * 1024) ? 1 : 0)} MiB`;
@@ -18,12 +19,23 @@ function outputCapabilityDescription(tools: PluginToolContribution[] | undefined
   return `读取获准的单个源文件，生成${media}产物（最多 ${formatBytes(output.output.maxBytes)}）；宿主确认后另存为新文件，不覆盖原文件。`;
 }
 const Page=styled.section`
-  color:var(--app-text);font-size:13px;line-height:1.6;padding:16px;max-width:1040px;margin:auto;
+  ${textToneStyles('primary')}
+  font-size:13px;line-height:1.6;padding:16px;max-width:1040px;margin:auto;
   h2{font-size:18px;margin:0}h3{font-size:14px;margin:0}p{margin:6px 0}header,.actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}header{justify-content:space-between;margin-bottom:16px}
-  article,.review,.recovery{border:1px solid var(--app-border-strong);border-radius:10px;background:var(--app-panel);padding:14px;margin:12px 0}
-  button{font:inherit;min-height:28px;padding:3px 12px;border:1px solid var(--app-border-strong);border-radius:6px;background:var(--app-bg-elevated);color:var(--app-text);cursor:pointer}button:disabled{opacity:.5;cursor:default}button:focus-visible{outline:2px solid var(--app-focus-border);outline-offset:2px}
+  article,.review,.recovery{
+    ${surfaceStyles('panel')}
+    border:1px solid var(--app-border-strong);border-radius:10px;padding:14px;margin:12px 0;
+  }
+  button{
+    border:1px solid transparent;
+    ${buttonStyles('secondary')}
+    min-height:28px;padding:3px 12px;border-radius:6px;cursor:pointer;
+  }
   header>div{min-width:0;max-width:100%}h3,small,p{overflow-wrap:anywhere}
-  small{color:var(--app-text-secondary)}code{overflow-wrap:anywhere;font-size:11px}details{margin-top:8px}li{overflow-wrap:anywhere}.error{color:var(--app-danger,#c33)}.recovery{border-color:var(--app-focus-border)}
+  small{${textToneStyles('secondary')}}
+  code{overflow-wrap:anywhere;font-size:11px}details{margin-top:8px}li{overflow-wrap:anywhere}
+  details summary{${focusVisibleStyles}}
+  .error{color:var(--app-danger-text)}.recovery{border-color:var(--app-focus-border)}
 `;
 export default function PluginManagement({onBack}:{onBack:()=>void}){
   const catalog=useSyncExternalStore(api.subscribe,api.getSnapshot);

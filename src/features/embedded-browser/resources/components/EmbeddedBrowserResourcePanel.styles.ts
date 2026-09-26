@@ -171,7 +171,7 @@ const PanelShell = styled.aside`
   .resource-panel-btn.primary {
     border-color: var(--semi-color-primary);
     background: var(--semi-color-primary);
-    color: #fff;
+    color: var(--app-accent-foreground);
   }
 
   .resource-panel-btn:disabled {
@@ -638,7 +638,7 @@ const PanelShell = styled.aside`
   .resource-card-btn.primary {
     border-color: var(--semi-color-primary);
     background: var(--semi-color-primary);
-    color: #fff;
+    color: var(--app-accent-foreground);
   }
 
   .resource-card-btn:disabled {
@@ -710,7 +710,7 @@ const PanelShell = styled.aside`
     color: var(--app-text);
   }
 
-  .resource-bulk-bar .resource-card-btn:not(:disabled):hover {
+  .resource-bulk-bar .resource-card-btn:not(.primary):not(:disabled):hover {
     border-color: var(--semi-color-primary);
     color: var(--semi-color-primary);
   }
@@ -724,7 +724,7 @@ const PanelShell = styled.aside`
   .resource-bulk-bar .resource-card-btn.primary {
     border-color: var(--semi-color-primary);
     background: var(--semi-color-primary);
-    color: #fff;
+    color: var(--app-accent-foreground);
   }
 
   .resource-bulk-bar .resource-card-btn:disabled {
