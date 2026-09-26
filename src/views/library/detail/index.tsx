@@ -75,6 +75,7 @@ import { getAppPopupContainer } from '@/utils/popup-container';
 import { getDesktopPlatform } from '@/platform';
 import { useAuth } from '@/hooks/useAuth';
 import AgentWorkspace from '@/features/agent/AgentWorkspace';
+import RetainedWorkspacePane from '@/features/library-workspace/RetainedWorkspacePane';
 import { AGENT_WORKSPACE_MIN_WIDTH } from '@/features/agent/agent-session-directory-layout';
 import type { AgentFileLink } from '@/shared/agent/agent-file-link';
 import { resolveAgentLibraryPath } from '@/features/agent/services/agent-library.api';
@@ -306,6 +307,8 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   }), [agentOwnerScope, libraryId]);
   const [treeRootNodeId, setTreeRootNodeId] = React.useState<number | null>(null);
   const [workspaceDisplayMode, setWorkspaceDisplayMode] = React.useState<WorkspaceDisplayMode>(initialWorkspaceState.workspaceDisplayMode);
+  // 文件与系统 tab 共用资源库导航入口，内容模式仍由各自的 owner 管理。
+  const isFileWorkspaceActive = workspaceDisplayMode === 'file-viewer' || workspaceDisplayMode === 'system';
   const [systemWorkspaceTabs, setSystemWorkspaceTabs] = React.useState<SystemWorkspaceView[]>([]);
   const [activeSystemWorkspaceView, setActiveSystemWorkspaceView] = React.useState<SystemWorkspaceView | null>(null);
   const [systemWorkspaceReturnMode, setSystemWorkspaceReturnMode] = React.useState<SystemWorkspaceReturnMode>('search-home');
@@ -2688,12 +2691,12 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
             ) : (
               <button
                 type="button"
-                className={`toolbar-action-btn ${workspaceDisplayMode === 'file-viewer' ? 'is-active' : ''}`}
+                className={`toolbar-action-btn ${isFileWorkspaceActive ? 'is-active' : ''}`}
                 onClick={openFileWorkspace}
                 title="打开文件模式"
                 aria-label="打开文件模式"
               >
-                <OutlineIcon name="folder" selected={workspaceDisplayMode === 'file-viewer'} />
+                <OutlineIcon name="folder" selected={isFileWorkspaceActive} />
               </button>
             )}
             <button
@@ -2864,7 +2867,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
             {!isWindows ? fileRefreshButton : null}
           </div>
         </ContentToolbar>
-        {!browserModeOpen && (workspaceDisplayMode === 'file-viewer' || workspaceDisplayMode === 'system') ? (
+        {!browserModeOpen && isFileWorkspaceActive ? (
           <FileTabsBar
             tabs={tabs}
             activeTabId={workspaceDisplayMode === 'file-viewer' ? activeTabId : null}
@@ -3074,8 +3077,11 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                 ) : null}
               </BrowserWorkspace>
             </div>
-          ) : workspaceDisplayMode === 'search-home' ? (
-            <div className="workspace-pane active">
+          ) : null}
+            <RetainedWorkspacePane
+              key={JSON.stringify([agentOwnerScope?.backendScope, agentOwnerScope?.accountScope, libraryId])}
+              active={workspaceDisplayMode === 'search-home'}
+            >
               <AgentWorkspace
                 onOpenFileLink={(link: AgentFileLink) => {
                   const requestedLibrary = libraryId;
@@ -3110,8 +3116,8 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                 rootNodeId={treeRootNodeId}
                 selectedTreeNode={selectedTreeNode}
               />
-            </div>
-          ) : workspaceDisplayMode === 'tools' ? (
+            </RetainedWorkspacePane>
+          {workspaceDisplayMode === 'tools' ? (
             <div className="workspace-pane active">
               <ToolWorkspace
                 pluginCommandRequest={pluginCommandRequest}

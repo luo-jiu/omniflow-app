@@ -1,4 +1,5 @@
 import React from 'react';
+import { WorkspaceVisibilityContext } from '@/components/ui/workspace-visibility';
 import styled, { keyframes } from 'styled-components';
 import OutlineIcon from '@/components/ui/outline-icon';
 import { workspaceScrollbarStyles } from '@/components/ui/workspace-scrollbar';
@@ -176,6 +177,7 @@ export default function AgentSessionPeek({ sessions, total, activeSessionId, loa
   onEditGroup?: (group: AgentSessionGroup) => void; onNewInGroup?: (id: string | null) => void;
   onArchive?: (session: AgentSessionSummary) => void; onArchives?: () => void; onRetry?: () => void;
 }) {
+  const workspaceActive = React.useContext(WorkspaceVisibilityContext);
   const [closedGroups, setClosedGroups] = React.useState<Record<string, boolean>>(() => {
     try {
       const value: unknown = storageKey ? JSON.parse(localStorage.getItem(storageKey) || '{}') : {};
@@ -247,7 +249,7 @@ export default function AgentSessionPeek({ sessions, total, activeSessionId, loa
 
   React.useEffect(() => {
     const layer = layerRef.current;
-    if (!compact || !open || !layer) return;
+    if (!workspaceActive || !compact || !open || !layer) return;
     const ownerDocument = layer.ownerDocument;
     const dismiss = (event: PointerEvent) => {
       if (!layer.contains(event.target as Node)) close();
@@ -264,7 +266,7 @@ export default function AgentSessionPeek({ sessions, total, activeSessionId, loa
       ownerDocument.removeEventListener('pointerdown', dismiss);
       ownerDocument.removeEventListener('keydown', onKeyDown);
     };
-  }, [close, compact, open]);
+  }, [close, compact, open, workspaceActive]);
 
   const settleDrag = () => {
     const current = drag.current;

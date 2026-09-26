@@ -1,5 +1,6 @@
 import TestRenderer, { act } from 'react-test-renderer';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { WorkspaceVisibilityContext } from '@/components/ui/workspace-visibility';
 import { useAgentIndexWave } from './useAgentIndexWave';
 
 afterEach(() => vi.unstubAllGlobals());
@@ -34,4 +35,26 @@ describe('Index wave animation lifecycle', () => {
     act(() => renderer.unmount());
     expect(frames.size).toBe(0);
   });
+});
+
+it('stops wave frames while the retained workspace is hidden and resumes on return', () => {
+  const request = vi.fn(() => 42);
+  const cancel = vi.fn();
+  const remove = vi.fn();
+  vi.stubGlobal('requestAnimationFrame', request);
+  vi.stubGlobal('cancelAnimationFrame', cancel);
+  vi.stubGlobal('document', { hidden: false, addEventListener: vi.fn(), removeEventListener: remove });
+  vi.stubGlobal('window', { matchMedia: () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }) });
+  function Wave() { useAgentIndexWave(10); return null; }
+  const render = (active: boolean) => <WorkspaceVisibilityContext.Provider value={active}><Wave /></WorkspaceVisibilityContext.Provider>;
+  let view!: TestRenderer.ReactTestRenderer;
+  act(() => { view = TestRenderer.create(render(true)); });
+  expect(request).toHaveBeenCalledTimes(1);
+  act(() => view.update(render(false)));
+  expect(cancel).toHaveBeenCalledWith(42);
+  expect(remove).toHaveBeenCalledWith('visibilitychange', expect.any(Function));
+  expect(request).toHaveBeenCalledTimes(1);
+  act(() => view.update(render(true)));
+  expect(request).toHaveBeenCalledTimes(2);
+  act(() => view.unmount());
 });

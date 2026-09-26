@@ -1,4 +1,5 @@
 import React from 'react';
+import { WorkspaceVisibilityContext } from '@/components/ui/workspace-visibility';
 import { AgentAttachmentStrip } from './components/AgentAttachmentStrip';
 import OutlineIcon from '@/components/ui/outline-icon';
 import { Toast } from '@douyinfe/semi-ui';
@@ -284,11 +285,12 @@ const Composer = styled.form`
 
   .agent-submit {
     background: var(--semi-color-primary);
-    color: #fff;
+    color: var(--app-accent-foreground);
   }
 
   .agent-submit.stop {
     background: #e58b32;
+    color: #fff;
   }
   .agent-submit .app-outline-icon { color: inherit; }
 
@@ -345,6 +347,7 @@ export default function AgentWorkspace({
   rootNodeId,
   selectedTreeNode,
 }: AgentWorkspaceProps) {
+  const workspaceActive = React.useContext(WorkspaceVisibilityContext);
   const [aiServices, setAIServices] = React.useState<AIServiceSnapshot | null>(null);
   const [models, setModels] = React.useState<string[]>([]);
   const [modelPreferences, setModelPreferences] = React.useState<AgentModelPreferences>(
@@ -503,25 +506,34 @@ export default function AgentWorkspace({
   const currentGroupId = currentSessionId ? session.sessionInfo?.groupId || null : draftGroupId;
   const permissionMode = currentSessionId ? session.sessionInfo?.permissionMode || 'ask' : draftPermissionMode;
 
+  const configRequestId = React.useRef(0);
+  const modelRequestId = React.useRef(0);
   const loadConfig = React.useCallback(async () => {
+    const requestId = ++configRequestId.current;
+    modelRequestId.current += 1;
+    setLoadingModels(false);
     setLoadingConfig(true);
     setConfigError(null);
     try {
       const snapshot = await fetchAIServiceProfiles();
+      if (requestId !== configRequestId.current) return;
       setAIServices(snapshot);
       setModels([]);
     } catch (error) {
+      if (requestId !== configRequestId.current) return;
       setAIServices(null);
       setConfigError(error instanceof Error ? error.message : '读取 AI 服务配置失败');
       setModels([]);
     } finally {
-      setLoadingConfig(false);
+      if (requestId === configRequestId.current) setLoadingConfig(false);
     }
   }, []);
 
   React.useEffect(() => {
+    if (!workspaceActive) return;
     void loadConfig();
-  }, [loadConfig]);
+    return () => { configRequestId.current += 1; modelRequestId.current += 1; };
+  }, [loadConfig, workspaceActive]);
 
   React.useEffect(() => {
     setSessions([]);
@@ -592,7 +604,7 @@ export default function AgentWorkspace({
 
   React.useLayoutEffect(() => {
     const element = scrollRef.current;
-    if (!element) return;
+    if (!element || !workspaceActive) return;
     if (scrollFrameRef.current !== null) {
       window.cancelAnimationFrame(scrollFrameRef.current);
       scrollFrameRef.current = null;
@@ -616,6 +628,7 @@ export default function AgentWorkspace({
       }
     };
   }, [
+    workspaceActive,
     composerHeight,
     composerDockHeight,
     managerMode,
@@ -631,6 +644,7 @@ export default function AgentWorkspace({
   }, []);
 
   const handleLoadModels = React.useCallback(async (): Promise<boolean> => {
+    const requestId = ++modelRequestId.current;
     if (!activeProfile) {
       Toast.warning('请先在 AI 服务配置中启用一个服务');
       return false;
@@ -638,16 +652,17 @@ export default function AgentWorkspace({
     setLoadingModels(true);
     try {
       const nextModels = await fetchActiveAIServiceModels();
+      if (requestId !== modelRequestId.current) return false;
       setModels(nextModels);
       if (!modelPreferences.model && nextModels.length > 0) {
         persistModelPreferences({ ...modelPreferences, model: nextModels[0] });
       }
       return true;
     } catch (error) {
-      Toast.error(error instanceof Error ? error.message : '获取模型列表失败');
+      if (requestId === modelRequestId.current) Toast.error(error instanceof Error ? error.message : '获取模型列表失败');
       return false;
     } finally {
-      setLoadingModels(false);
+      if (requestId === modelRequestId.current) setLoadingModels(false);
     }
   }, [activeProfile, modelPreferences, persistModelPreferences]);
 

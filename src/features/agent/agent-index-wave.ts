@@ -21,7 +21,7 @@ export function indexWaveSpread(strength: number, distance: number): number {
 }
 
 export function indexWaveColors(baseColors: Array<string | null>, center: number | null): Array<string> {
-  const colors = baseColors.map(color => color || 'var(--app-text-muted)');
+  const colors = baseColors.map(color => color || 'var(--dial-muted, var(--app-text-muted))');
   if (center === null) return colors;
   const influence = new Array<number>(colors.length).fill(0);
   // Only sources touched by the traveling wave can radiate to their neighbors.
@@ -34,7 +34,7 @@ export function indexWaveColors(baseColors: Array<string | null>, center: number
       const amount = indexWaveSpread(strength, Math.abs(target - source));
       if (amount <= influence[target]) continue;
       influence[target] = amount;
-      colors[target] = `color-mix(in srgb, ${color} ${(amount * 100).toFixed(2)}%, var(--app-text-muted))`;
+      colors[target] = `color-mix(in srgb, ${color} ${(amount * 100).toFixed(2)}%, var(--dial-muted, var(--app-text-muted)))`;
     }
   }
   return colors;

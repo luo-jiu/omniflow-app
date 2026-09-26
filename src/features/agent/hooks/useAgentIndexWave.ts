@@ -1,10 +1,12 @@
 import React from 'react';
+import { WorkspaceVisibilityContext } from '@/components/ui/workspace-visibility';
 import { indexWaveCenter } from '../agent-index-wave';
 
 export function useAgentIndexWave(activeIndex: number): number | null {
+  const workspaceActive = React.useContext(WorkspaceVisibilityContext);
   const [center, setCenter] = React.useState<number | null>(null);
   React.useEffect(() => {
-    if (activeIndex < 0) { setCenter(null); return; }
+    if (!workspaceActive || activeIndex < 0) { setCenter(null); return; }
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
     let frame = 0;
     let startedAt = 0;
@@ -32,6 +34,6 @@ export function useAgentIndexWave(activeIndex: number): number | null {
       reducedMotion.removeEventListener('change', sync);
       document.removeEventListener('visibilitychange', sync);
     };
-  }, [activeIndex]);
-  return activeIndex < 0 ? null : center;
+  }, [activeIndex, workspaceActive]);
+  return !workspaceActive || activeIndex < 0 ? null : center;
 }

@@ -20,14 +20,14 @@ describe('Index traveling wave', () => {
     const early = indexWaveColors(source, 6);
     expect(early[3]).toBe('green');
     expect(early[2]).toContain('green');
-    expect(early[1]).toBe('var(--app-text-muted)');
+    expect(early[1]).toBe('var(--dial-muted, var(--app-text-muted))');
     const peak = indexWaveColors(source, 3);
     expect(peak[0]).toContain('green');
     expect(peak[3]).toBe('green');
     expect(peak[6]).toContain('green');
     expect(indexWaveSpread(1, 1)).toBeGreaterThan(indexWaveSpread(1, 2));
     expect(indexWaveSpread(1, 2)).toBeGreaterThan(indexWaveSpread(1, 3));
-    expect(indexWaveColors(source, -5)).toEqual(source.map(color => color || 'var(--app-text-muted)'));
+    expect(indexWaveColors(source, -5)).toEqual(source.map(color => color || 'var(--dial-muted, var(--app-text-muted))'));
     expect(indexWaveColors([null, 'red', 'green'], 2)[1]).toBe('red');
   });
 });

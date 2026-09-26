@@ -1,7 +1,7 @@
 export const AGENT_CHAT_MAX_WIDTH = 850;
 export const AGENT_CHAT_MIN_WIDTH = 640;
 export const AGENT_CHAT_INDEX_INSET = 64;
-export const AGENT_DIRECTORY_WIDTH = 380;
+export const AGENT_DIRECTORY_WIDTH = 300;
 export const AGENT_DIRECTORY_MARGIN = 12;
 export const AGENT_DIRECTORY_BUBBLE_SIZE = 32;
 export const AGENT_DIRECTORY_BUBBLE_WIDTH = 48;
