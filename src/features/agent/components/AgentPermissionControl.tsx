@@ -1,4 +1,5 @@
 import React from 'react';
+import { WorkspaceVisibilityContext } from '@/components/ui/workspace-visibility';
 import { IconShieldStroked, IconTick } from '@douyinfe/semi-icons';
 import { Popover } from '@douyinfe/semi-ui';
 import styled from 'styled-components';
@@ -71,11 +72,13 @@ export default function AgentPermissionControl({ value, disabled, onChange, grou
   onChange: (value: AgentSessionPermissionMode) => void;
 }) {
   const [visible, setVisible] = React.useState(false);
+  const workspaceActive = React.useContext(WorkspaceVisibilityContext);
+  React.useEffect(() => { if (!workspaceActive) setVisible(false); }, [workspaceActive]);
   const triggerRef = React.useRef<HTMLButtonElement>(null);
   const menuRef = React.useRef<HTMLDivElement | null>(null);
   const focusMenuOnOpen = React.useRef(false);
   return <Popover trigger="click" position="topRight" showArrow={false} motion={false}
-    visible={!disabled && visible} onVisibleChange={setVisible} getPopupContainer={getAppPopupContainer}
+    visible={workspaceActive && !disabled && visible} onVisibleChange={setVisible} getPopupContainer={getAppPopupContainer}
     style={{ backgroundColor: 'transparent', boxShadow: 'none' }}
     content={<Menu role="menu" aria-label="Agent 权限模式" ref={node => {
       menuRef.current = node;

@@ -1,4 +1,5 @@
 import React from 'react';
+import { WorkspaceVisibilityContext } from '@/components/ui/workspace-visibility';
 import styled from 'styled-components';
 import { CompactModal } from '@/components/ui/compact-modal';
 import OutlineIcon from '@/components/ui/outline-icon';
@@ -24,6 +25,7 @@ export default function AgentSessionGroupEditor({ group, libraryId, onSave, onDe
   onSave: (input: AgentSessionGroupInput) => Promise<void>;
   onDelete?: () => void; onCancel: () => void;
 }) {
+  const workspaceActive = React.useContext(WorkspaceVisibilityContext);
   const [name, setName] = React.useState(group?.name || '');
   const [directories, setDirectories] = React.useState(group?.directories || []);
   const [access, setAccess] = React.useState<'read' | 'read-write'>(group?.access || 'read-write');
@@ -34,7 +36,7 @@ export default function AgentSessionGroupEditor({ group, libraryId, onSave, onDe
   // Open after StrictMode's mount replay so Semi can retain its portal.
   React.useEffect(() => { setVisible(true); }, []);
   return <>
-    <CompactModal visible={visible} title={group ? '会话组设置' : '新建会话组'} width={420} onCancel={onCancel}
+    <CompactModal visible={workspaceActive && visible} title={group ? '会话组设置' : '新建会话组'} width={420} onCancel={onCancel}
       okText="保存" confirmLoading={saving} okButtonProps={{ disabled: !name.trim() || saving }} onOk={async () => {
         setSaving(true); setError('');
         try { await onSave({ ...(group ? { id: group.id, revision: group.revision } : {}), name, directories, access }); }
@@ -60,7 +62,7 @@ export default function AgentSessionGroupEditor({ group, libraryId, onSave, onDe
         {group && onDelete ? <button className="group-add" type="button" disabled={saving} onClick={onDelete}><OutlineIcon name="trash" />删除会话组</button> : null}
       </Fields>
     </CompactModal>
-    <LibraryNodePickerModal visible={picking} displayMode="folders" libraryId={libraryId} title="选择自动授权目录" confirmText="添加目录"
+    <LibraryNodePickerModal visible={workspaceActive && picking} displayMode="folders" libraryId={libraryId} title="选择自动授权目录" confirmText="添加目录"
       onCancel={() => setPicking(false)} onConfirm={({ node, pathLabel }) => {
         setDirectories(current => current.some(item => item.nodeId === node.id) ? current : [...current, { nodeId: node.id, name: pathLabel || node.name }]);
         setPicking(false);

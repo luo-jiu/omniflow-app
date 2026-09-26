@@ -1,4 +1,5 @@
 import React from 'react';
+import { WorkspaceVisibilityContext } from '@/components/ui/workspace-visibility';
 import { IconFolder, IconTerminal } from '@douyinfe/semi-icons';
 import styled from 'styled-components';
 import { workspaceScrollbarStyles } from '@/components/ui/workspace-scrollbar';
@@ -105,7 +106,7 @@ const ConfirmationCard = styled.article`
 
   .agent-confirmation-allow {
     background: var(--semi-color-primary);
-    color: #fff;
+    color: var(--app-accent-foreground);
   }
 
   .agent-confirmation-editor {
@@ -326,6 +327,7 @@ export default function AgentConfirmationCard({
   libraryId,
   onResolve,
 }: AgentConfirmationCardProps) {
+  const workspaceActive = React.useContext(WorkspaceVisibilityContext);
   const preparation = approval.preparation;
   const preparedActionId = preparation?.preparedActionId;
   const initialAction = React.useMemo(
@@ -625,7 +627,7 @@ export default function AgentConfirmationCard({
           onCancel={() => setPickerVisible(false)}
           onConfirm={handleDirectorySelected}
           title="选择保存目录"
-          visible={pickerVisible}
+          visible={workspaceActive && pickerVisible}
         />
       ) : null}
     </>

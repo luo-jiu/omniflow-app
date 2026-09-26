@@ -1,7 +1,7 @@
 import TestRenderer, { act } from 'react-test-renderer';
 import { describe, expect, it, vi } from 'vitest';
 import AgentSessionPeek from './AgentSessionPeek';
-import { AGENT_DIRECTORY_WIDTH } from '../agent-session-directory-layout';
+import { AGENT_DIRECTORY_BREAKPOINT, AGENT_DIRECTORY_WIDTH } from '../agent-session-directory-layout';
 import type { AgentSessionDirectorySummary } from '@/shared/agent/agent-session-management';
 import type { AgentSessionSummary } from '@/shared/agent/agent.types';
 
@@ -157,6 +157,9 @@ describe('Agent session peek', () => {
       expect(card.props['data-visible']).toBe(true);
       expect(card.props.style.top).toBe(12);
       bounds = { width: 1265, height: 600 };
+      act(() => measure());
+      expect(card.props['data-visible']).toBe(true);
+      bounds = { width: AGENT_DIRECTORY_BREAKPOINT, height: 600 };
       act(() => measure());
       expect(card.props['data-visible']).toBe(false);
     } finally {

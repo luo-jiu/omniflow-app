@@ -1,4 +1,5 @@
 import React from 'react';
+import { WorkspaceVisibilityContext } from '@/components/ui/workspace-visibility';
 import styled from 'styled-components';
 import AgentDisclosureChevron from './AgentDisclosureChevron';
 import type { AgentRunSnapshot } from '@/shared/agent/agent.types';
@@ -38,13 +39,14 @@ export default function AgentRunElapsed({ run, collapsible, expanded, onToggle }
   onToggle: () => void;
 }) {
   const [now, setNow] = React.useState(Date.now);
+  const workspaceActive = React.useContext(WorkspaceVisibilityContext);
   const active = isAgentRunActive(run);
   React.useEffect(() => {
-    if (!active) return;
+    if (!active || !workspaceActive) return;
     setNow(Date.now());
     const timer = globalThis.setInterval(() => setNow(Date.now()), 1000);
     return () => globalThis.clearInterval(timer);
-  }, [active, run.id]);
+  }, [active, run.id, workspaceActive]);
   const label = formatAgentRunElapsed(run, now);
   return <ElapsedRow data-agent-elapsed={run.id}>
     {collapsible ? <button type="button" aria-expanded={expanded}

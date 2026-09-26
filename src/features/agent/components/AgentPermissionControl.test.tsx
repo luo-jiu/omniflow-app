@@ -1,6 +1,8 @@
 import TestRenderer, { act } from 'react-test-renderer';
 import { describe, expect, it, vi } from 'vitest';
 import AgentPermissionControl from './AgentPermissionControl';
+import { Popover } from '@douyinfe/semi-ui';
+import { WorkspaceVisibilityContext } from '@/components/ui/workspace-visibility';
 
 vi.mock('@douyinfe/semi-icons', () => ({
   IconShieldStroked: () => null,
@@ -11,6 +13,21 @@ vi.mock('@douyinfe/semi-ui', () => ({
 }));
 
 describe('Agent permission selection', () => {
+  it('hides its portal on page switch and does not reopen it on return', () => {
+    const render = (active: boolean) => <WorkspaceVisibilityContext.Provider value={active}>
+      <AgentPermissionControl value="ask" disabled={false} onChange={vi.fn()} />
+    </WorkspaceVisibilityContext.Provider>;
+    let renderer!: TestRenderer.ReactTestRenderer;
+    act(() => { renderer = TestRenderer.create(render(true)); });
+    const popover = renderer.root.findByType(Popover);
+    act(() => popover.props.onVisibleChange(true));
+    expect(popover.props.visible).toBe(true);
+    act(() => renderer.update(render(false)));
+    expect(popover.props.visible).toBe(false);
+    act(() => renderer.update(render(true)));
+    expect(popover.props.visible).toBe(false);
+    act(() => renderer.unmount());
+  });
   it('marks the authoritative selection with a tick and does not optimistically switch it', () => {
     const onChange = vi.fn();
     let renderer!: TestRenderer.ReactTestRenderer;

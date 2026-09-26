@@ -1,4 +1,5 @@
 import React from 'react';
+import { WorkspaceVisibilityContext } from '@/components/ui/workspace-visibility';
 import { CompactModal } from '@/components/ui/compact-modal';
 import type { AgentSessionGroup } from '@/shared/agent/agent-session-management';
 
@@ -6,13 +7,14 @@ export default function AgentSessionGroupPicker({ title, groups, initialGroupId,
   title: string; groups: AgentSessionGroup[]; initialGroupId: string | null;
   onChoose: (id: string | null) => Promise<void> | void; onCancel: () => void;
 }) {
+  const workspaceActive = React.useContext(WorkspaceVisibilityContext);
   const [groupId, setGroupId] = React.useState(initialGroupId || '');
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState('');
   const [visible, setVisible] = React.useState(false);
   // Open after StrictMode's mount replay so Semi can retain its portal.
   React.useEffect(() => { setVisible(true); }, []);
-  return <CompactModal visible={visible} title={title} width={360} onCancel={onCancel} confirmLoading={busy} okText="确定" onOk={async () => {
+  return <CompactModal visible={workspaceActive && visible} title={title} width={360} onCancel={onCancel} confirmLoading={busy} okText="确定" onOk={async () => {
     setBusy(true); setError('');
     try { await onChoose(groupId || null); } catch (reason) { setError(reason instanceof Error ? reason.message : '操作失败'); }
     finally { setBusy(false); }

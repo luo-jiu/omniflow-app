@@ -1,4 +1,5 @@
 import React from 'react';
+import { WorkspaceVisibilityContext } from '@/components/ui/workspace-visibility';
 import { IconChevronDown, IconChevronRight, IconTick } from '@douyinfe/semi-icons';
 import { InputNumber, Popover } from '@douyinfe/semi-ui';
 import styled from 'styled-components';
@@ -341,6 +342,9 @@ const SettingsSubmenuAnchor: React.FC<SettingsSubmenuAnchorProps> = ({
   submenu,
 }) => {
   const triggerRef = React.useRef<HTMLDivElement | null>(null);
+  const workspaceActive = React.useContext(WorkspaceVisibilityContext);
+  const [open, setOpen] = React.useState(false);
+  React.useEffect(() => { if (!workspaceActive) setOpen(false); }, [workspaceActive]);
   const resolveFrameRef = React.useRef<number | null>(null);
   const [position, setPosition] = React.useState<ContextMenuPosition>('leftTop');
 
@@ -395,8 +399,10 @@ const SettingsSubmenuAnchor: React.FC<SettingsSubmenuAnchorProps> = ({
       stopPropagation
       style={SETTINGS_POPOVER_STYLE}
       trigger="hover"
+      visible={workspaceActive && open}
       content={submenu}
       onVisibleChange={(visible) => {
+        setOpen(visible);
         if (visible) {
           activate();
           return;
@@ -446,8 +452,17 @@ export default function AIModelSettingsControl({
   onReasoningEffortChange,
   reasoningEffort,
 }: AIModelSettingsControlProps) {
+  const workspaceActive = React.useContext(WorkspaceVisibilityContext);
+  const [open, setOpen] = React.useState(false);
+  React.useEffect(() => { if (!workspaceActive) setOpen(false); }, [workspaceActive]);
   const [activeSettingsMenu, setActiveSettingsMenu] = React.useState<SettingsMenuKey | null>(null);
   const modelLoadStateRef = React.useRef<'idle' | 'loading' | 'loaded'>('idle');
+  React.useEffect(() => {
+    if (!workspaceActive) {
+      modelLoadStateRef.current = 'idle';
+      setActiveSettingsMenu(null);
+    }
+  }, [workspaceActive]);
   const modelOptions = React.useMemo(() => (
     [...availableModels].sort((left, right) => (
       right.localeCompare(left, 'en', { numeric: true, sensitivity: 'base' })
@@ -521,10 +536,12 @@ export default function AIModelSettingsControl({
     <Popover
       motion={false}
       trigger="click"
+      visible={workspaceActive && open}
       position="topRight"
       showArrow={false}
       style={SETTINGS_POPOVER_STYLE}
       onVisibleChange={(visible) => {
+        setOpen(visible);
         if (!visible) setActiveSettingsMenu(null);
       }}
       content={(
