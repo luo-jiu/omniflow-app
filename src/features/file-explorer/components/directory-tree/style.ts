@@ -1,4 +1,5 @@
 import styled from 'styled-components'
+import { interactiveItemStyles, selectedItemStyles } from '@/components/ui/theme-foundation-styles';
 
 export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
   position: relative;
@@ -56,13 +57,15 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
 
   .tree-container:hover,
   .tree-container:focus-within,
-  .tree-container:active {
+  .tree-container:active,
+  .is-side-panel-resizing & .tree-container {
     scrollbar-color: var(--app-scrollbar-thumb) var(--app-scrollbar-track);
   }
 
   .tree-container:hover::-webkit-scrollbar-thumb,
   .tree-container:focus-within::-webkit-scrollbar-thumb,
-  .tree-container:active::-webkit-scrollbar-thumb {
+  .tree-container:active::-webkit-scrollbar-thumb,
+  .is-side-panel-resizing & .tree-container::-webkit-scrollbar-thumb {
     background: var(--app-scrollbar-thumb);
   }
 
@@ -94,12 +97,13 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
     cursor: col-resize;
   }
   .resize-handle:hover {
-    background: rgba(0, 0, 0, 0.04);
+    background: var(--app-hover-bg);
   }
 
   .custom-tree-wrapper {
     display: block;
-    min-width: max-content;
+    /* 内容宽度独立测量，视口下限随布局实时变化，不冻结拖动前的宽度。 */
+    min-width: max(100%, var(--tree-content-min-width, 0px));
     width: auto;
     font-size: 13px;
   }
@@ -120,7 +124,7 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
       border-radius: 6px;
       font-size: 13px !important;
       line-height: 17px !important;
-      color: var(--app-text-secondary);
+      color: var(--app-text);
     }
   }
 
@@ -137,15 +141,22 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
       border-radius 120ms ease;
   }
 
-    .semi-tree-option:hover {
-      background: rgba(0, 0, 0, 0.04);
-      color: var(--app-text);
+    .custom-tree .semi-tree-option-list .semi-tree-option {
+      ${interactiveItemStyles}
     }
 
-    .semi-tree-option.tree-row-selected,
-    .semi-tree-option.tree-row-selected:hover {
-      background: color-mix(in srgb, var(--semi-color-primary-light-default) 92%, transparent);
-      color: var(--app-text);
+    .custom-tree .semi-tree-option-list .semi-tree-option.tree-row-selected {
+      ${selectedItemStyles}
+    }
+
+    /* Semi Tree 的选中行会把外层主文字色继承给 label；选中只改背景，
+       普通名称与未选中状态保持同一正文前景，归档名称保留独立语义色。 */
+    .custom-tree .semi-tree-option-list .semi-tree-option.tree-row-selected .tree-node-text:not(.tree-node-text-archive) {
+      color: var(--app-text) !important;
+    }
+
+    .custom-tree .semi-tree-option-list .semi-tree-option.tree-row-selected .tree-node-text-archive {
+      color: var(--app-folder-archive-label) !important;
     }
 
     .semi-tree-option.tree-row-selected-single {
@@ -286,7 +297,7 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
     line-height: 18px !important;
     vertical-align: middle;
     margin-left: -3px;
-    border-color: var(--semi-color-primary);
+    border-color: var(--app-focus-border);
     border-radius: 6px;
     background: var(--semi-color-bg-1);
   }
@@ -311,7 +322,7 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
   }
 
   .tree-node-label.drag-over {
-    background: rgba(52, 88, 71, 0.06);
+    background: color-mix(in srgb, var(--app-accent-soft) 75%, transparent);
     outline: 1px dashed var(--app-accent);
     border-radius: 4px;
   }
@@ -322,14 +333,8 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
     white-space: nowrap;
     overflow: visible;
     text-overflow: initial;
-    color: inherit;
     font-size: 13px !important;
     line-height: 17px;
-  }
-
-  .tree-node-text-archive {
-    color: var(--app-folder-archive-label, var(--app-text));
-    font-weight: 600;
   }
 
   .tree-file-type-icon {

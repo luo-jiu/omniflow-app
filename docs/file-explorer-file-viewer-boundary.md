@@ -152,7 +152,9 @@ DirectoryTree double click
 - `expandedKeys`
 - `treesCache`
 
-它们都在 `useRepositoryTree` 内维护，并按 `libraryId` 做 snapshot 缓存。
+目录树的节点选择状态也由 `DirectoryTree` 单独持有：`selectedNodeIds` 保存当前多选结果，`selectionAnchorKey` 保存 Shift 范围锚点。选择事件在树容器统一委托到 `.semi-tree-option[data-key]`，因此点击文件名、图标或行内空白使用同一套普通点击、Shift 范围和 Cmd/Ctrl 增量选择规则；展开箭头继续只负责展开，不改变选区。范围按当前可见树的深度优先顺序计算，普通点击会清掉旧范围并把当前节点设为新的锚点。
+
+上述结构状态都在 `useRepositoryTree` 内维护，并按 `libraryId` 做 snapshot 缓存；节点选择状态属于当前 `DirectoryTree` 实例，不写入树结构 snapshot。
 
 当前缓存行为：
 
@@ -253,6 +255,7 @@ Text dirty draft 属于用户数据，不跟随普通 tab 关闭、资料库释�
 
 - 文件类型解析策略变化
 - 文件树 snapshot / dirty rebuild 语义变化
+- 目录树节点选择、范围锚点或行事件命中范围变化
 - `FileViewerContext` 的 tab 规则变化
 - 页面层开始接管更多预览状态
 - 文件分发器新增新的 viewer 类型或不再只是纯分发

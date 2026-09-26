@@ -5,6 +5,7 @@ import { getPluginCommandMenuItems, resolvePluginCommandMenuAction } from '@/fea
 import type { PluginCommandOpenRequest } from '@/features/plugin-commands/command-open-request';
 import React, { ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { Tree, Toast, Input } from '@douyinfe/semi-ui';
+import { ResourceLabel } from '@/components/business/resource-label';
 import { IconChevronRightStroked } from '@douyinfe/semi-icons';
 import {
   batchSetArchiveChildrenBuiltInType,
@@ -56,6 +57,7 @@ import {
   resolveNodeExt,
   resolveNodeType,
 } from './utils/tree-node';
+import { resolveTreeSelection } from './utils/tree-selection';
 import type { ContextMenuPosition, OverlayBoundaryRect } from '@/components/ui/context-menu';
 import { openOverlay } from '@/service/overlay/overlay.api';
 import type {
@@ -254,6 +256,23 @@ export default function DirectoryTree({
   const creatingDirectoryRef = useRef(false);
   const [selectedNodeIds, setSelectedNodeIds] = useState<number[]>([]);
   const [selectionAnchorKey, setSelectionAnchorKey] = useState<string | null>(null);
+  const selectedNodeIdsRef = useRef<number[]>([]);
+  const selectionAnchorKeyRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    selectedNodeIdsRef.current = selectedNodeIds;
+  }, [selectedNodeIds]);
+
+  useEffect(() => {
+    selectionAnchorKeyRef.current = selectionAnchorKey;
+  }, [selectionAnchorKey]);
+
+  const commitSelection = (nextIds: number[], nextAnchor: string | null) => {
+    selectedNodeIdsRef.current = nextIds;
+    selectionAnchorKeyRef.current = nextAnchor;
+    setSelectedNodeIds(nextIds);
+    setSelectionAnchorKey(nextAnchor);
+  };
 
   const resetCreateModalState = useCallback(() => {
     setCreateModal({
@@ -287,7 +306,7 @@ export default function DirectoryTree({
   const visibleRowBoundsRef = useRef<VisibleRowBounds[]>([]);
   const treeDataRef = useRef<any[]>(treeData);
 
-  // 记录上一次应用到 wrapper 的 minWidth，避免 1px 抖动
+  // 只记录名称所需宽度；视口下限由 CSS 的 100% 实时计算。
   const lastAppliedWidthRef = useRef<number>(0);
 
   // 记录上一次的 expandedKeys
@@ -295,9 +314,7 @@ export default function DirectoryTree({
   const expandedKeysRef = useRef<string[]>(expandedKeys);
 
   const H_REDUNDANCY_PX = 3;        // 极小冗余，避免边界像素抖动
-  const FLOAT_EPS = 0.5;            // 浮点比较误差容忍
   const MAX_TEXT_WIDTH_CAP = 40000; // 兜底，避免异常节点导致极大宽度
-  const ICON_BUFFER_PX = 16;        // 行内图标缓冲
   const ROOT_PARENT_ID = Number.isFinite(rootNodeId) && Number(rootNodeId) > 0 ? Number(rootNodeId) : null;
 
   const resolveRootParentId = () => {
@@ -511,11 +528,11 @@ export default function DirectoryTree({
       if (!label || !text) return;
       if (!label.isConnected || !text.isConnected) return;
 
-      const labelRect = label.getBoundingClientRect();
-      const leftInWrapper = labelRect.left - wrapperRect.left;
+      // 文字起点已包含缩进、箭头和图标，不再重复加图标缓冲。
+      const leftInWrapper = text.getBoundingClientRect().left - wrapperRect.left;
 
       // 文字天然宽度（不受容器 100% 影响），设置一个极端上限保险
-      const contentWidth = Math.min(Math.ceil(text.scrollWidth) + ICON_BUFFER_PX, MAX_TEXT_WIDTH_CAP);
+      const contentWidth = Math.min(Math.ceil(text.scrollWidth), MAX_TEXT_WIDTH_CAP);
 
       // 给一点 label 的右侧 padding 余量（避免 1px 抖动）
       let padRight = 0;
@@ -529,12 +546,8 @@ export default function DirectoryTree({
       }
     });
 
-    const needsHorizontalScroll = maxRightEdge > container.clientWidth + FLOAT_EPS;
-    const desiredWidth = needsHorizontalScroll
-      ? Math.ceil(maxRightEdge + H_REDUNDANCY_PX)
-      : container.clientWidth;
-
-    applyMinWidth(desiredWidth, container);
+    // 只测量内容本身，不把当时的视口宽度冻结进像素 min-width。
+    applyMinWidth(Math.ceil(maxRightEdge + H_REDUNDANCY_PX), container);
   }, []);
 
   const scheduleRecompute = useCallback(() => {
@@ -544,6 +557,14 @@ export default function DirectoryTree({
       recomputeRequiredWidth();
     });
   }, [recomputeRequiredWidth]);
+
+  useEffect(() => {
+    scheduleRecompute();
+    return () => {
+      if (rafIdRef.current !== null) cancelAnimationFrame(rafIdRef.current);
+      rafIdRef.current = null;
+    };
+  }, [scheduleRecompute]);
 
   // 处理文件放置逻辑
   // 外部文件拖拽
@@ -639,8 +660,7 @@ export default function DirectoryTree({
     if (!targetNode) {
       return;
     }
-    setSelectedNodeIds([Number(targetNode.id)]);
-    setSelectionAnchorKey(String(targetNode.key || ''));
+    commitSelection([Number(targetNode.id)], String(targetNode.key || ''));
     window.requestAnimationFrame(() => {
       const wrapper = wrapperRef.current;
       const container = wrapper?.parentElement as HTMLElement | null;
@@ -884,53 +904,42 @@ export default function DirectoryTree({
     const nodeId = Number(treeNode.id);
     if (!Number.isFinite(nodeId) || nodeId <= 0) return;
 
-    const withToggle = event.metaKey || event.ctrlKey;
-    const withRange = event.shiftKey;
     const targetKey = String(treeNode.key || '');
-    const visibleNodes = getVisibleNodesLinear();
-    const visibleKeys = visibleNodes.map(item => String(item.key || ''));
-    const targetIndex = visibleKeys.indexOf(targetKey);
-    const anchorKey = selectionAnchorKey;
-    const anchorIndex = anchorKey ? visibleKeys.indexOf(anchorKey) : -1;
+    const resolved = resolveTreeSelection({
+      visibleNodes: getVisibleNodesLinear()
+        .map(item => ({ id: Number(item?.id), key: String(item?.key || '') })),
+      targetKey,
+      anchorKey: selectionAnchorKeyRef.current,
+      selectedNodeIds: selectedNodeIdsRef.current,
+      withRange: event.shiftKey,
+      withToggle: event.metaKey || event.ctrlKey,
+    });
+    if (!resolved) return;
 
-    if (withRange && targetIndex >= 0 && anchorIndex >= 0) {
-      const [start, end] = anchorIndex <= targetIndex
-        ? [anchorIndex, targetIndex]
-        : [targetIndex, anchorIndex];
-      const rangeIds = visibleNodes
-        .slice(start, end + 1)
-        .map(item => Number(item?.id))
-        .filter(id => Number.isFinite(id) && id > 0);
-      if (withToggle) {
-        const merged = Array.from(new Set([...selectedNodeIds, ...rangeIds]));
-        setSelectedNodeIds(merged);
-      } else {
-        setSelectedNodeIds(rangeIds);
-      }
+    commitSelection(resolved.selectedNodeIds, resolved.anchorKey);
+  };
+
+  /**
+   * Semi Tree exposes modifier keys only on the native row event. Delegate
+   * selection from the tree wrapper so row icons and blank row space behave
+   * like the label. Semi's expand switcher stops propagation, so expanding a
+   * directory does not unexpectedly change the selection.
+   */
+  const handleTreeSelectionClick = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (event.defaultPrevented) return;
+    const target = event.target as HTMLElement | null;
+    if (!target) return;
+    if (target.closest('.semi-tree-option-expand-icon, .semi-tree-option-spin-icon, .semi-tree-option-empty-icon')) {
       return;
     }
 
-    if (withRange && targetIndex >= 0 && anchorIndex < 0) {
-      setSelectedNodeIds([nodeId]);
-      setSelectionAnchorKey(targetKey || null);
-      return;
-    }
+    const option = target.closest<HTMLElement>('.semi-tree-option');
+    const nodeKey = String(option?.dataset.key || '').trim();
+    if (!nodeKey) return;
 
-    if (withToggle) {
-      setSelectedNodeIds((prev) => {
-        if (prev.includes(nodeId)) {
-          return prev.filter(item => item !== nodeId);
-        }
-        return [...prev, nodeId];
-      });
-      if (!selectionAnchorKey) {
-        setSelectionAnchorKey(targetKey || null);
-      }
-      return;
-    }
-
-    setSelectedNodeIds([nodeId]);
-    setSelectionAnchorKey(targetKey || null);
+    const treeNode = findNodeByKey(treeDataRef.current || [], nodeKey);
+    if (!treeNode) return;
+    handleSelectionIntent(treeNode, event);
   };
 
   const resolveDeleteSelection = (targetNode: any): any[] => {
@@ -1380,15 +1389,14 @@ export default function DirectoryTree({
     const wrapper = wrapperRef.current;
     if (!wrapper) return;
 
-    // 不小于容器宽，否则可能出现反向闪烁
-    const target = Math.max(container.clientWidth, targetWidth);
+    const target = Math.max(0, Math.ceil(targetWidth));
     if (Math.abs(target - lastAppliedWidthRef.current) < 1) return;
 
     lastAppliedWidthRef.current = target;
-    wrapper.style.minWidth = `${Math.ceil(target)}px`;
+    wrapper.style.setProperty('--tree-content-min-width', `${target}px`);
 
     // 夹紧 scrollLeft，防止宽度缩小后残留在越界位置
-    const maxScroll = Math.max(0, wrapper.scrollWidth - container.clientWidth);
+    const maxScroll = Math.max(0, container.scrollWidth - container.clientWidth);
     if (container.scrollLeft > maxScroll) {
       container.scrollLeft = maxScroll;
     }
@@ -2032,11 +2040,17 @@ export default function DirectoryTree({
         if (shouldClearAudio) {
           globalAudioPlayer.clear();
         }
-        setSelectedNodeIds((prev) => prev.filter(id => !deletedNodeIds.has(id)));
-        const anchorNode = selectionAnchorKey
-          ? findNodeByKey(treeDataRef.current || [], selectionAnchorKey)
+        setSelectedNodeIds((prev) => {
+          const next = prev.filter(id => !deletedNodeIds.has(id));
+          selectedNodeIdsRef.current = next;
+          return next;
+        });
+        const anchorKey = selectionAnchorKeyRef.current;
+        const anchorNode = anchorKey
+          ? findNodeByKey(treeDataRef.current || [], anchorKey)
           : null;
         if (anchorNode && deletedNodeIds.has(Number(anchorNode.id))) {
+          selectionAnchorKeyRef.current = null;
           setSelectionAnchorKey(null);
         }
         if (deleteError) {
@@ -2442,15 +2456,15 @@ export default function DirectoryTree({
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
         onDrop={onDrop}
-        onClick={(e) => handleSelectionIntent(treeNode, e)}
         onContextMenu={(e) => openMenu(e, treeNode, isFolder)}
       >
-        <span
+        <ResourceLabel
           className={`tree-node-text ${isArchiveFolder ? 'tree-node-text-archive' : ''}`}
+          $archived={isArchiveFolder}
           ref={bindTextRef(treeNode.key)}
         >
           {label}
-        </span>
+        </ResourceLabel>
       </div>
     );
   };
@@ -2584,6 +2598,7 @@ export default function DirectoryTree({
       <div
         className="custom-tree-wrapper"
         ref={wrapperRef}
+        onClick={handleTreeSelectionClick}
         onDragOverCapture={handleTreeContainerExternalDragOverCapture}
         onDragLeaveCapture={handleTreeContainerExternalDragLeaveCapture}
         onDropCapture={handleTreeContainerExternalDropCapture}
@@ -2613,8 +2628,7 @@ export default function DirectoryTree({
                 return;
               }
               if (!selectedNodeIds.includes(draggedNodeId)) {
-                setSelectedNodeIds([draggedNodeId]);
-                setSelectionAnchorKey(String(draggedNode?.key || ''));
+                commitSelection([draggedNodeId], String(draggedNode?.key || ''));
                 dragSelectionNodeIdsRef.current = [draggedNodeId];
                 attachDownloadUrlToTreeDrag(info, draggedNode, [draggedNodeId]);
                 prepareDragCollapsedNodes([draggedNodeId]);
