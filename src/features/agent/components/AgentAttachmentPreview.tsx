@@ -43,10 +43,15 @@ export default function AgentAttachmentPreview({ attachment, scope, sessionId, o
     const previous = document.activeElement as HTMLElement | null;
     return () => { if (visibleRef.current && previous?.isConnected) previous.focus(); };
   }, []);
+  React.useEffect(() => {
+    if (!workspaceActive) {
+      onClose();
+    }
+  }, [onClose, workspaceActive]);
   return <ImagePreview visible={workspaceActive} src={src ? [src] : []} disableDownload closeOnEsc maskClosable
     previewStyle={{ backgroundColor: 'rgba(0, 0, 0, 0.7)', backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)' }}
     getPopupContainer={getAppPopupContainer} onClose={onClose}
-    onVisibleChange={visible => { if (workspaceActive && !visible) onClose(); }}
+    onVisibleChange={visible => { if (!visible) onClose(); }}
     previewTitle={error || (loading ? '正在读取清晰图片…' : attachment.name)}
     renderPreviewMenu={({ zoom = 100, min, max, onZoomIn, onZoomOut }) => <ZoomControls>
       <button type="button" aria-label="缩小图片" title="缩小" disabled={zoom === min} onClick={onZoomOut}><Minus size={16} strokeWidth={1.25} /></button>

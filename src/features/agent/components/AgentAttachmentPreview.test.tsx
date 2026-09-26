@@ -1,6 +1,7 @@
 import TestRenderer, { act } from 'react-test-renderer';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ImagePreview } from '@douyinfe/semi-ui';
+import { WorkspaceVisibilityContext } from '@/components/ui/workspace-visibility';
 import AgentAttachmentPreview from './AgentAttachmentPreview';
 import { previewAgentAttachment } from '../services/agent.api';
 
@@ -31,5 +32,21 @@ describe('Attachment image preview', () => {
     expect(onClose).toHaveBeenCalledOnce();
     act(() => renderer.unmount());
     expect(focus).toHaveBeenCalledOnce();
+  });
+
+  it('closes when the retained agent workspace becomes inactive', async () => {
+    const onClose = vi.fn();
+    vi.stubGlobal('document', { activeElement: null });
+    vi.mocked(previewAgentAttachment).mockResolvedValue('');
+    const scope = { ownerScope: { accountScope: 'user:7', backendScope: 'https://test.invalid' }, libraryId: 3 };
+    await act(async () => { TestRenderer.create(
+      <WorkspaceVisibilityContext.Provider value={false}>
+        <AgentAttachmentPreview
+          attachment={{ id: 'img', name: 'a.png', kind: 'image', sizeBytes: 3, mimeType: 'image/png', thumbnail: 'data:image/png;base64,small' }}
+          scope={scope} onClose={onClose}
+        />
+      </WorkspaceVisibilityContext.Provider>,
+    ); });
+    expect(onClose).toHaveBeenCalledOnce();
   });
 });
