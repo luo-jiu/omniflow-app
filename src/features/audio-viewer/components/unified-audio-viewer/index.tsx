@@ -230,6 +230,20 @@ const UnifiedAudioViewer: React.FC<UnifiedAudioViewerProps> = ({
   const currentTime = isCurrentAudioSource ? playerState.currentTime : 0;
   const duration = isCurrentAudioSource ? playerState.duration : 0;
   const visibleCurrentTime = seekingTime ?? currentTime;
+  useEffect(() => {
+    if (!isCurrentAudioSource || currentCardId === null || !Number.isFinite(duration) || duration <= 0) return;
+    setCards((previous) => {
+      let changed = false;
+      const next = previous.map((card) => {
+        if (card.id !== currentCardId || Math.abs(Number(card.durationSeconds || 0) - duration) < 0.1) {
+          return card;
+        }
+        changed = true;
+        return { ...card, durationSeconds: duration };
+      });
+      return changed ? next : previous;
+    });
+  }, [currentCardId, duration, isCurrentAudioSource]);
   const readLiveProgressTime = useCallback(() => {
     const live = getPlayerState();
     return live.src === currentAudioUrl && isGlobalAudioOwnedBy(live, { ownerType: 'default', ownerKey: audioOwnerKey, tabId, libraryId })
@@ -1153,7 +1167,6 @@ const UnifiedAudioViewer: React.FC<UnifiedAudioViewerProps> = ({
                       <div className="song-title-line">
                         <span className="song-title" title={card.title}>{card.title}</span>
                         {card.subtitleCount > 0 && <span className="song-pill">歌词</span>}
-                        {card.coverUrl && <span className="song-pill">封面</span>}
                       </div>
                       <span className="song-artist">未知艺术家</span>
                     </div>
