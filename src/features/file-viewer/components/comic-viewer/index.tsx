@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Modal, Popover, Slider, Spin } from '@douyinfe/semi-ui';
+import { Modal, Slider, Spin } from '@douyinfe/semi-ui';
 import {
   batchGetFileLinks,
   fetchNodeDetailById,
@@ -8,6 +8,10 @@ import {
 } from '@/features/file-explorer/services/file.api';
 import { ComicViewerWrapper } from './style';
 import ContextMenu, { type ContextMenuItem } from '@/components/ui/context-menu';
+import FloatingViewerDock from '@/components/ui/floating-viewer-dock';
+import ComicReaderDock from './ComicReaderDock';
+import ViewerOptionsButton from '../ViewerOptionsButton';
+import { getComicScrollDockProgress, getComicScrollJumpPosition } from './comic-viewer-progress';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 import {
   type ComicPageItem,
@@ -298,6 +302,7 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
   const [scrollWidth, setScrollWidth] = useState(0);
   const [restoreTick, setRestoreTick] = useState(0);
   const [currentPageNumber, setCurrentPageNumber] = useState(0);
+  const [dockScrollProgress, setDockScrollProgress] = useState(0);
   const [layoutMode, setLayoutMode] = useState<ReaderLayoutMode>('scroll');
   const [scrollColumnMode, setScrollColumnMode] = useState<ScrollColumnMode>(1);
   const [scrollZoomScale, setScrollZoomScale] = useState(1);
@@ -318,6 +323,16 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
   const [scrollPageGapPx, setScrollPageGapPx] = useState(DEFAULT_SCROLL_PAGE_GAP_PX);
   const scrollRowGap = scrollPageGapPx;
   const hotCostUnits = estimateComicViewerHotCostUnits(layoutMode, visibleCount);
+
+  useEffect(() => {
+    if (!flipMenuState.visible) return;
+    const closeOnOutsidePointer = (event: PointerEvent) => {
+      if (event.target instanceof Element && event.target.closest('.comic-context-menu-layer')) return;
+      setFlipMenuState(previous => previous.visible ? { ...previous, visible: false } : previous);
+    };
+    document.addEventListener('pointerdown', closeOnOutsidePointer, true);
+    return () => document.removeEventListener('pointerdown', closeOnOutsidePointer, true);
+  }, [flipMenuState.visible]);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const flipStageRef = useRef<HTMLDivElement | null>(null);
@@ -482,7 +497,7 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
     setFlipZoomCustomized(snapshot.flipZoomCustomized);
     setFlipPageIndex(Math.max(snapshot.currentPageNumber - 1, 0));
     skipNextFlipTransformResetRef.current = snapshot.layoutMode === 'flip';
-    setFlipOffset({ x: snapshot.flipOffsetX, y: snapshot.flipOffsetY });
+    setFlipOffset(snapshot.scrollColumnMode === 2 ? { x: 0, y: 0 } : { x: snapshot.flipOffsetX, y: snapshot.flipOffsetY });
     setFlipRotateSteps(snapshot.flipRotateSteps);
     setScrollPageGapPx(snapshot.scrollPageGapPx);
     setCurrentPageNumber(snapshot.currentPageNumber);
@@ -928,6 +943,7 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
       ? clamp(scrollTop / maxScrollable, 0, 1)
       : 0;
     const anchorSnapshot = captureAnchorSnapshot(scrollEl);
+    setDockScrollProgress(getComicScrollDockProgress(scrollRatio));
     lastFocusedPageIdRef.current = anchorSnapshot.anchorPageId;
     setCurrentPageNumber(anchorSnapshot.currentPageNumber);
     currentPageNumberRef.current = anchorSnapshot.currentPageNumber;
@@ -1009,10 +1025,12 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
   }, [isFlipMode, persistCurrentScroll]);
 
   const handleBackToTop = useCallback(() => {
+    markComicSessionInteracted();
+    pendingRestoreRef.current = null;
+    pendingZoomAnchorRef.current = null;
     if (isFlipMode) {
       setFlipPageIndex(0);
       setFlipOffset({ x: 0, y: 0 });
-      persistCurrentScroll({ forceRemoteNow: true });
       return;
     }
     const scrollEl = scrollRef.current;
@@ -1057,7 +1075,52 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
     };
 
     backTopAnimationRafRef.current = window.requestAnimationFrame(step);
-  }, [isFlipMode, pages.length, persistCurrentScroll]);
+  }, [isFlipMode, markComicSessionInteracted, pages.length, persistCurrentScroll]);
+
+  const handleProgressJump = useCallback((progress: number) => {
+    if (!active || !Number.isFinite(progress) || pages.length === 0) return;
+    markComicSessionInteracted();
+    if (backTopAnimationRafRef.current) {
+      window.cancelAnimationFrame(backTopAnimationRafRef.current);
+      backTopAnimationRafRef.current = 0;
+    }
+    if (scrollPersistRafRef.current) {
+      window.cancelAnimationFrame(scrollPersistRafRef.current);
+      scrollPersistRafRef.current = 0;
+    }
+    pendingZoomAnchorRef.current = null;
+    const ratio = clamp(progress, 0, 1);
+    const rowCount = Math.ceil(pages.length / scrollColumnMode);
+    const jumpPosition = isFlipMode
+      ? { rowPosition: ratio * Math.max(rowCount - 1, 0), targetRow: Math.round(ratio * Math.max(rowCount - 1, 0)), rowOffsetRatio: 0 }
+      : getComicScrollJumpPosition(ratio, rowCount);
+    const { targetRow } = jumpPosition;
+    const targetIndex = Math.min(targetRow * scrollColumnMode, pages.length - 1);
+    lastFocusedPageIdRef.current = pages[targetIndex].id;
+    setVisibleCount(previous => Math.max(previous, Math.min(targetIndex + INITIAL_VISIBLE_COUNT, pages.length)));
+    setCurrentPageNumber(targetIndex + 1);
+    if (isFlipMode) {
+      pendingRestoreRef.current = null;
+      setFlipPageIndex(targetIndex);
+      setFlipOffset({ x: 0, y: 0 });
+    } else {
+      setDockScrollProgress(ratio);
+      // Reuse the existing anchor restore path, including late image layout.
+      pendingRestoreRef.current = {
+        desiredScrollTop: 0,
+        desiredScrollRatio: ratio,
+        // The rail represents the physical scroll viewport, so let the
+        // existing restore loop resolve the exact maxScrollable value after
+        // all required pages have laid out.
+        anchorPageId: null,
+        anchorOffsetRatio: 0,
+        attempts: 0,
+        lastMaxScrollable: 0,
+        stableTicks: 0,
+      };
+      setRestoreTick(previous => previous + 1);
+    }
+  }, [active, isFlipMode, markComicSessionInteracted, pages, scrollColumnMode]);
 
   useEffect(() => {
     if (active) return;
@@ -1199,6 +1262,9 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
 
     targetTop = Math.min(targetTop, maxScrollable);
     scrollEl.scrollTop = targetTop;
+    setDockScrollProgress(getComicScrollDockProgress(
+      maxScrollable > 0 ? targetTop / maxScrollable : 0,
+    ));
 
     const reachedDesiredPosition = Math.abs(scrollEl.scrollTop - targetTop) <= 1;
     const growthDelta = Math.abs(maxScrollable - pending.lastMaxScrollable);
@@ -1222,7 +1288,7 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
       setRestoreTick(prev => prev + 1);
     }, 80);
     return () => window.clearTimeout(timer);
-  }, [active, captureAnchorSnapshot, flushSessionSnapshot, isFlipMode, renderedPages.length, restoreTick]);
+  }, [active, captureAnchorSnapshot, flushSessionSnapshot, isFlipMode, pages.length, renderedPages.length, restoreTick, scrollColumnMode]);
 
   useEffect(() => {
     if (!active) return;
@@ -1434,31 +1500,36 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
   const handleFlipMouseDown = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     if (event.button === 0 || event.button === 1) {
       event.preventDefault();
+      event.currentTarget.focus({ preventScroll: true });
       flipDragStartRef.current = { x: event.clientX, y: event.clientY };
       flipDragMovedRef.current = false;
+      if (event.button !== 0 || !flipPanMode || scrollColumnMode !== 1) return;
       setFlipDragging(true);
       setFlipDragAnchor({
         x: event.clientX - flipOffset.x,
         y: event.clientY - flipOffset.y,
       });
     }
-  }, [flipOffset.x, flipOffset.y]);
+  }, [flipOffset.x, flipOffset.y, flipPanMode, scrollColumnMode]);
 
   const handleFlipMouseMove = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
-    if (!flipDragging) return;
+    if (!(event.buttons & 1)) return;
     const movedX = Math.abs(event.clientX - flipDragStartRef.current.x);
     const movedY = Math.abs(event.clientY - flipDragStartRef.current.y);
     if (movedX > 3 || movedY > 3) {
       flipDragMovedRef.current = true;
     }
+    if (!flipDragging || !flipPanMode || scrollColumnMode !== 1) return;
     setFlipOffset({
       x: event.clientX - flipDragAnchor.x,
       y: event.clientY - flipDragAnchor.y,
     });
-  }, [flipDragAnchor.x, flipDragAnchor.y, flipDragging]);
+  }, [flipDragAnchor.x, flipDragAnchor.y, flipDragging, flipPanMode, scrollColumnMode]);
 
   const handleFlipMouseUp = useCallback(() => {
-    if (flipDragMovedRef.current) {
+    const moved = flipDragMovedRef.current;
+    flipDragMovedRef.current = false;
+    if (moved) {
       suppressNextFlipClickRef.current = true;
       window.setTimeout(() => {
         suppressNextFlipClickRef.current = false;
@@ -1470,7 +1541,8 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
   const handleViewerContextMenu = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     event.preventDefault();
     event.stopPropagation();
-    const nextPosition = { x: event.clientX, y: event.clientY };
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const nextPosition = { x: event.clientX - bounds.left, y: event.clientY - bounds.top };
 
     if (flipMenuState.visible) {
       setFlipMenuState(prev => ({ ...prev, visible: false }));
@@ -1489,20 +1561,18 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
       return;
     }
     if (flipPanMode || flipDragging) return;
-    if (event.button !== 0) return;
+    if (event.button !== 0 || event.detail === 0) return;
 
     const rect = event.currentTarget.getBoundingClientRect();
     if (rect.width <= 0) return;
     const relativeX = event.clientX - rect.left;
-    const zoneWidth = rect.width / 3;
+    const zoneWidth = rect.width / 2;
 
     if (relativeX < zoneWidth) {
       goToPrevFlipPage();
       return;
     }
-    if (relativeX > zoneWidth * 2) {
-      goToNextFlipPage();
-    }
+    goToNextFlipPage();
   }, [flipDragging, flipPanMode, goToNextFlipPage, goToPrevFlipPage, isFlipMode]);
 
   useEffect(() => {
@@ -1513,8 +1583,10 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
     }
 
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.target instanceof HTMLElement && event.target.closest('input, textarea, select, button, [contenteditable="true"]')) return;
       if (event.code === 'Space' && !event.repeat) {
         event.preventDefault();
+        if (scrollColumnMode !== 1) return;
         markComicSessionInteracted();
         setFlipPanMode(true);
       }
@@ -1537,13 +1609,20 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
       }
     };
 
+    const cancelPan = () => {
+      setFlipPanMode(false);
+      setFlipDragging(false);
+    };
+
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('blur', cancelPan);
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('blur', cancelPan);
     };
-  }, [active, goToNextFlipPage, goToPrevFlipPage, isFlipMode, markComicSessionInteracted]);
+  }, [active, goToNextFlipPage, goToPrevFlipPage, isFlipMode, markComicSessionInteracted, scrollColumnMode]);
 
   const applyViewerZoomShortcut = useCallback((action: ViewerZoomShortcutAction) => {
     if (!active) return;
@@ -1703,6 +1782,13 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
   }, [flipRotateSteps, isFlipMode, scrollColumnMode]);
 
   useEffect(() => {
+    if (scrollColumnMode !== 2) return;
+    setFlipOffset({ x: 0, y: 0 });
+    setFlipPanMode(false);
+    setFlipDragging(false);
+  }, [scrollColumnMode]);
+
+  useEffect(() => {
     if (isFlipMode) return;
     setFlipMenuState(prev => (prev.visible ? { ...prev, visible: false } : prev));
   }, [isFlipMode]);
@@ -1772,6 +1858,7 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
         <div className="state-empty">
           <Spin size="large" tip="漫画目录加载中..." />
         </div>
+        <FloatingViewerDock label="漫画" title={displayTitle} icon="book" placement="right" hideIdentity><ViewerOptionsButton /></FloatingViewerDock>
       </ComicViewerWrapper>
     );
   }
@@ -1780,6 +1867,7 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
     return (
       <ComicViewerWrapper>
         <div className="state-error">{listError}</div>
+        <FloatingViewerDock label="漫画" title={displayTitle} icon="book" placement="right" hideIdentity><ViewerOptionsButton /></FloatingViewerDock>
       </ComicViewerWrapper>
     );
   }
@@ -1788,20 +1876,22 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
     return (
       <ComicViewerWrapper>
         <div className="state-empty">该目录下没有可预览的图片</div>
+        <FloatingViewerDock label="漫画" title={displayTitle} icon="book" placement="right" hideIdentity><ViewerOptionsButton /></FloatingViewerDock>
       </ComicViewerWrapper>
     );
   }
 
-  const layoutModeSwitchLabel = isFlipMode ? '滚动模式' : '翻页模式';
-  const pageModeSwitchLabel = scrollColumnMode === 1 ? '双页' : '单页';
   const pageGap = scrollRowGap;
 
   return (
     <ComicViewerWrapper>
       {isFlipMode ? (
         <div
-          className={`flip-stage can-pan ${flipPanMode ? 'space-pan' : ''} ${flipDragging ? 'is-panning' : ''}`}
+          className={`flip-stage ${flipPanMode && scrollColumnMode === 1 ? 'can-pan space-pan' : ''} ${flipDragging && scrollColumnMode === 1 ? 'is-panning' : ''}`}
           ref={flipStageRef}
+          tabIndex={0}
+          role="group"
+          aria-label="漫画阅读区域"
           onClick={handleFlipStageClick}
           onContextMenu={handleViewerContextMenu}
           onWheel={handleFlipWheel}
@@ -1822,7 +1912,7 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
                     decoding="async"
                     draggable={false}
                     style={{
-                      transform: `translate(${flipOffset.x}px, ${flipOffset.y}px) scale(${effectiveFlipZoom}) rotate(${-90 * flipRotateSteps}deg)`,
+                      transform: `translate(${scrollColumnMode === 1 ? flipOffset.x : 0}px, ${scrollColumnMode === 1 ? flipOffset.y : 0}px) scale(${effectiveFlipZoom}) rotate(${-90 * flipRotateSteps}deg)`,
                     }}
                   />
                 ) : page ? (
@@ -1888,34 +1978,10 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
           </div>
         </div>
       )}
-      <Popover
-        trigger="custom"
-        visible={flipMenuState.visible}
-        onClickOutSide={() => setFlipMenuState(prev => ({ ...prev, visible: false }))}
-        position="bottomLeft"
-        showArrow={false}
-        spacing={4}
-        getPopupContainer={() => document.body}
-        content={(
-          <ContextMenu
-            items={viewerMenuItems}
-            className="directory-context-menu"
-            onItemClick={() => setFlipMenuState(prev => ({ ...prev, visible: false }))}
-          />
-        )}
-      >
-        <div
-          style={{
-            position: 'fixed',
-            left: flipMenuState.x,
-            top: flipMenuState.y,
-            width: 1,
-            height: 1,
-            pointerEvents: 'none',
-            zIndex: 9999,
-          }}
-        />
-      </Popover>
+      {flipMenuState.visible && <div className="comic-context-menu-layer" style={{ left: flipMenuState.x, top: flipMenuState.y }}>
+        <ContextMenu items={viewerMenuItems} className="directory-context-menu"
+          onItemClick={() => setFlipMenuState(prev => ({ ...prev, visible: false }))} />
+      </div>}
       <Modal
         visible={viewerSettingsVisible}
         title="视图设置"
@@ -1972,35 +2038,21 @@ const ComicViewer: React.FC<ComicViewerProps> = ({
           />
         </div>
       </Modal>
-      {!isFlipMode && (
-        <button type="button" className="back-top-btn" onClick={handleBackToTop}>
-          回到顶部
-        </button>
-      )}
-
-      <div className="viewer-footer">
-        <div className="footer-side footer-side-left">
-          <span className="footer-title-badge">COMIC</span>
-          <span className="footer-title" title={displayTitle}>{displayTitle}</span>
-        </div>
-        <span className="footer-page-meta">{Math.max(currentPageNumber, 1)} / {pages.length} 页</span>
-        <div className="footer-side footer-side-right">
-          <button
-            type="button"
-            className={`footer-btn ${isFlipMode ? 'is-active' : ''}`}
-            onClick={toggleLayoutMode}
-          >
-            {layoutModeSwitchLabel}
-          </button>
-          <button
-            type="button"
-            className="footer-btn"
-            onClick={toggleScrollColumnMode}
-          >
-            {pageModeSwitchLabel}
-          </button>
-        </div>
-      </div>
+      <ComicReaderDock
+        key={`${libraryId}:${folderNodeId}:${reloadToken}`}
+        active={active && !viewerSettingsVisible}
+        title={displayTitle}
+        page={currentPageNumber}
+        total={pages.length}
+        progress={isFlipMode ? Math.floor(flipPrimaryIndex / scrollColumnMode) / Math.max(Math.ceil(pages.length / scrollColumnMode) - 1, 1) : dockScrollProgress}
+        animateProgress={isFlipMode}
+        layoutMode={layoutMode}
+        columns={scrollColumnMode}
+        onProgressChange={handleProgressJump}
+        onBackToTop={handleBackToTop}
+        onLayoutChange={() => { markComicSessionInteracted(); toggleLayoutMode(); }}
+        onColumnsChange={() => { markComicSessionInteracted(); toggleScrollColumnMode(); }}
+      />
     </ComicViewerWrapper>
   );
 };

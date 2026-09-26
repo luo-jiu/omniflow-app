@@ -1,9 +1,10 @@
-import { Activity, Archive, ArchiveRestore, ArrowLeft, ArrowRight, BookOpen, Bookmark, CircleAlert, CircleCheck, CircleHelp, CloudUpload, Copy, FilePenLine, FileText, FolderClosed, FolderInput, FolderOpen, FolderPlus, Globe, History, House, LoaderCircle, Play, Plus, RotateCw, Search, Settings, SlidersHorizontal, Sparkles, SquareTerminal, Star, Tags, Trash2, Wrench } from 'lucide-react';
+import { Activity, Archive, ArchiveRestore, ArrowLeft, ArrowRight, ArrowUpToLine, BookOpen, Bookmark, CircleAlert, CircleCheck, CircleHelp, CloudUpload, Columns2, Copy, FilePenLine, FileText, FolderClosed, FolderInput, FolderOpen, FolderPlus, GalleryVertical, Globe, History, House, LoaderCircle, Play, Plus, RectangleVertical, RotateCw, Search, Settings, SlidersHorizontal, Sparkles, SquareTerminal, Star, Tags, Trash2, Wrench } from 'lucide-react';
 import styled from 'styled-components';
 
 const icons = { bookmark: Bookmark, upload: CloudUpload, copy: Copy, history: History, home: House, plus: Plus, settings: Settings, trash: Trash2, star: Star, activity: Activity, wrench: Wrench, agent: Sparkles, folder: FolderClosed, tools: SlidersHorizontal, browser: Globe, refresh: RotateCw, back: ArrowLeft, forward: ArrowRight, loading: LoaderCircle,
   archive: Archive, 'archive-restore': ArchiveRestore, play: Play, book: BookOpen, edit: FilePenLine, file: FileText, search: Search, terminal: SquareTerminal,
-  move: FolderInput, 'folder-plus': FolderPlus, 'folder-open': FolderOpen, check: CircleCheck, alert: CircleAlert, help: CircleHelp, tags: Tags };
+  move: FolderInput, 'folder-plus': FolderPlus, 'folder-open': FolderOpen, check: CircleCheck, alert: CircleAlert, help: CircleHelp, tags: Tags,
+  'back-to-top': ArrowUpToLine, 'scroll-pages': GalleryVertical, 'single-page': RectangleVertical, 'double-page': Columns2 };
 
 export type OutlineIconName = keyof typeof icons;
 

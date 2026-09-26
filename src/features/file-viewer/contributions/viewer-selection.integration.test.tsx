@@ -1,7 +1,12 @@
 import React, { useContext, useMemo, useRef, useState } from 'react';
 import TestRenderer, { act } from 'react-test-renderer';
 import { afterEach, expect, it, vi } from 'vitest';
-vi.mock('@douyinfe/semi-ui', () => ({ Spin: () => <div>Loading</div> }));
+vi.mock('@douyinfe/semi-icons', () => ({ IconCrossStroked: () => null }));
+vi.mock('@douyinfe/semi-ui', () => ({
+  Spin: () => <div>Loading</div>,
+  Modal: ({ visible, children, onCancel }: React.PropsWithChildren<{ visible: boolean; onCancel: () => void }>) => visible
+    ? <div role="dialog"><button aria-label="关闭查看器设置" onClick={onCancel} />{children}</div> : null,
+}));
 vi.mock('@/features/file-explorer/services/file.api', () => ({ getFileLink: vi.fn() }));
 vi.mock('@/features/file-viewer/services/global-audio-player', () => ({ globalAudioPlayer: { releaseForTab: vi.fn() } }));
 vi.mock('@/features/file-viewer/services/floating-video.service', () => ({ floatingVideoService: { releaseForTab: vi.fn() } }));
@@ -11,7 +16,7 @@ vi.mock('@/features/file-viewer/session/viewer-session-cold-store', () => ({ vie
 vi.mock('@/features/file-viewer/components/text-viewer', () => ({ default: () => <div data-testid="core-view">Core text</div> }));
 vi.mock('@/features/file-viewer/components/image-viewer', () => ({ default: () => null }));
 vi.mock('@/features/file-viewer/components/video-viewer', () => ({ default: () => null }));
-vi.mock('@/features/file-viewer/components/comic-viewer', () => ({ default: () => null }));
+vi.mock('@/features/file-viewer/components/comic-viewer', () => ({ default: (props: { active: boolean }) => <div data-testid="comic-view" data-active={props.active}><ViewerOptionsButton /></div> }));
 vi.mock('@/features/file-viewer/components/gallery-viewer', () => ({ default: () => null }));
 vi.mock('@/features/file-viewer/components/pdf-viewer', () => ({ default: () => null }));
 vi.mock('@/features/file-viewer/components/asmr-viewer', () => ({ default: () => null }));
@@ -28,6 +33,7 @@ import { useViewerSession } from '../session/useViewerSession';
 import { viewerSessionRuntime } from '../session/viewer-session-runtime';
 import type { FileDispatcherProps } from './viewer.types';
 import { disposeViewerSessionOnClose } from '../session';
+import ViewerOptionsButton from '../components/ViewerOptionsButton';
 
 let owner: NonNullable<React.ContextType<typeof FileViewerContext>>;
 let renderer: TestRenderer.ReactTestRenderer | undefined;
@@ -92,4 +98,37 @@ it('switches two matching viewers in one tab, isolates reading state and falls b
   expect(JSON.stringify(renderer!.toJSON())).toContain('已回退到内置查看器');
   await act(async () => { disposers.push(viewerRegistry.registerBatch('example', [{ id: 'example.a', title: 'A', fileTypes: ['text'], View: ReadingViewer }])); });
   expect(renderer!.root.findByProps({ 'data-testid': 'position' }).children).toEqual(['5']);
+});
+
+it('keeps comic fallback details in the settings dialog and preserves the requested viewer on cancel', async () => {
+  await act(async () => { renderer = TestRenderer.create(<FileViewerProvider libraryId={900007}><Probe /></FileViewerProvider>); });
+  await act(async () => owner.setFileUrl('comic://library/900007/node/900199', '漫画', 'comic', 900199, { viewerId: 'missing.comic' }));
+  expect(renderer!.root.findAllByProps({ className: 'viewer-selector' })).toHaveLength(0);
+  expect(renderer!.root.findAllByProps({ role: 'dialog' })).toHaveLength(0);
+  expect(JSON.stringify(renderer!.toJSON())).not.toContain('原选择与恢复状态保留');
+  act(() => renderer!.root.findByProps({ 'aria-label': '查看器设置（已回退到内置查看器）' }).props.onClick());
+  expect(renderer!.root.findAllByProps({ role: 'dialog' })).toHaveLength(1);
+  expect(JSON.stringify(renderer!.toJSON())).toContain('已回退到内置查看器');
+  act(() => renderer!.root.findByProps({ 'aria-label': '关闭查看器设置' }).props.onClick());
+  expect(owner.tabs[0].viewerId).toBe('missing.comic');
+});
+
+it('applies a comic viewer only after confirmation and suspends the external view while settings are open', async () => {
+  disposers.push(viewerRegistry.registerBatch('example', [{ id: 'example.comic', title: '外部漫画', fileTypes: ['comic'],
+    View: props => <div data-testid="external-comic" data-active={props.active} /> }]));
+  await act(async () => { renderer = TestRenderer.create(<FileViewerProvider libraryId={900007}><Probe /></FileViewerProvider>); });
+  await act(async () => owner.setFileUrl('comic://library/900007/node/900198', '漫画', 'comic', 900198));
+  act(() => renderer!.root.findByProps({ 'aria-label': '查看器设置' }).props.onClick());
+  expect(renderer!.root.findByProps({ 'data-testid': 'comic-view' }).props['data-active']).toBe(false);
+  act(() => select('example.comic'));
+  expect(owner.tabs[0].viewerId).toBeUndefined();
+  const apply = renderer!.root.findAllByType('button').find(button => button.children.includes('应用'))!;
+  await act(async () => apply.props.onClick());
+  expect(owner.tabs).toHaveLength(1);
+  expect(owner.tabs[0].viewerId).toBe('example.comic');
+  expect(renderer!.root.findByProps({ 'data-testid': 'external-comic' }).props['data-active']).toBe(true);
+  act(() => renderer!.root.findByProps({ 'aria-label': '查看器设置' }).props.onClick());
+  expect(renderer!.root.findByProps({ 'data-testid': 'external-comic' }).props['data-active']).toBe(false);
+  act(() => renderer!.root.findByProps({ 'aria-label': '关闭查看器设置' }).props.onClick());
+  expect(renderer!.root.findByProps({ 'data-testid': 'external-comic' }).props['data-active']).toBe(true);
 });

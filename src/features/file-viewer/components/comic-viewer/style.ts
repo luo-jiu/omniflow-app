@@ -5,6 +5,7 @@ export const ComicViewerWrapper = styled.div`
   width: 100%;
   height: 100%;
   position: relative;
+  container-type: inline-size;
   display: flex;
   flex-direction: column;
   background:
@@ -16,10 +17,14 @@ export const ComicViewerWrapper = styled.div`
   .pages-scroll {
     flex: 1;
     min-height: 0;
+    width: calc(100% - 64px);
+    box-sizing: border-box;
     overflow-y: auto;
     overflow-x: auto;
     padding: 7px 0 13px;
     ${workspaceScrollbarStyles}
+    scrollbar-width: none;
+    &::-webkit-scrollbar { display: none; }
   }
 
   .pages-grid {
@@ -98,120 +103,11 @@ export const ComicViewerWrapper = styled.div`
     padding: 21px;
   }
 
-  .viewer-footer {
-    height: 28px;
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 7px;
-    padding: 0 8px;
-    border-top: 1px solid var(--semi-color-border);
-    background: color-mix(in srgb, var(--semi-color-bg-0) 95%, transparent);
-  }
-
-  .back-top-btn {
-    position: absolute;
-    right: 9px;
-    bottom: 35px;
-    z-index: 12;
-    height: 22px;
-    padding: 0 8px;
-    border-radius: 999px;
-    border: 1px solid color-mix(in srgb, var(--semi-color-border) 80%, transparent);
-    background: color-mix(in srgb, var(--semi-color-bg-0) 94%, transparent);
-    color: var(--semi-color-text-1);
-    font-size: 10px;
-    line-height: 1;
-    cursor: pointer;
-    transition: border-color 120ms ease, background-color 120ms ease, color 120ms ease;
-    backdrop-filter: blur(4px);
-  }
-
-  .back-top-btn:hover {
-    border-color: color-mix(in srgb, var(--semi-color-success) 52%, var(--semi-color-border));
-    color: var(--semi-color-success);
-  }
-
-  .footer-side {
-    min-width: 0;
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    flex: 1 1 0;
-  }
-
-  .footer-side-left {
-    justify-content: flex-start;
-    overflow: hidden;
-  }
-
-  .footer-side-right {
-    justify-content: flex-end;
-  }
-
-  .footer-title-badge {
-    font-size: 10px;
-    line-height: 1;
-    padding: 2px 5px;
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--semi-color-success) 16%, transparent);
-    color: var(--semi-color-success);
-    font-weight: 600;
-    flex-shrink: 0;
-  }
-
-  .footer-title {
-    min-width: 0;
-    font-size: 11px;
-    color: var(--semi-color-text-1);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .footer-page-meta {
-    flex: 0 0 auto;
-    min-width: 80px;
-    text-align: center;
-    font-size: 11px;
-    color: var(--semi-color-text-2);
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-    white-space: nowrap;
-  }
-
-  .footer-btn {
-    height: 22px;
-    padding: 0 8px;
-    border-radius: 6px;
-    border: 1px solid var(--semi-color-border);
-    background: color-mix(in srgb, var(--semi-color-bg-0) 96%, transparent);
-    color: var(--semi-color-text-1);
-    font-size: 10px;
-    line-height: 1;
-    cursor: pointer;
-    transition: all 120ms ease;
-  }
-
-  .footer-btn:hover:not(:disabled) {
-    border-color: color-mix(in srgb, var(--semi-color-success) 52%, var(--semi-color-border));
-    color: var(--semi-color-success);
-  }
-
-  .footer-btn:disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
-  }
-
-  .footer-btn.is-active {
-    border-color: color-mix(in srgb, var(--semi-color-success) 58%, var(--semi-color-border));
-    color: var(--semi-color-success);
-    background: color-mix(in srgb, var(--semi-color-success-light-default) 30%, var(--semi-color-bg-0));
-  }
-
   .flip-stage {
+    outline: none;
     flex: 1;
     min-height: 0;
+    width: calc(100% - 64px);
     position: relative;
     overflow: hidden;
     background: transparent;
@@ -219,6 +115,15 @@ export const ComicViewerWrapper = styled.div`
     align-items: center;
     justify-content: center;
     user-select: none;
+  }
+
+  .flip-stage:focus-visible { outline: 2px solid var(--app-focus-border); outline-offset: -2px; }
+  html[data-app-input-modality='pointer'] & .flip-stage:focus-visible { outline: none; }
+
+  .comic-context-menu-layer {
+    position: absolute;
+    z-index: 9999;
+    transform: translate(0, 4px);
   }
 
   .flip-canvas {
@@ -241,6 +146,31 @@ export const ComicViewerWrapper = styled.div`
   .flip-canvas.double {
     gap: 3px;
     padding: 0 21px;
+  }
+
+  .comic-page-counter {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    line-height: 1.25;
+    color: var(--app-text);
+  }
+
+  .comic-page-divider {
+    display: flex;
+    gap: 4px;
+    padding: 2px 0;
+  }
+
+  .comic-page-divider::before,
+  .comic-page-divider::after {
+    content: '';
+    width: 2px;
+    height: 2px;
+    border-radius: 50%;
+    background: currentColor;
   }
 
   .flip-page-panel {
