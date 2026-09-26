@@ -240,11 +240,18 @@ const UnifiedAudioViewer: React.FC<UnifiedAudioViewerProps> = ({
     fromColor: spectrumColors.primary,
     ratio: duration > 0 ? Math.min(Math.max(currentTime / duration, 0), 1) : 1,
   };
-  const showMeteor = Boolean(viewerMode === 'archive' && meteor && active && isCurrentAudioSource && playerState.isPlaying && meteor.src === currentAudioUrl);
+  const showMeteor = Boolean(
+    (viewerMode === 'archive' || viewerMode === 'folder' || viewerMode === 'bare')
+      && meteor
+      && active
+      && isCurrentAudioSource
+      && playerState.isPlaying
+      && meteor.src === currentAudioUrl,
+  );
   useEffect(() => { if (!showMeteor) setMeteor(null); }, [showMeteor]);
   // The service marks this only after native play() succeeds, and resets it on
   // source release/replacement. Metadata loading must not reveal archive seek.
-  const dockProgressMode = viewerMode === 'archive' || viewerMode === 'folder';
+  const dockProgressMode = viewerMode === 'archive' || viewerMode === 'folder' || viewerMode === 'bare';
   const showPlayerProgress = dockProgressMode
     ? (isCurrentAudioSource && playerState.hasStarted)
     : true;
@@ -613,7 +620,7 @@ const UnifiedAudioViewer: React.FC<UnifiedAudioViewerProps> = ({
     lastHandledEndedSerialRef.current = endedSerial;
     const previous = pendingMeteorRef.current;
     pendingMeteorRef.current = null;
-    setMeteor(automatic && activeRef.current && viewerMode === 'archive' && previous
+    setMeteor(automatic && activeRef.current && (viewerMode === 'archive' || viewerMode === 'folder' || viewerMode === 'bare') && previous
       ? { ...previous, id: ++meteorSerialRef.current, src: url }
       : null);
   }, [viewerMode]);
@@ -815,12 +822,11 @@ const UnifiedAudioViewer: React.FC<UnifiedAudioViewerProps> = ({
   }, [cancelPendingSeek, currentAudioUrl]);
 
   useEffect(() => {
-    if (bareAudioMode) return;
     if (!isCurrentAudioSource) return;
     if (playerState.endedSerial <= 0 || playerState.endedSerial === lastHandledEndedSerialRef.current) return;
     lastHandledEndedSerialRef.current = playerState.endedSerial;
     playNextCard(true);
-  }, [bareAudioMode, isCurrentAudioSource, playNextCard, playerState.endedSerial]);
+  }, [isCurrentAudioSource, playNextCard, playerState.endedSerial]);
 
   useEffect(() => {
     requestIdRef.current += 1;
@@ -1245,7 +1251,7 @@ const UnifiedAudioViewer: React.FC<UnifiedAudioViewerProps> = ({
           <Button
             className="play-main"
             icon={isCurrentAudioSource && playerState.isPlaying ? <IconPause /> : <IconPlay />}
-            theme={viewerMode === 'archive' ? 'borderless' : 'solid'}
+            theme={dockProgressMode ? 'borderless' : 'solid'}
             shape="circle"
             onClick={togglePlay}
             disabled={cards.length === 0}

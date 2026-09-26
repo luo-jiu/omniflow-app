@@ -710,7 +710,8 @@ export const UnifiedAudioViewerWrapper = styled.div`
   }
 
   &[data-viewer-mode='archive'],
-  &[data-viewer-mode='folder'] {
+  &[data-viewer-mode='folder'],
+  &[data-viewer-mode='bare'] {
     position: relative;
     --audio-dock-width: min(900px, calc(100% - 32px));
 
