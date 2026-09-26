@@ -740,7 +740,7 @@ const DashboardRoot = styled.div`
     min-width: 0;
     border: 1px solid color-mix(in srgb, var(--app-border) 82%, transparent);
     border-radius: 8px;
-    background: color-mix(in srgb, var(--app-bg-base) 78%, transparent);
+    background: color-mix(in srgb, var(--app-bg) 78%, transparent);
     padding: 2px;
     display: flex;
     align-items: center;
@@ -786,7 +786,7 @@ const DashboardRoot = styled.div`
     border-radius: 8px;
     background:
       linear-gradient(180deg, color-mix(in srgb, var(--semi-color-primary) 5%, transparent), transparent 72%),
-      color-mix(in srgb, var(--app-bg-elevated) 98%, var(--app-bg-base));
+      color-mix(in srgb, var(--app-bg-elevated) 98%, var(--app-bg));
     padding: 10px;
     overflow: hidden;
   }

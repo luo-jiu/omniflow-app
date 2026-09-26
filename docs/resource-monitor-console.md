@@ -1,6 +1,6 @@
 # 资源监测控制台
 
-更新时间：2026-08-14
+更新时间：2026-09-23
 
 适用范围：仓库页 / 资料库页 system workspace 中的资源监测入口、前端展示、后端快照 API 对接和后续探针扩展。
 
@@ -20,7 +20,7 @@
 - 历史 provider 类型值提示，例如 `MINIO` 兼容映射到唯一 provider alias
 - 对象存储、Postgres、Redis 的只读可用性探针
 - 探针可用性图谱：登录后由前端应用级 runtime 立即探测一次，之后每 5 分钟自动探测；页面只订阅展示，离开页面后仍继续采样；内存中只保留最近 60 次，不持久化，退出登录 / 切换账号 / 重启后清空
-- 资源组成主图使用 `echarts` 渲染；图表封装只存在于 `features/resource-monitor` 内，负责读取当前主题颜色、初始化、resize 和释放实例
+- 资源组成主图使用 `echarts` 渲染；图表封装只存在于 `features/resource-monitor` 内，消费当前只读主题快照，负责初始化、resize 和释放实例
 - 资源组成主图支持「冠军分离」：当第一名占比达到 `60%` 且可展示项不少于 3 个时，冠军项单独渲染通栏条，其余项以自身最大值作为坐标上限放大展示；条上标签与 tooltip 仍展示真实占比和容量，不满足条件时保持普通线性条形图
 - 到存储设置、迁移任务、回收站的快捷跳转
 - 用户显式触发的历史样本记录
@@ -50,6 +50,7 @@
 - `views/library` 只负责打开 `resource-monitor` system view。
 - `features/system-workspace` 只负责 system view 的宿主和注册；资源监测实际页面通过懒加载壳进入，避免图表库成本扩散到设置、上传中心等其他 system view。
 - `features/resource-monitor` 负责资源监测自己的请求、格式化、加载态、错误态和展示。
+- `ResourceMonitorCharts`从`AppearanceViewContext.colors`直接派生轴、文字、网格和tooltip目标色；不从WAAPI动画中的computed CSS采样，也不维护第二份主题状态或观察body变化。预览、取消和迟到快照都会更新既有图表实例；类别palette与数据不变。Canvas更新到目标色，不承诺与DOM统一动效逐帧同步；缺少主题provider时才使用内部fallback。
 - 资源探针历史由 `features/resource-monitor/services/resource-monitor-runtime.ts` 维护，生命周期跟随登录后的应用进程，不归属页面组件。
 - storage provider 的写入门禁复用同一 runtime，不另建页面级轮询。新建文件和上传确认读取相同的对象存储探针状态；写入前只在结果未知或超过 1 分钟时补一次探活，并复用 runtime 的并发请求合并，不能按上传文件逐个探活。
 - 写入门禁采用失败关闭：只有选中 provider 的新鲜探针状态为 `ok` 才允许创建节点或把上传批次加入队列；`error`、`unknown`、探活请求失败或 provider 列表缺失都必须停止写入。探活只是前置门禁，不能移除实际写入失败后的节点 / 临时文件清理。
@@ -299,3 +300,4 @@ type ResourceMonitorSample = {
 - 分布统计失败时分布表展示错误摘要，同时保留探针结果。
 - 无资源对象时展示空态。
 - API 失败时展示错误态和 Toast。
+- 预览配色/明暗后，轴、标签、网格与tooltip到达当前主题色；取消恢复，数据和分类色不变。自动测试覆盖computed CSS仍停旧动画帧、迟到快照、取消反向及实例释放；锁屏期间未进行图表真机视觉验收。

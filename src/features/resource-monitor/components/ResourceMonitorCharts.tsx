@@ -11,6 +11,7 @@ import type { BarSeriesOption } from 'echarts/charts';
 import type { ComposeOption, ECharts } from 'echarts/core';
 import { CanvasRenderer } from 'echarts/renderers';
 import styled from 'styled-components';
+import { AppearanceViewContext } from '@/features/appearance/appearance.context';
 import {
   formatPercentLabel,
   type ResourceMonitorChartItem,
@@ -60,43 +61,19 @@ function formatBytes(bytes: number): string {
   return `${value.toFixed(digits)} ${units[index]}`;
 }
 
-function readColorVariable(source: HTMLElement | null, name: string, fallback: string): string {
-  if (typeof window === 'undefined') return fallback;
-  const sourceStyle = source ? window.getComputedStyle(source) : null;
-  const bodyStyle = window.getComputedStyle(document.body);
-  const rootStyle = window.getComputedStyle(document.documentElement);
-  return sourceStyle?.getPropertyValue(name).trim()
-    || bodyStyle.getPropertyValue(name).trim()
-    || rootStyle.getPropertyValue(name).trim()
-    || fallback;
-}
-
-function readChartTheme(source: HTMLElement | null): ChartThemeColors {
-  return {
-    axis: readColorVariable(source, '--app-text-muted', FALLBACK_THEME.axis),
-    grid: readColorVariable(source, '--app-border', FALLBACK_THEME.grid),
-    muted: readColorVariable(source, '--app-text-muted', FALLBACK_THEME.muted),
-    text: readColorVariable(source, '--app-text', FALLBACK_THEME.text),
-    tooltipBackground: readColorVariable(source, '--app-bg-elevated', FALLBACK_THEME.tooltipBackground),
-    tooltipBorder: readColorVariable(source, '--app-border', FALLBACK_THEME.tooltipBorder),
-    tooltipText: readColorVariable(source, '--app-text', FALLBACK_THEME.tooltipText),
-  };
-}
-
-function useChartThemeColors(sourceRef: React.RefObject<HTMLElement>): ChartThemeColors {
-  const [theme, setTheme] = React.useState<ChartThemeColors>(() => readChartTheme(null));
-
-  React.useEffect(() => {
-    if (typeof window === 'undefined') return undefined;
-    const refreshTheme = () => setTheme(readChartTheme(sourceRef.current));
-    const observer = new MutationObserver(refreshTheme);
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style'] });
-    observer.observe(document.body, { attributes: true, attributeFilter: ['class', 'style'] });
-    refreshTheme();
-    return () => observer.disconnect();
-  }, [sourceRef]);
-
-  return theme;
+function useChartThemeColors(): ChartThemeColors {
+  const colors = React.useContext(AppearanceViewContext)?.colors;
+  // Canvas options need the resolved target palette. Reading computed CSS while
+  // the host animates would capture an intermediate frame without a final mutation.
+  return React.useMemo(() => colors ? {
+    axis: colors['text.muted'],
+    grid: colors['border.default'],
+    muted: colors['text.muted'],
+    text: colors['text.primary'],
+    tooltipBackground: colors['surface.elevated'],
+    tooltipBorder: colors['border.default'],
+    tooltipText: colors['text.primary'],
+  } : FALLBACK_THEME, [colors]);
 }
 
 function toChartRows(items: ResourceMonitorChartItem[]) {
@@ -264,8 +241,7 @@ const EChartSurface: React.FC<{
 };
 
 export const ResourceCompositionChart: React.FC<ResourceCompositionChartProps> = ({ items }) => {
-  const rootRef = React.useRef<HTMLDivElement | null>(null);
-  const theme = useChartThemeColors(rootRef);
+  const theme = useChartThemeColors();
   const split = React.useMemo(() => splitChampionItem(items), [items]);
   const tailMax = React.useMemo(() => {
     if (!split) return undefined;
@@ -287,7 +263,7 @@ export const ResourceCompositionChart: React.FC<ResourceCompositionChartProps> =
     ].filter(Boolean).join(' ')
     : '';
   return (
-    <ChartRoot ref={rootRef}>
+    <ChartRoot>
       {split ? (
         <div
           aria-label={championDescription}
