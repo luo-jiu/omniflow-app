@@ -3,6 +3,7 @@ import { LIMITS, type PluginMetadataFile, type ThemeSnapshot } from '../../../pa
 import type { PluginManifest, PluginToolContribution, PluginWorkspaceContribution } from './manifest';
 import { validateToolOutput } from './tool-schema';
 import { decodeFileOutput } from './file-output';
+import { isThemeColor, isThemeRecord } from '../../../src/features/appearance/color-theme';
 
 export interface PluginToolExecution {
   contribution: PluginToolContribution;
@@ -103,10 +104,10 @@ function workspaceParameters(value: unknown): asserts value is Record<string, un
 }
 
 export function validateTheme(theme: ThemeSnapshot): ThemeSnapshot {
-  if (!theme || theme.schemaVersion !== 1 || !Number.isSafeInteger(theme.revision) || theme.revision < 0
-    || !['light', 'dark'].includes(theme.mode) || !object(theme.colors) || Object.keys(theme.colors).length > 128
-    || Object.entries(theme.colors).some(([key, value]) => !/^[a-z][a-z0-9.-]{0,63}$/.test(key) || typeof value !== 'string' || !/^#[0-9a-f]{6}(?:[0-9a-f]{2})?$/i.test(value))) throw new Error('Invalid plugin theme');
-  return structuredClone(theme);
+  if (!isThemeRecord(theme) || theme.schemaVersion !== 1 || !Number.isSafeInteger(theme.revision) || theme.revision < 0
+    || !['light', 'dark'].includes(theme.mode) || !isThemeRecord(theme.colors) || Object.keys(theme.colors).length > 128
+    || Object.entries(theme.colors).some(([key, value]) => !/^[a-z][a-zA-Z0-9.-]{0,63}$/.test(key) || !isThemeColor(value))) throw new Error('Invalid plugin theme');
+  return { schemaVersion: 1, revision: theme.revision, mode: theme.mode, colors: { ...theme.colors } };
 }
 export class PluginResourceBroker {
   readonly handle = randomUUID();

@@ -1,8 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { PluginResourceBroker, PluginSettingsMemory, PluginReadingStateMemory, type OpenedResourceAuthority } from './resource-broker';
+import { PluginResourceBroker, PluginSettingsMemory, PluginReadingStateMemory, validateTheme, type OpenedResourceAuthority } from './resource-broker';
 import { parsePluginManifest } from './manifest';
 import manifestJson from '../../../samples/csv-viewer/manifest.json';
 import { LIMITS, createPluginClient, type ThemeSnapshot } from '../../../packages/plugin-sdk/index.js';
+import { DEFAULT_COLOR_TOKENS } from '../../../src/features/appearance/color-theme';
 const manifest = parsePluginManifest(manifestJson, 'darwin');
 const theme: ThemeSnapshot = { schemaVersion: 1, revision: 1, mode: 'light', colors: { 'surface.app': '#ffffff' } };
 function resource(overrides: Partial<OpenedResourceAuthority> = {}): OpenedResourceAuthority {
@@ -105,6 +106,25 @@ describe('plugin settings and theme', () => {
     expect(broker.setTheme(theme)).toBe(false);
     expect(broker.setTheme({ ...theme, revision: 2 })).toBe(true);
     expect(() => broker.setTheme({ ...theme, revision: 3, colors: { x: 'url(https://invalid)' } })).toThrow();
+  });
+  it.each(['light', 'dark'] as const)('accepts complete %s host colors, including alpha and camel-case tokens', async mode => {
+    const broker = await setup();
+    const next = { schemaVersion: 1 as const, revision: 2, mode, colors: DEFAULT_COLOR_TOKENS[mode] };
+    expect(broker.setTheme(next)).toBe(true);
+    expect((await call(broker, 'context.get')).value.theme).toEqual(next);
+  });
+  it.each(['url(https://invalid)', 'var(--secret)', '#fff; color:red', 'rgb(256, 0, 0)', 'rgba(0, 0, 0, 2)'])('rejects unsafe or invalid color %s', color => {
+    expect(() => validateTheme({ ...theme, colors: { 'surface.app': color } })).toThrow('Invalid plugin theme');
+  });
+  it('keeps token budgets and names bounded and strips host-only theme fields', () => {
+    expect(() => validateTheme({ ...theme, colors: Object.fromEntries(Array.from({ length: 129 }, (_, i) => [`color.${i}`, '#ffffff'])) })).toThrow();
+    expect(() => validateTheme({ ...theme, colors: { '--injected': '#ffffff' } })).toThrow();
+    expect(() => validateTheme({ ...theme, colors: { ['x'.repeat(65)]: '#ffffff' } })).toThrow();
+    const colors = { ...theme.colors };
+    const projected = validateTheme({ ...theme, colors, ownerEpoch: 'private-owner' } as ThemeSnapshot);
+    expect(projected).toEqual(theme);
+    colors['surface.app'] = '#000000';
+    expect(projected.colors['surface.app']).toBe('#ffffff');
   });
 });
 describe('independent SDK contract', () => {
