@@ -1,5 +1,6 @@
 import styled from 'styled-components';
 import { workspaceScrollbarStyles } from '@/components/ui/workspace-scrollbar';
+import { AUDIO_DOCK_RADIUS } from '@/features/audio-viewer/components/unified-audio-viewer/audio-dock-progress-geometry';
 
 export const AsmrCoverPickerList = styled.div`
   flex: 1;
@@ -499,6 +500,167 @@ export const AsmrViewerWrapper = styled.div`
 
   .asmr-player-bar .semi-button-icon {
     font-size: 14px;
+  }
+
+  .audio-player-bar {
+    position: relative;
+    flex-shrink: 0;
+    height: 76px;
+    display: grid;
+    grid-template-columns: minmax(180px, 1fr) minmax(190px, auto) minmax(220px, 1fr);
+    align-items: center;
+    gap: 18px;
+    padding: 10px 16px 9px;
+    border-top: 1px solid var(--semi-color-border);
+    background: color-mix(in srgb, var(--semi-color-bg-1) 94%, transparent);
+    box-shadow: 0 -8px 22px rgba(0, 0, 0, 0.08);
+  }
+
+  .audio-dock-progress {
+    position: absolute;
+    inset: -1px;
+    z-index: 2;
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  .audio-dock-progress[data-visible='true'] {
+    visibility: visible;
+  }
+
+  .audio-dock-progress-svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+    pointer-events: none;
+  }
+
+  .audio-dock-progress-track {
+    stroke: var(--semi-color-fill-1);
+  }
+
+  .audio-player-bar[data-meteor-active='true'] .audio-dock-progress-fill {
+    opacity: 0;
+  }
+
+  .audio-dock-meteor {
+    position: absolute;
+    inset: -1px;
+    width: calc(100% + 2px);
+    height: calc(100% + 2px);
+    overflow: visible;
+    pointer-events: none;
+    z-index: 3;
+  }
+
+  .audio-dock-meteor-light {
+    transition: color 260ms linear;
+    filter: drop-shadow(0 0 3px currentColor);
+  }
+
+  .audio-dock-progress-keyboard {
+    position: absolute;
+    top: -6px;
+    left: ${AUDIO_DOCK_RADIUS}px;
+    width: calc(100% - ${AUDIO_DOCK_RADIUS * 2}px);
+    height: 14px;
+    margin: 0;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .audio-dock-progress-keyboard:focus-visible + .audio-dock-progress-svg .audio-dock-progress-track {
+    stroke: var(--app-accent);
+    stroke-width: 5px;
+  }
+
+  .audio-dock-progress-hit {
+    cursor: pointer;
+    touch-action: none;
+  }
+
+  .player-brief {
+    min-width: 0;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0;
+    color: inherit;
+    text-align: left;
+  }
+
+  .audio-cover.mini {
+    width: 42px;
+    height: 42px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    border-radius: 5px;
+    color: color-mix(in srgb, var(--semi-color-primary) 74%, var(--semi-color-text-1));
+    background:
+      linear-gradient(135deg, color-mix(in srgb, var(--semi-color-primary-light-default) 66%, var(--semi-color-bg-1)), var(--semi-color-fill-0));
+  }
+
+  .audio-cover.mini img {
+    width: 100%;
+    height: 100%;
+    display: block;
+    object-fit: cover;
+  }
+
+  .player-track {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .player-title {
+    max-width: 230px;
+    font-size: 12px;
+    line-height: 1.25;
+    font-weight: 700;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .player-artist {
+    color: var(--semi-color-text-2);
+    font-size: 11px;
+    line-height: 1.2;
+  }
+
+  .audio-player-bar .player-controls {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+  }
+
+  .audio-player-bar .player-controls .play-main {
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+  }
+
+  .player-extra {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+
+  .time-display {
+    color: var(--semi-color-text-2);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 11px;
+    white-space: nowrap;
   }
 
   @keyframes asmr-cover-wave {

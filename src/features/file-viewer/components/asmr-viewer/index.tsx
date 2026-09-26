@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  IconFolder,
   IconEdit,
   IconBackward,
   IconFastForward,
@@ -37,6 +36,10 @@ import {
 } from './asmr-viewer-session';
 import { useViewerSession, type ViewerSessionAdapter } from '@/features/file-viewer/session';
 import { MediaVolumeControl } from '@/features/file-viewer/components/media-volume-control';
+import { useAudioSpectrumColors } from '@/features/file-viewer/components/audio-spectrum-visualizer/use-audio-spectrum-colors';
+import { AudioDockMeteor, type AudioDockMeteorEvent } from '@/features/audio-viewer/components/unified-audio-viewer/AudioDockMeteor';
+import { AudioDockProgress } from '@/features/audio-viewer/components/unified-audio-viewer/audio-dock-progress';
+import OutlineIcon from '@/components/ui/outline-icon';
 
 interface AsmrViewerProps {
   accountScope: string | null;
@@ -274,10 +277,17 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
     togglePlay: toggleOwnedPlay,
   } = useGlobalAudioPlayback({ ownerType: 'asmr', ownerKey: asmrOwnerKey, tabId, libraryId });
   const retentionPlaying = isOwnedGlobalAudioPlaying(playerState, tabId, libraryId);
+  const spectrumColors = useAudioSpectrumColors(coverUrl);
+  const [meteor, setMeteor] = useState<AudioDockMeteorEvent | null>(null);
+  const meteorSerialRef = useRef(0);
+  const progressVisualRef = useRef({ fromColor: spectrumColors.primary, ratio: 0 });
+  const lastHandledEndedSerialRef = useRef(playerState.endedSerial);
+  const pendingMeteorRef = useRef<Omit<AudioDockMeteorEvent, 'id' | 'src'> | null>(null);
 
   useEffect(() => {
     if (active) return;
     setEditorVisible(false);
+    setMeteor(null);
   }, [active]);
 
   const listRequestIdRef = useRef(0);
@@ -436,6 +446,28 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
   const hasPrevAudio = currentAudioQueueIndex > 0;
   const hasNextAudio = currentAudioQueueIndex >= 0 && currentAudioQueueIndex < audioQueue.length - 1;
   const visibleCurrentTime = seekingTime ?? playerState.currentTime;
+  const isCurrentAudioSource = Boolean(
+    isOwnedSource
+    && currentAudioSrc
+    && playerState.src === currentAudioSrc
+  );
+  const showPlayerProgress = Boolean(
+    currentAudioId !== null
+    && isCurrentAudioSource
+    && Number.isFinite(playerState.duration)
+    && playerState.duration > 0
+  );
+  const showMeteor = Boolean(
+    meteor
+    && active
+    && currentAudioId !== null
+    && currentAudioSrc
+    && meteor.src === currentAudioSrc
+  );
+  progressVisualRef.current = {
+    fromColor: spectrumColors.primary,
+    ratio: playerState.duration > 0 ? Math.min(Math.max(playerState.currentTime / playerState.duration, 0), 1) : 0,
+  };
   const currentTrackName = useMemo(() => {
     if (currentAudioQueueIndex >= 0) {
       const active = audioQueue[currentAudioQueueIndex];
@@ -510,12 +542,22 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
     targetAudio: AsmrNodeItem,
     queue: AsmrNodeItem[],
     parentNodeId?: number | null,
+    options?: { animateTransition?: boolean },
   ) => {
     const requestId = beginPlaybackRequest();
     activePlaybackRequestIdRef.current = requestId;
     try {
       const url = await resolveAudioUrl(targetAudio);
       if (!isPlaybackRequestCurrent(requestId)) return;
+      const previousState = getPlayerState();
+      const shouldAnimate = Boolean(
+        options?.animateTransition
+        && previousState.src
+        && previousState.duration > 0
+      );
+      pendingMeteorRef.current = shouldAnimate
+        ? { ...progressVisualRef.current }
+        : null;
       const claimed = ensureSource(
         url,
         resolveDisplayName(targetAudio),
@@ -535,6 +577,11 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
       setCurrentAudioSrc(url);
       setSelectedId(targetAudio.id);
       setSeekingTime(null);
+      const previous = pendingMeteorRef.current;
+      pendingMeteorRef.current = null;
+      setMeteor(previous
+        ? { ...previous, id: ++meteorSerialRef.current, src: url }
+        : null);
     } catch (error: any) {
       if (!isPlaybackRequestCurrent(requestId)) return;
       runtimeLogger.error('ASMR 音频播放失败:', error);
@@ -547,6 +594,7 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
   }, [
     beginPlaybackRequest,
     ensureSource,
+    getPlayerState,
     isPlaybackRequestCurrent,
     play,
     resolveAudioUrl,
@@ -923,8 +971,27 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
   const handlePlayNextAudio = useCallback(async () => {
     if (!hasNextAudio || currentAudioQueueIndex < 0) return;
     const nextTrack = audioQueue[currentAudioQueueIndex + 1];
-    await playAudioInAsmr(nextTrack, audioQueue);
+    await playAudioInAsmr(nextTrack, audioQueue, currentAudioParentNodeIdRef.current, { animateTransition: true });
   }, [audioQueue, currentAudioQueueIndex, hasNextAudio, playAudioInAsmr]);
+
+  useEffect(() => {
+    if (!active || !isCurrentAudioSource) return;
+    if (playerState.endedSerial <= 0 || playerState.endedSerial === lastHandledEndedSerialRef.current) return;
+    lastHandledEndedSerialRef.current = playerState.endedSerial;
+    if (!hasNextAudio || currentAudioQueueIndex < 0) return;
+    const nextTrack = audioQueue[currentAudioQueueIndex + 1];
+    if (nextTrack) {
+      void playAudioInAsmr(nextTrack, audioQueue, currentAudioParentNodeIdRef.current, { animateTransition: true });
+    }
+  }, [
+    active,
+    audioQueue,
+    currentAudioQueueIndex,
+    hasNextAudio,
+    isCurrentAudioSource,
+    playAudioInAsmr,
+    playerState.endedSerial,
+  ]);
 
   const openEditor = useCallback(() => {
     if (!rootNodeId || !libraryId) {
@@ -1192,7 +1259,7 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
                   >
                     <div className="row-main">
                       <span className="row-icon">
-                        {isDir ? <IconFolder size="extra-large" /> : getFileNodeIcon(item.ext, item.name, {
+                        {isDir ? <OutlineIcon name="folder" /> : getFileNodeIcon(item.ext, item.name, {
                           mimeType: item.mimeType,
                           parentBuiltInType: 'AUDIO',
                           parentArchiveMode: 1,
@@ -1215,30 +1282,43 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
         </div>
 
         {currentAudioId !== null ? (
-          <div className="asmr-player-bar">
-            <input
-              className="player-progress-line"
-              type="range"
-              min={0}
-              max={Math.max(playerState.duration, 0)}
-              step={0.1}
-              value={Math.min(visibleCurrentTime, Math.max(playerState.duration, 0))}
-              onChange={(event) => {
-                const next = Number(event.target.value);
-                setSeekingTime(next);
-                seekTo(next);
+          <div className="audio-player-bar" data-progress-visible={showPlayerProgress} data-meteor-active={showMeteor}>
+            {showMeteor && meteor ? (
+              <AudioDockMeteor
+                key={meteor.id}
+                event={meteor}
+                color={spectrumColors.primary}
+                onFinish={() => setMeteor(current => current?.id === meteor.id ? null : current)}
+              />
+            ) : null}
+            <AudioDockProgress
+              visible={showPlayerProgress}
+              disabled={!isCurrentAudioSource}
+              duration={playerState.duration}
+              value={visibleCurrentTime}
+              startColor={spectrumColors.mirrored}
+              endColor={spectrumColors.primary}
+              smooth={active && playerState.isPlaying && seekingTime === null && !showMeteor}
+              readTime={() => {
+                const state = getPlayerState();
+                return isCurrentAudioSource ? state.currentTime : null;
               }}
-              onMouseUp={() => {
-                setSeekingTime(null);
+              onPreview={(time) => {
+                setSeekingTime(time);
+                seekTo(time);
               }}
-              onKeyUp={() => {
-                setSeekingTime(null);
-              }}
+              onCommit={() => setSeekingTime(null)}
+              onCancel={() => setSeekingTime(null)}
             />
 
-            <div className="player-track">
-              <span className="player-track-icon"><IconMusic /></span>
-              <span className="player-track-name" title={currentTrackName}>{currentTrackName}</span>
+            <div className="player-brief">
+              <span className="audio-cover mini">
+                {coverUrl ? <img src={coverUrl} alt="" draggable={false} /> : <IconMusic />}
+              </span>
+              <span className="player-track">
+                <span className="player-title" title={currentTrackName}>{currentTrackName}</span>
+                <span className="player-artist">ASMR</span>
+              </span>
             </div>
 
             <div className="player-controls">
@@ -1252,9 +1332,10 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
                 }}
               />
               <Button
-                theme="solid"
+                theme="borderless"
                 size="large"
-                className="player-main-toggle"
+                className="play-main"
+                shape="circle"
                 icon={playerState.isPlaying ? <IconPause /> : <IconPlay />}
                 onClick={() => {
                   void toggleOwnedPlay().catch((error) => {
@@ -1273,12 +1354,8 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
               />
             </div>
 
-            <div className="player-right">
-              <div className="player-time-inline">
-                <span className="player-time">{formatDuration(visibleCurrentTime)}</span>
-                <span className="player-time-sep">/</span>
-                <span className="player-time">{formatDuration(playerState.duration)}</span>
-              </div>
+            <div className="player-extra">
+              <span className="time-display">{formatDuration(visibleCurrentTime)} / {formatDuration(playerState.duration)}</span>
 
               <MediaVolumeControl
                 muted={playerState.isMuted}
@@ -1477,7 +1554,7 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
                         >
                           <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0, fontSize: 11 }}>
                             <span style={{ width: 20, display: 'inline-flex', justifyContent: 'center' }}>
-                              {isDir ? <IconFolder /> : getFileNodeIcon(item.ext, item.name, {
+                              {isDir ? <OutlineIcon name="folder" /> : getFileNodeIcon(item.ext, item.name, {
                                 mimeType: item.mimeType,
                                 parentBuiltInType: 'AUDIO',
                                 parentArchiveMode: 1,

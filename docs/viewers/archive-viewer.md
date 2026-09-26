@@ -87,7 +87,7 @@
 - `hooks/useArchiveCardGrid.ts`
 - `utils/archive-sort.ts`
 
-四类卡片网格（视频、ASMR、漫画、图集）的自适应列数和卡片宽度完全由 CSS Grid 计算。`useArchiveCardGrid` 只返回稳定的最小列宽、间距变量和滚动容器 ref，不监听尺寸、不读取布局、不在拖拽中更新 React 状态；因此保活的隐藏归档页也不会因侧栏逐像素变化重新渲染全部卡片。保留 auto-fill 空列及末行对齐，滚动锚点、分页和封面懒加载仍由各 viewer 原有 owner 负责。
+四类卡片网格（视频、ASMR、漫画、图集）的自适应列数和卡片宽度完全由 CSS Grid 计算。`useArchiveCardGrid` 只返回稳定的最小列宽、间距变量和滚动容器 ref，不监听尺寸、不读取布局、不在拖拽中更新 React 状态；因此保活的隐藏归档页也不会因侧栏逐像素变化重新渲染全部卡片。保留 auto-fill 空列及末行对齐，滚动锚点、分页和封面懒加载仍由各 viewer 原有 owner 负责。 ASMR 归档卡片的封面容器保持固定比例并由图片完整填充，图片不会因卡片 flex 布局露出底色空带。
 
 五类归档 viewer 都通过公共 Viewer Session Registry 保存最小阅读现场。卡片数组、分页响应、计数和临时封面/媒体链接始终重新请求；snapshot 只保存稳定卡片锚点、锚点内偏移、整体滚动比例、绝对滚动兜底，以及 Audio Archive 的稳定选择。刷新通过公共 reload generation 精确失效旧 snapshot，不再维护逐 viewer cache key。
 

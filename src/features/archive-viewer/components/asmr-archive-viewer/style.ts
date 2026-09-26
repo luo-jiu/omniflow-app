@@ -64,12 +64,20 @@ export const AsmrArchiveViewerWrapper = styled.div`
   }
 
   .card-cover {
+    width: 100%;
+    flex: 0 0 auto;
     aspect-ratio: 4 / 3;
+    min-height: 0;
+    display: flex;
+    overflow: hidden;
     border-bottom: 1px solid rgba(0, 0, 0, 0.08);
-    background: #e9edf2;
+    background: transparent;
   }
 
   .card-cover img {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
     width: 100%;
     height: 100%;
     display: block;
