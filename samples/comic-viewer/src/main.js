@@ -5,10 +5,40 @@ const picture = element('page'), status = element('status'), position = element(
 let context, entries = [], index = 0, stateRevision = 0, busy = false, stopped = false;
 const controller = new AbortController();
 let retryIndex = 0;
-function theme(value) {
-  document.documentElement.style.setProperty('--surface', value.colors['surface.app']);
-  document.documentElement.style.setProperty('--text', value.colors['text.primary']);
-  document.documentElement.style.colorScheme = value.mode;
+let themeRevision = -1;
+const themeDefaults = new WeakMap();
+const themeProperties = [
+  ['--background', 'surface.app'], ['--surface', 'surface.panel'],
+  ['--foreground', 'text.primary'], ['--secondary', 'text.secondary'],
+  ['--disabled', 'text.disabled'], ['--border', 'border.default'],
+  ['--accent', 'accent.default'], ['--focus', 'focus.border'],
+  ['--error', 'status.danger.text'], ['--button-background', 'fill.default'],
+  ['--button-hover', 'fill.strong'], ['--button-active', 'fill.pressed'],
+  ['--button-disabled', 'fill.subtle'], ['--hover', 'interaction.hover'],
+  ['--active', 'interaction.active'], ['--selection', 'selection.background'],
+  ['--selection-text', 'selection.text'], ['--scrollbar-thumb', 'scrollbar.thumb'],
+  ['--scrollbar-track', 'scrollbar.track'],
+];
+function theme(snapshot) {
+  if (snapshot.revision <= themeRevision) return;
+  document.documentElement.dataset.theme = snapshot.mode;
+  // Only mutate this package's external stylesheet; no host styles or inline CSS.
+  const sheet = [...document.styleSheets].find(item => item.href?.endsWith('/style.css'));
+  const rules = sheet && [...sheet.cssRules].filter(item => [':root', ':root[data-theme="dark"]'].includes(item.selectorText));
+  const rule = rules?.find(item => item.selectorText === (snapshot.mode === 'dark' ? ':root[data-theme="dark"]' : ':root'));
+  if (!rule) return;
+  // Reset both variants so partial snapshots never retain a previous host color.
+  for (const themeRule of rules) {
+    if (!themeDefaults.has(themeRule)) themeDefaults.set(themeRule, new Map(themeProperties.map(([property]) => [property, themeRule.style.getPropertyValue(property)])));
+    for (const [property, fallback] of themeDefaults.get(themeRule)) {
+      if (fallback) themeRule.style.setProperty(property, fallback);
+      else themeRule.style.removeProperty(property);
+    }
+  }
+  for (const [property, key] of themeProperties) {
+    if (snapshot.colors[key]) rule.style.setProperty(property, snapshot.colors[key]);
+  }
+  themeRevision = snapshot.revision;
 }
 function buttons() {
   element('previous').disabled = busy || index <= 0;
@@ -18,6 +48,7 @@ const errors = { LIMIT: '已达到读取或图片大小上限，可在宿主重�
 async function showPage(target) {
   if (busy || stopped || !entries[target]) return;
   retryIndex = target; busy = true; buttons(); element('retry').hidden = true;
+  status.dataset.error = 'false';
   picture.hidden = true; picture.removeAttribute('src');
   const entry = entries[target]; let resource;
   try {
@@ -47,10 +78,10 @@ async function showPage(target) {
     position.textContent = `${index + 1} / ${entries.length} · ${entry.name}`;
     status.textContent = '';
     try { const state = await client.setState({ entryId: entry.id, index }, stateRevision); stateRevision = state.revision; }
-    catch { status.textContent = '页面已显示，但阅读位置未能保存。'; }
+    catch { status.dataset.error = 'true'; status.textContent = '页面已显示，但阅读位置未能保存。'; }
   } catch (error) {
     picture.removeAttribute('src'); picture.hidden = true;
-    if (!stopped) { status.textContent = errors[error.code] ?? '图片读取或解码失败，可重试或切回内置查看器。'; element('retry').hidden = false; }
+    if (!stopped) { status.dataset.error = 'true'; status.textContent = errors[error.code] ?? '图片读取或解码失败，可重试或切回内置查看器。'; element('retry').hidden = false; }
   } finally {
     if (resource) await client.releaseResource(resource.handle).catch(() => undefined);
     busy = false; buttons();
@@ -80,4 +111,4 @@ try {
   index = saved < 0 ? 0 : saved;
   if (!entries.length) status.textContent = '此目录没有支持的直属图片。';
   else await showPage(index);
-} catch (error) { status.textContent = errors[error.code] ?? '无法打开漫画目录，请在宿主重新加载。'; }
+} catch (error) { status.dataset.error = 'true'; status.textContent = errors[error.code] ?? '无法打开漫画目录，请在宿主重新加载。'; }

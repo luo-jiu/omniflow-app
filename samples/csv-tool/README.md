@@ -16,6 +16,8 @@ npm run package
 
 `build.mjs` 只用 Node 标准库，将自己的静态资源和已安装 SDK 复制到 `dist/`。分发包包含 Viewer `index.html` 与 Tool `tool.html` 两个入口。`npm run package` 生成以 `dist/` 内容为根的 `plugin.zip`，交给宿主安装器。
 
+Viewer 的 `src/main.js` / `src/style.css` 展示主题快照消费：初始 context 与 theme 事件更新背景、面板、正文/说明/禁用文字、边框、普通按钮三态与禁用、错误、焦点、文字划选和滚动条。通过 CSSOM 更新本包外链样式表，`data-theme` 决定亮暗回退及原生控件 `color-scheme`；每次先恢复两套原始默认值，缺字段不会沿用旧快照，旧 revision 不能反向覆盖。当前 CSV 行不带表头事实，不将每页首行当表头；CSS 预留真正 `th` 的表面颜色。样板不依赖宿主主题源码或其他样板包，Tool worker 不消费主题。修改样板后需重新构建并更新插件包，不会自动改变已安装版本。
+
 ## 查询契约
 
 Tool 调用输入要求 `resource: { nodeId }`，nodeId 是正安全整数。宿主绑定资料库、当前调用身份、资源版本与句柄，移除 `resource` 后只把业务参数交给插件。插件拿不到原始 nodeId、凭据、签名 URL 或本机路径。

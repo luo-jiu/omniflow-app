@@ -18,6 +18,22 @@ npm run package
 
 SDK 尚未发布到公开 npm 注册表，不要把 `npm install @omniflow/plugin-sdk` 当作可用的发布流程。完整 API、错误和配额见 `SDK.md`，Manifest 契约见 `manifest.schema.json`。
 
+## 主题接入
+
+生成的只读工程已提供可复用示范：`src/main.js` 的 `themeProperties` / `theme` 将 SDK 快照投影到 `src/style.css` 的插件私有变量。宿主不穿透隔离文档，也不会自动给新增控件套主题；按控件用途同时消费以下角色，不要只改页面背景。
+
+| 用途 | 快照颜色角色 |
+| --- | --- |
+| 页面/内容面板、正文/说明 | `surface.app`、`surface.panel`、`text.primary`、`text.secondary` |
+| 边框、键盘焦点、错误说明 | `border.default`、`focus.border`、`status.danger.text` |
+| 普通按钮默认/hover/active | `fill.default`、`fill.strong`、`fill.pressed`，搭配`text.primary` |
+| 禁用按钮 | `fill.subtle`与`text.disabled`；禁用时不绘制hover/active |
+| 文本划选、滚动条 | `selection.background`、`selection.text`、`scrollbar.thumb`、`scrollbar.track` |
+
+初始 `context().theme` 与后续 `theme` 事件走同一个投影函数，只接受递增 revision；该 revision 与插件设置/阅读检查点各自独立。`mode` 应同步 `color-scheme`；快照缺字段时使用本包亮暗默认值，每次先恢复两套默认值再应用给出的字段，避免部分快照留下上次主题颜色。新增主按钮可使用 `accent.default`、`accent.hover`、`accent.active`并搭配`accent.foreground`，不要假设固定白字适配所有强调色。`ThemeSnapshot`结构以SDK类型为准；颜色映射为字符串字典，新字段仍需检查是否存在并提供回退。
+
+通过包内外链 CSS 的 CSSOM 修改自己的规则；不要使用 `element.style`、注入 `<style>`、读取宿主DOM或导入宿主样式/React/Context。表面、按钮、文字和焦点应成套处理，图片像素、用户内容与分类图表则保留各自语义。修改后需要重新构建、提高包版本并更新安装；模板源码改善不代表已安装包已改变。
+
 ## 独立样板
 
 `examples/csv-viewer`、`examples/json-tree-viewer`、`examples/comic-viewer`、`examples/csv-tool`、`examples/batch-rename`、`examples/csv-export` 和 `examples/json-transform` 分别覆盖文件查看、目录漫画、同包 Viewer/Tool、元数据改名提案与 CSV/JSON 文件产物，均只依赖本开发包 SDK。在任一示例目录执行相同的 install/build/package 命令即可得到 ZIP。CSV Viewer 默认 ID 为随包保留 ID，制作外部副本时先修改 Manifest 的 id、viewers[].id 和 activation；Tool 副本还应同步 agentTools[].id 和 tool activation。

@@ -1,1 +1,62 @@
-:root{color-scheme:light dark}*{box-sizing:border-box}body{margin:0;background:var(--surface,#fff);color:var(--text,#222);font:13px/1.5 system-ui}header{display:flex;align-items:center;justify-content:center;gap:12px;padding:8px;position:sticky;top:0;background:var(--surface,#fff)}button{font:inherit;min-height:28px;border:1px solid currentColor;border-radius:4px;padding:2px 10px;background:transparent;color:inherit}button:disabled{opacity:.45}button:focus-visible{outline:2px solid currentColor;outline-offset:2px}#position{max-width:50%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#status{text-align:center;padding:0 12px}main{text-align:center;padding:0 8px 12px}img{max-width:100%;max-height:calc(100vh - 100px);object-fit:contain} [hidden]{display:none!important}
+:root {
+  color-scheme: light;
+  --background: #fff;
+  --surface: #f7f8fa;
+  --foreground: #222;
+  --secondary: #59616d;
+  --disabled: #89909b;
+  --border: #d3d8df;
+  --accent: #345847;
+  --focus: #5080ca;
+  --error: #b42318;
+  --button-background: #edf0f3;
+  --button-hover: #e1e6ec;
+  --button-active: #d4dce6;
+  --button-disabled: #f2f4f6;
+  --hover: #edf0f3;
+  --active: #e1e6ec;
+  --selection: #d7e6fb;
+  --selection-text: #17243a;
+  --scrollbar-thumb: #a3aab5;
+  --scrollbar-track: transparent;
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --background: #191b21;
+  --surface: #232630;
+  --foreground: #e6e9f0;
+  --secondary: #a5afc1;
+  --disabled: #7f8898;
+  --border: #424b5b;
+  --accent: #9ac5ac;
+  --focus: #9aafff;
+  --error: #ffabab;
+  --button-background: #333b49;
+  --button-hover: #414b5c;
+  --button-active: #505d72;
+  --button-disabled: #292e39;
+  --hover: #333b49;
+  --active: #414b5c;
+  --selection: #354d76;
+  --selection-text: #f1f5ff;
+  --scrollbar-thumb: #667387;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--background); color: var(--foreground); font: 13px/1.5 system-ui; }
+header { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 8px; position: sticky; top: 0; background: var(--surface); }
+button { font: inherit; min-height: 28px; border: 1px solid; border-radius: 4px; padding: 2px 10px; cursor: pointer; }
+button { color: var(--foreground); background: var(--button-background); border-color: var(--border); }
+button:hover:enabled { background: var(--button-hover); }
+button:active:enabled { background: var(--button-active); }
+button:disabled { color: var(--disabled); background: var(--button-disabled); border-color: var(--border); cursor: default; }
+button:focus-visible:enabled, input:focus-visible:enabled { outline: 2px solid var(--focus); outline-offset: 2px; }
+input { accent-color: var(--accent); }
+::selection { background: var(--selection); color: var(--selection-text); }
+#position { max-width: 50%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#status { text-align: center; padding: 0 12px; color: var(--secondary); }
+#status[data-error=true] { color: var(--error); }
+main { text-align: center; padding: 0 8px 12px; }
+/* Theme applies to the surrounding UI, never to decoded comic pixels. */
+img { max-width: 100%; max-height: calc(100vh - 100px); object-fit: contain; }
+[hidden] { display: none !important; }
+html { scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track); }

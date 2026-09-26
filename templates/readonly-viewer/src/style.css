@@ -1,1 +1,59 @@
-:root{font:13px/1.6 system-ui;--background:#fff;--foreground:#222}body{margin:0;padding:16px;background:var(--background);color:var(--foreground)}header{display:flex;gap:12px;align-items:center}h1{font-size:18px;flex:1;overflow-wrap:anywhere}button{font:inherit;min-height:28px;padding:3px 12px;color:inherit;background:transparent;border:1px solid #8888;border-radius:6px}button:focus-visible{outline:2px solid #719bd8;outline-offset:2px}pre{font:13px/1.7 ui-monospace,monospace;white-space:pre-wrap;overflow-wrap:anywhere;height:65vh;overflow:auto;border:1px solid #8888;padding:12px;border-radius:6px}
+:root {
+  font: 13px/1.6 system-ui;
+  color-scheme: light;
+  --background: #fff;
+  --surface: #f7f8fa;
+  --foreground: #222;
+  --secondary: #59616d;
+  --disabled: #89909b;
+  --border: #d3d8df;
+  --focus: #5080ca;
+  --error: #b42318;
+  --button-background: #edf0f3;
+  --button-hover: #e1e6ec;
+  --button-active: #d4dce6;
+  --button-disabled: #f2f4f6;
+  --selection: #d7e6fb;
+  --selection-text: #17243a;
+  --scrollbar-thumb: #a3aab5;
+  --scrollbar-track: transparent;
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --background: #191b21;
+  --surface: #232630;
+  --foreground: #e6e9f0;
+  --secondary: #a5afc1;
+  --disabled: #7f8898;
+  --border: #424b5b;
+  --focus: #9aafff;
+  --error: #ffabab;
+  --button-background: #333b49;
+  --button-hover: #414b5c;
+  --button-active: #505d72;
+  --button-disabled: #292e39;
+  --selection: #354d76;
+  --selection-text: #f1f5ff;
+  --scrollbar-thumb: #667387;
+}
+body { margin: 0; padding: 16px; background: var(--background); color: var(--foreground); }
+header { display: flex; gap: 12px; align-items: center; }
+h1 { font-size: 18px; flex: 1; overflow-wrap: anywhere; }
+button {
+  font: inherit; min-height: 28px; padding: 3px 12px;
+  color: var(--foreground); background: var(--button-background);
+  border: 1px solid var(--border); border-radius: 6px; cursor: pointer;
+}
+button:hover:enabled { background: var(--button-hover); }
+button:active:enabled { background: var(--button-active); }
+button:disabled { color: var(--disabled); background: var(--button-disabled); cursor: default; }
+button:focus-visible:enabled { outline: 2px solid var(--focus); outline-offset: 2px; }
+#status { color: var(--secondary); }
+#status[data-error=true] { color: var(--error); }
+pre {
+  font: 13px/1.7 ui-monospace,monospace; white-space: pre-wrap; overflow-wrap: anywhere;
+  height: 65vh; overflow: auto; border: 1px solid var(--border); padding: 12px; border-radius: 6px;
+  background: var(--surface);
+}
+::selection { background: var(--selection); color: var(--selection-text); }
+html, pre { scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track); }

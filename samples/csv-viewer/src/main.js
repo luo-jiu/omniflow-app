@@ -32,11 +32,39 @@ async function saveState() {
 let scrollTimer;
 scroller.addEventListener('scroll', () => { clearTimeout(scrollTimer); if (!restoring) scrollTimer = setTimeout(() => void saveState(), 200); });
 for (const [id, delta] of [['previous', -1], ['next', 1]]) document.getElementById(id).addEventListener('click', () => { restoring = false; page += delta; scroller.scrollTop = 0; render(); void saveState(); });
+const themeDefaults = new WeakMap();
+const themeProperties = [
+  ['--background', 'surface.app'], ['--surface', 'surface.panel'],
+  ['--foreground', 'text.primary'], ['--secondary', 'text.secondary'],
+  ['--disabled', 'text.disabled'], ['--border', 'border.default'],
+  ['--accent', 'accent.default'], ['--focus', 'focus.border'],
+  ['--error', 'status.danger.text'], ['--button-background', 'fill.default'],
+  ['--button-hover', 'fill.strong'], ['--button-active', 'fill.pressed'],
+  ['--button-disabled', 'fill.subtle'], ['--hover', 'interaction.hover'],
+  ['--active', 'interaction.active'], ['--selection', 'selection.background'],
+  ['--selection-text', 'selection.text'], ['--scrollbar-thumb', 'scrollbar.thumb'],
+  ['--scrollbar-track', 'scrollbar.track'],
+];
 function theme(snapshot) {
   if (snapshot.revision <= themeRevision) return;
+  document.documentElement.dataset.theme = snapshot.mode;
+  // Only mutate this package's external stylesheet; no host styles or inline CSS.
+  const sheet = [...document.styleSheets].find(item => item.href?.endsWith('/style.css'));
+  const rules = sheet && [...sheet.cssRules].filter(item => [':root', ':root[data-theme="dark"]'].includes(item.selectorText));
+  const rule = rules?.find(item => item.selectorText === (snapshot.mode === 'dark' ? ':root[data-theme="dark"]' : ':root'));
+  if (!rule) return;
+  // Reset both variants so partial snapshots never retain a previous host color.
+  for (const themeRule of rules) {
+    if (!themeDefaults.has(themeRule)) themeDefaults.set(themeRule, new Map(themeProperties.map(([property]) => [property, themeRule.style.getPropertyValue(property)])));
+    for (const [property, fallback] of themeDefaults.get(themeRule)) {
+      if (fallback) themeRule.style.setProperty(property, fallback);
+      else themeRule.style.removeProperty(property);
+    }
+  }
+  for (const [property, key] of themeProperties) {
+    if (snapshot.colors[key]) rule.style.setProperty(property, snapshot.colors[key]);
+  }
   themeRevision = snapshot.revision;
-  document.documentElement.style.setProperty('--background', snapshot.colors['surface.app'] ?? '#fff');
-  document.documentElement.style.setProperty('--foreground', snapshot.colors['text.primary'] ?? '#222');
 }
 async function refresh() {
   restoring = true; clearTimeout(scrollTimer);

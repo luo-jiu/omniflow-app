@@ -3,7 +3,40 @@ import { JSON_LIMITS, parseJsonTree, visibleNodes, nodeValue, restoreTreeState }
 const status=document.getElementById('status'),tree=document.getElementById('tree'),scroller=document.getElementById('scroller'),detail=document.getElementById('detail');
 let client,model,expanded=new Set(),page=0,active=true,controller,loaded=false,stateRevision=0,settingRevision=0,themeRevision=-1,saving=false,dirty=false,timer;
 const typeLabels={object:'对象',array:'数组',string:'字符串',number:'数字',boolean:'布尔',null:'空值'};
-function applyTheme(theme){if(theme.revision<=themeRevision)return;themeRevision=theme.revision;document.documentElement.style.setProperty('--background',theme.colors['surface.app']??'#ffffff');document.documentElement.style.setProperty('--foreground',theme.colors['text.primary']??'#222222');document.documentElement.style.setProperty('--error',theme.mode==='dark'?'#ffabab':'#b42318');}
+const themeDefaults = new WeakMap();
+const themeProperties = [
+  ['--background', 'surface.app'], ['--surface', 'surface.panel'],
+  ['--foreground', 'text.primary'], ['--secondary', 'text.secondary'],
+  ['--disabled', 'text.disabled'], ['--border', 'border.default'],
+  ['--accent', 'accent.default'], ['--focus', 'focus.border'],
+  ['--error', 'status.danger.text'], ['--button-background', 'fill.default'],
+  ['--button-hover', 'fill.strong'], ['--button-active', 'fill.pressed'],
+  ['--button-disabled', 'fill.subtle'], ['--hover', 'interaction.hover'],
+  ['--active', 'interaction.active'], ['--selection', 'selection.background'],
+  ['--selection-text', 'selection.text'], ['--scrollbar-thumb', 'scrollbar.thumb'],
+  ['--scrollbar-track', 'scrollbar.track'],
+];
+function applyTheme(snapshot) {
+  if (snapshot.revision <= themeRevision) return;
+  document.documentElement.dataset.theme = snapshot.mode;
+  // Only mutate this package's external stylesheet; no host styles or inline CSS.
+  const sheet = [...document.styleSheets].find(item => item.href?.endsWith('/style.css'));
+  const rules = sheet && [...sheet.cssRules].filter(item => [':root', ':root[data-theme="dark"]'].includes(item.selectorText));
+  const rule = rules?.find(item => item.selectorText === (snapshot.mode === 'dark' ? ':root[data-theme="dark"]' : ':root'));
+  if (!rule) return;
+  // Reset both variants so partial snapshots never retain a previous host color.
+  for (const themeRule of rules) {
+    if (!themeDefaults.has(themeRule)) themeDefaults.set(themeRule, new Map(themeProperties.map(([property]) => [property, themeRule.style.getPropertyValue(property)])));
+    for (const [property, fallback] of themeDefaults.get(themeRule)) {
+      if (fallback) themeRule.style.setProperty(property, fallback);
+      else themeRule.style.removeProperty(property);
+    }
+  }
+  for (const [property, key] of themeProperties) {
+    if (snapshot.colors[key]) rule.style.setProperty(property, snapshot.colors[key]);
+  }
+  themeRevision = snapshot.revision;
+}
 function showError(error){status.dataset.error='true';status.textContent=({FORBIDDEN:'当前文件读取未获授权或已撤权。',CONTENT_CHANGED:'文件已变化，请重新打开。',LIMIT:'读取或保存超过限制。',TIMEOUT:'读取超时，请重试。',UNAVAILABLE:'查看器或资源不可用，请重新打开。'})[error.code]??error.message;}
 function showNode(node){const path=[];let cursor=node;while(cursor.parentId){path.unshift(String(cursor.key).replaceAll('~','~0').replaceAll('/','~1'));cursor=model.all[cursor.parentId-1];}detail.textContent='路径：'+(path.length?'/'+path.join('/'):'(根)')+'\n层级：'+node.depth+'\n'+(node.key===null?'根节点':typeof node.key==='number'?`索引 ${node.key}`:`键 ${JSON.stringify(node.key)}`)+'\n类型：'+typeLabels[node.type]+'\n'+nodeValue(node);}
 function render(focusId){

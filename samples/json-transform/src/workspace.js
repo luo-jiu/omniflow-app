@@ -17,6 +17,16 @@ let loading = false;
 let preparing = false;
 let disposed = false;
 let themeRevision = -1;
+const themeDefaults = new WeakMap();
+const themeProperties = [
+  ['--background', 'surface.app'], ['--surface', 'surface.panel'],
+  ['--foreground', 'text.primary'], ['--secondary', 'text.secondary'],
+  ['--border', 'border.default'], ['--accent', 'accent.default'],
+  ['--button-background', 'accent.default'], ['--button-foreground', 'accent.foreground'],
+  ['--button-hover', 'accent.hover'], ['--button-active', 'accent.active'],
+  ['--focus', 'focus.border'], ['--error', 'status.danger.text'],
+  ['--scrollbar-thumb', 'scrollbar.thumb'], ['--scrollbar-hover', 'scrollbar.hover'], ['--scrollbar-track', 'scrollbar.track'],
+];
 let loadController;
 let generation = 0;
 let previewValid = false;
@@ -48,9 +58,20 @@ function applyTheme(snapshot) {
   // Change the package's external stylesheet through CSSOM; never add inline styles.
   const selector = snapshot.mode === 'dark' ? ':root[data-theme="dark"]' : ':root';
   const sheet = [...document.styleSheets].find(item => item.href?.endsWith('/workspace.css'));
-  const rule = sheet && [...sheet.cssRules].find(item => item.selectorText === selector);
+  const rules = sheet && [...sheet.cssRules].filter(item => [':root', ':root[data-theme="dark"]'].includes(item.selectorText));
+  const rule = rules?.find(item => item.selectorText === selector);
   if (!rule) return;
-  for (const [property, key] of [['--background', 'surface.app'], ['--foreground', 'text.primary'], ['--secondary', 'text.secondary']]) {
+  // Reset both variants so an omitted token always uses the package fallback,
+  // including when a later snapshot follows one with a richer color contract.
+  for (const themeRule of rules) {
+    if (!themeDefaults.has(themeRule)) themeDefaults.set(themeRule, new Map(themeProperties.map(([property]) => [property, themeRule.style.getPropertyValue(property)])));
+    for (const [property, fallback] of themeDefaults.get(themeRule)) {
+      if (fallback) themeRule.style.setProperty(property, fallback);
+      else themeRule.style.removeProperty(property);
+    }
+  }
+  for (const [property, key] of themeProperties) {
+    if (property === '--button-background' && !snapshot.colors['accent.foreground']) continue;
     if (snapshot.colors[key]) rule.style.setProperty(property, snapshot.colors[key]);
   }
 }

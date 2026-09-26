@@ -7,6 +7,14 @@
   --border: #d8dee8;
   --accent: #365acf;
   --error: #b82d39;
+  --button-background: var(--surface);
+  --button-foreground: var(--accent);
+  --button-hover: var(--background);
+  --button-active: var(--background);
+  --focus: var(--accent);
+  --scrollbar-thumb: var(--border);
+  --scrollbar-hover: var(--secondary);
+  --scrollbar-track: transparent;
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
@@ -33,7 +41,7 @@ section { min-width: 0; }
 fieldset { padding: 0; margin: 0; border: 0; min-width: 0; }
 .option { display: flex; gap: 8px; align-items: center; min-height: 30px; overflow-wrap: anywhere; cursor: pointer; }
 input { margin: 0; accent-color: var(--accent); flex: 0 0 auto; }
-input:focus-visible, button:focus-visible, pre:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+input:focus-visible, button:focus-visible, pre:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
 .fields { max-height: 320px; margin-top: 12px; overflow: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
 .fields:empty { display: none; }
 .field-label { min-width: 0; overflow-wrap: anywhere; }
@@ -45,13 +53,17 @@ pre { min-height: 260px; max-height: 470px; margin: 0; padding: 12px; background
 footer { display: flex; align-items: center; gap: 16px; margin-top: 20px; padding-top: 14px; border-top: 1px solid var(--border); }
 #status { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 #status[data-error="true"] { color: var(--error); }
-button { min-height: 32px; padding: 4px 14px; border-radius: 10px; border: 1px solid var(--accent); background: var(--surface); color: var(--accent); font: inherit; font-weight: 600; white-space: nowrap; cursor: pointer; }
-button:hover:enabled { background: var(--background); }
-button:disabled { color: var(--secondary); border-color: var(--border); cursor: default; opacity: 0.75; }
+button { min-height: 32px; padding: 4px 14px; border-radius: 10px; border: 1px solid var(--accent); background: var(--button-background); color: var(--button-foreground); font: inherit; font-weight: 600; white-space: nowrap; cursor: pointer; }
+button:hover:enabled { background: var(--button-hover); }
+button:active:enabled { background: var(--button-active); }
+button:disabled { background: var(--surface); color: var(--secondary); border-color: var(--border); cursor: default; opacity: 0.75; }
 .save-hint { text-align: right; }
-.fields::-webkit-scrollbar, pre::-webkit-scrollbar { width: 8px; height: 8px; }
-.fields::-webkit-scrollbar-thumb, pre::-webkit-scrollbar-thumb { background: var(--border); border-radius: 8px; }
-.fields::-webkit-scrollbar-corner, pre::-webkit-scrollbar-corner { background: transparent; }
+html, .fields, pre { scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track); scrollbar-width: thin; }
+html::-webkit-scrollbar, .fields::-webkit-scrollbar, pre::-webkit-scrollbar { width: 8px; height: 8px; }
+html::-webkit-scrollbar-track, .fields::-webkit-scrollbar-track, pre::-webkit-scrollbar-track { background: var(--scrollbar-track); }
+html::-webkit-scrollbar-thumb, .fields::-webkit-scrollbar-thumb, pre::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 8px; }
+html::-webkit-scrollbar-thumb:hover, .fields::-webkit-scrollbar-thumb:hover, pre::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-hover); }
+html::-webkit-scrollbar-corner, .fields::-webkit-scrollbar-corner, pre::-webkit-scrollbar-corner { background: var(--scrollbar-track); }
 @media (max-width: 580px) {
   main { padding: 14px; }
   .workspace-grid { grid-template-columns: minmax(0, 1fr); gap: 20px; }

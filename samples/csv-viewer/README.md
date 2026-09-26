@@ -8,4 +8,6 @@ C2 第一方开发样板，依赖 `@omniflow/plugin-sdk@0.1.0`，不导入宿主
 
 主题从 SDK 快照投影为样板自己的 CSS 变量。紧凑显示设置采用插件 namespace 和 revision；活动状态停止当前读取，恢复后重新检查授权。页码/滚动检查点通过 SDK state API 保存；C2 已接入 B2 打开方式、真实服务端授权与 Warm/Cold 恢复，详见 `docs/plugin-system-c2-csv-viewer.md`。
 
+主题接入示例在 `src/main.js` 的 `themeProperties` / `theme` 与 `src/style.css`：同时消费初始 context 和 theme 事件，将应用/面板背景、正文/说明/禁用文字、边框、普通按钮三态与禁用填充、错误、焦点、文字划选及滚动条映射到包内变量，并按 mode 设置原生控件的 `color-scheme`。只通过 CSSOM 修改本包外链样式表；不导入宿主样式、React 或主题 owner，也不注入内联样式。每次应用前恢复亮暗两套 CSS 默认值，旧宿主缺字段或完整快照切回部分字段时不会残留上次颜色；旧 revision 不覆盖新快照。当前 CSV 全部是数据单元格，不将每页首行冒充表头；CSS 给未来真正的 `th` 保留独立表面颜色。包之间保留独立源码与构建，无跨样板运行时依赖。更改源码后需重新构建并更新包，已安装版本不会自动变化。
+
 D1 可手动安装构建产物 ZIP，并提供更新/回滚；外部副本需修改插件 ID、viewer ID 和 activation，不能覆盖保留的 `example.csv`。本地包发布者未经验证，不代表已签名或可信来源。格式与流程见 `docs/plugin-system-d1-management.md`。当前 Manifest 只声明 macOS。包加载时使用稳定的开发目录，构建完成后再重载；不要让其他进程在加载期间改写目录。
