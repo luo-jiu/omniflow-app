@@ -11,6 +11,7 @@ import { locateNodeInDirectoryTree } from '@/features/file-explorer/services/tre
 import { useNodePropertiesOverlay } from '@/features/file-explorer/hooks/useNodePropertiesOverlay';
 import ContextMenu, { ContextMenuItem } from '@/components/ui/context-menu';
 import { openCompactConfirm } from '@/components/ui/compact-confirm';
+import FloatingViewerDock from '@/components/ui/floating-viewer-dock';
 import type { FileViewerReturnTarget } from '@/contexts/file-viewer.context';
 import { buildFileViewerReturnTarget } from '@/contexts/file-viewer-return-target';
 import { useFileViewer } from '@/hooks/useFileViewer';
@@ -649,12 +650,7 @@ const GalleryArchiveViewer: React.FC<GalleryArchiveViewerProps> = ({
             </div>
           )}
         </section>
-        <footer className="archive-footer">
-          <div className="footer-title-group">
-            <span className="badge">GALLERY ARCHIVE</span>
-            <span className="title" title={title}>{title}</span>
-          </div>
-        </footer>
+        <FloatingViewerDock label="图集归档" title={title} icon="folder" />
       </GalleryArchiveViewerWrapper>
       <Popover
         trigger="custom"

@@ -1,39 +1,41 @@
 import styled from 'styled-components';
 import { workspaceScrollbarStyles } from '@/components/ui/workspace-scrollbar';
+import { focusVisibleStyles, textToneStyles } from '@/components/ui/theme-foundation-styles';
+import { archiveViewerThemeStyles } from '../archive-card-theme';
 
 export const GalleryArchiveViewerWrapper = styled.div`
-  --archive-card-width: 220px;
+  --archive-card-min-width: 220px;
   --archive-card-gap: 18px;
-  --archive-column-count: 1;
 
+  position: relative;
   width: 100%;
   height: 100%;
+  min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  color: var(--semi-color-text-0);
+  ${archiveViewerThemeStyles}
 
   .gallery-archive-surface {
     flex: 1;
     min-height: 0;
     overflow: auto;
     scrollbar-gutter: stable;
-    padding: 18px;
-    background: var(--app-bg);
+    padding: 18px 18px 64px;
     ${workspaceScrollbarStyles}
   }
 
   .gallery-archive-grid {
     display: grid;
     width: 100%;
-    grid-template-columns: repeat(var(--archive-column-count), minmax(0, var(--archive-card-width)));
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--archive-card-min-width)), 1fr));
     justify-content: start;
     align-items: start;
     gap: var(--archive-card-gap);
   }
 
   .gallery-album-card {
-    width: var(--archive-card-width);
+    width: 100%;
     min-width: 0;
     position: relative;
     display: flex;
@@ -48,6 +50,7 @@ export const GalleryArchiveViewerWrapper = styled.div`
     contain: layout paint style;
     content-visibility: auto;
     contain-intrinsic-size: 0 220px;
+    ${focusVisibleStyles}
   }
 
   .gallery-album-stack {
@@ -147,15 +150,21 @@ export const GalleryArchiveViewerWrapper = styled.div`
     justify-content: space-between;
     gap: 8px;
     padding: 0 2px;
-    color: var(--semi-color-text-2);
+    ${textToneStyles('secondary')}
     font-size: 11px;
     line-height: 16px;
   }
 
-  .gallery-album-card:hover .gallery-album-cover {
+  .gallery-album-card:not(:disabled):not([aria-disabled='true']):hover .gallery-album-cover {
     box-shadow:
       0 18px 32px rgba(0, 0, 0, 0.3),
-      0 0 0 1px color-mix(in srgb, var(--semi-color-tertiary) 58%, transparent);
+      0 0 0 1px var(--app-focus-border);
+  }
+
+  .gallery-album-card:not(:disabled):not([aria-disabled='true']):active .gallery-album-cover {
+    box-shadow:
+      0 18px 32px rgba(0, 0, 0, 0.3),
+      0 0 0 1px var(--app-accent-active);
   }
 
   .gallery-album-placeholder {
@@ -176,53 +185,7 @@ export const GalleryArchiveViewerWrapper = styled.div`
     display: flex;
     align-items: center;
     justify-content: center;
-    color: var(--app-text-secondary);
     font-size: 12px;
     text-align: center;
-  }
-
-  .state-wrap.state-error {
-    color: var(--semi-color-danger);
-  }
-
-  .archive-footer {
-    height: 28px;
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    padding: 0 8px;
-    border-top: 1px solid var(--semi-color-border);
-    background: color-mix(in srgb, var(--semi-color-bg-0) 95%, transparent);
-  }
-
-  .footer-title-group {
-    min-width: 0;
-    width: 100%;
-    display: flex;
-    align-items: center;
-    gap: 5px;
-  }
-
-  .badge {
-    flex-shrink: 0;
-    font-size: 10px;
-    line-height: 1;
-    font-weight: 700;
-    letter-spacing: 0.05em;
-    color: color-mix(in srgb, var(--semi-color-tertiary) 76%, var(--semi-color-primary) 24%);
-    background: color-mix(in srgb, var(--semi-color-tertiary-light-default) 82%, transparent);
-    border: 1px solid color-mix(in srgb, var(--semi-color-tertiary) 34%, transparent);
-    border-radius: 999px;
-    padding: 3px 6px;
-  }
-
-  .title {
-    min-width: 0;
-    margin: 0;
-    font-size: 11px;
-    font-weight: 600;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
   }
 `;

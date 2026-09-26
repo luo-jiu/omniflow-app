@@ -1,49 +1,27 @@
 import styled from 'styled-components';
 import { workspaceScrollbarStyles } from '@/components/ui/workspace-scrollbar';
+import { archiveCardSurfaceStyles, archiveViewerThemeStyles } from '../archive-card-theme';
 
 export const ComicArchiveViewerWrapper = styled.div`
-  --archive-card-width: 275px;
+  --archive-card-min-width: 275px;
   --archive-card-gap: 15px;
-  --archive-column-count: 1;
 
+  position: relative;
   width: 100%;
   height: 100%;
+  min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 0;
-  color: var(--semi-color-text-0);
-
-  .badge {
-    flex-shrink: 0;
-    font-size: 10px;
-    line-height: 1;
-    font-weight: 700;
-    letter-spacing: 0.05em;
-    color: #116d48;
-    background: #dbfce8;
-    border: 1px solid #a8efc8;
-    border-radius: 999px;
-    padding: 3px 6px;
-  }
-
-  .title {
-    min-width: 0;
-    margin: 0;
-    font-size: 11px;
-    font-weight: 600;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
+  ${archiveViewerThemeStyles}
 
   .table-surface {
     flex: 1;
     min-height: 0;
     overflow: auto;
     scrollbar-gutter: stable;
-    padding: 13px 13px 15px;
-    background: var(--app-bg);
+    padding: 13px 64px 15px 13px;
     ${workspaceScrollbarStyles}
   }
 
@@ -52,32 +30,28 @@ export const ComicArchiveViewerWrapper = styled.div`
     display: flex;
     align-items: center;
     justify-content: center;
-    color: var(--app-text-secondary);
     font-size: 11px;
     text-align: center;
-  }
-
-  .state-wrap.state-error {
-    color: var(--semi-color-danger);
   }
 
   .cards-grid {
     display: grid;
     width: 100%;
-    grid-template-columns: repeat(var(--archive-column-count), minmax(0, var(--archive-card-width)));
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, var(--archive-card-min-width)), 1fr));
     justify-content: start;
     gap: var(--archive-card-gap);
     align-items: start;
   }
 
   .archive-card {
-    width: var(--archive-card-width);
+    width: 100%;
+    min-width: 0;
     position: relative;
     display: flex;
     flex-direction: column;
     border-radius: 8px;
-    border: 1px solid rgba(255, 255, 255, 0.22);
-    background: #fefefe;
+    border: 1px solid;
+    ${archiveCardSurfaceStyles}
     box-shadow:
       0 11px 16px rgba(2, 20, 15, 0.28),
       0 2px 0 rgba(255, 255, 255, 0.55) inset;
@@ -86,10 +60,6 @@ export const ComicArchiveViewerWrapper = styled.div`
     contain: layout paint style;
     content-visibility: auto;
     contain-intrinsic-size: 0 330px;
-  }
-
-  .archive-card:hover {
-    border-color: color-mix(in srgb, var(--semi-color-success) 40%, rgba(255, 255, 255, 0.22));
   }
 
   .card-bg-image,
@@ -193,23 +163,5 @@ export const ComicArchiveViewerWrapper = styled.div`
     border-color: color-mix(in srgb, var(--semi-color-success) 42%, rgba(30, 41, 59, 0.22));
     color: #116d48;
     background: color-mix(in srgb, #dbfce8 88%, rgba(255, 255, 255, 0.9));
-  }
-
-  .archive-footer {
-    height: 28px;
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    padding: 0 8px;
-    border-top: 1px solid var(--semi-color-border);
-    background: color-mix(in srgb, var(--semi-color-bg-0) 95%, transparent);
-  }
-
-  .footer-title-group {
-    min-width: 0;
-    width: 100%;
-    display: flex;
-    align-items: center;
-    gap: 5px;
   }
 `;

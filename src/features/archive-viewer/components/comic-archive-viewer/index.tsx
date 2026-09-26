@@ -13,6 +13,7 @@ import { ComicArchiveViewerWrapper } from './style';
 import { useArchiveCardGrid } from '@/features/archive-viewer/hooks/useArchiveCardGrid';
 import ContextMenu, { ContextMenuItem } from '@/components/ui/context-menu';
 import { openCompactConfirm } from '@/components/ui/compact-confirm';
+import FloatingViewerDock from '@/components/ui/floating-viewer-dock';
 import { locateNodeInDirectoryTree } from '@/features/file-explorer/services/tree-locate';
 import { useNodePropertiesOverlay } from '@/features/file-explorer/hooks/useNodePropertiesOverlay';
 import type { FileViewerReturnTarget } from '@/contexts/file-viewer.context';
@@ -901,12 +902,7 @@ const ComicArchiveViewer: React.FC<ComicArchiveViewerProps> = ({
           )}
         </section>
 
-        <footer className="archive-footer">
-          <div className="footer-title-group">
-            <span className="badge">COMIC ARCHIVE</span>
-            <span className="title" title={title}>{title}</span>
-          </div>
-        </footer>
+        <FloatingViewerDock label="漫画归档" title={title} icon="book" placement="right" />
       </ComicArchiveViewerWrapper>
       <Popover
         trigger="custom"

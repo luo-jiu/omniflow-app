@@ -17,6 +17,7 @@ import { useFileViewer } from '@/hooks/useFileViewer';
 import { useArchiveCardGrid } from '@/features/archive-viewer/hooks/useArchiveCardGrid';
 import ContextMenu, { type ContextMenuItem } from '@/components/ui/context-menu';
 import { openCompactConfirm } from '@/components/ui/compact-confirm';
+import FloatingViewerDock from '@/components/ui/floating-viewer-dock';
 import { locateNodeInDirectoryTree } from '@/features/file-explorer/services/tree-locate';
 import { useNodePropertiesOverlay } from '@/features/file-explorer/hooks/useNodePropertiesOverlay';
 import type {
@@ -990,15 +991,7 @@ const VideoArchiveViewer: React.FC<VideoArchiveViewerProps> = ({
         )}
       </div>
 
-      <footer className="archive-footer">
-        <div className="footer-title-group">
-          <span className="badge">VIDEO ARCHIVE</span>
-          <span className="title" title={title}>{title}</span>
-        </div>
-        <div className="archive-count">
-          共 {total} 项
-        </div>
-      </footer>
+      <FloatingViewerDock label="视频归档" title={title} icon="archive" detail={<>共 {total} 项</>} />
 
       <Popover
         trigger="custom"

@@ -20,6 +20,7 @@ import { fetchTags, type TagItem } from '@/features/tag-management/services/tag.
 import { useArchiveCardGrid } from '@/features/archive-viewer/hooks/useArchiveCardGrid';
 import ContextMenu, { ContextMenuItem } from '@/components/ui/context-menu';
 import { openCompactConfirm } from '@/components/ui/compact-confirm';
+import FloatingViewerDock from '@/components/ui/floating-viewer-dock';
 import { locateNodeInDirectoryTree } from '@/features/file-explorer/services/tree-locate';
 import { useNodePropertiesOverlay } from '@/features/file-explorer/hooks/useNodePropertiesOverlay';
 import {
@@ -1177,12 +1178,7 @@ const AsmrArchiveViewer: React.FC<AsmrArchiveViewerProps> = ({
         />
       </Modal>
 
-      <footer className="archive-footer">
-        <div className="footer-title-group">
-          <span className="badge">ASMR ARCHIVE</span>
-          <span className="title" title={title}>{title}</span>
-        </div>
-      </footer>
+      <FloatingViewerDock label="ASMR 归档" title={title} icon="archive" />
     </AsmrArchiveViewerWrapper>
   );
 };
