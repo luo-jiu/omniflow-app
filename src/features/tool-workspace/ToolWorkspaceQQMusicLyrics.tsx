@@ -1,12 +1,10 @@
 import React from 'react';
 import {
   IconAlertCircle,
-  IconFile,
-  IconList,
+  IconChevronRightStroked,
   IconMusic,
   IconPause,
   IconPlay,
-  IconRefresh,
   IconSaveStroked,
   IconSearch,
   IconTickCircle,
@@ -36,6 +34,7 @@ import type {
   QQMusicLyricsStatus,
 } from '@/shared/qqmusic-lyrics/qqmusic-lyrics.types';
 import { workspaceScrollbarStyles } from '@/components/ui/workspace-scrollbar';
+import OutlineIcon from '@/components/ui/outline-icon';
 
 import {
   fetchQQMusicLyricsStatus,
@@ -922,6 +921,10 @@ const QQMusicLyricsSaveDialogContent = styled.div`
     white-space: nowrap;
     text-align: left;
     cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
     transition:
       border-color 0.14s ease,
       background-color 0.14s ease;
@@ -936,6 +939,12 @@ const QQMusicLyricsSaveDialogContent = styled.div`
   .qq-save-directory:focus-visible {
     outline: 1px solid var(--semi-color-primary);
     outline-offset: 1px;
+  }
+
+  .qq-save-directory .app-outline-icon {
+    width: 14px;
+    height: 14px;
+    color: var(--app-text-muted);
   }
 
   .semi-input-wrapper,
@@ -997,12 +1006,12 @@ function contextualSaveDirectory(
   rootNodeId: number | null,
 ): QQMusicLyricsSaveDirectory | null {
   if (selectedTreeNode?.type === 'dir') {
-    return { parentId: selectedTreeNode.id, pathLabel: `当前目录 / ${selectedTreeNode.name}` };
+    return { parentId: selectedTreeNode.id, pathLabel: `/${selectedTreeNode.name}` };
   }
   if (selectedTreeNode?.type === 'file') {
     return {
       parentId: selectedTreeNode.parentId,
-      pathLabel: `当前文件所在目录 / ${selectedTreeNode.parentId}`,
+      pathLabel: `/${selectedTreeNode.parentId}`,
     };
   }
   if (rootNodeId && rootNodeId > 0) {
@@ -2003,7 +2012,7 @@ const ToolWorkspaceQQMusicLyrics: React.FC<ToolWorkspaceQQMusicLyricsProps> = ({
           <Button
             aria-label="刷新本地状态"
             className="qq-icon-button"
-            icon={<IconRefresh />}
+            icon={<OutlineIcon name="refresh" />}
             theme="borderless"
             title="刷新本地状态"
             onClick={loadStatus}
@@ -2073,7 +2082,7 @@ const ToolWorkspaceQQMusicLyrics: React.FC<ToolWorkspaceQQMusicLyricsProps> = ({
                 aria-label={searchScope === 'cached' ? '刷新本地已有歌词' : '搜索本地曲库'}
                 className="qq-icon-button"
                 htmlType="submit"
-                icon={hasSearched ? <IconRefresh /> : <IconSearch />}
+                icon={hasSearched ? <OutlineIcon name="refresh" /> : <OutlineIcon name="search" />}
                 loading={searching}
                 theme="borderless"
                 title={searchScope === 'cached' ? '刷新本地已有歌词' : '搜索本地曲库'}
@@ -2151,7 +2160,7 @@ const ToolWorkspaceQQMusicLyrics: React.FC<ToolWorkspaceQQMusicLyricsProps> = ({
                       <Button
                         aria-label={previewMode === 'timeline' ? '查看 XML 文件' : '返回歌词时间轴'}
                         className="qq-icon-button"
-                        icon={previewMode === 'timeline' ? <IconFile /> : <IconList />}
+                        icon={previewMode === 'timeline' ? <OutlineIcon name="file" /> : <OutlineIcon name="scroll-pages" />}
                         theme="borderless"
                         title={previewMode === 'timeline' ? '查看 XML 文件' : '返回歌词时间轴'}
                         onClick={togglePreviewMode}
@@ -2295,6 +2304,7 @@ const ToolWorkspaceQQMusicLyrics: React.FC<ToolWorkspaceQQMusicLyricsProps> = ({
               onClick={() => setDirectoryPickerVisible(true)}
             >
               {saveDraftDirectory?.pathLabel || '选择保存目录'}
+              <IconChevronRightStroked aria-hidden="true" />
             </button>
           </div>
           <label className="qq-save-field">
@@ -2320,6 +2330,7 @@ const ToolWorkspaceQQMusicLyrics: React.FC<ToolWorkspaceQQMusicLyricsProps> = ({
       <LibraryNodePickerModal
         confirmText="保存到此目录"
         displayMode="folders"
+        initialNodeId={saveDraftDirectory?.parentId ?? selectedSaveDirectory?.parentId ?? null}
         libraryId={libraryId}
         title="选择歌词保存目录"
         visible={directoryPickerVisible}

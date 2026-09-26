@@ -1,10 +1,11 @@
 import React from 'react';
 import styled, { createGlobalStyle } from 'styled-components';
 import { Empty, Modal, Spin } from '@douyinfe/semi-ui';
-import { IconFile, IconFolder } from '@douyinfe/semi-icons';
+import OutlineIcon from '@/components/ui/outline-icon';
 import { workspaceScrollbarStyles } from '@/components/ui/workspace-scrollbar';
 
 import {
+  fetchNodeDetailById,
   getChildrenByNodeId,
   getLibraryRootNodeId,
 } from '@/features/file-explorer/services/file.api';
@@ -30,6 +31,7 @@ interface LibraryNodePickerModalProps {
   cancelText?: string;
   confirmText?: string;
   displayMode: LibraryNodePickerDisplayMode;
+  initialNodeId?: number | null;
   libraryId: number;
   title?: string;
   visible: boolean;
@@ -40,6 +42,7 @@ interface LibraryNodePickerModalProps {
 const PickerModalStyle = createGlobalStyle`
   .library-node-picker-modal .semi-modal-content {
     border-radius: 8px;
+    overflow: hidden;
   }
 
   .library-node-picker-modal .semi-modal-header {
@@ -107,7 +110,7 @@ const ModalBody = styled.div`
   }
 
   .node-panel {
-    height: clamp(260px, 38vh, 318px);
+    height: clamp(220px, 32vh, 280px);
     min-height: 0;
     overflow: auto;
     ${workspaceScrollbarStyles}
@@ -262,6 +265,7 @@ const LibraryNodePickerModal: React.FC<LibraryNodePickerModalProps> = ({
   cancelText = '取消',
   confirmText = '确定',
   displayMode,
+  initialNodeId = null,
   libraryId,
   onCancel,
   onConfirm,
@@ -319,8 +323,31 @@ const LibraryNodePickerModal: React.FC<LibraryNodePickerModalProps> = ({
         if (cancelled) {
           return;
         }
-        setBreadcrumbs([{ id: root.id, name: root.name }]);
-        await loadChildren(root.id);
+        const requestedNodeId = Number(initialNodeId);
+        if (!Number.isInteger(requestedNodeId) || requestedNodeId <= 0 || requestedNodeId === root.id) {
+          setBreadcrumbs([{ id: root.id, name: root.name }]);
+          await loadChildren(root.id);
+          return;
+        }
+        const ancestry: LibraryNodePickerNode[] = [];
+        const visited = new Set<number>();
+        let cursorId = requestedNodeId;
+        while (cursorId > 0 && cursorId !== root.id && !visited.has(cursorId) && ancestry.length < 64) {
+          visited.add(cursorId);
+          const detail = await fetchNodeDetailById(cursorId);
+          const node = normalizePickerNode(detail, libraryId);
+          if (!node || node.type !== 'dir') break;
+          ancestry.unshift(node);
+          cursorId = node.parentId;
+        }
+        if (cursorId !== root.id || ancestry.length === 0) {
+          setBreadcrumbs([{ id: root.id, name: root.name }]);
+          await loadChildren(root.id);
+          return;
+        }
+        const path = [{ id: root.id, name: root.name }, ...ancestry.map(node => ({ id: node.id, name: node.name }))];
+        setBreadcrumbs(path);
+        await loadChildren(ancestry[ancestry.length - 1].id);
       } catch (error: any) {
         if (cancelled) {
           return;
@@ -336,7 +363,7 @@ const LibraryNodePickerModal: React.FC<LibraryNodePickerModalProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [libraryId, loadChildren, visible]);
+  }, [initialNodeId, libraryId, loadChildren, visible]);
 
   const currentCrumb = breadcrumbs[breadcrumbs.length - 1] ?? null;
   const currentNodes = currentCrumb ? (childrenMap[currentCrumb.id] || []) : [];
@@ -392,10 +419,10 @@ const LibraryNodePickerModal: React.FC<LibraryNodePickerModalProps> = ({
         className="library-node-picker-modal"
         title={title}
         visible={visible}
-        width={720}
+        width={620}
         centered
         style={{ maxWidth: 'calc(100vw - 40px)' }}
-        bodyStyle={{ minHeight: 350, padding: '7px 16px 9px' }}
+        bodyStyle={{ minHeight: 0, padding: '5px 14px 7px' }}
         okText={confirmText}
         cancelText={cancelText}
         okButtonProps={{ disabled: !confirmNode || loading }}
@@ -469,7 +496,7 @@ const LibraryNodePickerModal: React.FC<LibraryNodePickerModalProps> = ({
                   >
                     <span className="node-label">
                       <span className={`node-kind-icon ${node.type === 'dir' ? 'is-dir' : ''}`}>
-                        {node.type === 'dir' ? <IconFolder /> : <IconFile />}
+                        {node.type === 'dir' ? <OutlineIcon name="folder" /> : <OutlineIcon name="file" />}
                       </span>
                       <span className="node-name">
                         {node.type === 'file' && node.ext ? `${node.name}.${node.ext}` : node.name}
