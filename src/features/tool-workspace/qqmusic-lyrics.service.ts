@@ -6,12 +6,11 @@ import type {
 } from '@/shared/qqmusic-lyrics/qqmusic-lyrics.types';
 import { fetchNodeDetailById } from '@/features/file-explorer/services/file.api';
 import { fetchProviders } from '@/features/storage-config/services/storage-config.api';
+import type { OverlayStorageProvider } from '@/service/overlay/types';
 import { uploadGeneratedSubtitleContent } from './subtitle-translation.service';
 
-export interface QQMusicStorageProviderOption {
-  alias: string;
+export interface QQMusicStorageProviderOption extends Omit<OverlayStorageProvider, 'healthStatus'> {
   isDefault: boolean;
-  label: string;
 }
 
 export class QQMusicLyricsClientError extends Error {
@@ -61,6 +60,10 @@ export async function fetchQQMusicStorageProviders(): Promise<{
       alias: String(provider.alias || '').trim(),
       isDefault: String(provider.alias || '').trim() === defaultProvider,
       label: String(provider.label || provider.alias || '').trim(),
+      type: String(provider.type || '').trim(),
+      endpoint: String(provider.endpoint || '').trim(),
+      bucket: String(provider.bucket || '').trim(),
+      useSSL: Boolean(provider.useSSL),
     })).filter(provider => Boolean(provider.alias)),
   };
 }

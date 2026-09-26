@@ -53,8 +53,12 @@ describe('QQ Music lyrics storage provider integration', () => {
       defaultProvider: 'win-minio',
       providers: [{
         alias: 'local-minio',
+        bucket: 'my-bucket',
+        endpoint: 'localhost:9000',
         isDefault: false,
         label: '本地 MinIO',
+        type: 'minio',
+        useSSL: false,
       }],
     });
   });

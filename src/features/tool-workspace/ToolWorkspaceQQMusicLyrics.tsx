@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  IconChevronDownStroked,
   IconAlertCircle,
   IconChevronRightStroked,
   IconMusic,
@@ -35,6 +36,14 @@ import type {
 } from '@/shared/qqmusic-lyrics/qqmusic-lyrics.types';
 import { workspaceScrollbarStyles } from '@/components/ui/workspace-scrollbar';
 import OutlineIcon from '@/components/ui/outline-icon';
+import { resourceMonitorProbeRuntime } from '@/features/resource-monitor/services/resource-monitor-runtime';
+import { getStorageProviderProbeStatus } from '@/features/resource-monitor/services/storage-provider-health';
+import { formatStorageProviderAlias } from '@/features/file-explorer/components/directory-tree/modals/storage-provider-display';
+import {
+  StorageProviderHealthDot,
+  StorageProviderDropdownStyle,
+  StorageProviderOption,
+} from '@/features/file-explorer/components/directory-tree/modals/storage-provider-option';
 
 import {
   fetchQQMusicLyricsStatus,
@@ -947,6 +956,84 @@ const QQMusicLyricsSaveDialogContent = styled.div`
     color: var(--app-text-muted);
   }
 
+  .qq-save-provider-select {
+    width: 100%;
+    margin-top: 0;
+  }
+
+  .qq-save-provider-select.semi-select,
+  .qq-save-provider-select .semi-select {
+    height: 30px;
+    max-height: 30px !important;
+    overflow: hidden !important;
+  }
+
+  .qq-save-provider-select.semi-select::-webkit-scrollbar,
+  .qq-save-provider-select .semi-select::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+
+  .qq-save-provider-select .semi-select-selection {
+    height: 30px;
+    min-height: 30px;
+    max-height: 30px;
+    align-items: center;
+    overflow: hidden !important;
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+
+  .qq-save-provider-select .semi-select-selection-placeholder,
+  .qq-save-provider-select .semi-select-selection-rendered,
+  .qq-save-provider-select .semi-select-selection-text,
+  .qq-save-provider-select .semi-select-selection span {
+    overflow: hidden !important;
+  }
+
+  .qq-save-provider-select .semi-select-selection-text {
+    max-height: none !important;
+    overflow: hidden !important;
+    white-space: nowrap;
+    line-height: 1.25;
+  }
+
+  .qq-save-provider-select .semi-select-selection-text::-webkit-scrollbar {
+    display: none;
+  }
+
+  .qq-save-provider-select .semi-select-arrow {
+    display: inline-flex;
+    width: 24px;
+    flex: 0 0 24px;
+    align-self: center;
+    align-items: center;
+    justify-content: center;
+    color: var(--semi-color-text-1);
+    font-size: 12px;
+  }
+
+  .qq-save-provider-selected {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 7px;
+    overflow: hidden;
+    padding-right: 6px;
+  }
+
+  .qq-save-provider-selected-title {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--semi-color-text-0);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.25;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .semi-input-wrapper,
   .semi-select {
     width: 100%;
@@ -1257,6 +1344,11 @@ const ToolWorkspaceQQMusicLyrics: React.FC<ToolWorkspaceQQMusicLyricsProps> = ({
   const [lyricsViewportRevision, setLyricsViewportRevision] = React.useState(0);
   const [storageProviders, setStorageProviders] = React.useState<QQMusicStorageProviderOption[]>([]);
   const [defaultStorageProvider, setDefaultStorageProvider] = React.useState('');
+  const probeRuntime = React.useSyncExternalStore(
+    resourceMonitorProbeRuntime.subscribe,
+    resourceMonitorProbeRuntime.getState,
+    resourceMonitorProbeRuntime.getState,
+  );
   const playbackRef = React.useRef({ startedAt: 0, startingTime: 0 });
   const activeRowRef = React.useRef<HTMLDivElement | null>(null);
   const activeStageLineRef = React.useRef<HTMLDivElement | null>(null);
@@ -1695,6 +1787,7 @@ const ToolWorkspaceQQMusicLyrics: React.FC<ToolWorkspaceQQMusicLyricsProps> = ({
   }, [cancelLyricsStageResizeSession, finishLyricsListResize, statusReady]);
 
   React.useEffect(() => {
+    resourceMonitorProbeRuntime.start();
     let active = true;
     void fetchQQMusicStorageProviders()
       .then((result) => {
@@ -1996,9 +2089,31 @@ const ToolWorkspaceQQMusicLyrics: React.FC<ToolWorkspaceQQMusicLyricsProps> = ({
     setDirectoryPickerVisible(false);
   }, [libraryId]);
 
+  const selectedStorageProvider = storageProviders.find(
+    provider => provider.alias === saveDraftStorageProvider,
+  );
+  const selectedStorageProviderStatus = getStorageProviderProbeStatus(
+    probeRuntime.snapshot,
+    saveDraftStorageProvider,
+  );
+  const renderSelectedStorageProvider = React.useCallback(() => {
+    if (!selectedStorageProvider) {
+      return saveDraftStorageProvider || '使用默认 Provider';
+    }
+    return (
+      <div className="qq-save-provider-selected">
+        <StorageProviderHealthDot status={selectedStorageProviderStatus} />
+        <div className="qq-save-provider-selected-title">
+          {formatStorageProviderAlias(selectedStorageProvider, defaultStorageProvider)}
+        </div>
+      </div>
+    );
+  }, [defaultStorageProvider, saveDraftStorageProvider, selectedStorageProvider, selectedStorageProviderStatus]);
+
   return (
     <QQMusicLyricsWorkspace>
       <QQMusicLyricsSaveModalStyle />
+      <StorageProviderDropdownStyle />
       <WorkspaceHeader>
         <div className="header-copy">
           <div className="header-title">QQ 音乐歌词</div>
@@ -2307,23 +2422,34 @@ const ToolWorkspaceQQMusicLyrics: React.FC<ToolWorkspaceQQMusicLyricsProps> = ({
               <IconChevronRightStroked aria-hidden="true" />
             </button>
           </div>
-          <label className="qq-save-field">
-            <span className="qq-save-label">存储位置</span>
+          <div className="qq-save-field">
+            <span id="qqmusic-save-storage-provider-label" className="qq-save-label">存储位置</span>
             <Select
-              aria-label="存储 Provider"
+              aria-labelledby="qqmusic-save-storage-provider-label"
+              arrowIcon={<IconChevronDownStroked size="small" />}
+              className="qq-save-provider-select"
+              dropdownClassName="directory-tree-storage-provider-dropdown"
               disabled={storageProviders.length === 0}
               dropdownStyle={{ maxHeight: 180, overflowY: 'auto' }}
-              emptyContent="没有可用 Provider"
-              optionList={storageProviders.map(provider => ({
-                label: `${provider.label || provider.alias}${provider.isDefault ? '（默认）' : ''}`,
-                value: provider.alias,
-              }))}
+              emptyContent="没有可用存储桶"
               placeholder="使用默认 Provider"
-              position="bottomLeft"
+              renderSelectedItem={renderSelectedStorageProvider}
+              size="small"
               value={saveDraftStorageProvider || undefined}
               onChange={value => setSaveDraftStorageProvider(String(value || ''))}
-            />
-          </label>
+            >
+              {storageProviders.map(provider => (
+                <Select.Option key={provider.alias} value={provider.alias} showTick={false}>
+                  <StorageProviderOption>
+                    <StorageProviderHealthDot
+                      status={getStorageProviderProbeStatus(probeRuntime.snapshot, provider.alias)}
+                    />
+                    {formatStorageProviderAlias(provider, defaultStorageProvider)}
+                  </StorageProviderOption>
+                </Select.Option>
+              ))}
+            </Select>
+          </div>
         </QQMusicLyricsSaveDialogContent>
       </Modal>
 
