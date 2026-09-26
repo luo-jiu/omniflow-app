@@ -86,6 +86,8 @@ B2 在同一 tab 显式切换查看器时，也由 FileViewerContext 捕获旧�
 - 音量偏好不属于 MediaRegistry entry、Viewer Session 或账号远端偏好；`clear()`、关闭 tab 和换播放源均不得重置音量。
 - 当前该 preference 只投影音频；视频音量接入属于后续独立改动，接入前不得让 audio viewer 直接操作 video DOM。
 
+音频归档的边框进度显示仅为UI投影：使用 `useGlobalAudioPlayback` 的当前owner/source校验与服务已有 `hasStarted`，不另建“已播放”状态；元数据加载和未完成的播放请求不得触发显示，暂停后沿用服务状态保留。进度条隐藏时禁用range并退出Tab顺序；弧线鼠标seek与原生键盘range均沿用预览、提交、取消的原服务链，不因气泡视觉变化新增播放实体。
+
 ## 2. 接口面
 
 ### 2.1 `mediaRegistry`（模块单例）
@@ -244,3 +246,7 @@ subscribePendingActivation(listener)      // 同 libraryId 内多次 set 也能�
 - 浮窗按钮语义变化（softClose / hide / dismiss）
 - 跨路由跳转协调器 `file-viewer-pending-activation` 的接口变化
 - 单例约束变化（例如允许多视频）
+
+音频归档自动续播的边框流星仅消费现有播放请求成功回执及自动原因，不调度下一首、不持有播放进度、不新建媒体实体。结束检测、请求仲裁与播放仍在既有链路中完成；隐藏、暂停或seek可随时丢弃视觉事件。
+
+音频边框进度的平滑绘制只读现有`getState()`中的真实media currentTime并校验完整owner/source身份，不提高timeupdate通知频率、不写播放状态。可见且播放中才按像素速度采样4～60Hz，暂停、拖动预览、隐藏或流星期间停止；不可根据墙钟外推缓冲中的播放位置。
