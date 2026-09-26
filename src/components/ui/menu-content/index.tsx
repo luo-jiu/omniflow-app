@@ -1,9 +1,58 @@
-import styled from 'styled-components';
+import styled, { css } from 'styled-components';
+import { focusVisibleStyles, surfaceStyles, textToneStyles } from '@/components/ui/theme-foundation-styles';
+
+// 普通菜单画在行上，紧凑菜单画在外扩的伪元素上；两者消费同一份状态颜色。
+const menuItemStateStyles = css`
+  --app-menu-item-background: transparent;
+  --app-menu-item-icon-color: var(--app-text-secondary);
+  --app-menu-item-detail-color: var(--app-text-muted);
+  ${textToneStyles('primary')}
+
+  &:not(.disabled):not(:disabled):not([aria-disabled='true']) {
+    &:hover {
+      --app-menu-item-background: var(--app-hover-bg);
+    }
+
+    &:active {
+      --app-menu-item-background: var(--app-active-bg);
+    }
+
+    &.danger {
+      color: var(--app-danger-text);
+      --app-menu-item-icon-color: var(--app-danger-text);
+
+      &:hover {
+        --app-menu-item-background: var(--app-danger-bg);
+      }
+
+      &:active {
+        --app-menu-item-background: color-mix(in srgb, var(--app-danger-text) 14%, var(--app-danger-bg));
+      }
+    }
+  }
+
+  &:not(.disabled) {
+    ${focusVisibleStyles}
+  }
+
+  &.disabled,
+  &:disabled,
+  &[aria-disabled='true'] {
+    ${textToneStyles('disabled')}
+    --app-menu-item-icon-color: var(--app-text-disabled);
+    --app-menu-item-detail-color: var(--app-text-disabled);
+    cursor: not-allowed;
+
+    img.bookmark-favicon {
+      opacity: 0.5;
+    }
+  }
+`;
 
 export const MenuContent = styled.div`
+  ${surfaceStyles('popover')}
   min-width: 240px;
   padding: 8px;
-  background: var(--app-bg-elevated);
   border-radius: 12px;
   box-shadow: var(--app-shadow);
   border: 1px solid var(--app-border-strong);
@@ -13,16 +62,17 @@ export const MenuContent = styled.div`
   
   // 菜单标题
   .menu-title {
+    ${textToneStyles('muted')}
     font-size: 14px;
     line-height: 24px;
     font-weight: 600;
-    color: var(--semi-color-text-2);
     margin: 4px 12px;
     padding-bottom: 6px;
-    border-bottom: 1px solid var(--semi-color-border);
+    border-bottom: 1px solid var(--app-border);
   }
 
   .menu-item {
+    ${menuItemStateStyles}
     padding: 8px 14px;
     border-radius: 8px;
     cursor: pointer;
@@ -30,8 +80,8 @@ export const MenuContent = styled.div`
     font-size: 18px;
     line-height: 1.2;
     font-weight: 500;
-    color: var(--semi-color-text-0);
-    transition: all 0.15s ease;
+    background-color: var(--app-menu-item-background);
+    transition: background-color 0.15s ease, color 0.15s ease;
     display: flex;
     align-items: center;
     gap: 10px;
@@ -44,7 +94,7 @@ export const MenuContent = styled.div`
       width: 20px;
       height: 20px;
       flex: 0 0 20px;
-      color: var(--semi-color-text-1);
+      color: var(--app-menu-item-icon-color);
       overflow: visible;
     }
 
@@ -59,7 +109,7 @@ export const MenuContent = styled.div`
 
     .menu-item-submenu-arrow {
       margin-left: 6px;
-      color: var(--semi-color-text-2);
+      color: var(--app-menu-item-detail-color);
       font-size: 14px;
       line-height: 1;
       flex-shrink: 0;
@@ -68,26 +118,6 @@ export const MenuContent = styled.div`
 
   .menu-item + .menu-item {
     margin-top: 2px;
-  }
-
-  .menu-item:hover {
-    background: var(--semi-color-fill-0);
-  }
-
-  .menu-item.danger {
-    color: var(--semi-color-danger);
-    .menu-item-icon {
-      color: var(--semi-color-danger);
-    }
-  }
-  
-  .menu-item.danger:hover {
-    background: var(--semi-color-danger-light-default);
-  }
-
-  .menu-item.disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
   }
 
   .menu-item-icon .bookmark-favicon {
@@ -107,8 +137,8 @@ export const MenuContent = styled.div`
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    color: #8c9099;
-    background: rgba(140, 144, 153, 0.08);
+    color: inherit;
+    background: var(--app-fill-subtle);
   }
 
   .menu-item-icon .bookmark-favicon.favicon-fallback .semi-icon {
@@ -120,7 +150,7 @@ export const MenuContent = styled.div`
     height: 18px;
     display: block;
     position: relative;
-    color: var(--semi-color-text-1);
+    color: inherit;
   }
 
   .menu-item-icon .bookmark-folder-glyph::before {
@@ -176,6 +206,7 @@ export const MenuContent = styled.div`
       line-height: 1.2;
       gap: 5px;
       border-radius: 5px;
+      background-color: transparent;
     }
 
     .menu-item + .menu-item {
@@ -189,20 +220,8 @@ export const MenuContent = styled.div`
       z-index: -1;
       border-radius: inherit;
       pointer-events: none;
+      background-color: var(--app-menu-item-background);
       transition: background-color 0.15s ease;
-    }
-
-    .menu-item:hover,
-    .menu-item.danger:hover {
-      background: transparent;
-    }
-
-    .menu-item:hover::before {
-      background: var(--semi-color-fill-0);
-    }
-
-    .menu-item.danger:hover::before {
-      background: var(--semi-color-danger-light-default);
     }
 
     .menu-item-icon {

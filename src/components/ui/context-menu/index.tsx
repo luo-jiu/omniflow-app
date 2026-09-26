@@ -177,6 +177,7 @@ export const ContextMenu: React.FC<ContextMenuProps> = ({
         const content = (
           <div
             className={`menu-item ${item.children?.length ? 'has-submenu' : ''} ${item.danger ? 'danger' : ''} ${item.disabled ? 'disabled' : ''}`}
+            aria-disabled={item.disabled || undefined}
             onClick={(e) => {
               e.stopPropagation();
               if (item.render) return; // 如果有自定义 render，由 render 内部处理点击

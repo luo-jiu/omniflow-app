@@ -12,6 +12,7 @@
   --app-text-secondary: #6b6b6b;
   --app-text-muted: #999999;
   --app-accent: #345847;
+  --app-accent-foreground: #ffffff;
   --app-accent-soft: rgba(52, 88, 71, 0.08);
   --app-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
   --app-shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.04);
@@ -101,17 +102,26 @@ textarea, select, input, button {
 
 body, body * {
   box-sizing: border-box;
-  transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+  // Inherited color transitions on every descendant chase their animated
+  // parent, making deeply nested text lag behind a light/dark theme change.
+  transition: background-color 0.2s ease, border-color 0.2s ease;
 }
 
 .semi-navigation,
 .semi-navigation-item-text,
 .semi-navigation-header {
-  transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
 }
 
 a {
   color: var(--semi-color-link);
+}
+
+// Text selection is independent of selecting a row or activating navigation.
+// Editors may provide a more specific selection rule for their content.
+::selection {
+  background: var(--app-selection-bg);
+  color: inherit;
 }
 
 img {
@@ -125,4 +135,27 @@ ul, li {
 button, input, textarea, select, a {
   outline: none;
   border: none;
+}
+
+// Only marks painted on a primary fill use its foreground. Keep neutral,
+// disabled and status controls on Semi's own semantic foregrounds.
+.semi-button-primary:not(.semi-button-borderless):not(.semi-button-light):not(.semi-button-outline):not(.semi-button-disabled):not(:disabled) {
+  color: var(--app-accent-foreground);
+}
+
+.semi-checkbox:not(.semi-checkbox-disabled) .semi-checkbox-inner-checked .semi-checkbox-inner-display,
+.semi-checkbox.semi-checkbox-indeterminate:not(.semi-checkbox-disabled) .semi-checkbox-inner-display,
+.semi-radio:not(.semi-radio-disabled) .semi-radio-inner-checked .semi-radio-inner-display {
+  color: var(--app-accent-foreground);
+}
+
+// Theme colors interpolate once on body. Descendants inherit the same frame;
+// their normal transitions would otherwise animate those moving values again.
+body[data-app-theme-transition],
+body[data-app-theme-transition] *,
+body[data-app-theme-transition]::before,
+body[data-app-theme-transition]::after,
+body[data-app-theme-transition] *::before,
+body[data-app-theme-transition] *::after {
+  transition: none !important;
 }

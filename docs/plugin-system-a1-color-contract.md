@@ -1,12 +1,12 @@
 # A1 外观契约与纯解析内核
 
-更新时间：2026-09-14
+更新时间：2026-09-23
 
-状态：解析契约已接入实际 ThemeContext、设置、存储、编辑器和 overlay；当前实现见 [外观系统](appearance-system.md)。A1 已通过 macOS 桌面验收，见 [验收记录](plugin-system-a1-acceptance.md)。本文保留纯解析层契约。
+状态：解析契约已接入实际 ThemeContext、设置、存储、编辑器和 overlay；当前实现见 [外观系统](appearance-system.md)。历史 A1 已通过 macOS 桌面验收，见 [验收记录](plugin-system-a1-acceptance.md)。2026-09-23 新增紫罗兰及主题消费接线，本轮自动检查与 macOS 代表性界面范围见 [验证矩阵](frontend-validation-matrix.md#310-主题--布局--浮层)。本文保留纯解析层契约。
 
 ## 1. 当前实现
 
-[color-theme.ts](../src/features/appearance/color-theme.ts) 提供内部 `validateColorTheme`、`resolveColorTheme`、`isThemeColor` 及语义 token → CSS 变量映射。所有结果由调用者使用，模块不写 DOM、localStorage、IPC 或全局主题状态，不建立第二个 owner。这是宿主内部 A1 接入准备，不是已发布的第三方 SDK。
+[color-theme.ts](../src/features/appearance/color-theme.ts) 提供内部 `validateColorTheme`、`resolveColorTheme`、`isThemeColor` 及语义 token → CSS 变量映射。所有结果由调用者使用，模块不写 DOM、localStorage、IPC 或全局主题状态，不建立第二个 owner。这是宿主内部主题解析契约，不是第三方主题包安装 API。
 
 [appearance-theme.ts](../src/features/appearance/appearance-theme.ts) 提供组合入口 `resolveAppearanceTheme`；[theme-effects.ts](../src/features/appearance/theme-effects.ts) 校验受限效果；[theme-adapters.ts](../src/features/appearance/theme-adapters.ts) 将同一个解析结果投影为 Semi CSS 变量及编辑器 palette。适配结果为普通可序列化数据，不导出 UI 组件，不在导入时执行任何界面变更。
 
@@ -45,7 +45,7 @@
 
 ## 3. 已实现 token 范围
 
-默认值和映射的代码权威入口是 `DEFAULT_COLOR_TOKENS` 与 `COLOR_CSS_VARIABLES`。已有表面、文字、边框、强调和滚动条默认值沿用当前 reset.less；新增语义已接入主要消费面，实际已验证和剩余状态以 A1 验收记录为准。
+默认值和映射的代码权威入口是 `DEFAULT_COLOR_TOKENS` 与 `COLOR_CSS_VARIABLES`。已有表面、文字、边框、强调和滚动条默认值沿用当前 reset.less；消费范围见外观系统，历史验证见 A1 验收记录，本轮新增语义的验证状态以验证矩阵为准。
 
 | 分组 | 当前 token | 说明 |
 | --- | --- | --- |
@@ -55,7 +55,9 @@
 | 边框 | border.default/strong | 保留透明度 |
 | 文字 | text.primary/secondary/muted/disabled | disabled 为独立增量语义 |
 | 链接 | text.link | 链接独立于强调色，默认一致 |
-| 强调 | accent.default/soft/hover/active | hover/active 后续投影 Semi |
+| 强调 | accent.default/soft/hover/active/foreground | 主色及状态、主色底前景；foreground 不等于全局白色 |
+| 导航 | navigation.active | 工作区激活导航；保留独立于强调色的角色 |
+| 选中控件 | control.selected.background/hover/active | 宿主选中控件及 Semi primary-light-default/hover/active |
 | 滚动条 | scrollbar.thumb/hover/track | 保留 transparent 轨道 |
 | 交互 | selection.background、focus.border | 增量语义 |
 | 补充交互 | interaction.hover/active、selection.text | 悬停、按下和选中文字 |
@@ -66,21 +68,25 @@
 | 编辑器 | editor.background/text/gutter/cursor/selection/activeLine | 通过宿主扩展应用到 CodeMirror |
 | 语法 | syntax.keyword/string/number/comment/function/type/operator/invalid | 语义色，不暴露 Lezer 内部类型 |
 
-当前共 62 个颜色 token、2 个阴影 token 和 3 个圆角 token。候选默认值补齐主要语义组，但不代表所有组件已经消费，也不保证自定义组合自动满足对比度。未覆盖的组件状态仍需后续适配；内置目录图标已接入，第三方图标包安装和用户自定义命名空间 token 尚未开放。
+当前共 67 个颜色 token、2 个阴影 token 和 3 个圆角 token。内置森林/海蓝保持原 62 个解析色值；新增导航默认值沿用原紫色，选中控件三态沿用原 Semi 明暗蓝色，`accent.foreground` 默认白色。新增紫罗兰（`omniflow.violet`）显式定义完整亮暗 67 色，但默认主题 ID 仍为 `omniflow.default`，不改已保存用户选择。完整颜色数据不代表所有组件已经消费，也不保证任意用户覆盖满足对比度；内置目录图标已接入，第三方图标包安装和用户自定义命名空间 token 尚未开放。
+
+强调色设置目前只覆盖 `accent.default`、`text.link` 和 `focus.border`，不会自动推导导航、前景、hover/active 或选中控件三态。已有用户覆盖优先于新选配色，不随切换配色自动清除。
 
 ### 3.1 适配结果
 
 - 组合结果返回 colors、effects、cssVariables、有效 themeId、mode 和诊断。cssVariables 是宿主可应用的有限映射，不含选择器和样式脚本；此层不生成 epoch/revision，也不持有当前快照。
-- Semi 适配覆盖既有背景、fill、文字、边框、链接、强调色/hover/active及各状态主要颜色和轻背景；未映射的组件状态不能宣称已适配。自定义主题应显式提供相关交互色，本内核不会自动推导配色。
+- Semi 适配覆盖既有背景、fill、文字、边框、链接、焦点边框、强调色/hover/active、选中控件浅背景三态及各状态主要颜色和轻背景；未映射的组件状态不能宣称已适配。`accent.foreground` 通过共享 CSS 交给非禁用主色实心按钮和 checkbox/radio 标记，不能改写 `--semi-white` / `--semi-color-white` 导致危险按钮或白色表面串色。自定义主题应显式提供相关交互色，本内核不会自动推导配色。
 - 编辑器适配返回背景、正文、gutter、cursor、selection、activeLine 和 syntax palette；不会创建 CodeMirror 扩展，后续由宿主编辑器 adapter 消费。
-- styled-components、原生主窗口背景和 overlay 已接入；第三方插件视图尚未开放。
+- styled-components、原生主窗口背景和 overlay 已接入。隔离 Viewer/工具工作区通过同一个 `toPluginThemeSnapshot` 复制完整颜色，继续使用既有 SDK `schemaVersion/revision/mode/colors` 形状；不下发效果、图标或内部 owner 状态，也不允许插件改宿主配色。插件消费与包更新边界见 [外观系统](appearance-system.md#41-隔离插件颜色投影)。
 
 ## 4. 验证与后续接入
 
 [color-theme.test.ts](../src/features/appearance/color-theme.test.ts) 与 [组合契约测试](../src/features/appearance/appearance-theme.test.ts) 覆盖颜色 grammar、危险 CSS、未知/原型字段、坏 schema/ID、超限输入、跨颜色/效果事务原子性、有限数值、旧颜色包兼容、输出隔离、Semi/编辑器投影。兼容测试读取当前 reset.less，比对明暗模式已有颜色、圆角、Semi 固定值和默认阴影参数，防止默认外观在准备阶段漂移。该测试是接入前兼容约束，后续替换 reset 声明时须保留相应历史 fixture，不能直接删掉兼容断言。
 
-当前自动检查、实际界面场景及剩余项统一见 [A1 验收记录](plugin-system-a1-acceptance.md)。单元测试不能替代组件对比度和跨窗口验证。
+新增 [内置主题测试](../src/features/appearance/built-in-themes.test.ts) 对原森林/海蓝全部 62 个颜色保留兼容指纹，同时检查新增默认角色、紫罗兰完整字段及两模式关键文字/控件对比度不低于 4.5。插件颜色复制由独立适配测试覆盖。任意用户覆盖、透明材质和组件叠色仍须实际观察，不能从这些用例推导全界面均通过对比度验收。
 
-解析快照的版本、预览事务纯状态模型与目录图标契约现已落地，见 [主题事务、快照与图标契约](plugin-system-a1-state-and-icons.md)。上述 owner、CSS/Semi/编辑器、账号本机存储、overlay 同步和两套内置样板已接入；真实交互验收已完成，后续按总计划推进 B1。
+历史自动检查和实际场景见 [A1 验收记录](plugin-system-a1-acceptance.md)，本轮检查及未验证项见 [验证矩阵](frontend-validation-matrix.md)。单元测试不能替代组件对比度和跨窗口验证。
+
+解析快照的版本、预览事务纯状态模型与目录图标契约现已落地，见 [主题事务、快照与图标契约](plugin-system-a1-state-and-icons.md)。owner、CSS/Semi/编辑器、账号本机存储和 overlay 同步继续复用；新增配色不建立第二套状态或迁移旧用户偏好。
 
 新增 token 时同时补默认值、映射、合法值与对应消费面；公开为 SDK 前单独冻结完整 schema 和错误协议。

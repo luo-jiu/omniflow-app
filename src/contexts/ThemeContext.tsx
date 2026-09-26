@@ -6,7 +6,7 @@ import { AppearanceControlContext, AppearanceViewContext } from '@/features/appe
 import { defaultSelection, readAppearance, saveAppearance } from '@/features/appearance/appearance-storage';
 import { findBuiltInColorTheme } from '@/features/appearance/built-in-themes';
 import { toThemeView } from '@/features/appearance/theme-view';
-import { applyThemeView } from '@/features/appearance/theme-dom';
+import { applyThemeView, cancelThemeTransition } from '@/features/appearance/theme-dom';
 import { publishAppearance } from '@/service/appearance/appearance.api';
 import legacyStyledTheme from '@/assets/theme';
 
@@ -84,6 +84,7 @@ export const ThemeProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const snapshot = useMemo(() => createThemeSnapshot(state, findBuiltInColorTheme), [state]);
   const view = useMemo(() => toThemeView(snapshot), [snapshot]);
   useLayoutEffect(() => { applyThemeView(view); }, [view]);
+  useLayoutEffect(() => () => cancelThemeTransition(), []);
   useEffect(() => { void publishAppearance(view).catch(() => undefined); }, [view]);
   useEffect(() => {
     if (state.accountScope !== 'anonymous') return;

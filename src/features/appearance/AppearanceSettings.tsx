@@ -3,21 +3,22 @@ import { AppearanceControlContext, AppearanceViewContext } from './appearance.co
 import { BUILT_IN_COLOR_THEMES, BUILT_IN_ICON_THEMES } from './built-in-themes';
 import type { ThemeOperationToken, ThemeSelection } from './theme-state';
 import styled from 'styled-components';
+import { buttonStyles, focusVisibleStyles, inputStyles, textToneStyles } from '@/components/ui/theme-foundation-styles';
 
 const Panel = styled.section`
-  padding: 16px 0; border-bottom: 1px solid var(--app-border);
+  padding: 16px 0; border-bottom: 1px solid var(--app-border); font-size: 12px; line-height: 1.5;
   h3 { font-size: 13px; margin-bottom: 10px; }
   .appearance-fields { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px; }
   .appearance-field { flex: 1 1 180px; min-width: 0; }
   label { display: flex; align-items: center; gap: 8px; font-size: 12px; }
-  select, button { min-height: 28px; padding: 3px 10px; border: 1px solid var(--app-border-strong); border-radius: var(--app-radius-small); background: var(--app-panel); color: var(--app-text); }
-  button { cursor: pointer; } button:disabled { opacity: .5; cursor: default; }
-  button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--app-focus-border); outline-offset: 2px; }
+  select { ${inputStyles} min-height: 28px; padding: 3px 10px; }
+  button { ${buttonStyles('secondary')} min-height: 28px; padding: 3px 10px; border: 1px solid transparent; border-radius: var(--app-radius-small); cursor: pointer; }
+  input[type=color] { ${focusVisibleStyles} }
   .appearance-actions { margin-top: 12px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-  p { font-size: 12px; line-height: 1.5; color: var(--app-text-secondary); margin: 8px 0; }
+  p { ${textToneStyles('secondary')} font-size: 12px; line-height: 1.5; margin: 8px 0; }
   [role=alert] { color: var(--app-danger-text); }
 `;
-export default function AppearanceSettings() {
+export default function AppearanceSettings({ onOpenPreview }: { onOpenPreview?: () => void }) {
   const controls = useContext(AppearanceControlContext);
   const view = useContext(AppearanceViewContext);
   const activePreview = useRef<ThemeOperationToken | null>(null);
@@ -67,6 +68,10 @@ export default function AppearanceSettings() {
       <button title="预览默认配色和图标，保存后保留" onClick={() => preview({ ...selected, colorThemeId: 'omniflow.default', iconThemeId: 'omniflow.material', overrides: {} })}>恢复默认</button>
     </div>
     <p>{controls.phase === 'preview' ? '正在预览，保存到本机当前账号；取消或离开此页会恢复上次保存的外观。' : '修改或恢复默认后立即预览，保存后在本机当前账号保留。'}</p>
+    {onOpenPreview && <div className="appearance-actions">
+      <button type="button" onClick={onOpenPreview}>主题预览</button>
+      <span>集中查看背景、文字、按钮和归档选中效果。</span>
+    </div>}
     {error && <p role="alert">{error}</p>}
   </Panel>;
 }

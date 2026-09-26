@@ -23,6 +23,7 @@
     "dev:drag-drop-lab": "electron tools/drag-drop-lab/main.cjs",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "test": "vitest run",
+    "theme:audit": "node tools/theme-audit/audit.mjs --check",
     "signing:setup:mac": "bash tools/setup-local-mac-signing.sh",
     "release:mac": "node tools/release-mac.mjs",
     "update:serve": "node tools/serve-update-feed.mjs",

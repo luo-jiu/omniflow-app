@@ -20,7 +20,7 @@ function setup() {
   const storage = { getItem: (key: string) => values.get(key) ?? null, setItem: vi.fn((key: string, value: string) => { values.set(key, value); }) };
   vi.stubGlobal('localStorage', storage);
   vi.stubGlobal('window', { matchMedia: () => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() }) });
-  vi.stubGlobal('document', { body: { setAttribute: vi.fn(), style: { setProperty: vi.fn() } } });
+  vi.stubGlobal('document', { body: { setAttribute: vi.fn(), removeAttribute: vi.fn(), style: { setProperty: vi.fn() } } });
   act(() => { renderer = TestRenderer.create(<ThemeProvider><Probe /></ThemeProvider>); });
   return { values, storage };
 }

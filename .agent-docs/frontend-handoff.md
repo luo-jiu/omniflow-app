@@ -62,7 +62,7 @@
 - 插件系统与主题扩展的长期方针、阶段路线和合格标准：
   - [插件系统与主题扩展方针](../docs/plugin-system-and-theming-policy.md)（目标设计，非当前已实现能力）
   - [插件化实施计划](../docs/plugin-system-implementation-plan.md)（代码调研、批次依赖、兼容与验收；A0 macOS 基础基线已收口，见 [基线记录](../docs/plugin-system-a0-baseline.md)）
-  - [A1 外观契约与纯解析](../docs/plugin-system-a1-color-contract.md)（已通过 macOS A1 验收；实现与验收见 [外观系统](../docs/appearance-system.md)）
+  - [A1 外观契约与纯解析](../docs/plugin-system-a1-color-contract.md)（历史 macOS A1 已验收；紫罗兰和新增主题接线的本轮状态见 [外观系统](../docs/appearance-system.md)，不复用历史结论）
 - 内置命令、目录菜单和工具贡献注册及排序兼容：
   - [B1 贡献入口](../docs/plugin-system-b1-contributions.md)（内置贡献范围已验收）
 - 查看器贡献、打开方式和恢复 key 兼容：
@@ -87,8 +87,9 @@
   - [M1 手动执行](../docs/plugin-system-m1-manual-commands.md)（独立 main 执行记录、能力批准与 Agent 授权分离；最新验证状态见专题）
 - 插件独立工具页面、资源选择和宿主审批接线：
   - [M2 工具工作区](../docs/plugin-system-m2-tool-workspaces.md)（动态贡献、共享隔离宿主及 JSON 交互样板；最新验证状态见专题）
-- 下一轮主题优化：
-  - [外观系统](../docs/appearance-system.md)、[颜色契约](../docs/plugin-system-a1-color-contract.md)及[显示基线](../docs/ui-display-readability-baseline.md)（当前强调色只覆盖主色、链接和焦点边框；宿主滚动条除左侧目录树外按溢出常驻。后续继续复用唯一主题 owner 与跨窗口快照，内部图标库重绘由用户另行安排）
+- 当前主题优化：
+  - [主题视觉设计与推广计划](../docs/theme-design-and-rollout-plan.md)、[通用主题基础](../docs/theme-foundation.md)（T1长期样板＋T2/T3共享接入：表面/文字/选择/焦点/按钮/输入及归档名称独立组合；设置、菜单、插件宿主、工具、归档卡片和视频普通侧栏指定入口已接。逐类范围、固定色例外与下一批见[覆盖地图](../docs/theme-adoption-map.md)，静态变量检查用`npm run theme:audit`。长期对照页「设置 → 外观 → 主题预览」，保留开发快捷入口`/#/dev/theme-foundation`，不新增主题owner；锁屏期间本轮只完成代码及自动验证，新增消费者待解锁视觉核验，全页面迁移与视觉定稿未完成）
+  - [外观系统](../docs/appearance-system.md)、[颜色契约](../docs/plugin-system-a1-color-contract.md)及[显示基线](../docs/ui-display-readability-baseline.md)（新增紫罗兰亮暗主题与 67 色角色；森林/海蓝原 62 色、默认选择及已存偏好保留。导航/选中控件接入独立角色，Viewer/工具工作区共享完整颜色快照；JSON 转换样板源码已适配，旧安装包须重建更新。强调色仍只覆盖主色、链接和焦点边框；全量检查和 macOS 亮暗预览/取消、暗色菜单通过，范围及未验项见验证矩阵。继续复用唯一 owner 与跨窗口快照，内部图标库重绘由用户另行安排）
 - 当前云端、Tailscale、多 MinIO 和发布方式：
   - `docs/current-deployment-topology.md`
 - macOS / Windows 窗口策略、平台 bridge 和构建验证：

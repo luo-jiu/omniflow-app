@@ -1,6 +1,6 @@
 # OmniFlow App Frontend Review Standard
 
-更新时间：2026-08-14
+更新时间：2026-09-23
 
 适用范围：`omniflow-app` 前端、Electron renderer / preload / main、IPC、工作区交互和前端文档相关改动的代码评审。
 
@@ -98,6 +98,10 @@ views -> features -> components / hooks -> service / bridge -> backend or electr
 优先关注：
 
 - 亮色 / 暗色 / 跟随系统是否都成立
+- 新页面和迁移组件是否复用[通用主题基础](../docs/theme-foundation.md)的表面、文字、选择及交互规则；已有共享入口能表达的状态，不再各页自写颜色。归档/状态语义须能与选中和键盘焦点叠加，不能用选中规则覆盖全部后代文字；样式配置不能替代原生disabled、ARIA或业务状态owner。
+- 迁移共享样式须核对实际消费者和CSS优先级：禁用不残留hover/active反馈，Semi显式variant保留前景/底色配对，片段的`font: inherit`不覆盖旧控件字号/字重/行高。主题变量变更运行`npm run theme:audit`，固定色候选结合[覆盖地图](../docs/theme-adoption-map.md)区分内容/品牌/状态，不按数量机械替换。
+- 主题颜色动效是否由同一文档的统一边界驱动；不得在 `body *` 对继承的 `color` 添加通配 transition，或让组件对逐帧变化的主题变量再启动过渡。验证须覆盖深层文字与背景的同帧变化、快速反向切换和结束清理，不能只比较动画前后截图；跨窗口与隔离页面的同步范围须明确。
+- Canvas等一次性取色消费者是否直接使用只读目标快照或有明确终态更新；只观察class/style并读取动画中的computed CSS可能停在旧/中间色。不能以每帧DOM扫描补偿，也不能另建主题状态源。
 - 标题栏安全区、浮层、右键菜单、分栏拖拽是否稳定
 - 浏览器模式、文件模式、搜索主页切换时布局节奏是否突变
 - overlay / modal / context menu 是否会被原生 view 遮挡

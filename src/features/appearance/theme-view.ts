@@ -3,6 +3,7 @@ import { EFFECT_CSS_VARIABLES, validateThemeEffects, effectsToCss, type ThemeEff
 import type { ResolvedThemeMode, ThemeMode } from '@/contexts/theme.context';
 import type { ThemeSnapshot } from './theme-state';
 import { toSemiThemeVariables } from './theme-adapters';
+import { toAgentSyntaxThemeVariables } from './agent-syntax-theme';
 
 export interface ThemeView {
   schemaVersion: 1;
@@ -32,7 +33,8 @@ export function validateThemeView(value: unknown): ThemeView | null {
     mode: value.mode as ResolvedThemeMode, iconThemeId: value.iconThemeId, colors: colors.value as ColorTokens, effects: effects.value as ThemeEffects };
 }
 export function themeViewVariables(view: ThemeView) {
-  const variables: Record<string, string> = { ...effectsToCss(view.effects), ...toSemiThemeVariables({ colors: view.colors }) };
+  const variables: Record<string, string> = { ...effectsToCss(view.effects), ...toSemiThemeVariables({ colors: view.colors }),
+    ...toAgentSyntaxThemeVariables(view.mode) };
   for (const key of Object.keys(COLOR_CSS_VARIABLES) as Array<keyof ColorTokens>) variables[COLOR_CSS_VARIABLES[key]] = view.colors[key];
   return variables;
 }
