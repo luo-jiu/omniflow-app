@@ -269,6 +269,8 @@ export const LibrarySystemScroll = styled.div`
   display: flex;
   container-type: inline-size;
 
+  &[data-size='settings'] { padding: 0; overflow: hidden; }
+
   &::-webkit-scrollbar {
     width: 8px;
     height: 8px;
@@ -288,6 +290,17 @@ export const LibrarySystemFrame = styled.div`
   width: 760px;
   min-width: 760px;
   margin: 0 auto;
+
+  &[data-size='settings'] {
+    width: 100%;
+    min-width: 0;
+    min-height: 0;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    overflow: auto;
+    ${workspaceScrollbarStyles}
+  }
 
   &[data-size='detail'] {
     width: 1120px;
@@ -314,7 +327,7 @@ export const LibrarySystemFrame = styled.div`
 
 export const CardGrid = styled.div`
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(0, min(140px, 100%)));
+  grid-template-columns: repeat(auto-fill, minmax(min(140px, 100%), 1fr));
   justify-content: start;
   gap: 6px;
   padding: 2px 0 8px;
@@ -325,7 +338,8 @@ export const CardItem = styled.div`
   position: relative;
   height: 158px;
   min-height: 158px;
-  width: min(100%, 132px);
+  width: 100%;
+  min-width: 0;
   justify-self: center;
   box-sizing: border-box;
   border-radius: 8px;
@@ -388,7 +402,7 @@ export const CardArtwork = styled.img`
 `
 
 export const CardName = styled.div`
-  width: 126px;
+  width: calc(100% - 6px);
   height: 45px;
   margin-top: 10px;
   min-width: 0;
@@ -493,12 +507,12 @@ export const CardNameEdit = styled.div`
   display: flex;
   align-items: flex-start;
   justify-content: center;
-  width: 126px;
+  width: calc(100% - 6px);
   height: 45px;
   margin-top: 10px;
 
   .library-card-rename-input {
-    width: 126px;
+    width: 100%;
     height: 24px;
     box-sizing: border-box;
     padding: 2px 5px;

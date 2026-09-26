@@ -1,4 +1,4 @@
-import { useMemo, useState, type FC } from 'react';
+import { useState, type FC } from 'react';
 import {
   systemWorkspaceMeta,
   systemWorkspaceViews,
@@ -37,31 +37,22 @@ const SystemWorkspace: FC<SystemWorkspaceProps> = ({
   const frameClassKey = activeView === 'settings' && settingsSection !== 'home'
     ? 'settings-detail'
     : activeView;
-  const activeMeta = useMemo(() => {
-    if (activeView !== 'settings' || settingsSection === 'home') {
-      return meta;
-    }
-    return {
-      ...meta,
-      description: '管理设置里的高级配置项',
-    };
-  }, [activeView, meta, settingsSection]);
 
   return (
     <SystemWorkspaceRoot>
-      <SystemWorkspaceViewport>
+      <SystemWorkspaceViewport className={frameClassKey === 'settings' ? 'settings-split-viewport' : undefined}>
         <div className={`system-workspace-center-frame system-workspace-frame-${frameClassKey}`}>
-          <SystemWorkspaceHeader>
+          {activeView !== 'settings' && activeView !== 'profile' && <SystemWorkspaceHeader>
             <div className="system-workspace-header-inner">
               <div className="system-workspace-title-group">
-                <span className="system-workspace-icon">{activeMeta.icon}</span>
+                <span className="system-workspace-icon">{meta.icon}</span>
                 <div>
-                  <div className="system-workspace-title">{activeMeta.title}</div>
-                  <div className="system-workspace-description">{activeMeta.description}</div>
+                  <div className="system-workspace-title">{meta.title}</div>
+                  <div className="system-workspace-description">{meta.description}</div>
                 </div>
               </div>
             </div>
-          </SystemWorkspaceHeader>
+          </SystemWorkspaceHeader>}
           <SystemWorkspaceBody>
             <ViewComponent
               currentView={activeView}

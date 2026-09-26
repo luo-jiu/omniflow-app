@@ -2,9 +2,9 @@ import PluginManagement from '@/features/plugin-management/PluginManagement';
 import { useContext as useAppearanceContext } from 'react';
 import { AppearanceControlContext } from '@/features/appearance/appearance.context';
 import AppearanceSettings from '@/features/appearance/AppearanceSettings';
-import React, { useEffect, useRef, useState } from 'react';
-import styled, { createGlobalStyle } from 'styled-components';
-import { Button, Divider, Input, Select, Switch, Toast, Typography } from '@douyinfe/semi-ui';
+import React, { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import styled, { createGlobalStyle, css } from 'styled-components';
+import { Button, Input, Select, Switch, Toast } from '@douyinfe/semi-ui';
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from '@/hooks/useTheme';
 import type { ThemeMode } from '@/contexts/theme.context';
@@ -37,11 +37,25 @@ import StorageSettings from '@/views/storage-settings';
 import TagManagement from '@/views/tag-management';
 import type { SystemWorkspaceViewProps } from '../../types';
 import AppUpdateSettings from '@/features/app-update/components/AppUpdateSettings';
+import SettingsSections from './SettingsSections';
+import { buttonStyles, focusVisibleStyles, textToneStyles } from '@/components/ui/theme-foundation-styles';
+
+const ThemeFoundationPreview = lazy(() => import('@/features/appearance/ThemeFoundationPreview'));
+
+const actionButtonTypography = css`
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 30px;
+`;
 
 const SettingsWrapper = styled.div`
   width: 100%;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
   margin: 0;
-  color: var(--semi-color-text-0);
+  ${textToneStyles('primary')}
 
   .setting-item {
     display: flex;
@@ -52,15 +66,17 @@ const SettingsWrapper = styled.div`
   }
 
   .setting-title {
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 600;
     line-height: 1.35;
   }
 
+  .setting-item > div:first-child { min-width: 0; overflow-wrap: anywhere; }
+
   .setting-desc {
-    font-size: 11px;
+    font-size: 12px;
     margin-top: 4px;
-    color: var(--semi-color-text-2);
+    ${textToneStyles('muted')}
     line-height: 1.6;
   }
 
@@ -69,6 +85,7 @@ const SettingsWrapper = styled.div`
     align-items: center;
     gap: 7px;
     width: 360px;
+    max-width: 55%;
     justify-content: flex-end;
   }
 
@@ -79,7 +96,7 @@ const SettingsWrapper = styled.div`
 
   .setting-path-input .semi-input-wrapper,
   .setting-path-input .semi-input {
-    font-size: 11px;
+    font-size: 12px;
   }
 
   .setting-path-input .semi-input-wrapper {
@@ -92,51 +109,28 @@ const SettingsWrapper = styled.div`
     min-height: 30px;
     min-width: 72px;
     padding: 0 12px;
-    border-radius: 6px;
-    font-size: 11px;
-    font-weight: 600;
-    line-height: 30px;
+    border-radius: var(--app-radius-medium);
+    ${actionButtonTypography}
     white-space: nowrap;
     transform: none;
   }
 
   .settings-action-btn.manage {
-    border: 1px solid var(--semi-color-border);
-    color: var(--semi-color-text-0);
-    background: var(--semi-color-bg-0);
-  }
-
-  .settings-action-btn.manage:hover {
-    background: var(--semi-color-bg-0);
-    border-color: var(--semi-color-primary);
-    color: var(--semi-color-primary);
-  }
-
-  .settings-action-btn.manage:active {
-    background: var(--semi-color-bg-0);
-    border-color: color-mix(in srgb, var(--semi-color-primary) 78%, var(--semi-color-border) 22%);
-    color: color-mix(in srgb, var(--semi-color-primary) 88%, var(--semi-color-text-0) 12%);
-  }
-
-  .settings-action-btn.manage:focus-visible {
-    background: var(--semi-color-bg-0);
-    border-color: var(--semi-color-primary);
-    color: var(--semi-color-primary);
+    border: 1px solid transparent;
+    ${buttonStyles('outline')}
+    ${actionButtonTypography}
   }
 
   .settings-action-btn.exit {
-    border: 1px solid var(--semi-color-border);
-    color: var(--semi-color-text-0);
-    background: var(--semi-color-fill-0);
+    border: 1px solid transparent;
+    ${buttonStyles('secondary')}
+    ${actionButtonTypography}
   }
 
-  .settings-action-btn.exit:hover {
-    background: var(--semi-color-fill-1);
-    border-color: color-mix(in srgb, var(--semi-color-border) 85%, var(--semi-color-text-2));
-  }
-
-  .settings-action-btn.exit:active {
-    background: var(--semi-color-fill-2);
+  /* 更新已下载时由消费者显式选择实心主按钮，不能被管理入口的描边外观覆盖。 */
+  .settings-action-btn.manage:is(.semi-button-primary, .semi-button-primary-disabled):not(.semi-button-borderless):not(.semi-button-light):not(.semi-button-outline) {
+    ${buttonStyles('primary')}
+    ${actionButtonTypography}
   }
 
   .theme-control-group {
@@ -159,6 +153,7 @@ const SettingsWrapper = styled.div`
     align-items: center;
     justify-content: space-between;
     transition: background-color 0.2s ease, border-color 0.2s ease;
+    ${focusVisibleStyles}
   }
 
   .theme-toggle:hover {
@@ -206,13 +201,13 @@ const SettingsWrapper = styled.div`
 
   .theme-toggle-label {
     min-width: 51px;
-    font-size: 11px;
-    color: var(--semi-color-text-1);
+    font-size: 12px;
+    ${textToneStyles('secondary')}
     text-align: right;
   }
 
   .language-select {
-    font-size: 11px;
+    font-size: 12px;
   }
 
   .language-select.semi-select {
@@ -232,7 +227,7 @@ const SettingsWrapper = styled.div`
     height: 30px;
     min-height: 30px;
     max-height: 30px;
-    font-size: 11px;
+    font-size: 12px;
   }
 
   .language-select .semi-select-selection {
@@ -292,13 +287,13 @@ const SettingsWrapper = styled.div`
   }
 
   .app-version {
-    font-size: 11px;
-    color: var(--semi-color-text-2);
+    font-size: 12px;
+    ${textToneStyles('muted')}
     font-variant-numeric: tabular-nums;
   }
 
   .app-update-setting .setting-desc.is-error {
-    color: var(--semi-color-danger);
+    color: var(--app-danger-text);
   }
 
   .app-update-progress {
@@ -324,7 +319,7 @@ const SettingsDropdownStyle = createGlobalStyle`
     min-height: 26px;
     padding-top: 4px;
     padding-bottom: 4px;
-    font-size: 11px;
+    font-size: 12px;
     line-height: 18px;
   }
 
@@ -343,9 +338,11 @@ const SettingsWorkspace: React.FC<SystemWorkspaceViewProps> = ({
   onSettingsSectionChange,
   settingsSection = 'home',
 }) => {
-  const { Title, Text } = Typography;
+  const lastCategory = useRef('appearance');
+  const rememberCategory = useCallback((id: string) => { lastCategory.current = id; }, []);
   const { theme, toggleTheme } = useTheme();
   const [pluginsOpen, setPluginsOpen] = useState(false);
+  const [themePreviewOpen, setThemePreviewOpen] = useState(false);
   const appearanceControls = useAppearanceContext(AppearanceControlContext);
   const { user, setUserInfo } = useAuth();
   const userRef = useRef(user);
@@ -471,6 +468,10 @@ const SettingsWorkspace: React.FC<SystemWorkspaceViewProps> = ({
 
   if (pluginsOpen) return <PluginManagement onBack={() => setPluginsOpen(false)} />;
 
+  if (themePreviewOpen) return <Suspense fallback={<div className="system-workspace-lazy-state" role="status">正在加载主题预览…</div>}>
+    <ThemeFoundationPreview embedded onBack={() => setThemePreviewOpen(false)} />
+  </Suspense>;
+
   if (settingsSection === 'tags') {
     return <TagManagement embedded onBack={goHome} />;
   }
@@ -486,8 +487,13 @@ const SettingsWorkspace: React.FC<SystemWorkspaceViewProps> = ({
   return (
     <SettingsWrapper>
       <SettingsDropdownStyle />
-      <div className="setting-item"><div><div className="setting-title">插件管理</div><div className="setting-desc">安装本地插件、管理读取能力、停用和恢复</div></div><button className="settings-action-btn manage" onClick={() => setPluginsOpen(true)}>管理插件</button></div>
-      <AppearanceSettings />
+      <SettingsSections initialCategory={lastCategory.current} onCategoryChange={rememberCategory}>
+      <section data-settings-section="appearance" aria-labelledby="settings-appearance-title">
+      <h2 className="settings-section-title" id="settings-appearance-title">外观</h2>
+      <AppearanceSettings onOpenPreview={() => {
+        lastCategory.current = 'appearance';
+        setThemePreviewOpen(true);
+      }} />
       <div className="setting-item">
         <div>
           <div className="setting-title">界面主题</div>
@@ -510,7 +516,10 @@ const SettingsWorkspace: React.FC<SystemWorkspaceViewProps> = ({
           <span className="theme-toggle-label">{THEME_LABEL_MAP[theme]}</span>
         </div>
       </div>
+      </section>
 
+      <section data-settings-section="general" aria-labelledby="settings-general-title">
+      <h2 className="settings-section-title" id="settings-general-title">通用</h2>
       <div className="setting-item">
         <div>
           <div className="setting-title">默认语言</div>
@@ -534,7 +543,10 @@ const SettingsWorkspace: React.FC<SystemWorkspaceViewProps> = ({
           <Select.Option value="en-US">English</Select.Option>
         </Select>
       </div>
+      </section>
 
+      <section data-settings-section="files" aria-labelledby="settings-files-title">
+      <h2 className="settings-section-title" id="settings-files-title">文件与存储</h2>
       <div className="setting-item">
         <div>
           <div className="setting-title">目录树显示文件后缀</div>
@@ -612,20 +624,6 @@ const SettingsWorkspace: React.FC<SystemWorkspaceViewProps> = ({
 
       <div className="setting-item">
         <div>
-          <div className="setting-title">浏览器打开映射</div>
-          <div className="setting-desc">为文件后缀绑定网站，支持目录树右键直接在浏览器模式打开</div>
-        </div>
-        <Button
-          theme="borderless"
-          onClick={() => onSettingsSectionChange?.('browser-mappings')}
-          className="settings-action-btn manage"
-        >
-          管理
-        </Button>
-      </div>
-
-      <div className="setting-item">
-        <div>
           <div className="setting-title">存储管理</div>
           <div className="setting-desc">管理多个存储 Provider 和文件分流规则</div>
         </div>
@@ -637,7 +635,17 @@ const SettingsWorkspace: React.FC<SystemWorkspaceViewProps> = ({
           管理
         </Button>
       </div>
+      </section>
 
+      <section data-settings-section="browser" aria-labelledby="settings-browser-title">
+      <h2 className="settings-section-title" id="settings-browser-title">浏览器</h2>
+      <div className="setting-item">
+        <div>
+          <div className="setting-title">浏览器打开映射</div>
+          <div className="setting-desc">为文件后缀绑定网站，支持目录树右键直接在浏览器模式打开</div>
+        </div>
+        <Button theme="borderless" onClick={() => onSettingsSectionChange?.('browser-mappings')} className="settings-action-btn manage">管理</Button>
+      </div>
       <div className="setting-item">
         <div>
           <div className="setting-title">导入 Chrome 书签</div>
@@ -664,15 +672,19 @@ const SettingsWorkspace: React.FC<SystemWorkspaceViewProps> = ({
           </Button>
         </div>
       </div>
+      </section>
 
+      <section data-settings-section="plugins" aria-labelledby="settings-plugins-title">
+      <h2 className="settings-section-title" id="settings-plugins-title">插件</h2>
+      <div className="setting-item"><div><div className="setting-title">插件管理</div><div className="setting-desc">安装本地插件、管理读取能力、停用和恢复</div></div><button type="button" className="settings-action-btn manage" onClick={() => setPluginsOpen(true)}>管理插件</button></div>
+      </section>
+
+      <section data-settings-section="about" aria-labelledby="settings-about-title">
+      <h2 className="settings-section-title" id="settings-about-title">关于与更新</h2>
       <AppUpdateSettings />
-
-      <Divider style={{ margin: '16px 0' }} />
-
-      <div>
-        <Title heading={3} style={{ fontSize: 16, marginBottom: 7, lineHeight: 1.2 }}>关于</Title>
-        <Text style={{ fontSize: 11, color: 'var(--semi-color-text-2)' }}>Omniflow App</Text>
-      </div>
+      <div className="setting-desc">Omniflow App</div>
+      </section>
+      </SettingsSections>
     </SettingsWrapper>
   );
 };

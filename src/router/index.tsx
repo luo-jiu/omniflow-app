@@ -107,5 +107,11 @@ const routes: RouteObject[] = [
   }
 ]
 
+// Development shortcut to the same preview available in appearance settings.
+// Only this shortcut route is excluded from packaged application routes.
+if (import.meta.env.DEV) {
+  const ThemeFoundationPreview = lazy(() => import('@/features/appearance/ThemeFoundationPreview'))
+  routes.push({ path: '/dev/theme-foundation', element: <ThemeFoundationPreview /> })
+}
 
 export default routes

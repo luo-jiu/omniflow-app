@@ -359,7 +359,7 @@ const LibraryPage: React.FC = () => {
   const ActiveSystemView = librarySystemView ? systemWorkspaceViews[librarySystemView] : null
   const librarySystemFrameSize = librarySystemView === 'settings' && librarySettingsSection !== 'home'
     ? 'detail'
-    : 'normal'
+    : librarySystemView === 'settings' ? 'settings' : 'normal'
 
   return (
     <LibraryWrapper ref={wrapperRef} onContextMenu={preventSystemMenu}>
@@ -429,7 +429,7 @@ const LibraryPage: React.FC = () => {
           </LibraryMainToolbar>
           <RightHeaderDivider />
           {ActiveSystemView ? (
-            <LibrarySystemScroll>
+            <LibrarySystemScroll data-size={librarySystemFrameSize}>
               <LibrarySystemFrame data-size={librarySystemFrameSize}>
                 <ActiveSystemView
                   currentView={librarySystemView as SystemWorkspaceView}

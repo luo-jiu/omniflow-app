@@ -1,4 +1,5 @@
 import styled, { createGlobalStyle } from 'styled-components';
+import { workspaceScrollbarStyles } from '@/components/ui/workspace-scrollbar';
 
 export const SystemWorkspaceDropdownStyle = createGlobalStyle`
   .system-workspace-select-dropdown {
@@ -47,7 +48,6 @@ export const SystemWorkspaceViewport = styled.div`
     min-height: 0;
   }
 
-  .system-workspace-frame-settings,
   .system-workspace-frame-resource-monitor,
   .system-workspace-frame-profile {
     width: 760px;
@@ -64,6 +64,18 @@ export const SystemWorkspaceViewport = styled.div`
     margin: 0 auto;
     display: flex;
     flex-direction: column;
+  }
+
+  &.settings-split-viewport {
+    padding: 0;
+    overflow: hidden;
+  }
+
+  .system-workspace-frame-settings {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-width: 0;
   }
 
   .system-workspace-frame-uploads,
@@ -181,6 +193,21 @@ export const SystemWorkspaceHeader = styled.div`
 
 export const SystemWorkspaceBody = styled.div`
   padding: 18px 0 24px;
+
+  .system-workspace-frame-settings & {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    padding: 0;
+    overflow: auto;
+    ${workspaceScrollbarStyles}
+  }
+
+  .system-workspace-frame-settings &::before,
+  .system-workspace-frame-profile &::before { display: none; }
+
+  .system-workspace-frame-profile & { padding-top: 0; }
 
   .system-workspace-frame-settings-detail & {
     flex: 1;

@@ -75,6 +75,16 @@ const ProfileWrapper = styled.div`
     margin-top: 7px;
   }
 
+  .password-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    min-height: 30px;
+  }
+
+  .password-row .row-title { margin-bottom: 0; }
+
   .bottom-logout {
     margin-top: 18px;
     display: flex;
@@ -432,17 +442,15 @@ const ProfilePage: React.FC = () => {
           <Input className="profile-input" value={profile?.email || ''} disabled />
         </div>
 
-        <div className="form-row">
+        <div className="form-row password-row">
           <div className="row-title">密码</div>
-          <div className="form-actions">
-            <Button
-              theme="borderless"
-              className="profile-action-btn manage"
-              onClick={() => setPasswordModalVisible(true)}
-            >
-              修改密码
-            </Button>
-          </div>
+          <Button
+            theme="borderless"
+            className="profile-action-btn manage"
+            onClick={() => setPasswordModalVisible(true)}
+          >
+            修改密码
+          </Button>
         </div>
 
         <Divider style={{ margin: '16px 0 13px' }} />
