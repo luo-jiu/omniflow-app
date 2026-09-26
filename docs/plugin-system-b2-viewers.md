@@ -16,6 +16,8 @@ fileType 继续由现有 file-identity 与打开链路决定，不因安装或�
 
 有多个候选或所选贡献不可用时，分发器显示“查看器”选择框和“设为此类文件默认”。选择必须经 FileViewerContext.selectViewer，验证注册和匹配后，在同一个 tab 中更新 viewerId/generation。不存在第二套 tab owner；文件 tab ID 继续为 node:<id> 或 url:<url>。
 
+2026-09-25 漫画入口调整：普通comic改从右侧气泡图标打开「查看器设置」弹窗，顶部不再常驻上述横栏或回退说明；其他类型保留原入口。回退通过图标可访问名称和弹窗详情呈现，不丢失原因。弹窗草稿不改变requested ID，应用/设为默认才调用原selectViewer。弹窗打开时漫画view暂时inactive，避免原生插件遮挡和内置翻页快捷键干扰；这不是撤权或另建查看器owner。
+
 ## 2. 状态归属与持久化
 
 | 数据 | owner / 存储 | 兼容规则 |
