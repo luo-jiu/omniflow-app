@@ -1,6 +1,6 @@
 # 桌面平台适配架构
 
-更新时间：2026-08-31
+更新时间：2026-09-23
 
 适用范围：`omniflow-app` 的 macOS、Windows 和 Linux 宿主差异，包含主窗口配置、renderer 平台识别、标题栏安全区、平台专属系统能力及分平台构建验证。
 
@@ -64,6 +64,8 @@ macOS原生全屏时，目录树开关从窗口态的left=75px收回到10px，�
 主窗口启用vibrancy时，`mainWindowBackground`保持透明底色`#00000000`，MainLayout与body也保持透明，让目录树原有半透明背景透出macOS毛玻璃。禁止为掩盖快速resize露底而给整个页面外壳或vibrancy窗口填充不透明聊天背景；实色`--app-bg`由右侧ContentArea和AgentRoot负责。未启用vibrancy的平台才使用与renderer一致的底色：暗色`#1e1e1e`、亮色`#f5f5f0`，Windows继续使用原有MainLayout实色。底色跟随nativeTheme更新，窗口关闭时清理监听；独立overlay仍透明。不承诺仅靠CSS消除macOS原生resize未绘制帧，保留目录树毛玻璃优先。
 
 A1 自定义配色由主窗口可信快照投影到非 vibrancy 窗口底色；mainWindowBackground 缓存该有限颜色投影，nativeTheme 更新时不会重新覆盖成硬编码默认色。vibrancy 主窗口与 overlay 保持透明。来源与 IPC 规则见 [外观系统](appearance-system.md)。
+
+macOS 目录树侧栏使用原生 `sidebar` vibrancy 单独提供材质与桌面透色，不再由 renderer 叠加 `surface.sidebarVibrancy` 主题色。Windows 使用 `surface.sidebar` 实色回退。其他工作区若确实需要主题投影，仍须使用低不透明度变量，禁止提高叠层不透明度或关闭原生 vibrancy；仅确认 BrowserWindow 仍配置 `vibrancy: 'sidebar'` 不足以证明效果保留，还需检查 renderer 叠层是否遮住材质，并在真实 macOS 窗口中复验。
 
 Windows 的 `titleBarOverlay` 策略收敛在 `electron/platform/windows/mainWindow.ts`：标题栏透明，最小化、最大化和关闭仍由 Windows 原生绘制，符号色跟随 `nativeTheme`。首行工具栏使用 Window Controls Overlay 提供的 `titlebar-area-*` CSS 环境变量计算右侧安全区，不能用固定 padding 覆盖不同 DPI；不支持环境变量时才回退到三枚标准 caption button 的宽度。
 
