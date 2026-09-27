@@ -41,42 +41,63 @@ interface LibraryNodePickerModalProps {
 
 const PickerModalStyle = createGlobalStyle`
   .library-node-picker-modal {
-    width: min(480px, calc(100vw - 32px)) !important;
+    width: min(620px, calc(100vw - 32px)) !important;
     max-width: calc(100vw - 32px) !important;
   }
 
   .library-node-picker-modal .semi-modal-content {
     width: 100%;
     box-sizing: border-box;
-    border-radius: 8px;
+    padding: 0 !important;
+    border: 1px solid var(--app-border-strong);
+    border-radius: 10px;
+    background: var(--app-bg-elevated);
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28), var(--app-shadow);
     overflow: hidden;
   }
 
   .library-node-picker-modal .semi-modal-header {
-    padding: 10px 4px 6px;
+    margin: 0;
+    padding: 14px 16px 8px !important;
   }
 
   .library-node-picker-modal .semi-modal-title {
     font-size: 14px;
     line-height: 1.35;
-    font-weight: 600;
+    font-weight: 700;
   }
 
   .library-node-picker-modal .semi-modal-close {
-    top: 12px;
-    right: 6px;
+    top: 13px;
+    right: 14px;
+    color: var(--app-text-muted);
+  }
+
+  .library-node-picker-modal .semi-modal-close:hover {
+    color: var(--app-text);
+    background: color-mix(in srgb, var(--app-text) 8%, transparent);
+  }
+
+  .library-node-picker-modal .semi-modal-body {
+    padding: 2px 16px 16px !important;
   }
 
   .library-node-picker-modal .semi-modal-footer {
-    padding: 7px 4px 10px;
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin: 0;
+    padding: 0 16px 16px !important;
   }
 
-  .library-node-picker-modal .semi-button {
+  .library-node-picker-modal .semi-modal-footer .semi-button {
     height: 28px;
-    min-width: 66px;
-    padding: 0 12px;
-    font-size: 12px;
+    min-width: 56px;
+    margin: 0;
+    padding: 0 10px;
     border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
   }
 `;
 
@@ -117,7 +138,7 @@ const ModalBody = styled.div`
   }
 
   .node-panel {
-    height: clamp(160px, 26vh, 240px);
+    height: clamp(220px, 38vh, 318px);
     min-height: 0;
     overflow: auto;
     ${workspaceScrollbarStyles}
@@ -302,6 +323,7 @@ const LibraryNodePickerModal: React.FC<LibraryNodePickerModalProps> = ({
   const [selectedNodeId, setSelectedNodeId] = React.useState<number | null>(null);
   const [loading, setLoading] = React.useState(false);
   const [errorMessage, setErrorMessage] = React.useState('');
+  const navigationRequestRef = React.useRef(0);
 
   const loadChildren = React.useCallback(async (folderId: number) => {
     const children = await getChildrenByNodeId(folderId, libraryId);
@@ -318,6 +340,7 @@ const LibraryNodePickerModal: React.FC<LibraryNodePickerModalProps> = ({
 
   React.useEffect(() => {
     if (!visible) {
+      navigationRequestRef.current += 1;
       setBreadcrumbs([]);
       setChildrenMap({});
       setSelectedNodeId(null);
@@ -327,6 +350,7 @@ const LibraryNodePickerModal: React.FC<LibraryNodePickerModalProps> = ({
     }
 
     let cancelled = false;
+    const requestId = ++navigationRequestRef.current;
     setLoading(true);
     setErrorMessage('');
     setSelectedNodeId(null);
@@ -345,7 +369,7 @@ const LibraryNodePickerModal: React.FC<LibraryNodePickerModalProps> = ({
           parentId: 0,
           type: 'dir',
         };
-        if (cancelled) {
+        if (cancelled || requestId !== navigationRequestRef.current) {
           return;
         }
         const requestedNodeId = Number(initialNodeId);
@@ -360,26 +384,35 @@ const LibraryNodePickerModal: React.FC<LibraryNodePickerModalProps> = ({
         while (cursorId > 0 && cursorId !== root.id && !visited.has(cursorId) && ancestry.length < 64) {
           visited.add(cursorId);
           const detail = await fetchNodeDetailById(cursorId);
+          if (cancelled || requestId !== navigationRequestRef.current) {
+            return;
+          }
           const node = normalizePickerNode(detail, libraryId);
           if (!node || node.type !== 'dir') break;
           ancestry.unshift(node);
           cursorId = node.parentId;
         }
         if (cursorId !== root.id || ancestry.length === 0) {
+          if (cancelled || requestId !== navigationRequestRef.current) {
+            return;
+          }
           setBreadcrumbs([{ id: root.id, name: root.name }]);
           await loadChildren(root.id);
+          return;
+        }
+        if (cancelled || requestId !== navigationRequestRef.current) {
           return;
         }
         const path = [{ id: root.id, name: root.name }, ...ancestry.map(node => ({ id: node.id, name: node.name }))];
         setBreadcrumbs(path);
         await loadChildren(ancestry[ancestry.length - 1].id);
       } catch (error: any) {
-        if (cancelled) {
+        if (cancelled || requestId !== navigationRequestRef.current) {
           return;
         }
         setErrorMessage(error?.message || '目录加载失败');
       } finally {
-        if (!cancelled) {
+        if (!cancelled && requestId === navigationRequestRef.current) {
           setLoading(false);
         }
       }
@@ -415,6 +448,7 @@ const LibraryNodePickerModal: React.FC<LibraryNodePickerModalProps> = ({
     if (node.type !== 'dir') {
       return;
     }
+    const requestId = ++navigationRequestRef.current;
     setSelectedNodeId(null);
     setBreadcrumbs((prev) => {
       const existingIndex = prev.findIndex((item) => item.id === node.id);
@@ -424,33 +458,49 @@ const LibraryNodePickerModal: React.FC<LibraryNodePickerModalProps> = ({
       return [...prev, { id: node.id, name: node.name }];
     });
     if (childrenMap[node.id]) {
+      setErrorMessage('');
+      setLoading(false);
       return;
     }
     setLoading(true);
     setErrorMessage('');
     try {
       await loadChildren(node.id);
+      if (requestId !== navigationRequestRef.current) {
+        return;
+      }
     } catch (error: any) {
-      setErrorMessage(error?.message || '目录加载失败');
+      if (requestId === navigationRequestRef.current) {
+        setErrorMessage(error?.message || '目录加载失败');
+      }
     } finally {
-      setLoading(false);
+      if (requestId === navigationRequestRef.current) {
+        setLoading(false);
+      }
     }
   }, [childrenMap, loadChildren]);
 
   const handleBreadcrumbClick = React.useCallback((crumb: { id: number; name: string }, index: number) => {
+    const requestId = ++navigationRequestRef.current;
     setSelectedNodeId(null);
     setBreadcrumbs(prev => prev.slice(0, index + 1));
     if (childrenMap[crumb.id]) {
+      setErrorMessage('');
+      setLoading(false);
       return;
     }
     setLoading(true);
     setErrorMessage('');
     void loadChildren(crumb.id)
       .catch((error: any) => {
-        setErrorMessage(error?.message || '目录加载失败');
+        if (requestId === navigationRequestRef.current) {
+          setErrorMessage(error?.message || '目录加载失败');
+        }
       })
       .finally(() => {
-        setLoading(false);
+        if (requestId === navigationRequestRef.current) {
+          setLoading(false);
+        }
       });
   }, [childrenMap, loadChildren]);
 
@@ -461,12 +511,10 @@ const LibraryNodePickerModal: React.FC<LibraryNodePickerModalProps> = ({
         className="library-node-picker-modal"
         title={title}
         visible={visible}
-        style={{
-          width: 'min(480px, calc(100vw - 32px))',
-          maxWidth: 'calc(100vw - 32px)',
-        }}
+        width={620}
+        style={{ maxWidth: 'calc(100vw - 32px)' }}
         centered
-        bodyStyle={{ minHeight: 0, padding: '4px 4px 6px' }}
+        bodyStyle={{ minHeight: 0 }}
         okText={confirmText}
         cancelText={cancelText}
         okButtonProps={{ disabled: !confirmNode || loading }}
