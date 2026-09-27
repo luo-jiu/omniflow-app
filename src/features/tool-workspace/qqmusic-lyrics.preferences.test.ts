@@ -61,6 +61,18 @@ describe('QQ music lyrics preferences', () => {
     expect(loadQQMusicLyricsSaveDirectory(3)).toBeNull();
   });
 
+  it('normalizes the legacy root directory label', () => {
+    storage.setItem(
+      'qqmusic-lyrics-preferences:v1:3',
+      JSON.stringify({ saveDirectory: { parentId: 31, pathLabel: '资料库根目录 /' } }),
+    );
+
+    expect(loadQQMusicLyricsSaveDirectory(3)).toEqual({
+      parentId: 31,
+      pathLabel: '/',
+    });
+  });
+
   it.each([
     { parentId: 0, pathLabel: '/lyrics' },
     { parentId: -1, pathLabel: '/lyrics' },

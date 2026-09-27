@@ -20,11 +20,22 @@ function removeStoredDirectory(libraryId: number) {
   }
 }
 
+function normalizePathLabel(value: unknown): string {
+  if (typeof value !== 'string') return '';
+  const pathLabel = value.trim();
+  const legacyRootPrefix = '资料库根目录';
+  if (pathLabel === legacyRootPrefix) return '/';
+  if (pathLabel.startsWith(`${legacyRootPrefix} /`)) {
+    return pathLabel.slice(legacyRootPrefix.length).trim() || '/';
+  }
+  return pathLabel;
+}
+
 function normalizeSaveDirectory(value: unknown): QQMusicLyricsSaveDirectory | null {
   if (!value || typeof value !== 'object') return null;
   const candidate = value as Partial<QQMusicLyricsSaveDirectory>;
   const parentId = Number(candidate.parentId);
-  const pathLabel = typeof candidate.pathLabel === 'string' ? candidate.pathLabel.trim() : '';
+  const pathLabel = normalizePathLabel(candidate.pathLabel);
   if (!Number.isInteger(parentId) || parentId <= 0 || !pathLabel) return null;
   return { parentId, pathLabel };
 }

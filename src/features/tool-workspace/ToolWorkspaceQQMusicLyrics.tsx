@@ -1102,7 +1102,7 @@ function contextualSaveDirectory(
     };
   }
   if (rootNodeId && rootNodeId > 0) {
-    return { parentId: rootNodeId, pathLabel: '资料库根目录 /' };
+    return { parentId: rootNodeId, pathLabel: '/' };
   }
   return null;
 }
@@ -1116,7 +1116,7 @@ function fallbackSaveDirectory(
     return contextualTarget;
   }
   if (rootNodeId && rootNodeId > 0 && rootNodeId !== excludedParentId) {
-    return { parentId: rootNodeId, pathLabel: '资料库根目录 /' };
+    return { parentId: rootNodeId, pathLabel: '/' };
   }
   return null;
 }
