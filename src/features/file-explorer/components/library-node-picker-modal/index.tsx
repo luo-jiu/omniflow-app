@@ -138,18 +138,16 @@ const ModalBody = styled.div`
   }
 
   .node-panel {
-    height: clamp(220px, 38vh, 318px);
-    min-height: 0;
+    height: 318px;
+    min-height: 318px;
+    flex: 0 0 318px;
+    box-sizing: border-box;
     overflow: auto;
     ${workspaceScrollbarStyles}
     border: 1px solid var(--app-border);
     border-radius: 8px;
     background: var(--app-bg-elevated);
     padding: 6px;
-  }
-
-  .node-panel.is-empty {
-    height: 112px;
   }
 
   .node-panel .semi-empty {
@@ -554,9 +552,7 @@ const LibraryNodePickerModal: React.FC<LibraryNodePickerModalProps> = ({
             })}
           </div>
 
-          <div
-            className={`node-panel${!loading && !errorMessage && visibleNodes.length === 0 ? ' is-empty' : ''}`}
-          >
+          <div className="node-panel">
             {loading ? (
               <Spin spinning />
             ) : errorMessage ? (
