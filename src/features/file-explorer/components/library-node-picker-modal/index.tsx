@@ -40,13 +40,20 @@ interface LibraryNodePickerModalProps {
 }
 
 const PickerModalStyle = createGlobalStyle`
+  .library-node-picker-modal {
+    width: min(480px, calc(100vw - 32px)) !important;
+    max-width: calc(100vw - 32px) !important;
+  }
+
   .library-node-picker-modal .semi-modal-content {
+    width: 100%;
+    box-sizing: border-box;
     border-radius: 8px;
     overflow: hidden;
   }
 
   .library-node-picker-modal .semi-modal-header {
-    padding: 13px 16px 8px;
+    padding: 10px 4px 6px;
   }
 
   .library-node-picker-modal .semi-modal-title {
@@ -57,11 +64,11 @@ const PickerModalStyle = createGlobalStyle`
 
   .library-node-picker-modal .semi-modal-close {
     top: 12px;
-    right: 14px;
+    right: 6px;
   }
 
   .library-node-picker-modal .semi-modal-footer {
-    padding: 9px 16px 13px;
+    padding: 7px 4px 10px;
   }
 
   .library-node-picker-modal .semi-button {
@@ -76,7 +83,7 @@ const PickerModalStyle = createGlobalStyle`
 const ModalBody = styled.div`
   display: flex;
   flex-direction: column;
-  gap: 9px;
+  gap: 6px;
   min-height: 0;
 
   .breadcrumbs {
@@ -110,7 +117,7 @@ const ModalBody = styled.div`
   }
 
   .node-panel {
-    height: clamp(220px, 32vh, 280px);
+    height: clamp(160px, 26vh, 240px);
     min-height: 0;
     overflow: auto;
     ${workspaceScrollbarStyles}
@@ -118,6 +125,24 @@ const ModalBody = styled.div`
     border-radius: 8px;
     background: var(--app-bg-elevated);
     padding: 6px;
+  }
+
+  .node-panel.is-empty {
+    height: 112px;
+  }
+
+  .node-panel .semi-empty {
+    padding: 14px 8px;
+  }
+
+  .node-panel .semi-empty-title {
+    font-size: 13px;
+    line-height: 1.35;
+  }
+
+  .node-panel .semi-empty-description {
+    font-size: 11px;
+    line-height: 1.35;
   }
 
   .node-list {
@@ -412,6 +437,23 @@ const LibraryNodePickerModal: React.FC<LibraryNodePickerModalProps> = ({
     }
   }, [childrenMap, loadChildren]);
 
+  const handleBreadcrumbClick = React.useCallback((crumb: { id: number; name: string }, index: number) => {
+    setSelectedNodeId(null);
+    setBreadcrumbs(prev => prev.slice(0, index + 1));
+    if (childrenMap[crumb.id]) {
+      return;
+    }
+    setLoading(true);
+    setErrorMessage('');
+    void loadChildren(crumb.id)
+      .catch((error: any) => {
+        setErrorMessage(error?.message || '目录加载失败');
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+  }, [childrenMap, loadChildren]);
+
   return (
     <>
       <PickerModalStyle />
@@ -419,10 +461,12 @@ const LibraryNodePickerModal: React.FC<LibraryNodePickerModalProps> = ({
         className="library-node-picker-modal"
         title={title}
         visible={visible}
-        width={620}
+        style={{
+          width: 'min(480px, calc(100vw - 32px))',
+          maxWidth: 'calc(100vw - 32px)',
+        }}
         centered
-        style={{ maxWidth: 'calc(100vw - 40px)' }}
-        bodyStyle={{ minHeight: 0, padding: '5px 14px 7px' }}
+        bodyStyle={{ minHeight: 0, padding: '4px 4px 6px' }}
         okText={confirmText}
         cancelText={cancelText}
         okButtonProps={{ disabled: !confirmNode || loading }}
@@ -452,10 +496,7 @@ const LibraryNodePickerModal: React.FC<LibraryNodePickerModalProps> = ({
                     type="button"
                     className="crumb-btn"
                     data-current={isCurrent}
-                    onClick={() => {
-                      setSelectedNodeId(null);
-                      setBreadcrumbs(breadcrumbs.slice(0, index + 1));
-                    }}
+                    onClick={() => handleBreadcrumbClick(crumb, index)}
                   >
                     {crumb.name}
                   </button>
@@ -465,7 +506,9 @@ const LibraryNodePickerModal: React.FC<LibraryNodePickerModalProps> = ({
             })}
           </div>
 
-          <div className="node-panel">
+          <div
+            className={`node-panel${!loading && !errorMessage && visibleNodes.length === 0 ? ' is-empty' : ''}`}
+          >
             {loading ? (
               <Spin spinning />
             ) : errorMessage ? (
