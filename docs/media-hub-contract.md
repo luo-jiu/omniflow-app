@@ -86,6 +86,8 @@ B2 在同一 tab 显式切换查看器时，也由 FileViewerContext 捕获旧�
 - 音量偏好不属于 MediaRegistry entry、Viewer Session 或账号远端偏好；`clear()`、关闭 tab 和换播放源均不得重置音量。
 - 当前该 preference 只投影音频；视频音量接入属于后续独立改动，接入前不得让 audio viewer 直接操作 video DOM。
 
+音频歌词预览由当前展示歌曲驱动，进入页面即可独立读取；歌词发现与文本加载不调用 `ensureSource` / `play`，不申请播放 generation，也不注册 MediaHub。实际播放仅由既有 `globalAudioPlayer` 负责，歌词就绪与否不阻塞播放；播放开始不会重置同一首歌的歌词。
+
 音频归档的边框进度显示仅为UI投影：使用 `useGlobalAudioPlayback` 的当前owner/source校验与服务已有 `hasStarted`，不另建“已播放”状态；元数据加载和未完成的播放请求不得触发显示，暂停后沿用服务状态保留。进度条隐藏时禁用range并退出Tab顺序；弧线鼠标seek与原生键盘range均沿用预览、提交、取消的原服务链，不因气泡视觉变化新增播放实体。
 
 ## 2. 接口面

@@ -21,7 +21,6 @@ import { runtimeLogger } from '@/utils/runtimeLogger';
 import { useGlobalAudioPlayback } from '@/features/file-viewer/hooks/useGlobalAudioPlayback';
 import { isOwnedGlobalAudioPlaying } from '@/features/file-viewer/services/global-audio-retention';
 import { isGlobalAudioOwnedBy } from '@/features/file-viewer/services/global-audio-owner';
-import { useTimedText } from '@/features/file-viewer/timed-text/useTimedText';
 import type { TimedTextCue } from '@/features/file-viewer/timed-text/subtitle';
 import type {
   FileViewerSubtitleSource,
@@ -32,7 +31,6 @@ import {
   AUDIO_ARCHIVE_EMPTY_SIDECARS,
   buildBareAudioCard,
   buildSingleAudioFolderContent,
-  buildAudioSubtitleSources,
   normalizeAudioArchiveMatchName,
   resolveAudioViewerMode,
   type AudioArchiveCard,
@@ -58,6 +56,8 @@ import {
   releaseExternalKeyboardFocus,
 } from '@/features/file-viewer/utils/media-keyboard-target';
 import { useAudioCardPlayback } from './use-audio-card-playback';
+import { useAudioCardSubtitles } from './use-audio-card-subtitles';
+import { useAudioExpandedLayout } from './use-audio-expanded-layout';
 import { AudioDockProgress } from './audio-dock-progress';
 import {
   AudioCover,
@@ -182,8 +182,9 @@ const UnifiedAudioViewer: React.FC<UnifiedAudioViewerProps> = ({
   const meteorSerialRef = useRef(0);
   const pendingMeteorRef = useRef<Omit<AudioDockMeteorEvent, 'id' | 'src'> | null>(null);
   const [expanded, setExpanded] = useState(singleFolderMode || bareAudioMode);
+  useAudioExpandedLayout(viewerRootRef, active && expanded);
   const [seekingTime, setSeekingTime] = useState<number | null>(null);
-  const [activeSubtitleSources, setActiveSubtitleSources] = useState<FileViewerSubtitleSource[] | undefined>(undefined);
+  const [folderSubtitleSources, setFolderSubtitleSources] = useState<FileViewerSubtitleSource[] | undefined>(undefined);
   const [menuState, setMenuState] = useState<{
     visible: boolean;
     x: number;
@@ -274,10 +275,14 @@ const UnifiedAudioViewer: React.FC<UnifiedAudioViewerProps> = ({
     subtitleCues,
     subtitleError,
     subtitleFileName,
-  } = useTimedText({
+  } = useAudioCardSubtitles({
+    cardNodeId: hasLoadedList ? effectiveCard?.id ?? null : null,
+    mediaNodeId: hasLoadedList ? effectiveCard?.mediaNodeId ?? null : null,
     currentTime,
-    subtitleSources: activeSubtitleSources,
-    url: currentAudioUrl || '',
+    folderSubtitleSources,
+    libraryId,
+    resourceKey: JSON.stringify([fileUrl, contentRevision, reloadToken]),
+    viewerMode,
   });
 
   useEffect(() => {
@@ -552,7 +557,7 @@ const UnifiedAudioViewer: React.FC<UnifiedAudioViewerProps> = ({
         setCards([]);
         setTotal(0);
         setError('当前音乐文件夹中没有可播放的音频');
-        setActiveSubtitleSources(undefined);
+        setFolderSubtitleSources(undefined);
         return;
       }
 
@@ -561,14 +566,14 @@ const UnifiedAudioViewer: React.FC<UnifiedAudioViewerProps> = ({
       setCards(card ? [card] : []);
       setTotal(card ? 1 : 0);
       setSelectedCardId(card?.id ?? null);
-      setActiveSubtitleSources(content.subtitleSources.length > 0 ? content.subtitleSources : undefined);
+      setFolderSubtitleSources(content.subtitleSources.length > 0 ? content.subtitleSources : undefined);
     } catch (loadError) {
       runtimeLogger.error('加载音乐文件夹失败:', loadError);
       if (requestId !== requestIdRef.current) return;
       setCards([]);
       setTotal(0);
       setError('加载音乐文件夹失败');
-      setActiveSubtitleSources(undefined);
+      setFolderSubtitleSources(undefined);
     } finally {
       if (requestId === requestIdRef.current) {
         setHasLoadedList(true);
@@ -586,7 +591,7 @@ const UnifiedAudioViewer: React.FC<UnifiedAudioViewerProps> = ({
     setCards([card]);
     setTotal(1);
     setSelectedCardId(card.id);
-    setActiveSubtitleSources(undefined);
+    setFolderSubtitleSources(undefined);
     setHasLoadedList(true);
     setListLoading(false);
     setLoadingMore(false);
@@ -599,38 +604,20 @@ const UnifiedAudioViewer: React.FC<UnifiedAudioViewerProps> = ({
     void loadPage(nextOffset, true);
   }, [hasMore, listLoading, loadingMore, loadPage, nextOffset]);
 
-  const loadCardSubtitleSources = useCallback(async (card: AudioArchiveCard): Promise<FileViewerSubtitleSource[] | undefined> => {
-    if (!libraryId) return undefined;
-    if (card.mediaNodeId && card.mediaNodeId !== card.id) {
-      try {
-        const children = await getChildrenByNodeId(card.id, libraryId);
-        const sources = buildAudioSubtitleSources(children as AudioArchiveChildNode[], libraryId);
-        return sources.length > 0 ? sources : undefined;
-      } catch (error) {
-        runtimeLogger.warn('加载歌曲文件夹歌词失败:', error);
-        return undefined;
-      }
-    }
-    return undefined;
-  }, [libraryId]);
-
   const handlePlaybackStarted = useCallback(({
     card,
     endedSerial,
-    subtitleSources,
     url,
     automatic,
   }: {
     card: AudioArchiveCard;
     endedSerial: number;
-    subtitleSources: FileViewerSubtitleSource[] | undefined;
     url: string;
     automatic: boolean;
   }) => {
     setCurrentCardId(card.id);
     setSelectedCardId(card.id);
     setCurrentAudioUrl(url);
-    setActiveSubtitleSources(subtitleSources);
     lastHandledEndedSerialRef.current = endedSerial;
     const previous = pendingMeteorRef.current;
     pendingMeteorRef.current = null;
@@ -657,7 +644,6 @@ const UnifiedAudioViewer: React.FC<UnifiedAudioViewerProps> = ({
     getEndedSerial,
     libraryId,
     isPlaybackRequestCurrent,
-    loadSubtitleSources: loadCardSubtitleSources,
     onStarted: handlePlaybackStarted,
     play,
     seekTo,
@@ -864,7 +850,7 @@ const UnifiedAudioViewer: React.FC<UnifiedAudioViewerProps> = ({
       setCurrentCardId(null);
       setSelectedCardId(null);
       setCurrentAudioUrl(null);
-      setActiveSubtitleSources(undefined);
+      setFolderSubtitleSources(undefined);
       return;
     }
     if (pendingSessionResourceNodeIdRef.current !== folderNodeId) {
@@ -880,7 +866,7 @@ const UnifiedAudioViewer: React.FC<UnifiedAudioViewerProps> = ({
     setCurrentCardId(null);
     setSelectedCardId(pendingSessionRestoreRef.current?.selectedCardId ?? null);
     setCurrentAudioUrl(null);
-    setActiveSubtitleSources(undefined);
+    setFolderSubtitleSources(undefined);
     setExpanded(singleFolderMode || bareAudioMode);
     if (bareAudioMode) {
       loadBareAudio();
@@ -961,28 +947,14 @@ const UnifiedAudioViewer: React.FC<UnifiedAudioViewerProps> = ({
     setCurrentCardId(matchedCard.id);
     setSelectedCardId(matchedCard.id);
     setCurrentAudioUrl(playerState.src);
-    void loadCardSubtitleSources(matchedCard).then((sources) => {
-      const latestState = getPlayerState();
-      if (
-        latestState.src !== playerState.src
-        || latestState.sourceNodeId !== playingNodeId
-        || latestState.ownerKey !== audioOwnerKey
-        || latestState.tabId !== tabId
-      ) return;
-      setActiveSubtitleSources(sources);
-    });
   }, [
     cards,
     currentAudioUrl,
     currentCardId,
-    getPlayerState,
     isOwnedSource,
     libraryId,
-    loadCardSubtitleSources,
-    audioOwnerKey,
     playerState.sourceNodeId,
     playerState.src,
-    tabId,
   ]);
 
   useEffect(() => {
@@ -1066,20 +1038,18 @@ const UnifiedAudioViewer: React.FC<UnifiedAudioViewerProps> = ({
               <div className="expanded-lyrics">
                 <div className="expanded-title" title={effectiveCard?.title || ''}>{effectiveCard?.title || '未选择歌曲'}</div>
                 <div className="expanded-subtitle">{subtitleFileName || (subtitleCues.length > 0 ? '歌词已加载' : '暂无歌词')}</div>
-                <div className="lyrics-stage">
-                  <ExpandedLyricsRoller
-                    currentAudioUrl={currentAudioUrl}
-                    currentTime={currentTime}
-                    duration={duration}
-                    getPlayerState={getPlayerState}
-                    isOwnedSource={isCurrentAudioSource}
-                    isPlaying={playerState.isPlaying}
-                    onLyricJump={handleLyricJump}
-                    subtitleCues={subtitleCues}
-                    subtitleError={subtitleError}
-                    emptyText={bareAudioMode ? '暂无歌词' : undefined}
-                  />
-                </div>
+                <ExpandedLyricsRoller
+                  currentAudioUrl={currentAudioUrl}
+                  currentTime={currentTime}
+                  duration={duration}
+                  getPlayerState={getPlayerState}
+                  isOwnedSource={isCurrentAudioSource}
+                  isPlaying={playerState.isPlaying}
+                  onLyricJump={handleLyricJump}
+                  subtitleCues={subtitleCues}
+                  subtitleError={subtitleError}
+                  emptyText={bareAudioMode ? '暂无歌词' : undefined}
+                />
               </div>
               <div className="expanded-spectrum">
                 <AudioSpectrumVisualizer

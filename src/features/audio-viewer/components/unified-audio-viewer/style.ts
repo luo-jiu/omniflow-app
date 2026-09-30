@@ -506,12 +506,13 @@ export const UnifiedAudioViewerWrapper = styled.div`
     min-height: 0;
     position: relative;
     display: grid;
-    grid-template-columns: minmax(210px, 35%) minmax(260px, 1fr);
-    grid-template-rows: minmax(0, 1fr) clamp(96px, 15vh, 150px);
+    /* Equal columns share the floating dock's centered play-button axis. */
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: minmax(320px, 1fr) clamp(64px, 8vh, 96px);
     align-items: center;
-    column-gap: 36px;
+    column-gap: clamp(64px, 7cqw, 112px);
     row-gap: 18px;
-    padding: 28px 48px 16px;
+    padding: 28px clamp(24px, 5cqw, 96px) 16px;
     background:
       radial-gradient(circle at 18% 22%, color-mix(in srgb, var(--semi-color-primary-light-default) 42%, transparent), transparent 34%),
       linear-gradient(180deg, color-mix(in srgb, var(--semi-color-bg-1) 82%, transparent), var(--semi-color-bg-0));
@@ -541,13 +542,15 @@ export const UnifiedAudioViewerWrapper = styled.div`
     display: flex;
     justify-content: flex-end;
     min-width: 0;
+    transform: translateY(25px);
   }
 
   .audio-cover.large {
-    width: min(300px, 28vw);
-    height: min(300px, 28vw);
-    min-width: 180px;
-    min-height: 180px;
+    width: min(300px, 100%);
+    height: auto;
+    min-width: 0;
+    min-height: 0;
+    aspect-ratio: 1;
     border-radius: 10px;
     font-size: 68px;
     box-shadow: 0 24px 58px rgba(0, 0, 0, 0.22);
@@ -558,7 +561,14 @@ export const UnifiedAudioViewerWrapper = styled.div`
   }
 
   .expanded-lyrics {
+    --audio-lyrics-top: max(0px, calc(25vh - var(--audio-viewer-window-top, 0px) - 28px));
     min-width: 0;
+    min-height: 0;
+    height: calc(100% - var(--audio-lyrics-top));
+    max-height: 740px;
+    margin-top: var(--audio-lyrics-top);
+    transform: translateY(-25px);
+    align-self: start;
     display: flex;
     flex-direction: column;
     gap: 10px;
@@ -573,23 +583,29 @@ export const UnifiedAudioViewerWrapper = styled.div`
   }
 
   .expanded-title {
-    max-width: 620px;
+    flex-shrink: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 22px;
+    font-size: clamp(28px, 2.4cqw, 36px);
     line-height: 1.25;
     font-weight: 800;
   }
 
   .expanded-subtitle {
+    flex-shrink: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     color: var(--semi-color-text-2);
     font-size: 12px;
   }
 
   .lyrics-stage {
-    height: clamp(250px, 42vh, 420px);
+    flex: 1;
     min-height: 0;
+    container: audio-lyrics / size;
+    padding-right: 2px;
     overflow: auto;
     ${workspaceScrollbarStyles}
     scrollbar-width: none;
@@ -598,21 +614,26 @@ export const UnifiedAudioViewerWrapper = styled.div`
       width: 0;
       height: 0;
     }
-    /* Keep the lyric fade without reserving a visible scrollbar strip. */
+    /* Keep the opening lines visible until the stage starts scrolling. */
     mask-image:
-      linear-gradient(180deg, transparent 0%, #000 15%, #000 85%, transparent 100%);
+      linear-gradient(180deg, #000 0%, #000 85%, transparent 100%);
     mask-size: 100% 100%;
     mask-position: left top;
     mask-repeat: no-repeat;
+    &[data-scrolled='true'] {
+      mask-image:
+        linear-gradient(180deg, transparent 0%, #000 15%, #000 85%, transparent 100%);
+    }
   }
 
   .lyric-roller {
     min-height: 100%;
     display: flex;
     flex-direction: column;
-    justify-content: center;
+    justify-content: flex-start;
     gap: 14px;
-    padding: 42% 0;
+    /* Keep enough tail space for the last cue to reach the cover-aligned anchor. */
+    padding: 0 0 var(--audio-lyrics-tail-space, 50cqh);
   }
 
   .lyric-line {
@@ -630,6 +651,7 @@ export const UnifiedAudioViewerWrapper = styled.div`
     color: var(--semi-color-text-2);
     text-align: left;
     white-space: pre-wrap;
+    overflow-wrap: anywhere;
     cursor: pointer;
     opacity: 0.48;
     transform-origin: left center;
@@ -694,18 +716,6 @@ export const UnifiedAudioViewerWrapper = styled.div`
 
     .player-extra {
       display: none;
-    }
-
-    .expanded-player {
-      grid-template-columns: 1fr;
-      grid-template-rows: auto minmax(220px, 1fr) 76px;
-      align-items: start;
-      gap: 18px;
-      padding: 44px 20px 18px;
-    }
-
-    .expanded-cover-wrap {
-      justify-content: center;
     }
   }
 
@@ -895,14 +905,28 @@ export const UnifiedAudioViewerWrapper = styled.div`
 
       .expanded-player {
         grid-template-columns: minmax(0, 1fr);
-        grid-template-rows: auto minmax(220px, 1fr) 76px;
+        grid-template-rows: auto auto 64px;
         align-items: start;
         gap: 18px;
         padding: 28px 20px 128px;
       }
 
+      .expanded-lyrics {
+        height: auto;
+        max-height: none;
+        margin-top: 0;
+        transform: none;
+      }
+
       .expanded-cover-wrap {
         justify-content: center;
+        padding-right: 0;
+        transform: none;
+      }
+
+      .lyrics-stage {
+        flex: none;
+        height: clamp(280px, 54vh, 600px);
       }
 
       .audio-cover.large {

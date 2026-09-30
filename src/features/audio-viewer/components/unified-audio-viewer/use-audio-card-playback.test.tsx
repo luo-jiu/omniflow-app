@@ -11,7 +11,7 @@ function mount(started = true, current = true) {
   const options = {
     audioOwnerKey: 'owner', bareAudioMode: false, beginPlaybackRequest: vi.fn(() => 1), cancelPlaybackRequest: vi.fn(() => true),
     ensureSource: vi.fn(() => true), fileUrl: '', getEndedSerial: () => 1, libraryId: 3,
-    isPlaybackRequestCurrent: vi.fn(() => current), loadSubtitleSources: vi.fn(async () => undefined),
+    isPlaybackRequestCurrent: vi.fn(() => current),
     onStarted: vi.fn(), play: vi.fn(async () => started), seekTo: vi.fn(),
   };
   let api!: ReturnType<typeof useAudioCardPlayback>;

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { Toast } from '@douyinfe/semi-ui';
 import { getFileLink } from '@/features/file-explorer/services/file.api';
-import type { FileViewerSubtitleSource } from '@/contexts/file-viewer.context';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 import type { AudioArchiveCard } from './audio-viewer-content';
 
@@ -23,13 +22,9 @@ interface UseAudioCardPlaybackOptions {
   getEndedSerial: () => number;
   libraryId: number | null;
   isPlaybackRequestCurrent: (playbackRequestId: number) => boolean;
-  loadSubtitleSources: (
-    card: AudioArchiveCard,
-  ) => Promise<FileViewerSubtitleSource[] | undefined>;
   onStarted: (payload: {
     card: AudioArchiveCard;
     endedSerial: number;
-    subtitleSources: FileViewerSubtitleSource[] | undefined;
     url: string;
     automatic: boolean;
   }) => void;
@@ -47,7 +42,6 @@ export function useAudioCardPlayback({
   getEndedSerial,
   libraryId,
   isPlaybackRequestCurrent,
-  loadSubtitleSources,
   onStarted,
   play,
   seekTo,
@@ -79,12 +73,9 @@ export function useAudioCardPlayback({
     activeRequestIdRef.current = requestId;
 
     try {
-      const [nextUrl, subtitleSources] = await Promise.all([
-        bareAudioMode
-          ? Promise.resolve(fileUrl)
-          : getFileLink(card.mediaNodeId || card.id, libraryId, LINK_EXPIRY_MINUTES),
-        loadSubtitleSources(card),
-      ]);
+      const nextUrl = bareAudioMode
+        ? fileUrl
+        : await getFileLink(card.mediaNodeId || card.id, libraryId, LINK_EXPIRY_MINUTES);
       if (!nextUrl) throw new Error('未获取到音频访问链接');
       if (!isPlaybackRequestCurrent(requestId)) return false;
 
@@ -103,7 +94,6 @@ export function useAudioCardPlayback({
       onStarted({
         card,
         endedSerial: getEndedSerial(),
-        subtitleSources,
         url: nextUrl,
         automatic: options.automatic === true,
       });
@@ -127,7 +117,6 @@ export function useAudioCardPlayback({
     getEndedSerial,
     libraryId,
     isPlaybackRequestCurrent,
-    loadSubtitleSources,
     onStarted,
     play,
     seekTo,
