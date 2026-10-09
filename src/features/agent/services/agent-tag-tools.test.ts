@@ -5,7 +5,7 @@ import { executeAgentTagTool } from './agent-tag-tools';
 import { IpcRequestError } from '@/service/request/ipcRequest';
 
 const node = { id: 9, libraryId: 3, parentId: 8, name: 'report', type: 'file' as const, path: '/report' };
-const tag = (id: number, ownerUserId: number | null = 7): TagItem => ({ id, name: `tag${id}`, ownerUserId,
+const tag = (id: number): TagItem => ({ id, libraryId: 3, name: `tag${id}`,
   type: 'FILE', scope: 'resource', enabled: 1, sortOrder: 0, color: '#ffffff', targetKinds: ['file'] });
 function request(input: object = {}): AgentToolExecutionRequest {
   return { toolName: 'tag.list', executionId: 'e', sessionId: 's', runId: 'r',
@@ -13,37 +13,44 @@ function request(input: object = {}): AgentToolExecutionRequest {
     appContext: { libraryId: 3, platform: 'darwin' }, input: { libraryId: 3, ...input } } as AgentToolExecutionRequest;
 }
 function dependencies() {
-  return { assertOwner: vi.fn(), fetchTags: vi.fn(async () => [tag(1), tag(2, null), tag(3, 8),
-    { ...tag(4), enabled: 0 }, { ...tag(5), scope: 'ui' }]),
-  readLibraryNode: vi.fn(async () => node), readNodeTags: vi.fn(async () => ({ nodeId: 9, libraryId: 3, parentId: 8,
-    tagIds: [1, 3, 99], affectedParentIds: [8], dryRun: false })),
+  return { assertOwner: vi.fn(), queryLibraryTags: vi.fn(async () => ({ entries: [tag(1)], hasMore: false, nextCursor: undefined as string | undefined })),
+  readLibraryNode: vi.fn(async () => node),
   updateNodeTags: vi.fn(async () => ({ nodeId: 9, libraryId: 3, parentId: 8, tagIds: [1, 3, 99], affectedParentIds: [8], dryRun: false })),
   beforeCommit: vi.fn(async () => undefined), onCommitted: vi.fn(), notifyMutated: vi.fn() };
 }
 describe('agent tags', () => {
-  it('only lists enabled owner/public resource tags with explicit continuation', async () => {
+  it('delegates library, keyword, dimension and cursor filtering to the server', async () => {
     const deps = dependencies();
-    const first = await executeAgentTagTool(request({ limit: 1 }), deps);
+    deps.queryLibraryTags.mockResolvedValueOnce({ entries: [tag(1)], hasMore: true, nextCursor: 'opaque-next' })
+      .mockResolvedValueOnce({ entries: [tag(2)], hasMore: false, nextCursor: undefined });
+    const first = await executeAgentTagTool(request({ limit: 1, keyword: '日语', dimension: 'language' }), deps);
     expect(first).toMatchObject({ result: { ok: true,
-      data: { entries: [{ id: 1 }], hasMore: true, nextOffset: 1, total: 2 } } });
-    const revision = (first.result.data as Record<string, unknown>).revision;
-    expect(await executeAgentTagTool(request({ offset: 1, revision }), deps)).toMatchObject({ result: { data: {
+      data: { entries: [{ id: 1 }], hasMore: true, nextCursor: 'opaque-next', source: 'library_resource_catalog' } } });
+    expect(deps.queryLibraryTags).toHaveBeenLastCalledWith({ libraryId: 3, keyword: '日语', dimension: 'language',
+      limit: 1, enabled: true });
+    expect(await executeAgentTagTool(request({ cursor: 'opaque-next' }), deps)).toMatchObject({ result: { data: {
       entries: [{ id: 2 }], hasMore: false } } });
-    expect(deps.readNodeTags).not.toHaveBeenCalled();
+    expect(deps.queryLibraryTags).toHaveBeenLastCalledWith(expect.objectContaining({ libraryId: 3, cursor: 'opaque-next', limit: 10 }));
+    expect(deps.readLibraryNode).not.toHaveBeenCalled();
   });
-  it('preserves unresolved IDs from authoritative relations', async () => {
-    expect(await executeAgentTagTool(request({ nodeId: 9, target: node }), dependencies())).toMatchObject({ result: { ok: true,
-      data: { entries: [{ id: 1 }], unresolvedTagIds: [3, 99], authoritativeRelations: true, updateAvailable: true } } });
+  it('queries authoritative direct bindings without hiding disabled tags', async () => {
+    const deps = dependencies();
+    deps.queryLibraryTags.mockResolvedValue({ entries: [{ ...tag(2), enabled: 0, deleted: true, legacy: true }], hasMore: false, nextCursor: undefined });
+    expect(await executeAgentTagTool(request({ nodeId: 9, target: node }), deps)).toMatchObject({ result: { ok: true,
+      data: { entries: [{ id: 2, enabled: 0, deleted: true, legacy: true }], authoritativeRelations: true, source: 'node_tag_rel' } } });
+    expect(deps.queryLibraryTags).toHaveBeenCalledWith({ libraryId: 3, nodeId: 9, limit: 10 });
   });
-  it('refuses malformed metadata, changed nodes, cross-library and guessed targets', async () => {
-    const deps = dependencies(); deps.readNodeTags.mockResolvedValue({ nodeId: 9, libraryId: 4, parentId: 8, tagIds: [], affectedParentIds: [8], dryRun: false });
-    expect((await executeAgentTagTool(request({ nodeId: 9, target: node }), deps)).result.ok).toBe(false);
+  it('refuses malformed pages, changed nodes, cross-library and guessed targets', async () => {
+    const deps = dependencies();
+    deps.queryLibraryTags.mockResolvedValue({ entries: [{ ...tag(1), libraryId: 4 }], hasMore: false, nextCursor: undefined });
+    expect((await executeAgentTagTool(request(), deps)).result.ok).toBe(false);
     const next = dependencies(); next.readLibraryNode.mockResolvedValue({ ...node, parentId: 20 });
     expect((await executeAgentTagTool(request({ nodeId: 9, target: node }), next)).result.ok).toBe(false);
-    for (const input of [{ libraryId: 4 }, { nodeId: 9 }, { limit: 101 }]) {
+    expect(next.queryLibraryTags).not.toHaveBeenCalled();
+    for (const input of [{ libraryId: 4 }, { nodeId: 9 }, { limit: 11 }, { cursor: '' }]) {
       const invalid = dependencies();
       expect((await executeAgentTagTool(request(input), invalid)).result.ok).toBe(false);
-      expect(invalid.fetchTags).not.toHaveBeenCalled();
+      expect(invalid.queryLibraryTags).not.toHaveBeenCalled();
     }
   });
   it('does not return results after owner drift or cancellation', async () => {
@@ -51,7 +58,7 @@ describe('agent tags', () => {
       .mockImplementation(() => { throw new Error('owner changed'); });
     expect((await executeAgentTagTool(request(), deps)).result.ok).toBe(false);
     const controller = new AbortController(); const canceled = dependencies();
-    canceled.fetchTags.mockImplementation(async () => { controller.abort(); return [tag(1)]; });
+    canceled.queryLibraryTags.mockImplementation(async () => { controller.abort(); return { entries: [tag(1)], hasMore: false, nextCursor: undefined }; });
     expect((await executeAgentTagTool(request(), { ...canceled, signal: controller.signal })).result.ok).toBe(false);
   });
   it('sends only deltas and records facts before notifying', async () => {
@@ -61,7 +68,7 @@ describe('agent tags', () => {
       mutationCommitState: 'committed', affectedParentIds: [8] } }, perception: { knownNodes: [{ id: 9, updatedAt: 'v2' }] } });
     expect(deps.updateNodeTags).toHaveBeenCalledWith(9, { libraryId: 3, addTagIds: [1], removeTagIds: [2] });
     expect(deps.onCommitted.mock.invocationCallOrder[0]).toBeLessThan(deps.notifyMutated.mock.invocationCallOrder[0]);
-    expect(deps.fetchTags).not.toHaveBeenCalled(); expect(deps.readNodeTags).not.toHaveBeenCalled();
+    expect(deps.queryLibraryTags).not.toHaveBeenCalled();
   });
   it('distinguishes rejected and uncertain writes including malformed receipts', async () => {
     for (const [error, state] of [[new IpcRequestError('denied', 403), 'uncommitted'], [new Error('lost'), 'commit_unknown']] as const) {
@@ -101,45 +108,24 @@ describe('agent tags', () => {
     expect(await executeAgentTagTool(req, deps)).toMatchObject({ committed: true, result: { ok: true } });
     expect(deps.onCommitted).toHaveBeenCalledOnce(); expect(deps.notifyMutated).not.toHaveBeenCalled();
   });
-  it('keeps mixed long tags and unresolved IDs under the JSON byte budget without skipping', async () => {
+  it('preserves complete server pages and cursors within the byte budget', async () => {
     const deps = dependencies();
-    deps.fetchTags.mockResolvedValue(Array.from({ length: 60 }, (_, index) => ({ ...tag(index * 2 + 1), name: '长标签'.repeat(150) })));
-    deps.readNodeTags.mockResolvedValue({ nodeId: 9, libraryId: 3, parentId: 8,
-      tagIds: Array.from({ length: 120 }, (_, index) => index + 1), affectedParentIds: [8], dryRun: false });
-    let offset = 0; let revision: unknown; const received: number[] = [];
-    for (;;) {
-      const out = await executeAgentTagTool(request({ nodeId: 9, target: node, limit: 100, offset, revision }), deps);
-      expect(out.result.ok).toBe(true);
-      expect(new TextEncoder().encode(JSON.stringify(out.result)).byteLength).toBeLessThanOrEqual(8000);
-      const data = out.result.data as { entries: { id: number }[]; unresolvedTagIds: number[]; revision: string; hasMore: boolean; nextOffset?: number };
-      const ids = [...data.entries.map(entry => entry.id), ...data.unresolvedTagIds].sort((a, b) => a - b);
-      received.push(...ids);
-      if (!data.hasMore) break;
-      expect(data.nextOffset).toBe(offset + ids.length);
-      expect(ids.length).toBeLessThan(100);
-      offset = data.nextOffset!; revision = data.revision;
+    const entries = Array.from({ length: 10 }, (_, index) => ({ ...tag(index + 1), name: '长'.repeat(128), dimension: '类'.repeat(64) }));
+    deps.queryLibraryTags.mockResolvedValue({ entries, hasMore: true, nextCursor: 'server-cursor' });
+    const out = await executeAgentTagTool(request(), deps);
+    expect(out.result.ok).toBe(true);
+    expect(new TextEncoder().encode(JSON.stringify(out.result)).byteLength).toBeLessThanOrEqual(8000);
+    expect(out.result.data).toMatchObject({ entries: entries.map(({ id, name, dimension, enabled }) => ({ id, name, dimension, enabled })),
+      nextCursor: 'server-cursor' });
+  });
+  it('rejects invalid continuation instead of silently losing a page', async () => {
+    for (const nextCursor of [undefined, '', 'same']) {
+      const deps = dependencies(); deps.queryLibraryTags.mockResolvedValue({ entries: [tag(1)], hasMore: true, nextCursor });
+      expect((await executeAgentTagTool(request({ cursor: 'same' }), deps)).result.ok).toBe(false);
     }
-    expect(received).toEqual(Array.from({ length: 120 }, (_, index) => index + 1));
-  });
-  it('pages 10000 unresolved IDs instead of injecting them in every page', async () => {
-    const deps = dependencies(); deps.fetchTags.mockResolvedValue([]);
-    deps.readNodeTags.mockResolvedValue({ nodeId: 9, libraryId: 3, parentId: 8,
-      tagIds: Array.from({ length: 10000 }, (_, index) => index + 1), affectedParentIds: [8], dryRun: false });
-    const first = await executeAgentTagTool(request({ nodeId: 9, target: node }), deps);
-    const data = first.result.data as { unresolvedTagIds: number[]; revision: string; nextOffset: number };
-    expect(data.unresolvedTagIds).toHaveLength(100); expect(data.nextOffset).toBe(100);
-    const second = await executeAgentTagTool(request({ nodeId: 9, target: node, offset: data.nextOffset, revision: data.revision }), deps);
-    expect((second.result.data as { unresolvedTagIds: number[] }).unresolvedTagIds[0]).toBe(101);
-    expect(new TextEncoder().encode(JSON.stringify(second.result)).byteLength).toBeLessThanOrEqual(8000);
-  });
-  it('binds continuation to the query, owner and snapshot and rejects missing revisions', async () => {
-    const deps = dependencies(); const first = await executeAgentTagTool(request({ limit: 1 }), deps);
-    const revision = (first.result.data as { revision: string }).revision;
-    expect((await executeAgentTagTool(request({ offset: 1 }), deps)).result.ok).toBe(false);
-    expect((await executeAgentTagTool(request({ offset: 1, revision, keyword: 'tag1' }), deps)).result.ok).toBe(false);
-    const ownerChanged = request({ offset: 1, revision }); ownerChanged.ownerScope.accountScope = 'user:8';
-    expect((await executeAgentTagTool(ownerChanged, deps)).result.ok).toBe(false);
-    deps.fetchTags.mockResolvedValue([tag(1), { ...tag(2), name: 'changed' }]);
-    expect((await executeAgentTagTool(request({ offset: 1, revision }), deps)).result.ok).toBe(false);
+    const deps = dependencies();
+    deps.queryLibraryTags.mockResolvedValue({ entries: [{ ...tag(1), name: '长'.repeat(3000) }], hasMore: true, nextCursor: 'next' });
+    const out = await executeAgentTagTool(request(), deps);
+    expect(out.result).toMatchObject({ ok: false, message: expect.stringContaining('相同 cursor') });
   });
 });

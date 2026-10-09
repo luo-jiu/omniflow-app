@@ -23,8 +23,8 @@ describe('tag tool contracts', () => {
   });
   it('uses strict schemas and rejects cross-library targets', async () => {
     const tools = getAgentTagTools(); const registry = createAgentToolRegistry(tools);
-    expect(registry.validateInput('tag.list', { limit: 100 }).ok).toBe(true);
-    for (const input of [{ limit: 101 }, { nodeId: 0 }, { libraryId: 4 }, { addTagIds: [1] }]) {
+    expect(registry.validateInput('tag.list', { limit: 10, cursor: 'opaque-server-cursor', dimension: 'new-category' }).ok).toBe(true);
+    for (const input of [{ keyword: 'a'.repeat(65) }, { cursor: 'a'.repeat(257) }, { limit: 11 }, { offset: 1 }, { revision: 'old' }, { cursor: '' }, { nodeId: 0 }, { libraryId: 4 }, { addTagIds: [1] }]) {
       expect(registry.validateInput('tag.list', input).ok).toBe(false);
     }
     expect(await tools[0].validate?.({ nodeId: 9 }, { ...context, appContext: { ...context.appContext, libraryId: 4 } }))

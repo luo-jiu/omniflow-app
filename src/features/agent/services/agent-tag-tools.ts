@@ -3,16 +3,15 @@ import { auth } from '@/utils/auth';
 import { createAgentOwnerScope, normalizeAgentOwnerScope, serializeAgentOwnerScope } from '@/shared/agent/agent-owner-scope';
 import type { AgentToolExecutionRequest, AgentToolResult } from '@/shared/agent/agent.types';
 import type { AgentLibraryNode } from '@/shared/agent/agent-library-query';
-import { fetchTags } from '@/features/tag-management/services/tag.api';
-import { ipcRequest, IpcRequestError } from '@/service/request/ipcRequest';
+import { queryLibraryTags, updateNodeTags, type NodeTagState } from '@/features/tag-management/services/tag.api';
+import { IpcRequestError } from '@/service/request/ipcRequest';
 import { notifyLibraryNodesMutated } from '@/features/file-explorer/services/node-mutation-events';
 import { reportAgentToolExecutionProgress } from './agent.api';
 import { readAgentLibraryNode } from './agent-library.api';
 import type { AgentRendererToolOutcome } from './agent-tool-executor';
 
 export interface AgentTagToolDependencies {
-  fetchTags?: typeof fetchTags;
-  readNodeTags?: (nodeId: number, libraryId: number) => Promise<AgentNodeTagState>;
+  queryLibraryTags?: typeof queryLibraryTags;
   updateNodeTags?: (nodeId: number, input: { libraryId: number; addTagIds: number[]; removeTagIds: number[] }) => Promise<AgentNodeTagState>;
   beforeCommit?: () => Promise<void>;
   onCommitted?: (result: AgentToolResult) => Promise<void> | void;
@@ -22,9 +21,7 @@ export interface AgentTagToolDependencies {
   signal?: AbortSignal;
 }
 
-export interface AgentNodeTagState {
-  nodeId: number; libraryId: number; parentId: number; tagIds: number[]; affectedParentIds: number[]; dryRun: boolean;
-}
+export type AgentNodeTagState = NodeTagState;
 
 function validateState(state: AgentNodeTagState, nodeId: number, libraryId: number) {
   if (!state || state.nodeId !== nodeId || state.libraryId !== libraryId || state.dryRun !== false
@@ -34,16 +31,6 @@ function validateState(state: AgentNodeTagState, nodeId: number, libraryId: numb
     throw new Error('后端未返回有效节点标签回执');
   }
   return state;
-}
-
-async function readNodeTags(nodeId: number, libraryId: number): Promise<AgentNodeTagState> {
-  const body = await ipcRequest(`/v1/nodes/${nodeId}/tags?libraryId=${libraryId}`, { method: 'GET' });
-  return body?.data as AgentNodeTagState;
-}
-
-async function updateNodeTags(nodeId: number, input: { libraryId: number; addTagIds: number[]; removeTagIds: number[] }): Promise<AgentNodeTagState> {
-  const body = await ipcRequest(`/v1/nodes/${nodeId}/tags`, { method: 'PATCH', body: JSON.stringify(input) });
-  return body?.data as AgentNodeTagState;
 }
 
 function positive(value: unknown): value is number {
@@ -65,19 +52,19 @@ export async function executeAgentTagTool(
     const check = () => { deps.signal?.throwIfAborted(); checkOwner(); };
     check();
     const input = request.input as { libraryId: number; nodeId?: number; target?: AgentLibraryNode;
-      keyword?: string; offset?: number; limit?: number; revision?: string; addTagIds?: number[]; removeTagIds?: number[] };
+      keyword?: string; dimension?: string; cursor?: string; limit?: number; addTagIds?: number[]; removeTagIds?: number[] };
     if (!['tag.list', 'tag.update'].includes(request.toolName) || !input || !positive(input.libraryId)
       || input.libraryId !== request.appContext.libraryId
       || (input.nodeId !== undefined && !positive(input.nodeId))
-      || (input.keyword !== undefined && (typeof input.keyword !== 'string' || input.keyword.length > 128))) {
+      || (input.keyword !== undefined && (typeof input.keyword !== 'string' || input.keyword.length > 64))
+      || (input.dimension !== undefined && (typeof input.dimension !== 'string' || input.dimension.length > 64))) {
       throw new Error('标签查询范围或参数无效');
     }
-    const offset = input.offset ?? 0; const limit = input.limit ?? 100;
-    if (!Number.isSafeInteger(offset) || offset < 0 || offset > 100000
-      || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error('标签分页参数无效');
-    if ((input.revision !== undefined && (typeof input.revision !== 'string' || !/^[a-f0-9]{64}$/.test(input.revision)))
-      || (offset > 0 && !input.revision)) throw new Error('继续分页必须提供上一页 revision');
-    let nodeTagIds: number[] | undefined;
+    const limit = input.limit ?? 10;
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 10
+      || (input.cursor !== undefined && (typeof input.cursor !== 'string' || !input.cursor || input.cursor.length > 256))) {
+      throw new Error('标签分页参数无效');
+    }
     if (request.toolName === 'tag.update' && input.nodeId === undefined) throw new Error('需要明确 nodeId');
     if (input.nodeId !== undefined) {
       const target = input.target;
@@ -123,51 +110,33 @@ export async function executeAgentTagTool(
           return { committed: true, result: { ...committed, message: `${committed.message}；节点最新感知未更新，后续操作请先 file.stat` } };
         }
       }
-      const state = validateState(await (deps.readNodeTags || readNodeTags)(input.nodeId, input.libraryId), input.nodeId, input.libraryId);
-      check();
-      nodeTagIds = [...new Set(state.tagIds)];
-      if (nodeTagIds.length > 10000) throw new Error('节点标签记录过大');
     }
-    const catalog = await (deps.fetchTags || fetchTags)({ scope: 'resource' });
+    const page = await (deps.queryLibraryTags || queryLibraryTags)({ libraryId: input.libraryId,
+      nodeId: input.nodeId, keyword: input.keyword, dimension: input.dimension, cursor: input.cursor, limit,
+      // 已绑定但停用的标签仍是正式关系，必须能够查看和移除。
+      ...(input.nodeId === undefined ? { enabled: true } : {}),
+    });
     check();
-    const userId = Number(owner.accountScope.slice(5));
-    const visible = catalog.filter(tag => (tag.ownerUserId === null || tag.ownerUserId === userId)
-      && tag.scope === 'resource' && tag.enabled === 1);
-    const keyword = (input.keyword || '').toLocaleLowerCase();
-    const nodeIds = nodeTagIds === undefined ? undefined : new Set(nodeTagIds);
-    const matching = visible.filter(tag => (nodeIds === undefined || nodeIds.has(tag.id))
-      && tag.name.toLocaleLowerCase().includes(keyword)).sort((a, b) => a.id - b.id);
-    const projected = matching.map(tag => ({ id: tag.id, name: tag.name,
-      type: tag.type, dimension: tag.dimension, resourceKind: tag.resourceKind, targetKinds: tag.targetKinds || [] }));
-    const visibleIds = new Set(visible.map(tag => tag.id));
-    const unresolved = (nodeTagIds || []).filter(id => !visibleIds.has(id));
-    // 普通条目与未知 ID 共用同一序列，续读游标只按实际返回数量前进。
-    const snapshot = [...projected.map(entry => ({ id: entry.id, entry })),
-      ...unresolved.map(id => ({ id, entry: undefined }))].sort((a, b) => a.id - b.id);
-    if (snapshot.length > 100000) throw new Error('标签查询结果过大，请缩小范围');
-    const encoder = new TextEncoder();
-    const digest = await crypto.subtle.digest('SHA-256', encoder.encode(JSON.stringify({ owner, libraryId: input.libraryId,
-      nodeId: input.nodeId, keyword, snapshot })));
-    check();
-    const revision = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
-    if (input.revision && input.revision !== revision) throw new Error('标签查询或结果已变化，请清除 offset/revision 从头查询');
-    if (offset > snapshot.length) throw new Error('标签分页偏移超出当前快照');
-    const makeResult = (count: number): AgentToolResult => {
-      const page = snapshot.slice(offset, offset + count);
-      const hasMore = offset + count < snapshot.length;
-      return { ok: true, message: `已查询 ${count} 个标签`, data: {
-        libraryId: input.libraryId, ...(input.nodeId ? { nodeId: input.nodeId } : {}),
-        entries: page.flatMap(item => item.entry ? [item.entry] : []),
-        total: snapshot.length, hasMore, revision, ...(hasMore ? { nextOffset: offset + count } : {}),
-        ...(nodeTagIds !== undefined ? { source: 'node_tag_rel', authoritativeRelations: true,
-          unresolvedTagIds: page.filter(item => !item.entry).map(item => item.id) } : { source: 'owner_resource_catalog' }),
-        updateAvailable: true,
-      } };
-    };
-    let count = Math.min(limit, snapshot.length - offset);
-    let result = makeResult(count);
-    while (encoder.encode(JSON.stringify(result)).byteLength > 8000 && count > 0) result = makeResult(--count);
-    if (count === 0 && offset < snapshot.length) throw new Error('单个标签超过输出预算，无法完整返回，请调整该标签后重试');
+    if (!page || !Array.isArray(page.entries) || page.entries.length > limit || typeof page.hasMore !== 'boolean'
+      || (page.hasMore && (typeof page.nextCursor !== 'string' || !page.nextCursor || page.nextCursor === input.cursor))
+      || (page.nextCursor !== undefined && page.nextCursor.length > 256)
+      || page.entries.some(tag => !positive(tag.id) || tag.libraryId !== input.libraryId
+        || typeof tag.name !== 'string' || ![0, 1].includes(tag.enabled)
+        || (tag.dimension !== undefined && typeof tag.dimension !== 'string'))
+      || new Set(page.entries.map(tag => tag.id)).size !== page.entries.length) {
+      throw new Error('后端未返回有效资料库标签分页');
+    }
+    const result: AgentToolResult = { ok: true, message: `已查询 ${page.entries.length} 个标签`, data: {
+      libraryId: input.libraryId, ...(input.nodeId ? { nodeId: input.nodeId } : {}),
+      entries: page.entries.map(tag => ({ id: tag.id, name: tag.name, dimension: tag.dimension, enabled: tag.enabled, ...(tag.deleted ? { deleted: true } : {}), ...(tag.legacy ? { legacy: true } : {}) })),
+      hasMore: page.hasMore, ...(page.hasMore ? { nextCursor: page.nextCursor } : {}),
+      ...(input.nodeId !== undefined ? { source: 'node_tag_rel', authoritativeRelations: true }
+        : { source: 'library_resource_catalog' }),
+      updateAvailable: true,
+    } };
+    if (new TextEncoder().encode(JSON.stringify(result)).byteLength > 8000) {
+      throw new Error('标签页超过输出预算，请减小 limit 后使用相同 cursor 重试');
+    }
     return { result };
   } catch (error) {
     if (committed) return { committed: true, result: committed };

@@ -396,6 +396,8 @@ export async function renameNode(payload: {
 // 更新节点内置配置（内置类型/归档模式）
 export async function updateNodeConfig(payload: {
   id: number;
+  libraryId?: number;
+  expectedUpdatedAt?: string;
   builtInType?: string;
   archiveMode?: number;
   viewMeta?: string | null;
@@ -404,6 +406,8 @@ export async function updateNodeConfig(payload: {
     method: 'PUT',
     body: JSON.stringify({
       id: payload.id,
+      libraryId: payload.libraryId,
+      expectedUpdatedAt: payload.expectedUpdatedAt,
       builtInType: payload.builtInType,
       archiveMode: payload.archiveMode,
       viewMeta: payload.viewMeta,

@@ -11,12 +11,12 @@ function target(input: unknown, context: AgentToolExecutionContext) {
 
 const tagListTool: AgentTool = {
   name: 'tag.list', executor: 'renderer', risk: 'read', timeoutMs: 30000,
-  description: '查询当前账号可见的已启用资源标签，或已确认 nodeId 的正式直接标签。未知标签 ID 与普通条目共用分页预算。结果可能少于 limit；继续时原样传 nextOffset 和 revision，保持 nodeId/keyword 不变，快照变化需从头查询。targetKinds 不保证标签适用于任意节点。',
+  description: '查询当前资料库的已启用资源标签，或已确认 nodeId 的正式直接标签（包含停用项）。legacy=true 是未迁移的旧定义，只可查看或移除现有绑定，不可新增绑定。支持名称关键词及可选分类；分类不限制可绑定的资源类型。服务端游标分页，每页最多10项；继续时原样传 nextCursor，保持 nodeId/keyword/dimension 不变。',
   inputSchema: { type: 'object', additionalProperties: false, properties: {
-    nodeId: { type: 'integer', minimum: 1 }, keyword: { type: 'string', maxLength: 128 },
-    offset: { type: 'integer', minimum: 0, maximum: 100000 },
-    revision: { type: 'string', pattern: '^[a-f0-9]{64}$' },
-    limit: { type: 'integer', minimum: 1, maximum: 100 },
+    nodeId: { type: 'integer', minimum: 1 }, keyword: { type: 'string', maxLength: 64 },
+    dimension: { type: 'string', maxLength: 64 },
+    cursor: { type: 'string', minLength: 1, maxLength: 256 },
+    limit: { type: 'integer', minimum: 1, maximum: 10 },
   } },
   validate(input, context) {
     try { target(input, context); return { ok: true }; }

@@ -1,6 +1,6 @@
 # Agent 资料库标签工具
 
-更新时间：2026-09-10
+更新时间：2026-10-02
 
 ## 当前结论
 
@@ -9,16 +9,15 @@
 
 ## 读取契约
 
-- `tag.list({ nodeId?, keyword?, offset?, limit?, revision? })` 是 renderer/read 工具，assess 直接 allow。
-- limit 默认 100、最大 100；offset 默认 0、最大 100000。返回 entries、total、hasMore、nextOffset、revision。
-- 整个成功结果 JSON 的 UTF-8 字节数不超过 8000，实际数量可少于 limit。普通条目与 unresolvedTagIds 按 ID 合为同一序列，共享预算和游标，total 包含两类。
-- nextOffset 严格按本页实际条目数推进；offset>0 必须原样传上一页 revision。SHA-256 绑定规范 owner、library、node、keyword 与完整投影快照；数据或查询变化则拒绝续页，要求从头查询，不静默跳项。
-- 未知标签没有可搜索名称，keyword 仅筛选已解析条目，未知 ID 仍保留在共同分页序列中；单个条目本身超过预算时明确失败，不偷偷丢字段。
-- 无 nodeId 时列当前账号可见的已启用 resource 标签，不声称标签定义属于当前库或都能贴到当前节点。targetKinds 描述配置的可贴对象。
-- nodeId 必须来自当前库已感知节点。main 冻结 target，renderer 使用 metadata query 重验，再读取正式关系。
-- 节点模式使用新 GET `/nodes/:nodeId/tags?libraryId=...`，来源是 `node_tag_rel`，返回 `authoritativeRelations=true`，未知、禁用或不可见标签保留为 unresolvedTagIds，不返回其他 owner 的标签信息。
-- 每个请求前后校验 signal 与 owner。节点 metadata、存储地址和整个 viewMeta 不投影给模型。
-- 标签目录 API 本身不支持后端分页；本轮只对模型输出分页，revision 防止跨次快照变化导致 offset 结果跳项。
+- `tag.list({ nodeId?, keyword?, dimension?, cursor?, limit? })` 是 renderer/read 工具，assess 直接 allow。
+- 查询定义属于当前资料库，遵循资料库权限；不再按标签创建者 owner 或 ASMR/音频等资源类型拆词表。`dimension` 是可扩展的语义分类，不限定绑定对象。
+- 服务端 `GET /tags?libraryId=...` 完成名称搜索、分类过滤与游标分页；renderer 不下载全部词表、不排序/哈希整份目录，也不提供精确 total。
+- limit 默认和最大均为 10。返回 entries、hasMore、nextCursor；续页原样传 cursor，并保持 nodeId/keyword/dimension 不变。旧 offset/revision 参数已移除。
+- 整个成功结果 JSON 的 UTF-8 字节数不超过 8000。保留服务端整页与其游标，不截短返回数组后继续使用原游标；异常大页明确失败，提示减小 limit 并使用相同 cursor 重试。
+- 无 nodeId 时查询当前资料库已启用资源标签，来源为 `library_resource_catalog`；不投影历史 type/resourceKind/targetKinds。
+- nodeId 必须来自当前库已感知节点。main 冻结 target，renderer 使用 metadata query 重验，然后通过标签目录 nodeId 过滤正式直接绑定关系。来源为 `node_tag_rel`，返回 `authoritativeRelations=true`，不读取 viewMeta 标签投影。
+- 节点模式不添加 enabled 过滤；停用及服务端保留的已删除绑定仍显示其 ID、名称、enabled/deleted，能够明确移除。旧定义仅在请求库已有关系时可见，服务端标记 `legacy=true`；该定义只读且不可新增绑定，允许移除现有绑定。普通目录搜索不会暴露其他库标签。
+- 每个请求前后校验 signal 与 owner，页内各标签也重验 libraryId；节点 metadata、存储地址和整个 viewMeta 不投影给模型。
 
 ## 原子增量写入
 
@@ -26,7 +25,7 @@
 每组最多 100 个正整数 ID，两组至少一个 ID，无重复或交集；只操作已有标签关系，不创建或删除标签定义。
 
 PATCH `/nodes/:nodeId/tags` 仅传 libraryId/addTagIds/removeTagIds，不传全量标签或 viewMeta。
-后端 usecase 事务内锁定节点，校验指定标签 owner，新增复用既有 target policy 校验；未指定关系不改动。
+后端 usecase 事务内锁定节点，校验指定标签与节点属于同一资料库，新增要求标签可用；未指定关系不改动。文件、目录与作品共用库内标签，不再按历史资源域作硬性绑定限制。
 `node_tag_rel` 为正式关系，读取最终关系后仅同步 `view_meta.tagIds`，保留其他字段及大整数精度。
 后端 HTTP、dry-run 与 CLI 详见 `omniflow-go/docs/architecture/node-tag-delta.md`。
 
@@ -40,10 +39,10 @@ await 通知并捕获异常维持已提交成功，不修改事件模块。
 请求前失败或明确 HTTP 拒绝返回 uncommitted；发出后连接异常、无法识别的回执返回 commit_unknown。
 结果未知须先 tag.list 核对，不盲目重试。取消并不等于后端回滚。
 
-旧 `PUT /nodes/:id` 全量 viewMeta 替换契约仍存在，旧 viewer 晚到陈旧数据可能覆盖标签，这是旧接口残余风险；本增量接口不使用旧快照覆盖。
+`node_tag_rel` 是唯一关系事实源。节点配置 PUT 不再接受 viewMeta.tagIds 作为关系替换请求；旧 viewer 的陈旧配置不能覆盖增量标签。ASMR 也已使用同一增量接口，标签选择过程见 [ASMR Viewer](viewers/asmr-viewer.md)。
 
 ## 验证
 
-15 项专项测试覆盖严格 schema、已感知节点、跨库/owner 拒绝、未知标签保留、8KB 分页、revision 漂移、提交前后取消、失败三态、事件顺序与最新节点感知。
-本轮只跑新文件专项 Vitest/lint 与后端标签 usecase/handler/CLI 专项、CLI 构建，不跑全量、不重启服务、不提交。
-没有修改表结构，无需迁移或重生成模型。集成方需要用户重新加载新后端后，在非第一个资料库完成真实模型/UI 验收。
+标签工具专项覆盖服务端查询参数/游标透传、禁用绑定保留、非法/跨库回执、完整页的 8KB 边界、owner 漂移/取消、提交三态、事件顺序与最新节点感知。服务端游标失效与索引性能在后端验证；不再以 renderer 的全量快照散列提供稳定性。
+
+ASMR 保存专项覆盖编辑差集保留并发新增、仅标签变更不写配置、未改字段保留、版本条件更新、部分成功不重放及结果未知中止。完整集成与非第一个资料库的 UI 验证状态以本轮交付记录为准，不能复用历史测试结论。

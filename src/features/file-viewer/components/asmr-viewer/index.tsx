@@ -7,15 +7,13 @@ import {
   IconPause,
   IconMusic,
 } from '@douyinfe/semi-icons';
-import { Button, Input, Modal, Select, Spin, Toast } from '@douyinfe/semi-ui';
+import { Button, Input, Modal, Spin, Toast } from '@douyinfe/semi-ui';
 import {
   fetchNodeDetailById,
   getChildrenByNodeId,
   getFileLink,
-  renameNode,
-  updateNodeConfig,
 } from '@/features/file-explorer/services/file.api';
-import { fetchTags, type TagItem } from '@/features/tag-management/services/tag.api';
+import { queryLibraryTags, readNodeTags, type TagItem } from '@/features/tag-management/services/tag.api';
 import { getFileNodeIcon, isImageExtension } from '@/features/file-explorer/utils/file-node-icon';
 import { resolveNodeFileIdentity } from '@/features/file-identity';
 import { AsmrCoverPickerList, AsmrViewerWrapper } from './style';
@@ -40,6 +38,10 @@ import { useAudioSpectrumColors } from '@/features/file-viewer/components/audio-
 import { AudioDockMeteor, type AudioDockMeteorEvent } from '@/features/audio-viewer/components/unified-audio-viewer/AudioDockMeteor';
 import { AudioDockProgress } from '@/features/audio-viewer/components/unified-audio-viewer/audio-dock-progress';
 import OutlineIcon from '@/components/ui/outline-icon';
+import { API_CONFIG } from '@/config/api';
+import { matchesLibraryMutationScope, notifyLibraryNodesMutated, subscribeLibraryNodesMutated } from '@/features/file-explorer/services/node-mutation-events';
+import { LibraryTagPicker } from '@/features/tag-management/components/LibraryTagPicker';
+import { saveAsmrMetadata, type AsmrMetadataDraft } from './asmr-metadata-editor';
 
 interface AsmrViewerProps {
   accountScope: string | null;
@@ -169,32 +171,6 @@ function resolveMetaNumberList(input: unknown): number[] {
   return result;
 }
 
-function resolveTagIdsFromLegacyTagText(legacyTagText: string, options: TagItem[]): number[] {
-  const normalized = sanitizeMetaText(legacyTagText);
-  if (!normalized) {
-    return [];
-  }
-  const normalizedNameMap = new Map<string, number>();
-  options.forEach((option) => {
-    const key = sanitizeMetaText(option.name || '').toLowerCase();
-    if (key && !normalizedNameMap.has(key)) {
-      normalizedNameMap.set(key, option.id);
-    }
-  });
-  const tokens = normalized
-    .split(/[/,，、|]/g)
-    .map(token => sanitizeMetaText(token).toLowerCase())
-    .filter(Boolean);
-  const tagIds: number[] = [];
-  tokens.forEach((token) => {
-    const tagId = normalizedNameMap.get(token);
-    if (tagId && !tagIds.includes(tagId)) {
-      tagIds.push(tagId);
-    }
-  });
-  return tagIds;
-}
-
 function formatDuration(time: number): string {
   if (!Number.isFinite(time)) return '00:00';
   const minutes = Math.floor(Math.max(time, 0) / 60);
@@ -237,15 +213,13 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
   const [items, setItems] = useState<AsmrNodeItem[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [collectionName, setCollectionName] = useState<string>(fallbackTitle);
-  const [collectionTag, setCollectionTag] = useState<string>('');
+  const [legacyTagText, setLegacyTagText] = useState('');
   const [collectionTagIds, setCollectionTagIds] = useState<number[]>([]);
   const [collectionSn, setCollectionSn] = useState<string>('');
-  const [viewMetaBase, setViewMetaBase] = useState<AsmrViewMetaPayload>({});
   const [listLoading, setListLoading] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
   const [coverLoading, setCoverLoading] = useState(false);
   const [coverUrl, setCoverUrl] = useState<string | null>(null);
-  const [coverNodeId, setCoverNodeId] = useState<number | null>(null);
   const [audioQueue, setAudioQueue] = useState<AsmrNodeItem[]>([]);
   const [currentAudioId, setCurrentAudioId] = useState<number | null>(null);
   const [currentAudioSrc, setCurrentAudioSrc] = useState<string | null>(null);
@@ -258,7 +232,17 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
   const [editorSn, setEditorSn] = useState('');
   const [editorCoverNodeId, setEditorCoverNodeId] = useState<number | null>(null);
   const [asmrTagOptions, setAsmrTagOptions] = useState<TagItem[]>([]);
-  const [asmrTagOptionsLoading, setAsmrTagOptionsLoading] = useState(false);
+  const editorBaselineRef = useRef<AsmrMetadataDraft | null>(null);
+  const editorRequestIdRef = useRef(0);
+  const editorSavingRef = useRef(false);
+  useEffect(() => {
+    editorRequestIdRef.current += 1;
+    editorBaselineRef.current = null;
+    editorSavingRef.current = false;
+    setEditorVisible(false);
+    setEditorSaving(false);
+    return () => { editorRequestIdRef.current += 1; };
+  }, [accountScope, libraryId, rootNodeId]);
   const [coverPickerPathStack, setCoverPickerPathStack] = useState<AsmrPathItem[]>([]);
   const [coverPickerItems, setCoverPickerItems] = useState<AsmrNodeItem[]>([]);
   const [coverPickerLoading, setCoverPickerLoading] = useState(false);
@@ -416,32 +400,11 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
     });
     return map;
   }, [asmrTagOptions]);
-  const collectionTagDisplay = useMemo(() => {
-    if (collectionTagIds.length > 0) {
-      const names = collectionTagIds
-        .map(tagId => asmrTagOptionMap.get(tagId)?.name)
-        .filter((name): name is string => Boolean(sanitizeMetaText(name || '')));
-      if (names.length > 0) {
-        return names.join(' / ');
-      }
-      return collectionTagIds.map(tagId => `#${tagId}`).join(' / ');
-    }
-    return collectionTag;
-  }, [asmrTagOptionMap, collectionTag, collectionTagIds]);
-  const selectedTagItems = useMemo(() => {
-    return collectionTagIds
-      .map(tagId => asmrTagOptionMap.get(tagId))
-      .filter((item): item is TagItem => Boolean(item));
-  }, [asmrTagOptionMap, collectionTagIds]);
-  const fallbackTagTexts = useMemo(() => {
-    if (selectedTagItems.length > 0) {
-      return [] as string[];
-    }
-    return String(collectionTagDisplay || '')
-      .split(/[/,，、|]/g)
-      .map(text => sanitizeMetaText(text))
-      .filter(Boolean);
-  }, [collectionTagDisplay, selectedTagItems.length]);
+  const selectedTagItems = useMemo(() => collectionTagIds.map(id => {
+    const tag = asmrTagOptionMap.get(id);
+    return { id, name: tag ? `${tag.name}${tag.deleted ? '（已删除）' : tag.enabled === 0 ? '（已停用）' : ''}` : `#${id}`,
+      color: tag?.color, textColor: tag?.textColor };
+  }), [asmrTagOptionMap, collectionTagIds]);
   const title = sanitizeMetaText(collectionName) || fallbackTitle;
   const hasPrevAudio = currentAudioQueueIndex > 0;
   const hasNextAudio = currentAudioQueueIndex >= 0 && currentAudioQueueIndex < audioQueue.length - 1;
@@ -618,7 +581,7 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
       .filter((id, index, arr) => arr.indexOf(id) === index);
 
     if (candidateIds.length === 0) {
-      setCoverNodeId(null);
+
       setCoverUrl(null);
       setCoverLoading(false);
       return;
@@ -631,7 +594,7 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
         const url = await getFileLink(candidateId, libraryId, 60);
         if (requestId !== coverRequestIdRef.current) return;
         if (url) {
-          setCoverNodeId(candidateId);
+
           setCoverUrl(url);
           setCoverLoading(false);
           return;
@@ -642,7 +605,7 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
     }
 
     if (requestId === coverRequestIdRef.current) {
-      setCoverNodeId(null);
+
       setCoverUrl(null);
     }
     if (requestId === coverRequestIdRef.current) {
@@ -684,55 +647,61 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
   }, [libraryId]);
 
   const loadCollectionMeta = useCallback(async (targetNodeId: number) => {
-    const detail = await fetchNodeDetailById(targetNodeId);
-    const viewMeta = parseViewMeta(detail?.viewMeta);
-    const name = sanitizeMetaText(detail?.name || '');
-    const tag = sanitizeMetaText(String(viewMeta.tag || ''));
-    const tagIds = resolveMetaNumberList(viewMeta.tagIds);
-    const sn = sanitizeMetaText(String(viewMeta.sn || ''));
-    const preferredCoverNodeId = resolveMetaNumber(viewMeta.coverNodeId);
+    if (!libraryId) throw new Error('资料库参数异常');
+    const [detail, tags] = await Promise.all([
+      fetchNodeDetailById(targetNodeId), readNodeTags(targetNodeId, libraryId),
+    ]);
+    if (detail.id !== targetNodeId || detail.libraryId !== libraryId) throw new Error('集合所属资料库已变化');
+    const viewMeta = parseViewMeta(detail.viewMeta);
     return {
-      name: name || fallbackTitle,
-      tag,
-      tagIds,
-      sn,
-      preferredCoverNodeId,
-      viewMeta,
+      name: sanitizeMetaText(detail.name) || fallbackTitle,
+      tagIds: tags.tagIds,
+      sn: sanitizeMetaText(String(viewMeta.sn || '')),
+      preferredCoverNodeId: resolveMetaNumber(viewMeta.coverNodeId),
     };
-  }, [fallbackTitle]);
+  }, [fallbackTitle, libraryId]);
 
-  const loadAsmrTagOptions = useCallback(async () => {
-    const tagList = await fetchTags('ASMR');
-    return tagList.filter(tag => (
-      Number(tag.enabled ?? 1) === 1
-      && Number(tag.ownerUserId ?? 0) > 0
-    ));
-  }, []);
+  useEffect(() => {
+    let disposed = false;
+    let requestId = 0;
+    setCollectionTagIds([]);
+    setLegacyTagText('');
+    if (!libraryId || !rootNodeId) return;
+    const refresh = async () => {
+      const current = ++requestId;
+      try {
+        const state = await readNodeTags(rootNodeId, libraryId);
+        if (disposed || current !== requestId) return;
+        const detail = state.tagIds.length === 0 ? await fetchNodeDetailById(rootNodeId) : null;
+        if (disposed || current !== requestId) return;
+        if (detail && (detail.id !== rootNodeId || detail.libraryId !== libraryId)) throw new Error('集合所属资料库已变化');
+        setCollectionTagIds(state.tagIds);
+        setLegacyTagText(detail ? sanitizeMetaText(String(parseViewMeta(detail.viewMeta).tag || '')) : '');
+      } catch (error) { if (!disposed) runtimeLogger.warn('加载集合标签关系失败:', error); }
+    };
+    const unsubscribe = subscribeLibraryNodesMutated(event => {
+      if (event.nodeId !== rootNodeId || !matchesLibraryMutationScope(event, accountScope, API_CONFIG.BASE_URL, libraryId)) return;
+      void refresh();
+    });
+    void refresh();
+    return () => { disposed = true; unsubscribe(); };
+  }, [accountScope, libraryId, rootNodeId, reloadToken]);
 
   useEffect(() => {
     let canceled = false;
-    setAsmrTagOptionsLoading(true);
-    void loadAsmrTagOptions()
-      .then((tagList) => {
-        if (!canceled) {
-          setAsmrTagOptions(tagList);
-        }
-      })
-      .catch((error) => {
-        runtimeLogger.warn('加载 ASMR 标签失败:', error);
-        if (!canceled) {
-          setAsmrTagOptions([]);
-        }
-      })
-      .finally(() => {
-        if (!canceled) {
-          setAsmrTagOptionsLoading(false);
-        }
-      });
-    return () => {
-      canceled = true;
-    };
-  }, [loadAsmrTagOptions]);
+    setAsmrTagOptions([]);
+    if (!libraryId || collectionTagIds.length === 0) return;
+    void (async () => {
+      const tags: TagItem[] = [];
+      for (let offset = 0; offset < collectionTagIds.length; offset += 100) {
+        const page = await queryLibraryTags({ libraryId, ids: collectionTagIds.slice(offset, offset + 100), limit: 100 });
+        if (canceled) return;
+        tags.push(...page.entries);
+      }
+      setAsmrTagOptions(tags);
+    })().catch(error => { if (!canceled) runtimeLogger.warn('加载集合标签名称失败:', error); });
+    return () => { canceled = true; };
+  }, [accountScope, libraryId, collectionTagIds]);
 
   // MediaHub 注册由 globalAudioPlayer 服务层完成；详见 docs/media-hub-contract.md。
   // 卸载时不主动 clear，tab 关闭由 FileViewerContext.releaseForTab 兜底。
@@ -746,11 +715,9 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
       setListError('ASMR 目录参数异常');
       setListLoading(false);
       setCollectionName(fallbackTitle);
-      setCollectionTag('');
       setCollectionTagIds([]);
       setCollectionSn('');
-      setViewMetaBase({});
-      setCoverNodeId(null);
+
       setCoverUrl(null);
       setCoverLoading(false);
       return;
@@ -760,7 +727,7 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
     hasLoadedListRef.current = false;
     audioUrlCacheRef.current.clear();
     setCoverUrl(null);
-    setCoverNodeId(null);
+
     setCoverLoading(true);
 
     void (async () => {
@@ -768,20 +735,14 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
         .then((meta) => {
           if (canceled) return null;
           setCollectionName(meta.name);
-          setCollectionTag(meta.tag);
-          setCollectionTagIds(meta.tagIds);
           setCollectionSn(meta.sn);
-          setViewMetaBase(meta.viewMeta);
           return meta.preferredCoverNodeId;
         })
         .catch((error) => {
           if (canceled) return null;
           runtimeLogger.warn('加载 ASMR 元信息失败，已回退默认展示:', error);
           setCollectionName(fallbackTitle);
-          setCollectionTag('');
-          setCollectionTagIds([]);
           setCollectionSn('');
-          setViewMetaBase({});
           return null;
         });
       const [initialRestoreSource, rootResult] = await Promise.all([
@@ -994,53 +955,32 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
   ]);
 
   const openEditor = useCallback(() => {
-    if (!rootNodeId || !libraryId) {
-      Toast.error('ASMR 目录参数异常');
-      return;
-    }
+    if (!rootNodeId || !libraryId || editorSavingRef.current) return;
+    const requestId = ++editorRequestIdRef.current;
+    editorBaselineRef.current = null;
     setEditorVisible(true);
     setEditorLoading(true);
-    setAsmrTagOptionsLoading(true);
     const rootPath: AsmrPathItem[] = [{ id: rootNodeId, name: 'ROOT' }];
     void loadCoverPickerDirectory(rootNodeId, rootPath);
     void (async () => {
       try {
-        const [meta, tagOptions] = await Promise.all([
-          loadCollectionMeta(rootNodeId),
-          loadAsmrTagOptions(),
-        ]);
-        setAsmrTagOptions(tagOptions);
-        const resolvedTagIds = meta.tagIds.length > 0
-          ? meta.tagIds
-          : resolveTagIdsFromLegacyTagText(meta.tag, tagOptions);
+        const meta = await loadCollectionMeta(rootNodeId);
+        if (requestId !== editorRequestIdRef.current) return;
+        editorBaselineRef.current = { name: meta.name, tagIds: meta.tagIds, sn: meta.sn, coverNodeId: meta.preferredCoverNodeId };
         setEditorName(meta.name);
-        setEditorTagIds(resolvedTagIds);
+        setEditorTagIds(meta.tagIds);
         setEditorSn(meta.sn);
         setEditorCoverNodeId(meta.preferredCoverNodeId);
-        setViewMetaBase(meta.viewMeta);
-      } catch (error: any) {
+      } catch (error) {
+        if (requestId !== editorRequestIdRef.current) return;
         runtimeLogger.error('加载 ASMR 编辑信息失败:', error);
-        Toast.error(error?.message || '加载编辑信息失败');
-        setEditorName(title);
-        setEditorTagIds(collectionTagIds);
-        setEditorSn(collectionSn);
-        setEditorCoverNodeId(coverNodeId);
+        Toast.error(error instanceof Error ? error.message : '加载编辑信息失败');
+        setEditorVisible(false);
       } finally {
-        setEditorLoading(false);
-        setAsmrTagOptionsLoading(false);
+        if (requestId === editorRequestIdRef.current) setEditorLoading(false);
       }
     })();
-  }, [
-    collectionSn,
-    collectionTagIds,
-    coverNodeId,
-    libraryId,
-    loadAsmrTagOptions,
-    loadCollectionMeta,
-    loadCoverPickerDirectory,
-    rootNodeId,
-    title,
-  ]);
+  }, [libraryId, loadCollectionMeta, loadCoverPickerDirectory, rootNodeId]);
 
   const handleCoverPickerJumpToCrumb = useCallback(async (index: number) => {
     if (index < 0 || index >= coverPickerPathStack.length) return;
@@ -1056,83 +996,64 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
   }, [coverPickerPathStack, loadCoverPickerDirectory]);
 
   const handleSaveEditor = useCallback(async () => {
-    if (!rootNodeId || !libraryId) {
-      Toast.error('ASMR 目录参数异常');
-      return;
-    }
+    const baseline = editorBaselineRef.current;
+    if (!rootNodeId || !libraryId || !baseline || editorSavingRef.current || editorLoading) return;
     const nextName = sanitizeMetaText(editorName);
-    const nextTagIds = resolveMetaNumberList(editorTagIds);
-    const nextTagNames = nextTagIds
-      .map(tagId => asmrTagOptionMap.get(tagId)?.name)
-      .filter((name): name is string => Boolean(sanitizeMetaText(name || '')));
-    const nextTag = nextTagNames.join(' / ');
-    const nextSn = sanitizeMetaText(editorSn);
-    if (!nextName) {
-      Toast.error('名称不能为空');
-      return;
-    }
+    if (!nextName) { Toast.error('名称不能为空'); return; }
+    const requestId = editorRequestIdRef.current;
+    const assertCurrent = () => {
+      if (requestId !== editorRequestIdRef.current) throw new Error('编辑目标已变化');
+    };
+    editorSavingRef.current = true;
     setEditorSaving(true);
-    try {
-      if (nextName !== collectionName) {
-        await renameNode({
-          id: rootNodeId,
-          name: nextName,
-        });
-      }
-      const nextMeta: AsmrViewMetaPayload = { ...viewMetaBase };
-      delete nextMeta.tag;
-      delete nextMeta.tagIds;
-      delete nextMeta.sn;
-      delete nextMeta.coverNodeId;
-      if (nextTagIds.length > 0) {
-        nextMeta.tagIds = nextTagIds;
-      }
-      if (nextTag) {
-        nextMeta.tag = nextTag;
-      }
-      if (nextSn) {
-        nextMeta.sn = nextSn;
-      }
-      if (editorCoverNodeId && editorCoverNodeId > 0) {
-        nextMeta.coverNodeId = editorCoverNodeId;
-      }
-      await updateNodeConfig({
-        id: rootNodeId,
-        viewMeta: JSON.stringify(nextMeta),
-      });
-
-      setCollectionName(nextName);
-      setCollectionTag(nextTag);
-      setCollectionTagIds(nextTagIds);
-      setCollectionSn(nextSn);
-      setViewMetaBase(nextMeta);
-      setCoverNodeId(resolveMetaNumber(editorCoverNodeId));
+    const result = await saveAsmrMetadata(libraryId, rootNodeId, baseline, {
+      name: nextName, tagIds: resolveMetaNumberList(editorTagIds), sn: sanitizeMetaText(editorSn), coverNodeId: editorCoverNodeId,
+    }, { assertCurrent });
+    if (requestId !== editorRequestIdRef.current) return;
+    editorBaselineRef.current = result.baseline;
+    if (result.savedParts.includes('名称')) setCollectionName(result.baseline.name);
+    if (result.savedParts.includes('元信息')) setCollectionSn(result.baseline.sn);
+    if (result.savedParts.includes('标签')) {
+      setCollectionTagIds(result.baseline.tagIds);
+      setLegacyTagText('');
+    }
+    if (accountScope && result.savedParts.length > 0) {
+      notifyLibraryNodesMutated({ accountScope, backendScope: API_CONFIG.BASE_URL, libraryId, nodeId: rootNodeId,
+        affectedParentIds: result.affectedParentIds, ...(result.savedParts.includes('名称') ? { name: result.baseline.name, type: 'dir' } : {}) });
+    }
+    if (result.status === 'saved') {
       setEditorVisible(false);
-
-      const rootChildren = sortNodes((await getChildrenByNodeId(rootNodeId, libraryId)) as AsmrNodeItem[]);
-      await resolveCover(rootChildren, editorCoverNodeId);
       Toast.success('ASMR 信息已更新');
-    } catch (error: any) {
-      runtimeLogger.error('保存 ASMR 信息失败:', error);
-      Toast.error(error?.message || '保存失败');
-    } finally {
+      // 展示刷新失败不能把已提交的保存变成失败，更不能再次提交。
+      try {
+        const [children, meta] = await Promise.all([getChildrenByNodeId(rootNodeId, libraryId), loadCollectionMeta(rootNodeId)]);
+        assertCurrent();
+        setCollectionName(meta.name);
+        setCollectionSn(meta.sn);
+        await resolveCover(sortNodes(children as AsmrNodeItem[]), meta.preferredCoverNodeId);
+      } catch (error) { runtimeLogger.warn('ASMR 信息已保存，但封面刷新未完成:', error); }
+    } else {
+      Toast.error(result.message || '保存失败');
+      if (result.status === 'unknown') {
+        setEditorVisible(false);
+        editorBaselineRef.current = null;
+        try {
+          const meta = await loadCollectionMeta(rootNodeId);
+          assertCurrent();
+          setCollectionName(meta.name);
+          setCollectionTagIds(meta.tagIds);
+          setCollectionSn(meta.sn);
+        } catch (error) { runtimeLogger.warn('ASMR 保存结果核对未完成:', error); }
+      }
+    }
+    if (requestId === editorRequestIdRef.current) {
+      editorSavingRef.current = false;
       setEditorSaving(false);
     }
-  }, [
-    collectionName,
-    editorCoverNodeId,
-    editorName,
-    editorSn,
-    editorTagIds,
-    asmrTagOptionMap,
-    libraryId,
-    resolveCover,
-    rootNodeId,
-    viewMetaBase,
-  ]);
+  }, [accountScope, editorCoverNodeId, editorLoading, editorName, editorSn, editorTagIds, libraryId, loadCollectionMeta, resolveCover, rootNodeId]);
 
   return (
-    <AsmrViewerWrapper>
+    <AsmrViewerWrapper data-player-active={currentAudioId !== null}>
       <section className="top-section">
         <div className="cover-panel">
           {coverLoading ? (
@@ -1176,22 +1097,15 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
                   className="tag-pill"
                   style={{
                     background: tag.color || 'var(--semi-color-fill-0)',
-                    color: tag.textColor || '#fff',
+                    color: tag.textColor || (tag.color ? '#fff' : 'var(--semi-color-text-1)'),
                     borderColor: tag.color || 'var(--semi-color-border)',
                   }}
                 >
                   {tag.name}
                 </span>
               ))
-            ) : fallbackTagTexts.length > 0 ? (
-              fallbackTagTexts.map((text, index) => (
-                <span
-                  key={`asmr-tag-fallback-${index}`}
-                  className="tag-pill fallback"
-                >
-                  {text}
-                </span>
-              ))
+            ) : legacyTagText ? (
+              <span className="tag-pill fallback">{legacyTagText}</span>
             ) : (
               <span className="tag-empty">暂无标签</span>
             )}
@@ -1375,6 +1289,8 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
         width={660}
         onCancel={() => {
           if (!editorSaving) {
+            editorRequestIdRef.current += 1;
+            editorBaselineRef.current = null;
             setEditorVisible(false);
           }
         }}
@@ -1384,6 +1300,7 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
         okText="保存"
         cancelText="取消"
         confirmLoading={editorSaving}
+        okButtonProps={{ disabled: editorLoading }}
       >
         {editorLoading ? (
           <div style={{ height: 220, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -1395,6 +1312,7 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
               <div>
                 <div style={{ marginBottom: 4, color: 'var(--semi-color-text-1)', fontSize: 11 }}>名称</div>
                 <Input
+                  disabled={editorSaving}
                   value={editorName}
                   maxLength={255}
                   onChange={(value) => setEditorName(value)}
@@ -1403,30 +1321,19 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
                 />
               </div>
               <div>
-                <div style={{ marginBottom: 4, color: 'var(--semi-color-text-1)', fontSize: 11 }}>TAG</div>
-                <Select
-                  multiple
-                  filter
-                  loading={asmrTagOptionsLoading}
-                  value={editorTagIds}
-                  onChange={(value) => {
-                    setEditorTagIds(resolveMetaNumberList(value));
-                  }}
-                  placeholder="请选择一个或多个 ASMR 标签"
-                  style={{ width: '100%' }}
-                  size="small"
-                  maxTagCount={3}
-                >
-                  {asmrTagOptions.map(option => (
-                    <Select.Option key={String(option.id)} value={option.id}>
-                      {option.name}
-                    </Select.Option>
-                  ))}
-                </Select>
+                <div style={{ marginBottom: 4, color: 'var(--semi-color-text-1)', fontSize: 11 }}>标签</div>
+                {libraryId && <LibraryTagPicker
+                  libraryId={libraryId}
+                  valueIds={editorTagIds}
+                  onChange={setEditorTagIds}
+                  disabled={editorSaving}
+                  placeholder="搜索资料库标签"
+                />}
               </div>
               <div>
                 <div style={{ marginBottom: 4, color: 'var(--semi-color-text-1)', fontSize: 11 }}>SN</div>
                 <Input
+                  disabled={editorSaving}
                   value={editorSn}
                   maxLength={128}
                   onChange={(value) => setEditorSn(value)}
@@ -1447,6 +1354,7 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
                 <Button
                   theme="light"
                   size="small"
+                  disabled={editorSaving}
                   onClick={() => setEditorCoverNodeId(null)}
                 >
                   清除自定义封面
@@ -1547,7 +1455,7 @@ const AsmrViewer: React.FC<AsmrViewerProps> = ({
                             if (isDir) {
                               return;
                             }
-                            if (isImage) {
+                            if (isImage && !editorSaving) {
                               setEditorCoverNodeId(item.id);
                             }
                           }}
