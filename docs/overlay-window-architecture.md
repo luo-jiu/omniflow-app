@@ -1,6 +1,6 @@
 # Overlay 窗口架构与迁移规范
 
-更新时间：2026-08-26
+更新时间：2026-10-08
 
 适用范围：`omniflow-app` 的跨 renderer 浮层子系统(overlay BrowserWindow),及其承载的弹框 / 右键菜单 / 气泡等迁移流程。
 
@@ -51,6 +51,7 @@
 |---|---|---|---|
 | `overlay:open` | 主 renderer → main | `handle` | `{ requestId?, type, props }` → `Promise<result>` |
 | `overlay:update` | 主 renderer → main | `handle` | `{ requestId, props }` → `Promise<boolean>` |
+| `overlay:cancel` | 主 renderer → main | `handle` | `{ requestId }` → `Promise<boolean>` |
 | `overlay:host:resolve` | overlay → main | `on` | `{ requestId, result }` |
 | `overlay:host:dismiss` | overlay → main | `on` | `{ requestId, reason }` |
 | `overlay:host:show` | main → overlay | `send` | `{ requestId, type, props }` |
@@ -58,6 +59,8 @@
 | `overlay:host:dismiss-from-main` | main → overlay | `send` | `{ requestId }` |
 
 一次性 `openOverlay` 的 `requestId` 仍由 main 生成。需要渐进更新 props 时，`openOverlaySession` 在主 renderer 生成 UUID 并随 `overlay:open` 传入，使调用方在长 Promise 结算前可以调用 `updateProps`。main 只接受原始 sender 对当前或排队中同一请求的更新；请求结算、超时或 sender 销毁后更新返回 `false`。overlay host 对相同 `requestId` 只替换 props，不重建当前 overlay 请求。
+
+`openOverlaySession.cancel()` 只允许原 sender 取消同一 requestId 的当前或排队请求，并将原 result 结算为 cancel；已结算或其他 sender 的请求返回 false。当前请求取消时关闭浮层并推进队列，取消排队请求不影响当前浮层。业务组件卸载或账号 / 资料库作用域失效时必须主动取消自己持有的会话。OverlayHost 按 requestId 设置组件 key：同一请求的 props 更新保留草稿，新请求重建草稿和提交锁。
 
 `ipcMain.handle('overlay:open')` 的 handler 返回一个长 Promise，main 在收到 `overlay:host:resolve` 时 resolve 这个 Promise，作为 `invoke` 的返回值回到主 renderer。
 
@@ -112,7 +115,17 @@ src/overlay/main.tsx
 
 C2 第一方 CSV 的 native view 沿用此 overlay 边界：已在真实 CSV 表格上验证文件属性弹框与遮罩覆盖、Escape 关闭。宿主窗口共享 preload 产物为 `preload.cjs`，开发启动不依赖全局 `--no-sandbox`；详情见 [C2](plugin-system-c2-csv-viewer.md)。
 
-### 2.5 主题同步
+### 2.5 新建文件表单
+
+目录树“新建文件”使用 `create-file` overlay，由 `useCreateFileOverlay` 在主 renderer 编排。不能把 fixed 弹框直接放进目录树：侧栏的 `backdrop-filter` 会创建 fixed containing block，结合 `overflow: hidden` 将弹框居中并裁切在侧栏内；改成主窗口 body portal 仍无法覆盖原生浏览器。
+
+- 主 renderer 读取 provider 列表、订阅唯一资源探针 runtime，通过 `openOverlaySession.updateProps` 发送可序列化摘要与健康状态；请求关闭或作用域失效后停止订阅并忽略迟到列表结果；作用域失效同时取消独立浮窗。provider 列表读取完成后只对缺失 / 超过一分钟的探活结果请求刷新，连续创建复用新鲜结果。
+- overlay adapter 仅持有文件名和存储桶草稿。健康状态更新不重置输入，不覆盖手动选择；Enter 和确认按钮使用相同的提交条件。
+- 返回 `{type: 'confirm', name, storageProvider}` 后，由主 renderer 再检查存储可用性并执行创建与首次空内容写入。失败先完成必要回滚，再重新打开同类表单，恢复草稿并显示错误；不增加跨窗口业务回调或第二套 runtime。
+- 同一目录组件的创建流程保持单飞；切库、账号变化或卸载后关闭浮窗、忽略迟到确认与探活结果，不把旧结果追加到新目录树。创建、写入与补偿删除的异步边界都检查作用域，不使用新账号凭据继续旧事务。已经发出的 HTTP 请求不能收回；若作用域在节点创建期间失效，可能留下尚未初始化的节点，需要在原账号下检查，本轮不新增跨账号后台补偿。
+- 文件夹仍直接创建并进入行内重命名，不走本表单。
+
+### 2.6 主题同步
 
 主题由主窗口 ThemeContext 唯一解析，overlay 通过 `electronAppearance` 获取并订阅 main 校验后的完整快照，不再订阅 localStorage 或自行持续解析系统主题。
 

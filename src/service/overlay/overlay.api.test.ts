@@ -59,4 +59,26 @@ describe('overlay api', () => {
     }));
     await expect(session.result).resolves.toEqual({ type: 'close' });
   });
+
+  it('cancels the pending session using its original request id and returns the main result', async () => {
+    let settle: (result: { type: 'cancel' }) => void = () => undefined;
+    const open = vi.fn().mockImplementation(() => new Promise((resolve) => { settle = resolve; }));
+    const cancel = vi.fn().mockImplementation(async () => {
+      settle({ type: 'cancel' });
+      return true;
+    });
+    vi.stubGlobal('window', { electronOverlay: { open, update: vi.fn(), cancel } });
+
+    const session = openOverlaySession('delete-confirm', {
+      deleteCount: 1, isFolder: false, nodeName: 'demo.txt',
+    });
+    const requestId = open.mock.calls[0]?.[2];
+    await expect(session.cancel()).resolves.toBe(true);
+    expect(cancel).toHaveBeenCalledWith(requestId);
+    await expect(session.result).resolves.toEqual({ type: 'cancel' });
+
+    cancel.mockResolvedValue(false);
+    await expect(session.cancel()).resolves.toBe(false);
+    expect(cancel).toHaveBeenLastCalledWith(requestId);
+  });
 });

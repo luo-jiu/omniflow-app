@@ -61,6 +61,7 @@ export const OverlayHost: React.FC = () => {
   const Component = entry.component;
   return (
     <Component
+      key={current.requestId}
       props={current.props}
       onResolve={handleResolve}
       onCancel={handleCancel}

@@ -2,6 +2,7 @@ import { ipcMain, type WebContents } from 'electron';
 import { randomUUID } from 'node:crypto';
 import type { OverlayWindowController } from './overlayWindowController';
 import type {
+  OverlayCancelPayload,
   OverlayDismissFromRendererPayload,
   OverlayOpenPayload,
   OverlayResolvePayload,
@@ -135,6 +136,26 @@ export function registerOverlayWindowIpcHandlers(controller: OverlayWindowContro
     pending.props = payload.props;
     if (currentRequest === pending) {
       controller.updateSpec({ requestId, props: payload.props });
+    }
+    return true;
+  });
+
+  ipcMain.handle('overlay:cancel', (event, payload: OverlayCancelPayload) => {
+    const requestId = typeof payload?.requestId === 'string' ? payload.requestId.trim() : '';
+    if (!OVERLAY_REQUEST_ID_PATTERN.test(requestId)) return false;
+    const pending = findPending(requestId);
+    if (!pending || pending.senderContents !== event.sender) return false;
+
+    const isCurrent = currentRequest === pending;
+    if (isCurrent) {
+      controller.dismissSpec({ requestId });
+    } else {
+      queue.splice(queue.indexOf(pending), 1);
+    }
+    cleanupPending(pending);
+    pending.resolve({ type: 'cancel' });
+    if (isCurrent) {
+      advanceQueueOrIdle();
     }
     return true;
   });

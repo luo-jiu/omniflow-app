@@ -409,6 +409,7 @@ interface Window {
   electronOverlay: {
     open: <T = unknown>(type: string, props: unknown, requestId?: string) => Promise<T>;
     update: (requestId: string, props: unknown) => Promise<boolean>;
+    cancel: (requestId: string) => Promise<boolean>;
   };
 
   electronOverlayHost: {

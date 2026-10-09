@@ -17,6 +17,7 @@ export async function openOverlay<T extends OverlayType>(
 export type OverlaySession<T extends OverlayType> = {
   result: Promise<OverlayResultMap[T]>;
   updateProps: (props: OverlayPropsMap[T]) => Promise<boolean>;
+  cancel: () => Promise<boolean>;
 };
 
 export function openOverlaySession<T extends OverlayType>(
@@ -28,5 +29,6 @@ export function openOverlaySession<T extends OverlayType>(
   return {
     result: window.electronOverlay.open<OverlayResultMap[T]>(type, props, requestId),
     updateProps: (nextProps) => window.electronOverlay.update(requestId, nextProps),
+    cancel: () => window.electronOverlay.cancel(requestId),
   };
 }

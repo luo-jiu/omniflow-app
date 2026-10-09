@@ -438,6 +438,8 @@ contextBridge.exposeInMainWorld('electronOverlay', {
     ipcRenderer.invoke('overlay:open', { requestId, type, props }),
   update: (requestId: string, props: unknown) =>
     ipcRenderer.invoke('overlay:update', { requestId, props }),
+  cancel: (requestId: string) =>
+    ipcRenderer.invoke('overlay:cancel', { requestId }),
 });
 
 contextBridge.exposeInMainWorld('electronOverlayHost', {

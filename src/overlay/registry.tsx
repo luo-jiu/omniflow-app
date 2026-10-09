@@ -1,4 +1,5 @@
 import React from 'react';
+import { CreateFileOverlayAdapter } from './components/CreateFileOverlayAdapter';
 import { DeleteConfirmOverlayAdapter } from './components/DeleteConfirmOverlayAdapter';
 import { DirectoryContextMenuOverlayAdapter } from './components/DirectoryContextMenuOverlayAdapter';
 import { NodePropertiesOverlayAdapter } from './components/NodePropertiesOverlayAdapter';
@@ -15,6 +16,7 @@ export type OverlayRegistryEntry = {
 };
 
 export const overlayRegistry: Record<string, OverlayRegistryEntry> = {
+  'create-file': { component: CreateFileOverlayAdapter },
   'delete-confirm': { component: DeleteConfirmOverlayAdapter },
   'directory-context-menu': { component: DirectoryContextMenuOverlayAdapter },
   'node-properties': { component: NodePropertiesOverlayAdapter },

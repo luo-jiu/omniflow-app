@@ -10,18 +10,14 @@ import { IconChevronRightStroked } from '@douyinfe/semi-icons';
 import {
   batchSetArchiveChildrenBuiltInType,
   createNode,
-  deleteNodeAndChildren,
   getAllDescendantsByNodeId,
   fetchNodeDetailById,
   getFileLink,
-  hardDeleteNodeAndChildren,
   moveNodesBatch,
   renameNode,
   sortComicChildrenByName,
   updateNodeConfig,
-  updateNodeFileContent,
 } from "../../services/file.api";
-import CreateNodeModal from './modals/CreateNodeModal.tsx';
 import { buildFileFullName, splitFileBaseNameAndExt } from '@/utils/fileTreeSettings';
 import { validateWindowsLikeFileName } from '@/utils/windowsFileName';
 import { runtimeLogger } from '@/utils/runtimeLogger';
@@ -62,7 +58,6 @@ import type {
   DirectoryContextMenuNodeSnapshot,
   DirectoryContextMenuResult,
   OverlayContextMenuPosition,
-  OverlayStorageProvider,
 } from '@/service/overlay/types';
 import { useNodePropertiesOverlay } from '@/features/file-explorer/hooks/useNodePropertiesOverlay';
 import MigrationDialog from '@/features/file-explorer/components/migration-dialog';
@@ -79,11 +74,7 @@ import {
   type LibraryFileBrowserDragPayload,
 } from '@/features/file-transfer/model/file-transfer';
 import { containTreeExpandDoubleClick } from '@/features/file-explorer/utils/tree-expand-behavior';
-import {
-  ensureStorageProviderAvailable,
-  selectPreferredStorageProvider,
-} from '@/features/resource-monitor/services/storage-provider-health';
-import { resourceMonitorProbeRuntime } from '@/features/resource-monitor/services/resource-monitor-runtime';
+import { useCreateFileOverlay } from '@/features/file-explorer/hooks/useCreateFileOverlay';
 import { useLibraryTreeDeletionSelection } from '../../hooks/useLibraryTreeDeletionSelection';
 
 interface DirectoryTreeProps {
@@ -216,28 +207,7 @@ export default function DirectoryTree({
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
   const expandTimerRef = useRef<number | null>(null);
 
-  // 新建文件/文件夹 Modal 的状态
-  const [createModal, setCreateModal] = useState<{
-    visible: boolean;
-    type: 'file' | 'dir' | null;
-    parentNode: any | null; // 父节点，null 表示根目录
-    name: string;
-    loading: boolean;
-    defaultProvider: string;
-    providers: OverlayStorageProvider[];
-    providerLoading: boolean;
-    selectedProvider: string;
-  }>({
-    visible: false,
-    type: null,
-    parentNode: null,
-    name: '',
-    loading: false,
-    defaultProvider: '',
-    providers: [],
-    providerLoading: false,
-    selectedProvider: '',
-  });
+  const showCreateFile = useCreateFileOverlay({ libraryId, accountScope: viewerAccountScope });
   const treeContainerRef = useRef<HTMLDivElement | null>(null);
 
   // 存储迁移 Dialog 状态
@@ -272,19 +242,6 @@ export default function DirectoryTree({
     setSelectionAnchorKey(nextAnchor);
   };
 
-  const resetCreateModalState = useCallback(() => {
-    setCreateModal({
-      visible: false,
-      type: null,
-      parentNode: null,
-      name: '',
-      loading: false,
-      defaultProvider: '',
-      providers: [],
-      providerLoading: false,
-      selectedProvider: '',
-    });
-  }, []);
   const dragSelectionNodeIdsRef = useRef<number[]>([]);
   const dragCollapsedKeysRef = useRef<string[]>([]);
   const dragExpandedKeysSnapshotRef = useRef<string[]>([]);
@@ -1853,51 +1810,12 @@ export default function DirectoryTree({
     }
 
     if (action === '新建文件') {
-      setCreateModal({
-        visible: true,
-        type: 'file',
-        parentNode: node,
-        name: '',
-        loading: false,
-        defaultProvider: '',
-        providers: [],
-        providerLoading: true,
-        selectedProvider: '',
-      });
-      try {
-        const providerData = await fetchProviders();
-        const providers = (providerData.providers || []).map((provider) => ({
-          alias: provider.alias,
-          type: provider.type,
-          endpoint: provider.endpoint,
-          bucket: provider.bucket,
-          label: provider.label,
-          useSSL: provider.useSSL,
-        }));
-        const defaultProvider = providerData.defaultProvider || '';
-        const selectedProvider = selectPreferredStorageProvider(
-          providers,
-          defaultProvider,
-          resourceMonitorProbeRuntime.getState().snapshot,
-        );
-        setCreateModal(prev => (
-          prev.visible && prev.type === 'file'
-            ? {
-              ...prev,
-              defaultProvider,
-              providers,
-              providerLoading: false,
-              selectedProvider,
-            }
-            : prev
-        ));
-      } catch (error) {
-        runtimeLogger.warn('加载存储 Provider 失败，新建文件将使用后端默认分配:', error);
-        setCreateModal(prev => (
-          prev.visible && prev.type === 'file'
-            ? { ...prev, providerLoading: false }
-            : prev
-        ));
+      const parentId = node ? Number(node.id) : Number(ROOT_PARENT_ID);
+      const scope = menuScopeRef.current;
+      const newFile = await showCreateFile(parentId);
+      if (newFile && menuScopeRef.current === scope) {
+        onUploadSuccess?.(node || { id: parentId, key: 'root' }, newFile);
+        scheduleRecompute();
       }
     } else if (action === '新建文件夹') {
       if (creatingDirectoryRef.current) {
@@ -2071,102 +1989,6 @@ export default function DirectoryTree({
       runtimeLogger.debug(`👉 [${action}]`, node);
       Toast.info({ content: `模拟：${action}`, duration: 2 });
     }
-  };
-
-  // 确认创建文件/文件夹
-  const handleConfirmCreate = async () => {
-    const { type, parentNode, name, loading, providerLoading, selectedProvider } = createModal;
-    if (loading) {
-      return;
-    }
-    if (!type || !name.trim()) {
-      Toast.warning('请输入名称');
-      return;
-    }
-    if (type === 'file' && providerLoading) {
-      Toast.warning('存储位置加载中，请稍后');
-      return;
-    }
-    const resolvedRootParentId = ROOT_PARENT_ID;
-    if (!parentNode && resolvedRootParentId === null) {
-      Toast.warning('目录根节点初始化中，请稍后重试');
-      return;
-    }
-    if (type === 'file') {
-      setCreateModal(prev => ({ ...prev, loading: true }));
-      const availability = await ensureStorageProviderAvailable(selectedProvider);
-      if (!availability.available) {
-        Toast.warning(availability.message);
-        setCreateModal(prev => ({ ...prev, loading: false }));
-        return;
-      }
-    }
-
-    try {
-      const nextCreateValue = type === 'file'
-        ? splitFileBaseNameAndExt(name.trim())
-        : { name: name.trim(), ext: '' };
-      if (!nextCreateValue.name) {
-        Toast.warning('名称不能为空');
-        setCreateModal(prev => ({ ...prev, loading: false }));
-        return;
-      }
-
-      const parentId = parentNode ? parentNode.id : Number(resolvedRootParentId);
-      const storageProvider = type === 'file' ? selectedProvider : '';
-
-      setCreateModal(prev => ({ ...prev, loading: true }));
-      let newNode: any = await createNode({
-        name: nextCreateValue.name,
-        ext: type === 'file' ? nextCreateValue.ext : undefined,
-        parentId,
-        libraryId,
-        type,
-      });
-      if (type === 'file') {
-        try {
-          newNode = await updateNodeFileContent({
-            nodeId: Number(newNode.id),
-            libraryId,
-            content: '',
-            contentType: 'text/plain; charset=utf-8',
-            storageProvider,
-          });
-        } catch (error) {
-          const cleanupNodeId = Number(newNode.id);
-          await deleteNodeAndChildren(cleanupNodeId, libraryId).catch((deleteError) => {
-            runtimeLogger.warn('新建文件首次写入失败后清理节点失败:', deleteError);
-          });
-          await hardDeleteNodeAndChildren(cleanupNodeId, libraryId).catch((hardDeleteError) => {
-            runtimeLogger.warn('新建文件首次写入失败后彻底清理节点失败:', hardDeleteError);
-          });
-          throw error;
-        }
-      }
-      
-      Toast.success(`${type === 'dir' ? '文件夹' : '文件'}创建成功`);
-      resetCreateModalState();
-      
-      // 通知父组件刷新
-      if (onUploadSuccess) {
-        if (parentNode) {
-          onUploadSuccess(parentNode, newNode);
-        } else if (resolvedRootParentId !== null) {
-          onUploadSuccess({ id: resolvedRootParentId, key: 'root' }, newNode);
-        }
-      }
-      
-      scheduleRecompute();
-    } catch (error: any) {
-      runtimeLogger.error('创建节点失败:', error);
-      Toast.error(error.message || '创建失败，请重试');
-      setCreateModal(prev => ({ ...prev, loading: false }));
-    }
-  };
-
-  // 取消创建
-  const handleCancelCreate = () => {
-    resetCreateModalState();
   };
 
   // 确认重命名
@@ -2663,21 +2485,7 @@ export default function DirectoryTree({
       {/* 目录树右键菜单已迁移至 overlay 子窗口（见 docs/overlay-window-architecture.md） */}
       {/* 上传确认弹框已迁移至 overlay 子窗口（见 docs/overlay-window-architecture.md） */}
 
-      {/* 新建文件/文件夹 Modal - 居中显示 */}
-      <CreateNodeModal
-        visible={createModal.visible}
-        type={createModal.type}
-        name={createModal.name}
-        loading={createModal.loading}
-        defaultProvider={createModal.defaultProvider}
-        providers={createModal.providers}
-        providerLoading={createModal.providerLoading}
-        selectedProvider={createModal.selectedProvider}
-        onNameChange={(value) => setCreateModal(prev => ({ ...prev, name: value }))}
-        onProviderChange={(value) => setCreateModal(prev => ({ ...prev, selectedProvider: value }))}
-        onConfirm={handleConfirmCreate}
-        onCancel={handleCancelCreate}
-      />
+      {/* 新建文件表单由 useCreateFileOverlay 在独立 overlay 子窗口展示。 */}
 
       {/* 存储迁移对话框 */}
       <MigrationDialog

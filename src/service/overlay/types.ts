@@ -37,6 +37,19 @@ export type UploadConfirmResult =
   | { type: 'confirm'; storageProvider: string }
   | { type: 'cancel' };
 
+export type CreateFileOverlayProps = {
+  initialName: string;
+  initialStorageProvider: string;
+  defaultProvider: string;
+  providers: OverlayStorageProvider[];
+  providerLoading: boolean;
+  errorMessage?: string;
+};
+
+export type CreateFileResult =
+  | { type: 'confirm'; name: string; storageProvider: string }
+  | { type: 'cancel' };
+
 export type DeleteConfirmOverlayProps = {
   deleteCount: number;
   isFolder: boolean;
@@ -133,6 +146,7 @@ export type DirectoryContextMenuResult =
   | { type: 'cancel' };
 
 export type OverlayResultMap = {
+  'create-file': CreateFileResult;
   'delete-confirm': DeleteConfirmResult;
   'directory-context-menu': DirectoryContextMenuResult;
   'node-properties': NodePropertiesOverlayResult;
@@ -140,6 +154,7 @@ export type OverlayResultMap = {
 };
 
 export type OverlayPropsMap = {
+  'create-file': CreateFileOverlayProps;
   'delete-confirm': DeleteConfirmOverlayProps;
   'directory-context-menu': DirectoryContextMenuOverlayProps;
   'node-properties': NodePropertiesOverlayProps;

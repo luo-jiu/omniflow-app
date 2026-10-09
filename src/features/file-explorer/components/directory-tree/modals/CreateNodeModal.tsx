@@ -9,23 +9,16 @@ import {
   StorageProviderDropdownStyle,
   StorageProviderOption,
 } from './storage-provider-option';
-import { resourceMonitorProbeRuntime } from '@/features/resource-monitor/services/resource-monitor-runtime';
-import {
-  findStorageProviderProbe,
-  getStorageProviderProbeStatus,
-  isStorageProviderProbeFresh,
-  selectPreferredStorageProvider,
-} from '@/features/resource-monitor/services/storage-provider-health';
 
 interface CreateNodeModalProps {
   visible: boolean;
-  type: 'file' | 'dir' | null;
   name: string;
   loading: boolean;
   defaultProvider?: string;
   providers?: OverlayStorageProvider[];
   providerLoading?: boolean;
   selectedProvider?: string;
+  errorMessage?: string;
   onNameChange: (value: string) => void;
   onProviderChange?: (value: string) => void;
   onConfirm: () => void;
@@ -155,6 +148,14 @@ const Panel = styled.div`
     line-height: 1.35;
   }
 
+  .create-error {
+    margin-top: 10px;
+    color: var(--semi-color-danger);
+    font-size: 12px;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+  }
+
   .provider-select {
     width: 100%;
   }
@@ -240,66 +241,30 @@ const Panel = styled.div`
 
 const CreateNodeModal: React.FC<CreateNodeModalProps> = ({
   visible,
-  type,
   name,
   loading,
   defaultProvider,
   providers = [],
   providerLoading,
   selectedProvider,
+  errorMessage,
   onNameChange,
   onProviderChange,
   onConfirm,
   onCancel
 }) => {
-  const isFolder = type === 'dir';
-  const providerSelectionWasManualRef = React.useRef(false);
-  const probeRuntime = React.useSyncExternalStore(
-    resourceMonitorProbeRuntime.subscribe,
-    resourceMonitorProbeRuntime.getState,
-    resourceMonitorProbeRuntime.getState,
-  );
   const selectedProviderInfo = providers.find(provider => provider.alias === selectedProvider);
-  const selectedProviderStatus = getStorageProviderProbeStatus(
-    probeRuntime.snapshot,
-    selectedProvider || '',
-  );
-
-  React.useEffect(() => {
-    if (!visible) {
-      providerSelectionWasManualRef.current = false;
+  const selectedProviderStatus = selectedProviderInfo?.healthStatus || 'unknown';
+  const canSubmit = Boolean(name.trim())
+    && Boolean(selectedProvider?.trim())
+    && !loading
+    && !providerLoading
+    && selectedProviderStatus === 'ok';
+  const handleConfirm = () => {
+    if (canSubmit) {
+      onConfirm();
     }
-  }, [visible]);
-
-  React.useEffect(() => {
-    if (!visible || isFolder || providerSelectionWasManualRef.current) {
-      return;
-    }
-    if (getStorageProviderProbeStatus(probeRuntime.snapshot, selectedProvider || '') === 'ok') {
-      return;
-    }
-    const preferredProvider = selectPreferredStorageProvider(
-      providers,
-      defaultProvider || '',
-      probeRuntime.snapshot,
-    );
-    if (preferredProvider && preferredProvider !== selectedProvider) {
-      onProviderChange?.(preferredProvider);
-    }
-  }, [defaultProvider, isFolder, onProviderChange, probeRuntime.snapshot, providers, selectedProvider, visible]);
-
-  React.useEffect(() => {
-    if (!visible || isFolder || !selectedProvider) {
-      return;
-    }
-    const probe = findStorageProviderProbe(probeRuntime.snapshot, selectedProvider);
-    if (probeRuntime.snapshot && !probe) {
-      return;
-    }
-    if (!isStorageProviderProbeFresh(probe)) {
-      void resourceMonitorProbeRuntime.refresh({ silent: true });
-    }
-  }, [isFolder, probeRuntime.snapshot, selectedProvider, visible]);
+  };
 
   const renderSelectedProvider = React.useCallback(() => {
     if (!selectedProviderInfo) {
@@ -320,7 +285,7 @@ const CreateNodeModal: React.FC<CreateNodeModalProps> = ({
       return undefined;
     }
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
+      if (event.key === 'Escape' && !event.defaultPrevented) {
         event.preventDefault();
         onCancel();
       }
@@ -340,69 +305,70 @@ const CreateNodeModal: React.FC<CreateNodeModalProps> = ({
       <StorageProviderDropdownStyle />
       <Overlay role="presentation">
         <Panel
-          className={isFolder ? 'create-panel-folder' : 'create-panel-file'}
+          className="create-panel-file"
           role="dialog"
           aria-modal="true"
-          aria-label={isFolder ? '新建文件夹' : '新建文件'}
+          aria-label="新建文件"
+          aria-describedby={errorMessage ? 'directory-create-error' : undefined}
         >
           <div className="create-header">
-            <div className="create-title">{isFolder ? '新建文件夹' : '新建文件'}</div>
+            <div className="create-title">新建文件</div>
             <button className="create-close" type="button" aria-label="关闭" onClick={onCancel}>
               <IconCrossStroked size="small" />
             </button>
           </div>
           <div className="create-fields">
             <div className="create-field">
-              <div className="create-field-label">{isFolder ? '文件夹名称' : '文件名称'}</div>
+              <div id="directory-create-name-label" className="create-field-label">文件名称</div>
               <Input
-                placeholder={isFolder ? '请输入文件夹名称' : '请输入文件名称'}
+                aria-labelledby="directory-create-name-label"
+                placeholder="请输入文件名称"
                 value={name}
                 onChange={onNameChange}
                 onKeyDown={e => {
-                  if (e.key === 'Enter') {
-                    onConfirm();
+                  if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                    e.preventDefault();
+                    handleConfirm();
                   }
                 }}
                 autoFocus
               />
             </div>
-            {!isFolder && (
-              <div className="create-field">
-                <div id="directory-create-storage-provider-label" className="create-field-label">
-                  存储桶
-                </div>
-                <Select
-                  aria-labelledby="directory-create-storage-provider-label"
-                  arrowIcon={<IconChevronDownStroked size="small" />}
-                  className="provider-select"
-                  dropdownClassName="directory-tree-storage-provider-dropdown"
-                  value={selectedProvider}
-                  loading={providerLoading}
-                  disabled={providerLoading || providers.length === 0}
-                  placeholder={providerLoading ? '正在加载存储桶' : '选择存储桶'}
-                  size="small"
-                  dropdownStyle={{ maxHeight: 180, overflowY: 'auto' }}
-                  onChange={(value) => {
-                    providerSelectionWasManualRef.current = true;
-                    onProviderChange?.(String(value || ''));
-                  }}
-                  renderSelectedItem={renderSelectedProvider}
-                >
-                  {providers.map((provider) => {
-                    const status = getStorageProviderProbeStatus(probeRuntime.snapshot, provider.alias);
-                    return (
-                      <Select.Option key={provider.alias} value={provider.alias} showTick={false}>
-                        <StorageProviderOption>
-                          <StorageProviderHealthDot status={status} />
-                          {formatStorageProviderAlias(provider, defaultProvider)}
-                        </StorageProviderOption>
-                      </Select.Option>
-                    );
-                  })}
-                </Select>
+            <div className="create-field">
+              <div id="directory-create-storage-provider-label" className="create-field-label">
+                存储桶
               </div>
-            )}
+              <Select
+                aria-labelledby="directory-create-storage-provider-label"
+                arrowIcon={<IconChevronDownStroked size="small" />}
+                className="provider-select"
+                dropdownClassName="directory-tree-storage-provider-dropdown"
+                value={selectedProvider}
+                loading={providerLoading}
+                disabled={providerLoading || providers.length === 0}
+                placeholder={providerLoading ? '正在加载存储桶' : '选择存储桶'}
+                size="small"
+                dropdownStyle={{ maxHeight: 180, overflowY: 'auto' }}
+                onChange={(value) => onProviderChange?.(String(value || ''))}
+                renderSelectedItem={renderSelectedProvider}
+              >
+                {providers.map((provider) => {
+                  const status = provider.healthStatus || 'unknown';
+                  return (
+                    <Select.Option key={provider.alias} value={provider.alias} showTick={false}>
+                      <StorageProviderOption>
+                        <StorageProviderHealthDot status={status} />
+                        {formatStorageProviderAlias(provider, defaultProvider)}
+                      </StorageProviderOption>
+                    </Select.Option>
+                  );
+                })}
+              </Select>
+            </div>
           </div>
+          {errorMessage && (
+            <div id="directory-create-error" className="create-error" role="alert">{errorMessage}</div>
+          )}
           <div className="create-actions">
             <button
               className="create-action create-action-secondary"
@@ -415,9 +381,9 @@ const CreateNodeModal: React.FC<CreateNodeModalProps> = ({
             <button
               className="create-action create-action-primary"
               type="button"
-              disabled={loading || (!isFolder && (providerLoading || selectedProviderStatus !== 'ok'))}
-              title={!isFolder && selectedProviderStatus !== 'ok' ? '当前存储桶不可用' : undefined}
-              onClick={onConfirm}
+              disabled={!canSubmit}
+              title={selectedProviderStatus !== 'ok' ? '当前存储桶不可用' : undefined}
+              onClick={handleConfirm}
             >
               确定
             </button>

@@ -15,6 +15,10 @@ export type OverlayUpdatePayload = {
   props: unknown;
 };
 
+export type OverlayCancelPayload = {
+  requestId: string;
+};
+
 export type OverlayResolvePayload = {
   requestId: string;
   result: unknown;
