@@ -11,9 +11,11 @@
 
 ## 当前文件
 
+- [resource-tagging-notes.md](resource-tagging-notes.md) — 资源标签粒度、现有标签工具与目录范围 Agent 辅助打标草案；写入模式和人工修正流程待定。
+- [file-search-notes.md](file-search-notes.md) — 文件搜索能力调研及入口、结果展示候选方案；界面形式尚未确定。
 - `media-hub-roadmap.md` — 全局媒体控制中心后续迭代清单（基线版本已合入 main）。
 - `file-type-identity-roadmap.md` — 文件类型身份识别终局规划草案。
-- `resource-create-wizard-roadmap.md` — 资源创建向导规划草案。
+- [resource-create-wizard-roadmap.md](resource-create-wizard-roadmap.md) — 内置类型与归档手动组织调研：资源配置/创建、多选整理与导入入口待实施；Agent 领域知识和目录配置已落地，验证范围以正式专题为准。
 - `resource-monitor-console-roadmap.md` — 资源监测控制台规划草案。
 - `resource-monitor-dashboard-v2-roadmap.md` — 资源监测仪表盘 V2 改进规划草案。
 - `system-workspace-roadmap.md` — 设置 / 上传 / 回收站等系统页面改成资料库工作区视图的规划草案。
