@@ -13,10 +13,16 @@ export function getMainWindowBackgroundColor(): string {
   return nativeTheme.shouldUseDarkColors ? '#1e1e1e' : '#f5f5f0'
 }
 
+export function refreshMainWindowBackground(win: BrowserWindow): void {
+  if (win.isDestroyed()) return
+  const color = getMainWindowPlatformOptions().vibrancy
+    ? '#00000000'
+    : appearanceBackgrounds.get(win) ?? getMainWindowBackgroundColor()
+  win.setBackgroundColor(color)
+}
+
 export function syncMainWindowBackground(win: BrowserWindow): void {
-  const update = () => {
-    if (!win.isDestroyed()) win.setBackgroundColor(getMainWindowPlatformOptions().vibrancy ? '#00000000' : appearanceBackgrounds.get(win) ?? getMainWindowBackgroundColor())
-  }
+  const update = () => refreshMainWindowBackground(win)
   update()
   nativeTheme.on('updated', update)
   win.once('closed', () => nativeTheme.off('updated', update))

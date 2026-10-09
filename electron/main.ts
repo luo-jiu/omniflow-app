@@ -14,7 +14,11 @@ import { createEmbeddedBrowserMainController } from './service/embeddedBrowserMa
 import { isDevToolsToggleShortcut } from './service/embeddedBrowserInputShortcuts'
 import { registerAppearanceIpc } from './service/appearanceIpc'
 import { registerWindowControlIpcHandlers } from './service/windowControlIpc'
-import { getMainWindowBackgroundColor, syncMainWindowBackground } from './service/mainWindowBackground'
+import {
+  getMainWindowBackgroundColor,
+  refreshMainWindowBackground,
+  syncMainWindowBackground,
+} from './service/mainWindowBackground'
 import { createOverlayWindowController } from './service/overlayWindowController'
 import { registerOverlayWindowIpcHandlers } from './service/overlayWindowIpc'
 import { createSystemVideoWindowController } from './service/systemVideoWindowController'
@@ -319,15 +323,25 @@ function createWindow() {
     overlayWindowController.syncBoundsFromMain()
   })
   win.on('enter-full-screen', () => {
+    refreshMainWindowBackground(win)
     win.webContents.send('window-full-screen-changed', true)
     overlayWindowController.syncBoundsFromMain()
     // macOS fullscreen transition is animated; resync after it settles
     setTimeout(() => overlayWindowController.syncBoundsFromMain(), 300)
   })
   win.on('leave-full-screen', () => {
+    refreshMainWindowBackground(win)
     win.webContents.send('window-full-screen-changed', false)
     overlayWindowController.syncBoundsFromMain()
     setTimeout(() => overlayWindowController.syncBoundsFromMain(), 300)
+  })
+  // HTML fullscreen (used by the video viewer) has a separate lifecycle from
+  // BrowserWindow fullscreen and can temporarily replace the transparent backing.
+  const restoreHtmlFullscreenBackground = () => refreshMainWindowBackground(win)
+  win.webContents.on('enter-html-full-screen', restoreHtmlFullscreenBackground)
+  win.webContents.on('leave-html-full-screen', () => {
+    restoreHtmlFullscreenBackground()
+    setTimeout(restoreHtmlFullscreenBackground, 300)
   })
   win.on('minimize', () => {
     const overlay = overlayWindowController.getWindow()

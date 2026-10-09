@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const theme = vi.hoisted(() => ({ shouldUseDarkColors: false, vibrancy: undefined as string | undefined, on: vi.fn(), off: vi.fn() }))
 vi.mock('electron', () => ({ nativeTheme: theme }))
 vi.mock('../platform', () => ({ getMainWindowPlatformOptions: () => ({ vibrancy: theme.vibrancy }) }))
-import { getMainWindowBackgroundColor, syncMainWindowBackground } from './mainWindowBackground'
+import { getMainWindowBackgroundColor, refreshMainWindowBackground, syncMainWindowBackground } from './mainWindowBackground'
 
 describe('Main window backing color', () => {
   beforeEach(() => { vi.clearAllMocks(); theme.shouldUseDarkColors = false; theme.vibrancy = undefined })
@@ -39,5 +39,12 @@ describe('Main window backing color', () => {
     expect(win.setBackgroundColor).toHaveBeenCalledTimes(2)
     win.emit('closed')
     expect(theme.off).toHaveBeenCalledWith('updated', update)
+  })
+
+  it('restores the transparent backing used by vibrancy after fullscreen transitions', () => {
+    theme.vibrancy = 'sidebar'
+    const win = Object.assign(new EventEmitter(), { isDestroyed: () => false, setBackgroundColor: vi.fn() })
+    refreshMainWindowBackground(win as never)
+    expect(win.setBackgroundColor).toHaveBeenCalledWith('#00000000')
   })
 })
