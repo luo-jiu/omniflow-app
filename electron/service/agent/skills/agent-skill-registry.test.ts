@@ -10,23 +10,20 @@ import {
 import type { AgentSkillDefinitionV1 } from './agent-skill.types';
 
 function skill(overrides: Partial<AgentSkillDefinitionV1> = {}): AgentSkillDefinitionV1 {
-  const toolAllowlist = overrides.toolAllowlist
-    || ['file.list', 'media.inspect', 'media.extractAudio'];
   return {
     description: '从媒体文件提取音频',
     id: 'media-extract-audio',
     instructions: '先检查输入，再调用受控 Tool。\n完成后重新感知产物。',
     source: 'built-in',
-    optionalTools: overrides.optionalTools || [],
-    requiredTools: overrides.requiredTools || toolAllowlist,
-    toolAllowlist,
+    optionalTools: [],
+    requiredTools: ['file.list', 'media.inspect', 'media.extractAudio'],
     version: '1.0.0',
     whenToUse: '用户要求从一个明确的音视频文件提取音轨时。',
     ...overrides,
   };
 }
 
-describe('Agent Skill V1 registry', () => {
+describe('Agent Skill registry', () => {
   it('registers built-in definitions and returns a stable sorted catalog', () => {
     const registry = createAgentSkillRegistry({
       toolExists: () => true,
@@ -44,12 +41,11 @@ describe('Agent Skill V1 registry', () => {
     expect(Object.isFrozen(registry.get('a-first'))).toBe(true);
   });
 
-  it('deep-copies and freezes definitions, including the Tool allowlist', () => {
+  it('deep-copies and freezes definitions, including both Tool dependency arrays', () => {
     const input = {
       ...skill(),
-      optionalTools: [...skill().optionalTools],
+      optionalTools: ['file.delete'],
       requiredTools: [...skill().requiredTools],
-      toolAllowlist: [...skill().toolAllowlist],
     } as {
       description: string;
       id: string;
@@ -57,7 +53,6 @@ describe('Agent Skill V1 registry', () => {
       optionalTools: string[];
       requiredTools: string[];
       source: 'built-in';
-      toolAllowlist: string[];
       version: string;
       whenToUse: string;
     };
@@ -70,16 +65,12 @@ describe('Agent Skill V1 registry', () => {
     registry.register(input);
     input.description = 'changed after registration';
     input.requiredTools[0] = 'evil.tool';
-    input.toolAllowlist[0] = 'evil.tool';
+    input.optionalTools[0] = 'evil.tool';
 
     const registered = registry.get(input.id);
     expect(registered?.description).toBe('从媒体文件提取音频');
-    expect(registered?.toolAllowlist).toEqual([
-      'file.list',
-      'media.inspect',
-      'media.extractAudio',
-    ]);
-    expect(Object.isFrozen(registered?.toolAllowlist)).toBe(true);
+    expect(registered?.optionalTools).toEqual(['file.delete']);
+    expect(Object.isFrozen(registered?.optionalTools)).toBe(true);
     expect(registered?.requiredTools).toEqual([
       'file.list',
       'media.inspect',
@@ -103,11 +94,11 @@ describe('Agent Skill V1 registry', () => {
     expect(() => registry.register(skill())).toThrow('已注册');
     expect(() => registry.register(skill({
       id: 'duplicate-tools',
-      toolAllowlist: ['file.list', 'file.list'],
+      requiredTools: ['file.list', 'file.list'],
     }))).toThrow('重复 Tool');
     expect(() => registry.register(skill({
       id: 'unknown-tool',
-      toolAllowlist: ['does.not-exist'],
+      requiredTools: ['does.not-exist'],
     }))).toThrow('未知 Tool');
     expect(() => registry.register(skill({
       id: 'external-source',
@@ -132,11 +123,11 @@ describe('Agent Skill V1 registry', () => {
     expect(() => registry.register({
       ...skill(),
       id: 'date-value',
-      toolAllowlist: new Date() as unknown as readonly string[],
+      requiredTools: new Date() as unknown as readonly string[],
     })).toThrow();
   });
 
-  it('requires every allowlisted Tool to have one required or optional classification', () => {
+  it('rejects dependencies repeated across required and optional arrays', () => {
     const registry = createAgentSkillRegistry({
       toolExists: () => true,
       estimateTokens: text => text.length,
@@ -144,17 +135,45 @@ describe('Agent Skill V1 registry', () => {
       maxSummaryTokens: 10_000,
     });
     expect(() => registry.register(skill({
-      optionalTools: [],
-      requiredTools: ['file.list'],
-    }))).toThrow('必须归入');
-    expect(() => registry.register(skill({
       optionalTools: ['file.list'],
       requiredTools: ['file.list', 'media.inspect', 'media.extractAudio'],
     }))).toThrow('不能重复');
     expect(() => registry.register(skill({
-      optionalTools: ['other.tool'],
-      requiredTools: ['file.list', 'media.inspect', 'media.extractAudio'],
-    }))).toThrow('不在 allowlist');
+      optionalTools: ['file.delete'],
+      requiredTools: ['file.list'],
+    }))).not.toThrow();
+  });
+
+  it.each(['requiredTools', 'optionalTools'] as const)('validates every %s dependency independently', (field) => {
+    const registry = createAgentSkillRegistry({
+      toolExists: toolName => toolName === 'file.list',
+    });
+    const definition = skill({ requiredTools: [], optionalTools: [] });
+    for (const value of [undefined, 'file.list', [null], [''], ['file.\u0001list'], new Array(1)]) {
+      expect(() => registry.register({ ...definition, [field]: value } as AgentSkillDefinitionV1))
+        .toThrow();
+    }
+    expect(() => registry.register({ ...definition, [field]: ['file.list', 'file.list'] }))
+      .toThrow('重复 Tool');
+    expect(() => registry.register({ ...definition, [field]: ['unknown.tool'] }))
+      .toThrow('未知 Tool');
+    const dependencyWithGetter: string[] = [];
+    let getterCalled = false;
+    Object.defineProperty(dependencyWithGetter, '0', {
+      get() { getterCalled = true; return 'file.list'; },
+    });
+    expect(() => registry.register({ ...definition, [field]: dependencyWithGetter }))
+      .toThrow('定义无效');
+    expect(getterCalled).toBe(false);
+    expect(() => registry.register({ ...definition, [field]: ['file.list'] })).not.toThrow();
+  });
+
+  it('rejects legacy tool allowlists rather than retaining a hidden permission field', () => {
+    const registry = createAgentSkillRegistry();
+    expect(() => registry.register({
+      ...skill(),
+      toolAllowlist: ['file.list'],
+    } as AgentSkillDefinitionV1 & { toolAllowlist: string[] })).toThrow('不允许的字段 toolAllowlist');
   });
 
   it('checks summary and activation budgets with the injected estimator', () => {
@@ -227,13 +246,14 @@ describe('Agent Skill V1 registry', () => {
       instructions: definition.instructions,
       instructionsHash: getAgentSkillInstructionsHash(definition),
       skillId: definition.id,
-      toolAllowlist: definition.toolAllowlist,
       version: definition.version,
     });
     expect(serializeAgentSkillActivationEnvelope(envelope))
       .toBe(serializeAgentSkillActivationEnvelope(createAgentSkillActivationEnvelope(definition)));
     expect(Object.isFrozen(envelope)).toBe(true);
-    expect(Object.isFrozen(envelope.toolAllowlist)).toBe(true);
+    expect(envelope).not.toHaveProperty('toolAllowlist');
+    expect(envelope).not.toHaveProperty('requiredTools');
+    expect(envelope).not.toHaveProperty('optionalTools');
   });
 
   it('exposes summaries and activation envelopes only from the Run snapshot', () => {

@@ -1,6 +1,6 @@
 # Agent 内部文件操作
 
-更新时间：2026-09-10。
+更新时间：2026-10-01。
 
 ## 当前能力
 
@@ -17,12 +17,33 @@ Agent 的内部文件工具直接使用资料库接口，不把逻辑路径当�
 | 删除 | file.delete：资料库 path 或已确认 nodeId，目录需要 recursive=true |
 | 回收站浏览与恢复 | recycle.list 按 keyword 查询；recycle.restore 用实际回收站 nodeId 恢复原位置 |
 | 标签 | tag.list 查询目录/节点标签；tag.update 按明确 addTagIds/removeTagIds 原子增删，保留其他关系 |
+| 内置类型 / 归档 | node.configure：path/nodeId 二选一，builtInType/archiveMode 至少一个；library.batch 可逐项组合 |
 
 普通操作不提供覆盖语义，名称不得混用路径。多级新目录依次创建，父目录必须存在。恢复到原位置遇到冲突明确失败，不能自动永久删除冲突项。复制在原存储中生成独立对象，每次最多1000节点、1 GiB、后端120秒；它复制内容和目录结构，不复制标签、归档/展示配置或历史，源存储必须可达。复制和标签写入必须使用本轮新后端，不能把旧服务器的404误判为能力已经可用。标签细节见 [标签工具](agent-library-tags.md)，统一 UI 同步见 [节点变更同步](internal-node-ui-synchronization.md)。
 
 `file.delete` 支持直接传绝对 path；使用 nodeId 时先通过 file.stat/file.resolve 或目录查询取得本轮已知节点。仅处理当前 Run 资料库，根目录禁止删除。普通文件直接移入回收站，文件夹必须明确 recursive=true。本工具不提供永久删除、清空回收站或本机文件删除。
 
 删除只修改现有后端节点删除状态，不下载文件，也不删除 MinIO 对象，因此不要求文件所在存储当前可达。回收站恢复可通过系统入口或 Agent 工具完成。
+
+## 内置类型与归档组织
+
+系统提示词常驻 `builtInType / archiveMode` 的简短含义、配置不自动移动内容或传播给子目录等基础事实。Run 初始上下文只包含 Skill 摘要；复杂结构判断、批量整理和展示差异按需加载 `resource-organization@1.0.1`。简单问答或明确的单目录配置可直接处理，不强制加载、固定步骤或再次索取已具备的授权。同一 Run 可以追加加载其他 Skill，重复正文只保留一份，依赖声明不裁剪有效工具。
+
+领域 Skill 分别说明 COMIC 的作品与嵌套合集、ASMR 多音轨作品、VIDEO 单元与子合集、AUDIO 歌曲目录及裸音频、GALLERY 直属混合媒体与嵌套归档。ASMR / AUDIO 的子归档不能套用漫画式合集展示。推荐结构允许按用户目标调整，不要求每份历史资源重新包目录；类型配置不等于完成排序、封面或字幕绑定。
+
+笼统的“整理目录内置类型 / 作品 / 归档”同时关注内容组织，不能仅因字段合法而结束。发现散落媒体和歌词、字幕、封面等伴随文件时，按需加载领域说明，结合名称、标识、现有结构及必要的正文 / 媒体读取判断归属。明确的同一作品可归入已有或新建作品目录；只有归属存在实质歧义时补问。无伴随关系问题的裸媒体仍可保留，只检查或只改字段的请求不扩大为搬动文件。该引导属于模型策略，不是硬编码的自动归组；时长相近不能单独证明关联。
+
+`node.configure` 只配置当前资料库的目录，允许根目录，不递归，也不移动内容。类型枚举为 `DEF / COMIC / ASMR / VIDEO / AUDIO / GALLERY`，归档为 `0 / 1`；省略字段保留当前值，设置 `DEF` 自动关闭归档，显式 `DEF + 1` 拒绝。创建仍先用 `directory.create`，再配置返回节点，两次提交不是事务；配置失败保留已创建目录，不重新创建。
+
+工具进入已有 Registry、renderer executor、目录访问许可、标准审批与 `mutationCommitState` 三态。完全访问或组内编辑许可沿用原策略，Skill 不授予权限。读到的目录配置及 `updatedAt` 必须完整；旧后端缺字段时拒绝提交并提示更新，不把缺失字段猜成 `DEF / 0`。提交复用 `PUT /v1/nodes/:id`，附带 `libraryId / expectedUpdatedAt / requireDirectory=true`；时间字符串原样传递，后端在事务节点锁内校验库、精确版本和目录类型再更新，防止覆盖并发修改。
+
+写入成功后先保留 committed 回执，再读取最新配置。`configVerification=verified` 表示读回符合目标；读回发生变化或失败仍保留提交成功，并提示核对。网络不确定结果保持 `commit_unknown`，先 `file.stat` 核对，不盲目重试。`library.batch` 沿用逐项回执与部分成功语义，不承诺批次原子性。
+
+Broker 仅为同一配置操作合并最终核对字段，不能替换已提交身份、请求配置或提交状态。成功配置后使该节点的旧 Run 感知失效，后续配置重新读取；不让提交前的版本再次成为条件更新依据。
+
+成功事件使目录树更新类型、归档和展开规则；该目录已打开的旧预览通过既有关闭链释放，重新打开按正式目录解析入口选择 viewer，已打开的父归档刷新条目。该同步仅作用于匹配的账号、后端和资料库，不新增 Agent 树或 tab 状态源。
+
+试用需更新 Go 服务及 Electron 主进程，仅刷新 renderer 不够；后续仅调整提示词 / Skill 时，加载新版主进程即可。可在非第一个资料库的独立测试目录中输入：“把 /整理测试 设成漫画归档，直属的卷目录设成漫画作品，保留已有子归档”；也可先要求“看看这个 ASMR 目录应该作为一个多轨作品还是多个作品，先说明结构”。用户已试用创建、配置与归组组合；v1.0.1 的首次整理意图识别仍待再次试用，证据与验证状态见[验证矩阵](frontend-validation-matrix.md)。
 
 ## 权限与执行
 
@@ -32,7 +53,7 @@ Agent 的内部文件工具直接使用资料库接口，不把逻辑路径当�
 - 复用 `softDeleteNodeSubtree`：收集后代、执行提交前检查、请求后端、记录提交事实、清理草稿和 Viewer 恢复快照。后端成功即提交回执，不因随后取消、刷新失败或本地清理失败而反转成功。
 - HTTP 明确拒绝返回 `uncommitted`；请求发出后连接中断等无法确定的失败返回 `commit_unknown`，提示核对原目录及回收站，禁止盲目重试。
 - 新基础写工具共用 mutationCommitState 三态与 committing 阶段通知；file.write/file.delete 保留原兼容字段。完全访问直接执行可恢复操作，其他权限模式使用统一审批。两种路径定位在执行开始与提交前按 owner、library、父目录、名称、类型和版本复验；复制和移动禁止指向自身或子目录。后端复制与标签同步开放 HTTP/CLI/dry-run。
-- recycle.list 与 tag.list 的正文JSON有字节上限，实际条目可少于 limit，nextOffset 按实际交付条数前进，revision 绑定快照和查询条件。回收站不输出存储 URL/key。计划 schema 的 toolName enum 从当前冻结业务工具生成，模型可选名称与运行时校验一致；没有用静态模型名单授予工具。
+- recycle.list 与 tag.list 的正文 JSON 均有字节上限。recycle.list 的实际条目可少于 limit，nextOffset 按实际交付条数前进，revision 绑定快照和查询条件；不输出存储 URL/key。tag.list 使用服务端 nextCursor 续页，并保持 nodeId/keyword/dimension 不变；超出输出预算时明确失败，须减小 limit、使用相同 cursor 重试，不截短页面后跳到下一页。计划 schema 的 toolName enum 从当前冻结业务工具生成，模型可选名称与运行时校验一致；没有用静态模型名单授予工具。
 
 ## 界面同步
 

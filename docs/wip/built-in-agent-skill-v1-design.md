@@ -1,5 +1,7 @@
 # 内置 Agent Skill V1 设计与决策记录
 
+> **2026-10-01 契约更新：** 下文按 allowlist 收窄 Run 工具集合、每个 Run 仅允许一个 Skill 的设计均已被取代。当前 Skill 按需加载知识与流程、检查依赖，同一 Run 可加载多个 Skill，重复正文去重；执行仍使用本轮有效工具及原权限机制。新增资源组织 Skill 与配置工具的当前实现和验证边界见[内置 Agent 架构](../built-in-agent-architecture.md)，下文保留历史语境。
+
 更新时间：2026-08-26
 
 状态：历史设计与验收记录。Registry、环境 Capability Probe、Effective Tool / Skill Run snapshot、摘要投影、`skill.activate`、能力收窄、Run 诊断身份持久化、renderer 安全投影、provider 总轮次和首条内置 catalog 已实现；2026-08-25 已完成真实 provider 与 macOS 非第一个资料库媒体主路径验收。当前事实以 `docs/built-in-agent-architecture.md` 为准。

@@ -44,7 +44,7 @@ export interface AgentSkillReadinessSnapshot {
   readonly state: AgentSkillReadiness;
 }
 
-const SNAPSHOT_VERSION = 2;
+const SNAPSHOT_VERSION = 3;
 const INVISIBLE_TOOL_MESSAGE = 'Agent Tool 当前未被 Run capability snapshot 暴露';
 const UNKNOWN_SKILL_MESSAGE = 'Agent Skill 不存在';
 
@@ -102,7 +102,6 @@ function createSnapshotIdentity(input: {
       optionalTools: [...skill.optionalTools],
       readiness: input.skillReadiness.get(skill.id),
       requiredTools: [...skill.requiredTools],
-      toolAllowlist: [...skill.toolAllowlist],
       version: skill.version,
       whenToUse: skill.whenToUse,
     }))
@@ -330,14 +329,14 @@ export function createAgentRunCapabilitySnapshot(
   )));
 
   for (const skill of sourceSkills) {
-    for (const toolName of skill.toolAllowlist) {
+    for (const toolName of [...skill.requiredTools, ...skill.optionalTools]) {
       const referencedTool = options.toolSnapshot.get(toolName);
       if (!referencedTool) {
         if (skill.optionalTools.includes(toolName)) continue;
         throw new Error(`Agent Skill ${skill.id} 引用了 Run 快照中不存在的 Tool：${toolName}`);
       }
       if (referencedTool.kind !== 'business') {
-        throw new Error(`Agent Skill ${skill.id} 不能把控制 Tool 加入 allowlist：${toolName}`);
+        throw new Error(`Agent Skill ${skill.id} 不能声明控制 Tool 依赖：${toolName}`);
       }
     }
   }
@@ -392,11 +391,10 @@ export function createAgentRunCapabilitySnapshot(
     if (normalizeId(activeSkillId) && !skill) {
       throw new Error(`${UNKNOWN_SKILL_MESSAGE}：${normalizeId(activeSkillId)}`);
     }
-    if (!skill) return effectiveTools;
-    const allowlist = new Set(skill.toolAllowlist);
-    return Object.freeze(effectiveTools.filter(tool => (
-      toolKind(tool) === 'control' || allowlist.has(tool.name)
-    )));
+    // A Skill adds workflow guidance, not a task-wide execution restriction.
+    // Model/environment restrictions were already applied to this frozen view;
+    // every call still passes schema, access and permission checks at execution.
+    return effectiveTools;
   }
 
   function visibleTool(name: string, activeSkillId?: string | null): AgentToolSnapshot | null {

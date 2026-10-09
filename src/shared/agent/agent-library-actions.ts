@@ -3,7 +3,7 @@ import { normalizeAgentLibraryDirectoryPath } from './agent-library-path';
 export const AGENT_LIBRARY_MUTATION_TOOLS = ['directory.create', 'file.rename', 'file.move', 'file.copy', 'recycle.restore'] as const;
 export type AgentLibraryMutationName = typeof AGENT_LIBRARY_MUTATION_TOOLS[number];
 export function isAgentRendererMutationTool(name: string): boolean {
-  return [...AGENT_LIBRARY_MUTATION_TOOLS, 'file.write', 'file.delete', 'tag.update', 'library.batch'].includes(name);
+  return [...AGENT_LIBRARY_MUTATION_TOOLS, 'node.configure', 'file.write', 'file.delete', 'tag.update', 'library.batch'].includes(name);
 }
 export interface AgentLibraryActionInput {
   path?: string;

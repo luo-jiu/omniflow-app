@@ -36,6 +36,18 @@ function fixture(mode: AgentLibraryAccessSnapshot['mode'] = 'group', access: Age
 }
 
 describe('Client-owned Agent directory authorization', () => {
+  it('authorizes directory configuration and batches with existing write grants, without expanding read-only access', async () => {
+    const writable = fixture();
+    expect(await writable.guard.authorizeTool(writable.call('node.configure', { nodeId: 10, builtInType: 'COMIC' }), 'config')).toBe(true);
+    expect(await writable.guard.authorizeTool(writable.call('library.batch', { actions: [{ operation: 'node.configure', path: '/docs/sub', archiveMode: 1 }] }), 'batch')).toBe(true);
+    expect(writable.approve).not.toHaveBeenCalled();
+    await expect(writable.guard.authorizeTool(writable.call('node.configure', { nodeId: 11, builtInType: 'COMIC' }), 'file')).rejects.toThrow('必须为普通目录');
+    const readOnly = fixture('group', 'read');
+    await readOnly.guard.authorizeTool(readOnly.call('node.configure', { nodeId: 10, builtInType: 'COMIC', archiveMode: 1 }), 'config');
+    expect(readOnly.approve).toHaveBeenCalledWith(expect.objectContaining({ write: true, description: expect.stringContaining('COMIC'), targets: [{ nodeId: 10, name: '/docs', write: true, descendants: false }] }));
+    readOnly.nodes.set(10, { ...readOnly.nodes.get(10)!, parentId: 20 });
+    await expect(readOnly.guard.authorizeTool(readOnly.call('node.configure', { nodeId: 10, builtInType: 'COMIC' }), 'config', undefined, false)).rejects.toThrow('授权已变化');
+  });
   it('authorizes the document viewer but does not trust arbitrary document tools', async () => {
     const { guard, call, approve } = fixture();
     expect(await guard.authorizeTool(call('library.document.view', { nodeId: 11 }), 'view')).toBe(true);

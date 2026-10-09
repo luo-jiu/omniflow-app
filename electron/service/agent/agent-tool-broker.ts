@@ -1,5 +1,7 @@
 import crypto from 'node:crypto';
 import { isAgentRendererMutationTool } from '../../../src/shared/agent/agent-library-actions';
+import { normalizeAgentLibraryNode } from '../../../src/shared/agent/agent-library-query';
+import { normalizeAgentNodeConfigFields } from '../../../src/shared/agent/agent-node-config';
 
 import type {
   AgentAppContext,
@@ -114,6 +116,36 @@ function abortError(message = 'Agent 任务已取消'): Error {
 
 function sameOwnerScope(left: AgentOwnerScope, right: AgentOwnerScope): boolean {
   return left.accountScope === right.accountScope && left.backendScope === right.backendScope;
+}
+
+/** Add the post-write observation without replacing the acknowledged operation or commit state. */
+function settleNodeConfiguration(pending: PendingRendererExecution, executionId: string, result: AgentToolResult): AgentToolResult {
+  const committed = pending.committedResult!;
+  const original = committed.data as Record<string, unknown> | undefined;
+  const final = result.data as Record<string, unknown> | undefined;
+  if (!result.ok || original?.mutationCommitState !== 'committed' || final?.mutationCommitState !== 'committed'
+    || original.operation !== 'node.configure' || final.operation !== 'node.configure'
+    || original.operationId !== executionId || final.operationId !== original.operationId
+    || original.libraryId !== pending.libraryId || final.libraryId !== original.libraryId
+    || !Number.isSafeInteger(original.nodeId) || Number(original.nodeId) <= 0 || final.nodeId !== original.nodeId) return committed;
+  if (final.configVerification === 'unavailable' && final.node === undefined) {
+    return { ...committed, ...(result.message ? { message: result.message } : {}) };
+  }
+  if (!['verified', 'changed'].includes(String(final.configVerification))) return committed;
+  try {
+    const node = normalizeAgentLibraryNode(final.node, pending.libraryId);
+    if (node.id !== original.nodeId || node.type !== 'dir') return committed;
+    const config = normalizeAgentNodeConfigFields(node);
+    const expected = normalizeAgentNodeConfigFields(original.requestedConfig);
+    const matches = config.builtInType !== undefined && config.archiveMode !== undefined
+      && config.builtInType === expected.builtInType && config.archiveMode === expected.archiveMode;
+    if ((final.configVerification === 'verified') !== matches) return committed;
+    const affectedParentIds = Array.isArray(original.affectedParentIds) ? original.affectedParentIds : [];
+    return { ...committed, ...(result.message ? { message: result.message } : {}), data: { ...original,
+      node, configVerification: final.configVerification,
+      affectedParentIds: [...new Set([...affectedParentIds, node.parentId].filter(id => Number.isSafeInteger(id) && Number(id) > 0))],
+    } };
+  } catch { return committed; }
 }
 
 export function normalizeAgentToolResult(input: AgentToolResult): AgentToolResult {
@@ -472,8 +504,10 @@ export function createAgentToolBroker(options: AgentToolBrokerOptions = {}) {
     const writeSettled = isAgentRendererMutationTool(pending.toolName) && !result.ok
       && (state === 'uncommitted' || state === 'commit_unknown');
     if (pending.signal.aborted && !pending.committedResult && !writeSettled) throw abortError();
-    const committedResult = pending.committedResult && isAgentRendererMutationTool(pending.toolName) && result.ok && result.message
-      ? { ...pending.committedResult, message: result.message } : pending.committedResult;
+    const committedResult = pending.committedResult && pending.toolName === 'node.configure'
+      ? settleNodeConfiguration(pending, executionId, result)
+      : pending.committedResult && isAgentRendererMutationTool(pending.toolName) && result.ok && result.message
+        ? { ...pending.committedResult, message: result.message } : pending.committedResult;
     pending.resolve({
       perception: options.normalizePerception?.(input.perception),
       result: committedResult || result,

@@ -22,6 +22,31 @@ function Probe() { viewer = React.useContext(FileViewerContext)!; return null; }
 afterEach(() => { act(() => renderer?.unmount()); renderer = undefined; vi.resetAllMocks(); });
 
 describe('file viewer external content changes', () => {
+  it('closes stale configured directory viewers and refreshes only affected archive tabs in scope', async () => {
+    await act(async () => { renderer = TestRenderer.create(<FileViewerProvider libraryId={3}><Probe /></FileViewerProvider>); });
+    act(() => viewer.setFileUrl('audio-archive://library/3/node/8', 'songs', 'audio_archive', 8));
+    act(() => viewer.setFileUrl('audio-folder://library/3/node/9', 'song', 'audio_archive', 9));
+    act(() => viewer.setFileUrl('comic-archive://library/3/node/10', 'other', 'comic_archive', 10));
+    const active = viewer.activeTabId;
+    const event = {
+      accountScope: 'user:7', backendScope: API_CONFIG.BASE_URL, libraryId: 3,
+      affectedParentIds: [8, 9], nodeId: 9, configChanged: true,
+      builtInType: 'DEF' as const, archiveMode: 0 as const,
+    };
+    act(() => notifyLibraryNodesMutated({ ...event, accountScope: 'user:8' }));
+    act(() => notifyLibraryNodesMutated({ ...event, backendScope: 'https://other.invalid' }));
+    act(() => notifyLibraryNodesMutated({ ...event, libraryId: 4 }));
+    expect(viewer.tabs).toHaveLength(3);
+    expect(globalAudioPlayer.releaseForTab).not.toHaveBeenCalled();
+    act(() => notifyLibraryNodesMutated(event));
+    expect(viewer.tabs.map(tab => tab.nodeId)).toEqual([8, 10]);
+    expect(viewer.tabs[0].reloadToken).toBe(1);
+    expect(viewer.tabs[1].reloadToken).toBe(0);
+    expect(viewer.activeTabId).toBe(active);
+    expect(globalAudioPlayer.releaseForTab).toHaveBeenCalledWith('node:9');
+    expect(floatingVideoService.releaseForTab).toHaveBeenCalledWith('node:9');
+    expect(mocks.link).not.toHaveBeenCalled();
+  });
   it('renames matching tabs without reloading content, activating tabs or releasing media owners', async () => {
     await act(async () => { renderer = TestRenderer.create(<FileViewerProvider libraryId={3}><Probe /></FileViewerProvider>); });
     act(() => viewer.setFileUrl('audio-bytes', 'old.mp3', 'audio', 9));

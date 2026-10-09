@@ -14,7 +14,7 @@ const DEFERRED_HOST_TOOLS = new Set(['shell.run', 'file.stage', 'file.publish', 
 
 /**
  * Application-owned Skill registry.  Definitions are registered only after
- * the orchestrator has registered the built-in Tools, so their allowlists are
+ * the orchestrator has registered the built-in Tools, so their dependencies are
  * checked against the same Tool registry used by execution.
  */
 export const builtInAgentSkillRegistry = createAgentSkillRegistry({

@@ -1,6 +1,7 @@
 /**
- * The V1 Skill contract is deliberately data-only.  A Skill describes how to
- * compose already registered Tools; it is never an executor and must not
+ * The built-in Skill contract is deliberately data-only. A Skill describes how
+ * to compose already registered Tools without changing the Run's Tool view;
+ * it is never an executor and must not
  * carry callbacks, IPC channels, UI values, or file references.
  */
 
@@ -9,14 +10,13 @@ export type AgentSkillSourceV1 = typeof AGENT_SKILL_SOURCE_V1;
 
 /** The only Tool name allowed to participate in the Skill control protocol. */
 export const AGENT_SKILL_ACTIVATE_TOOL_NAME = 'skill.activate' as const;
-export const AGENT_SKILL_ACTIVATE_TOOL_REGISTRATION_ID = 'builtin:skill.activate@1' as const;
+export const AGENT_SKILL_ACTIVATE_TOOL_REGISTRATION_ID = 'builtin:skill.activate@2' as const;
 
 export interface AgentSkillDefinitionV1 {
   readonly id: string;
   readonly version: string;
   readonly description: string;
   readonly whenToUse: string;
-  readonly toolAllowlist: readonly string[];
   /** Tools required for the core workflow to remain discoverable. */
   readonly requiredTools: readonly string[];
   /** Tools that only enable optional branches of the workflow. */
@@ -34,7 +34,7 @@ export interface AgentSkillSummaryV1 {
 }
 
 /**
- * The complete result returned by a future `skill.activate` control Tool.
+ * The complete result returned by the `skill.activate` control Tool.
  * Keeping this shape here makes the registration-time budget check use the
  * same envelope as activation-time serialization.
  */
@@ -42,7 +42,6 @@ export interface AgentSkillActivationEnvelopeV1 {
   readonly skillId: string;
   readonly version: string;
   readonly instructions: string;
-  readonly toolAllowlist: readonly string[];
   readonly instructionsHash: string;
 }
 

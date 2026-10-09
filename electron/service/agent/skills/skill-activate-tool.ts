@@ -40,9 +40,6 @@ export function resolveAgentSkillActivationResult(
 ): AgentToolResult {
   const skillId = normalizedSkillId(input);
   if (!skillId) return { message: 'Skill ID 无效', ok: false as const };
-  if (context.activeSkillId && context.activeSkillId !== skillId) {
-    return { message: '当前 Run 已激活另一个 Skill，请为新的流程新建 Run', ok: false as const };
-  }
   const snapshot = context.runCapabilitySnapshot?.skillSnapshot;
   if (!snapshot) {
     return { message: '当前 Agent 运行未提供 Skill 快照', ok: false as const };
@@ -72,7 +69,7 @@ export const skillActivateTool: AgentTool & { readonly kind: 'control' } = {
   assess() {
     return { behavior: 'allow', risk: 'read' };
   },
-  description: '加载当前运行中可见的内置 Skill 流程说明。只接受 Skill ID，不读取路径、URL 或模型提供的正文。',
+  description: '按需加载当前运行中可见的内置 Skill 流程说明；同一任务可组合多个 Skill。只接受 Skill ID，不读取路径、URL 或模型提供的正文。',
   execute(input, context) {
     return Promise.resolve(resolveAgentSkillActivationResult(input, context));
   },

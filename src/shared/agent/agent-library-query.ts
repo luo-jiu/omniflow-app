@@ -1,5 +1,6 @@
 import type { AgentDirectoryEntry } from './agent.types';
 import { normalizeAgentLibraryDirectoryPath } from './agent-library-path';
+import { normalizeAgentNodeConfigFields } from './agent-node-config';
 
 export class AgentLibraryPageTooLargeError extends Error {
   constructor() { super('当前页元数据过大，请减小 limit 并使用原 cursor 重试'); }
@@ -54,6 +55,7 @@ export function normalizeAgentLibraryNode(input: unknown, libraryId: number): Ag
   }
   return {
     id: Number(item.id), libraryId, parentId: Number(item.parentId), name: item.name, type: item.type,
+    ...normalizeAgentNodeConfigFields(item),
     ...(path ? { path } : {}),
     ...(text(item.ext, 80) ? { ext: String(item.ext) } : {}),
     ...(text(item.mimeType, 256) ? { mimeType: String(item.mimeType) } : {}),

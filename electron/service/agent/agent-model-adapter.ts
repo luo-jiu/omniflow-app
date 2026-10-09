@@ -80,8 +80,8 @@ export function restrictAgentToolsForModel(snapshot: AgentToolRegistrySnapshot, 
 }
 
 export function restrictAgentSkillsForModel(snapshot: AgentSkillSnapshotV1, tools: AgentToolRegistrySnapshot): AgentSkillSnapshotV1 {
-  const skills = Object.freeze(snapshot.skills.filter(skill => skill.toolAllowlist.every(name =>
-    skill.optionalTools.includes(name) || tools.get(name) !== null)));
+  const skills = Object.freeze(snapshot.skills.filter(skill => skill.requiredTools.every(name =>
+    tools.get(name) !== null)));
   const allowed = new Set(skills.map(skill => skill.id));
   return Object.freeze({ ...snapshot, skills, list: () => skills,
     get: id => allowed.has(id) ? snapshot.get(id) : null,

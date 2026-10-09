@@ -10,6 +10,9 @@ export interface LibraryNodeMutation {
   ext?: string;
   type?: 'dir' | 'file';
   parentId?: number;
+  configChanged?: boolean;
+  builtInType?: import('@/shared/agent/agent-node-config').AgentBuiltInType;
+  archiveMode?: 0 | 1;
 }
 
 export function matchesLibraryMutationScope(

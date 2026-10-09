@@ -551,6 +551,26 @@ export const FileViewerProvider: React.FC<{
     event.nodeIds.forEach(nodeId => closeDeletedNodeRef.current(nodeId));
   }), [libraryId, viewerAccountScope]);
 
+  useEffect(() => subscribeLibraryNodesMutated(event => {
+    if (!event.configChanged || !event.nodeId
+      || !matchesLibraryMutationScope(event, viewerAccountScope, API_CONFIG.BASE_URL, libraryId)) return;
+    // 类型切换后旧 URL / 主媒体可能已不适用，重新打开仍走目录树的唯一解析入口。
+    closeDeletedNodeRef.current(event.nodeId);
+    const affectedParents = new Set(event.affectedParentIds);
+    setViewerState(previous => {
+      let changed = false;
+      const tabs = previous.tabs.map(tab => {
+        if (tab.libraryId !== event.libraryId || !tab.nodeId || !affectedParents.has(tab.nodeId)
+          || !tab.fileType?.endsWith('_archive')) return tab;
+        changed = true;
+        return { ...tab, reloadToken: (tab.reloadToken ?? 0) + 1 };
+      });
+      return changed
+        ? { ...previous, tabs, fileState: toFileState(tabs.find(tab => tab.id === previous.activeTabId) ?? null) }
+        : previous;
+    });
+  }), [libraryId, viewerAccountScope]);
+
   const selectViewer = (tabId: string, viewerId: string, remember = false) => {
     const tab = tabsRef.current.find(item => item.id === tabId);
     const contribution = viewerRegistry.get(viewerId);

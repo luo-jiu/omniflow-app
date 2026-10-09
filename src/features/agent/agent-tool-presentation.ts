@@ -99,6 +99,7 @@ const TOOL_TITLES: Record<string, string> = {
   'agent.access.request': '目录访问确认',
   'skill.activate': '加载流程',
   'directory.create': '创建文件夹',
+  'node.configure': '设置资源类型',
   'file.list': '读取目录',
   'file.search': '搜索资料库',
   'file.resolve': '定位路径',

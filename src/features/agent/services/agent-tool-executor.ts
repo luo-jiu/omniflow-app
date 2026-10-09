@@ -31,6 +31,7 @@ import { executeAgentLibraryAction, executeAgentRecycleList, type AgentLibraryAc
 import { executeAgentTagTool } from './agent-tag-tools';
 import { executeAgentLibraryBatch } from './agent-library-batch';
 import { AGENT_LIBRARY_MUTATION_TOOLS } from '@/shared/agent/agent-library-actions';
+import { executeAgentNodeConfigure } from './agent-node-configure';
 
 interface MediaInspectExecutionInput {
   fileName: string;
@@ -298,10 +299,10 @@ export async function executeAgentRendererTool(
   }
   if (request.toolName === 'file.write') return executeAgentFileWrite(request, dependencies);
   if (request.toolName === 'file.delete') return executeAgentFileDelete(request, dependencies);
+  if (request.toolName === 'node.configure') return executeAgentNodeConfigure(request, dependencies);
   if ((AGENT_LIBRARY_MUTATION_TOOLS as readonly string[]).includes(request.toolName)) return executeAgentLibraryAction(request, dependencies);
   if (request.toolName === 'recycle.list') return executeAgentRecycleList(request, dependencies);
   if (['tag.list', 'tag.update'].includes(request.toolName)) return executeAgentTagTool(request, dependencies);
-  if (request.toolName === 'library.batch') return executeAgentLibraryBatch(request, dependencies);
   if (request.toolName === 'library.batch') return executeAgentLibraryBatch(request, dependencies);
   if (request.toolName === 'media.inspect') {
     return executeMediaInspect(request, dependencies);

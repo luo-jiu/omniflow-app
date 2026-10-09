@@ -1,8 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import { parseAgentModelMetadata, resolveAgentModelContextBudget } from './agent-model-context';
-import { resolveAgentAdapterEffort, resolveAgentModelAdapter, restrictAgentToolsForModel, agentModelAdapterPrompt } from './agent-model-adapter';
+import { resolveAgentAdapterEffort, resolveAgentModelAdapter, restrictAgentToolsForModel, restrictAgentSkillsForModel, agentModelAdapterPrompt } from './agent-model-adapter';
 import { buildAgentProviderRequestBody } from './agent-provider-model';
 import { createAgentToolRegistry } from './agent-tool-registry';
+import { createAgentSkillRegistry } from './skills/agent-skill-registry';
+import { createAgentRunCapabilitySnapshot } from './agent-run-capability-snapshot';
 
 describe('trusted model adaptation', () => {
   const openai = { providerType: 'openai' as const, baseUrl: 'https://fixture.test/v1', apiKey: 'fixture' };
@@ -56,5 +58,42 @@ describe('trusted model adaptation', () => {
   it('keeps parallel restrictions in the actual request body', () => {
     const adapter = resolveAgentModelAdapter(openai, input.model, { supportsParallelToolCalls: false });
     expect(buildAgentProviderRequestBody(openai, { ...input, modelAdapter: adapter })).toMatchObject({ parallel_tool_calls: false });
+  });
+
+  it('keeps optional-dependent Skills while model restrictions still block Tool execution after activation', async () => {
+    const execute = vi.fn(async () => ({ ok: true }));
+    const originalTools = createAgentToolRegistry(['file.read', 'shell.run'].map(name => ({
+      name, description: name, risk: 'read' as const, inputSchema: { type: 'object' }, execute,
+    }))).createSnapshot();
+    const registry = createAgentSkillRegistry();
+    registry.register({
+      id: 'read-with-shell-fallback', version: '1.0.0', source: 'built-in',
+      description: '读取内容', whenToUse: '需要读取内容时', instructions: '优先使用文件读取。',
+      requiredTools: ['file.read'], optionalTools: ['shell.run'],
+    });
+    registry.register({
+      id: 'shell-required', version: '1.0.0', source: 'built-in',
+      description: '执行命令', whenToUse: '需要命令时', instructions: '使用 Shell。',
+      requiredTools: ['shell.run'], optionalTools: [],
+    });
+    const originalSkills = registry.createRunSnapshot();
+    const noShell = restrictAgentToolsForModel(originalTools, resolveAgentModelAdapter(openai, input.model, { supportsShellTool: false }));
+    const skills = restrictAgentSkillsForModel(originalSkills, noShell);
+    expect(skills.listSummaries().map(item => item.id)).toEqual(['read-with-shell-fallback']);
+    expect(skills.getActivationEnvelope('shell-required')).toBeNull();
+    const run = createAgentRunCapabilitySnapshot({ toolSnapshot: noShell, skillSnapshot: skills });
+    const context = {
+      appContext: { platform: 'darwin' as const, selectedNodeIds: [] },
+      onProgress: () => undefined, signal: new AbortController().signal,
+    };
+    expect(run.getSkillReadiness('read-with-shell-fallback')?.state).toBe('degraded');
+    expect(run.listTools('read-with-shell-fallback').map(item => item.name)).toEqual(['file.read']);
+    expect(() => run.validateInput('shell.run', {}, 'read-with-shell-fallback')).toThrow('未被 Run capability');
+    expect(() => run.execute('shell.run', {}, context, 'read-with-shell-fallback')).toThrow('未被 Run capability');
+    await expect(run.execute('file.read', {}, context, 'read-with-shell-fallback')).resolves.toEqual({ ok: true });
+    expect(execute).toHaveBeenCalledTimes(1);
+    const textOnly = restrictAgentToolsForModel(originalTools, resolveAgentModelAdapter(openai, input.model, { supportsToolCalling: false }));
+    expect(restrictAgentSkillsForModel(originalSkills, textOnly).list()).toEqual([]);
+    expect(originalSkills.list()).toHaveLength(2);
   });
 });

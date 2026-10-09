@@ -251,7 +251,7 @@ export interface AgentChatStartResult {
   sessionId: string;
 }
 
-export interface AgentDirectoryEntry {
+export interface AgentDirectoryEntry extends Partial<import('./agent-node-config').AgentNodeConfig> {
   storage?: {
     providerAlias: string;
     providerLabel?: string;
@@ -269,7 +269,7 @@ export interface AgentDirectoryEntry {
 
 export interface AgentPerceptionSnapshot {
   knownNodes?: import('./agent-library-query').AgentLibraryNode[];
-  currentDirectory?: {
+  currentDirectory?: Partial<import('./agent-node-config').AgentNodeConfig> & {
     entryCount: number;
     truncated?: boolean;
     entries: AgentDirectoryEntry[];

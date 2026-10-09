@@ -31,7 +31,7 @@ function context(
 function snapshot() {
   const toolRegistry = createAgentToolRegistry([
     skillActivateTool,
-    ...mediaExtractAudioSkill.toolAllowlist.map(name => ({
+    ...[...mediaExtractAudioSkill.requiredTools, ...mediaExtractAudioSkill.optionalTools].map(name => ({
       description: `Test Tool ${name}`,
       execute: async () => ({ ok: true }),
       inputSchema: { additionalProperties: false, properties: {}, type: 'object' },
@@ -42,10 +42,20 @@ function snapshot() {
   const registry = createAgentSkillRegistry({
     estimateTokens: text => Math.ceil([...text].length / 2),
     maxSummaryTokens: 256,
-    maxActivationTokens: 1_024,
+    maxActivationTokens: 10_000,
     toolExists: toolName => Boolean(toolRegistry.get(toolName)),
   });
   registry.register(mediaExtractAudioSkill);
+  registry.register({
+    description: '理解资源结构',
+    id: 'resource-structure',
+    instructions: '按目录的实际类型与归档模式解释结构。',
+    optionalTools: [],
+    requiredTools: [],
+    source: 'built-in',
+    version: '1.0.0',
+    whenToUse: '需要理解资料库结构时。',
+  });
   return createAgentRunCapabilitySnapshot({
     skillSnapshot: registry.createRunSnapshot(),
     toolSnapshot: toolRegistry.createSnapshot(),
@@ -57,6 +67,7 @@ describe(`${AGENT_SKILL_ACTIVATE_TOOL_NAME} Tool`, () => {
     expect(skillActivateTool.kind).toBe('control');
     expect(skillActivateTool.executor).toBe('main');
     expect(skillActivateTool.risk).toBe('read');
+    expect(skillActivateTool.registrationId).toBe('builtin:skill.activate@2');
     expect(skillActivateTool.inputSchema).toMatchObject({
       additionalProperties: false,
       required: ['skillId'],
@@ -69,16 +80,18 @@ describe(`${AGENT_SKILL_ACTIVATE_TOOL_NAME} Tool`, () => {
 
   it('loads the complete envelope only from the current Run snapshot', async () => {
     const runSnapshot = snapshot();
-    await expect(skillActivateTool.execute?.(
+    const result = await skillActivateTool.execute?.(
       { skillId: 'media-extract-audio' },
       context(runSnapshot),
-    )).resolves.toMatchObject({
+    );
+    expect(result).toEqual({
       data: {
         instructions: mediaExtractAudioSkill.instructions,
+        instructionsHash: expect.stringMatching(/^[0-9a-f]{64}$/u),
         skillId: mediaExtractAudioSkill.id,
-        toolAllowlist: mediaExtractAudioSkill.toolAllowlist,
         version: mediaExtractAudioSkill.version,
       },
+      message: `已加载 Skill ${mediaExtractAudioSkill.id}（${mediaExtractAudioSkill.version}）`,
       ok: true,
     });
   });
@@ -120,7 +133,7 @@ describe(`${AGENT_SKILL_ACTIVATE_TOOL_NAME} Tool`, () => {
     )).toMatchObject({ ok: false });
   });
 
-  it('keeps repeated activation idempotent but refuses to switch Skills in one Run', () => {
+  it('allows another visible Skill in the same Run and keeps snapshot results deterministic', () => {
     const runSnapshot = snapshot();
     const activeContext = {
       ...context(runSnapshot),
@@ -137,10 +150,17 @@ describe(`${AGENT_SKILL_ACTIVATE_TOOL_NAME} Tool`, () => {
 
     expect(repeated).toEqual(first);
     expect(resolveAgentSkillActivationResult(
-      { skillId: 'another-skill' },
+      { skillId: 'resource-structure' },
       activeContext,
     )).toMatchObject({
-      message: expect.stringContaining('新建 Run'),
+      data: { skillId: 'resource-structure', instructions: expect.any(String) },
+      ok: true,
+    });
+    expect(resolveAgentSkillActivationResult(
+      { skillId: 'unknown-skill' },
+      activeContext,
+    )).toMatchObject({
+      message: expect.stringContaining('不可激活'),
       ok: false,
     });
   });
@@ -150,7 +170,7 @@ describe(`${AGENT_SKILL_ACTIVATE_TOOL_NAME} Tool`, () => {
       { skillId: 'media-extract-audio' },
       context(snapshot()),
     );
-    const projection = projectAgentToolResultForProvider(result, 1_024);
+    const projection = projectAgentToolResultForProvider(result, 10_000);
 
     expect(projection.truncated).toBe(false);
     expect(JSON.parse(projection.content)).toMatchObject({

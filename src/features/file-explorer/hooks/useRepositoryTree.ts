@@ -772,12 +772,15 @@ export function useRepositoryTree(
     markRepositoryTreeSnapshotDirtyStore(libraryId);
     const node = event.nodeId ? findNodeById(treesCacheRef.current[selectedRepository] || [], event.nodeId) : null;
     if (node && event.name !== undefined) updateNodeName(node.key, { name: event.name, ext: event.ext ?? node.ext });
+    if (node && event.configChanged && (event.builtInType !== undefined || event.archiveMode !== undefined)) {
+      updateNodeBuiltInConfig(node.key, { builtInType: event.builtInType, archiveMode: event.archiveMode });
+    }
     return Promise.allSettled([...new Set(event.affectedParentIds)].map(id => refreshNodeSubtree(id))).then(results => {
       for (const result of results) {
         if (result.status === 'rejected') runtimeLogger.warn('节点已变更，但目录刷新失败', result.reason);
       }
     });
-  }), [accountScope, libraryId, selectedRepository, refreshNodeSubtree, updateNodeName]);
+  }), [accountScope, libraryId, selectedRepository, refreshNodeSubtree, updateNodeName, updateNodeBuiltInConfig]);
 
   // 加载子节点；提交完成后由 useLayoutEffect 在下一帧展开。
   const loadChildren = useCallback(async (node: Node): Promise<void> => {

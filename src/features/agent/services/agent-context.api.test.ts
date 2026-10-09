@@ -29,7 +29,7 @@ describe('readAgentPerception', () => {
     expect(result.currentDirectory?.entries).toHaveLength(200);
   });
   beforeEach(() => {
-    mocks.fetchNodeDetailById.mockReset();
+    mocks.fetchNodeDetailById.mockReset().mockResolvedValue(null);
     mocks.getChildrenByNodeId.mockReset();
   });
 
@@ -51,7 +51,7 @@ describe('readAgentPerception', () => {
     });
 
     expect(mocks.getChildrenByNodeId).toHaveBeenCalledWith(10, 3);
-    expect(mocks.fetchNodeDetailById).toHaveBeenCalledTimes(2);
+    expect(mocks.fetchNodeDetailById).toHaveBeenCalledTimes(3);
     expect(result.currentDirectory?.entries).toEqual([
       { id: 2, name: '媒体', type: 'dir' },
       { fileSize: 20, id: 3, name: 'zeta.txt', type: 'file' },
@@ -77,5 +77,16 @@ describe('readAgentPerception', () => {
     expect(result.selectedNodes).toEqual([
       { id: 8, name: 'note.txt', type: 'file' },
     ]);
+  });
+
+  it('exposes actual resource configuration in directory, entries and selection without inferring old-server defaults', async () => {
+    const folder = { id: 8, name: '漫画', type: 'dir', builtInType: 'COMIC', archiveMode: 1 };
+    mocks.getChildrenByNodeId.mockResolvedValue([folder, { id: 9, name: 'unknown', type: 'dir' }]);
+    mocks.fetchNodeDetailById.mockImplementation(async id => id === 8 ? folder : { id: 10, libraryId: 3, name: 'ASMR', type: 'dir', builtInType: 'ASMR', archiveMode: 1 });
+    const result = await readAgentPerception({ libraryId: 3, currentDirectory: { id: 10, name: 'ASMR' }, platform: 'darwin', selectedNodeIds: [8] });
+    expect(result.currentDirectory).toMatchObject({ builtInType: 'ASMR', archiveMode: 1 });
+    expect(result.selectedNodes[0]).toMatchObject({ builtInType: 'COMIC', archiveMode: 1 });
+    expect(result.currentDirectory?.entries.find(item => item.id === 8)).toMatchObject({ builtInType: 'COMIC', archiveMode: 1 });
+    expect(result.currentDirectory?.entries.find(item => item.id === 9)).not.toHaveProperty('builtInType');
   });
 });

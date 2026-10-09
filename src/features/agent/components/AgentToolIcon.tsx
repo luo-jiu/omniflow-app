@@ -24,6 +24,7 @@ const OPERATION_ICONS: Record<string, OutlineIconName> = {
   'file.copy': 'copy',
   'file.delete': 'trash',
   'directory.create': 'folder-plus',
+  'node.configure': 'folder',
   'library.batch': 'folder',
   'file.upload': 'upload',
   'file.publish': 'upload',

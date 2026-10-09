@@ -26,7 +26,6 @@ const ALLOWED_DEFINITION_KEYS = new Set([
   'optionalTools',
   'requiredTools',
   'source',
-  'toolAllowlist',
   'version',
   'whenToUse',
 ]);
@@ -116,9 +115,9 @@ function assertAllowedKeys(input: Record<string, unknown>): void {
   }
 }
 
-function normalizeToolAllowlist(value: unknown): string[] {
-  if (!Array.isArray(value) || value.length === 0) {
-    throw new Error('Agent Skill Tool allowlist 不能为空');
+function normalizeToolDependencies(value: unknown, field: string): string[] {
+  if (!Array.isArray(value)) {
+    throw new Error(`Agent Skill ${field} 必须是数组`);
   }
   if (Reflect.ownKeys(value).some(key => (
     typeof key === 'symbol'
@@ -134,28 +133,6 @@ function normalizeToolAllowlist(value: unknown): string[] {
   }
   const seen = new Set<string>();
   const names = value.map((rawName, index) => {
-    const name = normalizeText(rawName, `Agent Skill Tool 名称（第 ${index + 1} 项）`, 160, {
-      collapseWhitespace: true,
-    });
-    if (seen.has(name)) throw new Error(`Agent Skill Tool allowlist 包含重复 Tool：${name}`);
-    seen.add(name);
-    return name;
-  });
-  return names;
-}
-
-function normalizeToolClassification(value: unknown, field: string): string[] {
-  if (!Array.isArray(value)) {
-    throw new Error(`Agent Skill ${field} 必须是数组`);
-  }
-  if (Reflect.ownKeys(value).some(key => (
-    typeof key === 'symbol'
-    || (typeof key === 'string' && key !== 'length' && !/^\d+$/u.test(key))
-  ))) {
-    throw new Error(AGENT_SKILL_INVALID_DEFINITION_MESSAGE);
-  }
-  const seen = new Set<string>();
-  return value.map((rawName, index) => {
     const name = normalizeText(rawName, `Agent Skill ${field}（第 ${index + 1} 项）`, 160, {
       collapseWhitespace: true,
     });
@@ -163,6 +140,7 @@ function normalizeToolClassification(value: unknown, field: string): string[] {
     seen.add(name);
     return name;
   });
+  return names;
 }
 
 function cloneAndFreezeDefinition(input: unknown): AgentSkillDefinitionV1 {
@@ -205,22 +183,14 @@ function cloneAndFreezeDefinition(input: unknown): AgentSkillDefinitionV1 {
   if (input.source !== AGENT_SKILL_SOURCE_V1) {
     throw new Error('Agent Skill 当前只支持 built-in 来源');
   }
-  const toolAllowlist = normalizeToolAllowlist(input.toolAllowlist);
-  const requiredTools = normalizeToolClassification(input.requiredTools, 'requiredTools');
-  const optionalTools = normalizeToolClassification(input.optionalTools, 'optionalTools');
-  const allowlist = new Set(toolAllowlist);
+  const requiredTools = normalizeToolDependencies(input.requiredTools, 'requiredTools');
+  const optionalTools = normalizeToolDependencies(input.optionalTools, 'optionalTools');
   const classified = new Set<string>();
   for (const toolName of [...requiredTools, ...optionalTools]) {
-    if (!allowlist.has(toolName)) {
-      throw new Error(`Agent Skill Tool 分类不在 allowlist 中：${toolName}`);
-    }
     if (classified.has(toolName)) {
       throw new Error(`Agent Skill required / optional Tool 不能重复：${toolName}`);
     }
     classified.add(toolName);
-  }
-  if (classified.size !== allowlist.size) {
-    throw new Error('Agent Skill allowlist 中的 Tool 必须归入 requiredTools 或 optionalTools');
   }
   return Object.freeze({
     description,
@@ -229,7 +199,6 @@ function cloneAndFreezeDefinition(input: unknown): AgentSkillDefinitionV1 {
     optionalTools: Object.freeze(optionalTools),
     requiredTools: Object.freeze(requiredTools),
     source: AGENT_SKILL_SOURCE_V1,
-    toolAllowlist: Object.freeze(toolAllowlist),
     version,
     whenToUse,
   });
@@ -260,7 +229,6 @@ export function createAgentSkillActivationEnvelope(
     instructions: definition.instructions,
     instructionsHash: getAgentSkillInstructionsHash(definition),
     skillId: definition.id,
-    toolAllowlist: Object.freeze([...definition.toolAllowlist]),
     version: definition.version,
   });
 }
@@ -348,7 +316,7 @@ export function createAgentSkillRegistry(options: AgentSkillRegistryOptionsV1 = 
 
   function validateToolReferences(definition: AgentSkillDefinitionV1): void {
     if (!toolValidator) return;
-    for (const toolName of definition.toolAllowlist) {
+    for (const toolName of [...definition.requiredTools, ...definition.optionalTools]) {
       let known = false;
       try {
         known = toolValidator(toolName) === true;

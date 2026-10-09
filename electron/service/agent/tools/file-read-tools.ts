@@ -80,7 +80,7 @@ export const fileListTool: AgentTool = {
     context.onProgress({ message: `正在读取 ${directory.name}` });
     return {
       data: {
-        directory: { id: directory.id, name: directory.name },
+        directory: { id: directory.id, name: directory.name, builtInType: directory.builtInType, archiveMode: directory.archiveMode },
         entries: directory.entries,
         entryCount: directory.entryCount,
         returnedEntryCount: directory.entries.length,

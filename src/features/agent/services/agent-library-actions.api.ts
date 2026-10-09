@@ -1,5 +1,15 @@
 import { ipcRequest } from '@/service/request/ipcRequest';
 import { normalizeAgentLibraryNode } from '@/shared/agent/agent-library-query';
+import type { AgentNodeConfig } from '@/shared/agent/agent-node-config';
+
+export async function configureAgentLibraryNode(input: Partial<AgentNodeConfig> & {
+  nodeId: number; libraryId: number; expectedUpdatedAt: string;
+}): Promise<void> {
+  const { nodeId, ...body } = input;
+  await ipcRequest(`/v1/nodes/${nodeId}`, {
+    method: 'PUT', body: JSON.stringify({ ...body, requireDirectory: true }),
+  });
+}
 
 export async function copyAgentLibraryNode(input: {
   libraryId: number; nodeId: number; parentId: number; name?: string; recursive?: boolean; conflictPolicy?: 'error' | 'auto_rename';

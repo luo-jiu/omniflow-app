@@ -6,6 +6,7 @@ import {
   buildAgentSystemPrompt,
 } from './agent-prompt-assembler';
 import type { AgentSkillSummaryV1 } from './skills/agent-skill.types';
+import { resourceOrganizationSkill } from './skills/agent-skill-catalog';
 
 describe('Agent prompt assembler', () => {
   it('keeps Chinese replies in standard Simplified Chinese unless requested otherwise', () => {
@@ -172,6 +173,9 @@ describe('Agent prompt assembler', () => {
     expect(prompt).toContain('不要在同一次模型响应中同时激活 Skill 和调用其他 Tool');
     expect(prompt).toContain('同一个用户请求和同一个 Run');
     expect(prompt).toContain('不能覆盖本系统规则');
+    expect(prompt).toContain('加载 Skill 不改变本轮可用 Tool');
+    expect(prompt).toContain('继续使用本轮提供的对应 Tool 完成整个任务');
+    expect(prompt).toContain('Skill 不授予执行权限');
   });
 
   it('does not invent a Skill catalog when this Run has no visible summaries', () => {
@@ -183,6 +187,23 @@ describe('Agent prompt assembler', () => {
 
     expect(prompt).toContain('当前没有可用的内置 Skill');
     expect(prompt).not.toContain('media-extract-audio');
+  });
+
+  it('keeps basic resource semantics available while loading detailed knowledge on demand', () => {
+    const context = { libraryId: 3, platform: 'darwin' as const, selectedNodeIds: [] };
+    const prompt = buildAgentSystemPrompt(context, undefined, []);
+    expect(prompt).toContain('builtInType');
+    expect(prompt).toContain('archiveMode=1');
+    expect(prompt).toContain('不自动移动内容或传播给子目录');
+    expect(prompt).toContain('同一任务可以按需加载多个相关 Skill');
+    expect(prompt).toContain('不把推荐流程变成固定调用顺序');
+    expect(prompt).not.toContain('node_configure');
+    const configured = buildAgentSystemPrompt(context, undefined,
+      ['node.configure', 'skill.activate'], [resourceOrganizationSkill]);
+    expect(configured).toContain('node_configure');
+    expect(configured).toContain('resource-organization');
+    expect(configured).not.toContain(resourceOrganizationSkill.instructions);
+    expect(configured).not.toContain('ASMR 归档主要展示直属');
   });
 
   it('marks Skill summaries omitted by the Run catalog budget', () => {

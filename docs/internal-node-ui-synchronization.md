@@ -7,7 +7,7 @@
 `features/file-explorer/services/node-mutation-events.ts` 提供 `notifyLibraryNodesMutated(event)` 和 `subscribeLibraryNodesMutated(listener)`。
 
 - 必填：`accountScope`、`backendScope`、`libraryId`、`affectedParentIds`。
-- 可选：`nodeId`、`name`、`ext`、`type`、`parentId`。名称与扩展名使用后端独立字段，不能把完整文件名重复拼入 name。
+- 可选：`nodeId`、`name`、`ext`、`type`、`parentId`、`configChanged`、`builtInType`、`archiveMode`。名称与扩展名使用后端独立字段，不能把完整文件名重复拼入 name。配置字段仅传播成功后实际读回值；`configChanged` 表示配置提交已成功，不等于读回核对成功。
 - 创建、复制、恢复传实际目标父目录；移动传新旧父目录；重命名传最终节点名称、扩展名和类型。`parentId` 可投影移动后的选中项位置。
 - 只有确认业务提交成功后才通知。通知是 renderer 内同步广播，不是请求、授权或执行入口，不承担跨进程持久化。异步监听器的失败会记录日志，不能反转业务成功；调用方 await 通知不表示所有目录已刷新完成。
 - 每个订阅方精确匹配账号、后端、资料库，不接受仅 nodeId 或 libraryId 匹配。未挂载的树保留同作用域 dirty 标记，下次挂载走原快照重建链路；不保存第二份树或选中状态。
@@ -18,7 +18,9 @@
 
 `DirectoryTree` 仍是勾选 ID 与 anchor 的 owner，订阅既有 `file-deletion-events` 清除已删除项。节点数据变化也会重新投影 primaryNode，不仅在选中 ID 变化时通知。页面既有 selectedTreeNode 只是 appContext 的只读投影：删除清空、重命名或移动更新元数据，不新增 Agent 状态源。
 
-`FileViewerProvider` 仅修改对应已打开 tab 的 fileName 及活动 fileState 标题。tab ID、文件 URL、正文、reloadToken、媒体 owner 与播放资源均保持原值；不会调用重新打开或关闭 tab。删除继续通过原 closeTab 和媒体 releaseForTab 链路。
+重命名事件中，`FileViewerProvider` 仅修改对应已打开 tab 的 fileName 及活动 fileState 标题。tab ID、文件 URL、正文、reloadToken、媒体 owner 与播放资源均保持原值；不会调用重新打开或关闭 tab。删除继续通过原 closeTab 和媒体 releaseForTab 链路。
+
+`node.configure` 提交后的 `configChanged` 事件携带配置节点及其父目录范围。树使用既有 `updateNodeBuiltInConfig` 更新配置及展开规则，并刷新相关目录。预览关闭该配置节点的旧 tab、沿用媒体释放与 session 清理；重新打开继续走目录树的正式解析入口，不在 Context 另写主媒体选择逻辑。范围内已打开的父归档递增 reloadToken 更新条目，其他预览不受影响。
 
 ## 回收站恢复
 

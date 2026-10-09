@@ -16,7 +16,7 @@ export function committedAgentFileParents(activity: AgentToolActivitySnapshot, l
   if (activity.pluginSource && activity.preparation?.action.kind === 'plugin.rename') {
     return [...new Set(committedPluginRenameItems(activity, libraryId).map(item => item.parentId))];
   }
-  if ([...AGENT_LIBRARY_MUTATION_TOOLS, 'tag.update'].includes(activity.call.name)) {
+  if ([...AGENT_LIBRARY_MUTATION_TOOLS, 'node.configure', 'tag.update', 'library.batch'].includes(activity.call.name)) {
     if (activity.status !== 'completed' || activity.result?.ok !== true) return [];
     const data = activity.result.data as { mutationCommitState?: unknown; affectedParentIds?: unknown } | undefined;
     if (data?.mutationCommitState !== 'committed' || !Array.isArray(data.affectedParentIds) || data.affectedParentIds.length > 128) return [];

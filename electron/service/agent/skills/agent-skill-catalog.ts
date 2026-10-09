@@ -1,4 +1,7 @@
 import type { AgentSkillDefinitionV1 } from './agent-skill.types';
+import { resourceOrganizationSkill } from './resource-organization-skill';
+
+export { resourceOrganizationSkill } from './resource-organization-skill';
 
 /**
  * The first built-in Skill stays deliberately narrow.  It is a recipe for
@@ -16,11 +19,14 @@ export const mediaExtractAudioSkill: AgentSkillDefinitionV1 = Object.freeze({
     '目标缺失、存在多个候选，或用户明确要求了 m4a、mp3、wav 之外的格式时，使用 interaction.request 补齐必要信息；不要猜测 nodeId、路径或覆盖策略。',
     '调用 media.extractAudio 执行提取，默认 destination=library 保存当前资料库目录；本机更合适或用户指定时可以选择 local。输出格式仅使用 m4a、mp3 或 wav；用户未指定时直接使用 m4a，不为已有安全默认值额外询问。确认由运行时权限处理，不要重复索取授权。源文件不可达时不能靠改变保存位置继续提取。',
     '执行成功后根据 Tool 返回的节点事实，并在必要时重新用 file.list 或 file.stat 感知当前目录，确认输出条目后再向用户报告结果。',
+    '用户同时要求改名、移动或删除等后续操作时，使用本 Run 已提供的对应 Tool 继续完成完整目标，不因提取步骤完成而结束或让用户自行完成剩余操作。',
+    '只有用户明确要求删除资料库源文件，且提取成功、输出保存已核对后，才用本 Run 提供的 file.delete 将源文件移入回收站；删除确认仍由运行时权限处理。提取失败、取消或保存结果未知时保留源文件，不得删除。',
     '优先使用内置媒体流程；内置能力不适合时，可使用本 Run 已提供的 shell.run 和文件桥作为备选，不把内部优先当成禁止本机操作。不要猜测访问链接，不要把文件夹当作媒体文件；来源检查、权限与一次性执行约束对备选方案同样有效。',
   ].join('\n'),
   optionalTools: Object.freeze([
     'file.search', 'file.resolve',
     'interaction.request',
+    'file.delete',
     'shell.run', 'file.stage', 'file.publish', 'file.upload',
   ]),
   requiredTools: Object.freeze([
@@ -30,21 +36,13 @@ export const mediaExtractAudioSkill: AgentSkillDefinitionV1 = Object.freeze({
     'media.extractAudio',
   ]),
   source: 'built-in',
-  toolAllowlist: Object.freeze([
-    'file.search', 'file.resolve',
-    'file.list',
-    'file.stat',
-    'media.inspect',
-    'interaction.request',
-    'media.extractAudio',
-    'shell.run', 'file.stage', 'file.publish', 'file.upload',
-  ]),
-  version: '1.0.0',
+  version: '2.0.0',
   whenToUse: '用户要求从当前已打开或选中的单个音视频文件提取音频时。',
 });
 
 const BUILT_IN_AGENT_SKILLS: readonly AgentSkillDefinitionV1[] = Object.freeze([
   mediaExtractAudioSkill,
+  resourceOrganizationSkill,
 ]);
 
 /** Return a fresh array so callers cannot mutate the catalog projection. */
@@ -53,6 +51,5 @@ export function getBuiltInAgentSkills(): AgentSkillDefinitionV1[] {
     ...skill,
     optionalTools: [...skill.optionalTools],
     requiredTools: [...skill.requiredTools],
-    toolAllowlist: [...skill.toolAllowlist],
   }));
 }

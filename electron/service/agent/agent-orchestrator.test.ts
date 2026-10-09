@@ -254,6 +254,48 @@ describe('Agent orchestrator', () => {
       ...options,
     });
   }
+
+  it('preserves observed resource configuration while dropping invalid or missing fields', async () => {
+    const execute = vi.fn<NonNullable<AgentTool['execute']>>(async () => ({ ok: true }));
+    agentToolRegistry.register({
+      description: 'Inspect normalized perception in a test.', execute,
+      inputSchema: { additionalProperties: false, properties: {}, type: 'object' },
+      name: 'test.perception-config', risk: 'read',
+    });
+    mocks.streamAgentProviderTurn
+      .mockResolvedValueOnce({ content: '', toolCalls: [{ id: 'perception-config', input: {}, name: 'test.perception-config' }] })
+      .mockImplementationOnce(async (_connection, _input, onDelta) => {
+        onDelta('配置已核对。');
+        return { content: '配置已核对。', toolCalls: [] };
+      });
+    const webContents = sender();
+    await createOrchestrator().start(webContents as never, {
+      ...request(),
+      perception: {
+        ...request().perception,
+        currentDirectory: {
+          id: 10, name: '漫画', builtInType: 'COMIC', archiveMode: 1, entryCount: 3,
+          entries: [
+            { id: 11, name: '作品', type: 'dir', builtInType: 'COMIC', archiveMode: 0 },
+            { id: 12, name: '无效配置', type: 'dir', builtInType: 'UNKNOWN', archiveMode: '1' },
+            { id: 13, name: '未提供配置', type: 'dir' },
+          ],
+        },
+        selectedNodes: [{ id: 11, name: '作品', type: 'dir', builtInType: 'COMIC', archiveMode: 0 }],
+      } as never,
+    });
+    await waitForCompletedFinal(webContents, '配置已核对。');
+    expect(execute).toHaveBeenCalledTimes(1);
+    const perception = execute.mock.calls[0][1].perception!;
+    expect(perception.currentDirectory).toMatchObject({ builtInType: 'COMIC', archiveMode: 1 });
+    expect(perception.currentDirectory?.entries[0]).toMatchObject({ builtInType: 'COMIC', archiveMode: 0 });
+    expect(perception.selectedNodes[0]).toMatchObject({ builtInType: 'COMIC', archiveMode: 0 });
+    for (const entry of perception.currentDirectory!.entries.slice(1)) {
+      expect(entry).not.toHaveProperty('builtInType');
+      expect(entry).not.toHaveProperty('archiveMode');
+    }
+  });
+
   it.each(['cancel-before-run', 'run-write-failed'] as const)('rolls back new attachment bindings on %s', async failure => {
     const id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
     const attachmentBindings = {
@@ -691,16 +733,19 @@ describe('Agent orchestrator', () => {
     };
   }
 
-  async function startPreparedAudioApproval() {
+  async function startPreparedAudioApproval(options: {
+    orchestratorOptions?: Parameters<typeof createAgentOrchestrator>[0];
+    userPrompt?: string;
+  } = {}) {
     mocks.streamAgentProviderTurn.mockResolvedValueOnce({
       content: '',
       toolCalls: [{ id: 'call-extract-audio', input: {}, name: 'media.extractAudio' }],
     });
     const webContents = sender();
-    const orchestrator = createOrchestrator();
+    const orchestrator = createOrchestrator(options.orchestratorOptions);
     const started = await orchestrator.start(webContents as never, {
       ...request(),
-      userPrompt: '提取当前视频的音频',
+      userPrompt: options.userPrompt || '提取当前视频的音频',
     });
     await vi.waitFor(() => {
       expect(webContents.send).toHaveBeenCalledWith(
@@ -780,7 +825,7 @@ describe('Agent orchestrator', () => {
     });
     const session = await store.getSession(started.sessionId, OWNER_SCOPE, 3);
     expect(session?.runs[0]).toMatchObject({
-      capabilityIdentity: expect.stringMatching(/^v2:[a-f0-9]{64}$/u),
+      capabilityIdentity: expect.stringMatching(/^v3:[a-f0-9]{64}$/u),
       skillCatalogRevision: expect.any(Number),
       toolCatalogRevision: expect.any(Number),
     });
@@ -1173,9 +1218,11 @@ describe('Agent orchestrator', () => {
     });
   });
 
-  it('publishes only Skill summaries before activation and narrows Tools from the next turn', async () => {
+  it('publishes only Skill summaries before activation and preserves the Run Tools afterward', async () => {
+    let initialProviderTools: unknown;
     mocks.streamAgentProviderTurn
       .mockImplementationOnce(async (_connection, input) => {
+        initialProviderTools = input.tools;
         expect(input.systemPrompt).toContain('media-extract-audio');
         expect(input.systemPrompt).toContain('从一个明确的音视频文件中提取音轨');
         expect(input.systemPrompt).not.toContain('只在用户明确要求从一个音视频文件提取音轨时使用本流程');
@@ -1183,6 +1230,8 @@ describe('Agent orchestrator', () => {
           'agent.plan.set',
           'skill.activate',
           'directory.create',
+          'file.delete',
+          'file.rename',
         ]));
         return {
           content: '',
@@ -1195,26 +1244,16 @@ describe('Agent orchestrator', () => {
       })
       .mockImplementationOnce(async (_connection, input, onDelta) => {
         const toolNames = input.tools.map((tool: { name: string }) => tool.name);
-        expect(toolNames).toEqual([
-          'agent.plan.set',
-          'file.list',
-          'file.stat',
-          'file.search',
-          'file.resolve',
-          'interaction.request',
-          'media.inspect',
-          'media.extractAudio',
-          'skill.activate',
-        ]);
-        expect(toolNames).not.toContain('directory.create');
+        expect(input.tools).toEqual(initialProviderTools);
+        expect(toolNames).toEqual(expect.arrayContaining(['directory.create', 'file.delete', 'file.rename']));
         const activationResult = JSON.parse(input.messages.at(-1).content);
         expect(activationResult).toMatchObject({
           data: {
             skillId: 'media-extract-audio',
-            toolAllowlist: expect.arrayContaining(['media.extractAudio']),
           },
           ok: true,
         });
+        expect(activationResult.data).not.toHaveProperty('toolAllowlist');
         expect(activationResult.data.instructions).toContain('重新用 file.list 或 file.stat 感知');
         onDelta('流程已经加载。');
         return { content: '流程已经加载。', toolCalls: [] };
@@ -1263,6 +1302,283 @@ describe('Agent orchestrator', () => {
     );
   });
 
+  it('loads multiple Skills in one Run, deduplicates their bodies and executes unrelated Tools', async () => {
+    const secondSkillId = 'test.multi-skill';
+    const secondInstructions = 'Review the existing resource structure before organizing its contents.';
+    builtInAgentSkillRegistry.register({
+      description: '资源组织指导',
+      id: secondSkillId,
+      instructions: secondInstructions,
+      optionalTools: [],
+      requiredTools: [],
+      source: 'built-in',
+      version: '1.0.0',
+      whenToUse: '需要组合整理流程时。',
+    });
+    const executeUnrelated = vi.fn(async () => ({ message: 'unrelated Tool completed', ok: true }));
+    agentToolRegistry.register({
+      description: 'Unrelated read capability outside both Skills.',
+      execute: executeUnrelated,
+      inputSchema: { additionalProperties: false, properties: {}, type: 'object' },
+      name: 'test.after-skills',
+      risk: 'read',
+    });
+    const ids = ['media-extract-audio', secondSkillId, 'media-extract-audio', secondSkillId];
+    let round = 0;
+    let initialToolNames: string[] = [];
+    mocks.streamAgentProviderTurn.mockImplementation(async (_connection, input, onDelta) => {
+      const toolNames = input.tools.map((tool: { name: string }) => tool.name);
+      if (round === 0) initialToolNames = toolNames;
+      expect(toolNames).toEqual(initialToolNames);
+      const results = input.messages.filter((message: AgentProviderMessage) => (
+        message.role === 'tool' && message.name === 'skill.activate'
+      )).map((message: AgentProviderMessage) => JSON.parse(message.content));
+      if (round > 0 && round <= ids.length) {
+        const latest = results.at(-1);
+        expect(latest).toMatchObject({ data: { skillId: ids[round - 1] }, ok: true });
+        if (round <= 2) expect(latest.data.instructions).toEqual(expect.any(String));
+        else {
+          expect(latest.data.alreadyLoaded).toBe(true);
+          expect(latest.data).not.toHaveProperty('instructions');
+        }
+      }
+      if (round >= 2) {
+        expect(results.filter((result: AgentToolResult) => (
+          (result.data as { instructions?: string }).instructions
+        ))).toHaveLength(2);
+        expect(results.find((result: AgentToolResult) => (
+          (result.data as { skillId: string }).skillId === secondSkillId
+        )).data.instructions).toBe(secondInstructions);
+      }
+      if (round < ids.length) {
+        const skillId = ids[round++];
+        return { content: '', toolCalls: [{ id: `multi-skill-${round}`, input: { skillId }, name: 'skill.activate' }] };
+      }
+      if (round++ === ids.length) {
+        return { content: '', toolCalls: [{ id: 'after-multiple-skills', input: {}, name: 'test.after-skills' }] };
+      }
+      onDelta('多个流程已组合完成。');
+      return { content: '多个流程已组合完成。', toolCalls: [] };
+    });
+    const webContents = sender();
+    const orchestrator = createOrchestrator();
+    const started = await orchestrator.start(webContents as never, request());
+    await waitForCompletedFinal(webContents, '多个流程已组合完成。');
+
+    expect(executeUnrelated).toHaveBeenCalledTimes(1);
+    const snapshot = await store.getSession(started.sessionId, OWNER_SCOPE, 3);
+    expect(snapshot?.runs).toHaveLength(1);
+    expect(snapshot?.toolActivities.map(activity => activity.call.name)).toEqual([
+      'skill.activate', 'skill.activate', 'skill.activate', 'skill.activate', 'test.after-skills',
+    ]);
+    expect(snapshot?.toolActivities.every(activity => activity.status === 'completed')).toBe(true);
+    expect(JSON.stringify(webContents.send.mock.calls)).not.toContain(secondInstructions);
+  });
+
+  it('stops repeated alternating Skill loads without reinjecting their bodies', async () => {
+    const secondSkillId = 'test.skill-cycle';
+    builtInAgentSkillRegistry.register({
+      description: '循环加载测试', id: secondSkillId, instructions: 'Cycle test instructions.',
+      optionalTools: [], requiredTools: [], source: 'built-in', version: '1.0.0', whenToUse: '测试重复加载。',
+    });
+    let round = 0;
+    mocks.streamAgentProviderTurn.mockImplementation(async (_connection, input) => {
+      const bodies = input.messages.filter((message: AgentProviderMessage) => (
+        message.role === 'tool' && message.name === 'skill.activate'
+        && JSON.parse(message.content).data?.instructions
+      ));
+      expect(bodies).toHaveLength(Math.min(round, 2));
+      const skillId = round++ % 2 === 0 ? 'media-extract-audio' : secondSkillId;
+      return { content: '', toolCalls: [{ id: `skill-cycle-${round}`, input: { skillId }, name: 'skill.activate' }] };
+    });
+    const webContents = sender();
+    const orchestrator = createOrchestrator();
+    const started = await orchestrator.start(webContents as never, request());
+    await vi.waitFor(() => {
+      expect(webContents.send).toHaveBeenCalledWith('agent:chat:event', expect.objectContaining({
+        message: expect.stringContaining('无进展循环'), type: 'error',
+      }));
+    });
+    expect(mocks.streamAgentProviderTurn).toHaveBeenCalledTimes(6);
+    expect((await store.getSession(started.sessionId, OWNER_SCOPE, 3))?.toolActivities).toHaveLength(6);
+  });
+
+  it.each(['approve', 'deny', 'cancel'] as const)(
+    'keeps deletion available after audio Skill activation and honors %s at its own approval',
+    async (deleteDecision) => {
+      let initialProviderTools: unknown;
+      mocks.streamAgentProviderTurn
+        .mockImplementationOnce(async (_connection, input) => {
+          initialProviderTools = input.tools;
+          return {
+            content: '',
+            toolCalls: [{ id: 'activate-before-delete', input: { skillId: 'media-extract-audio' }, name: 'skill.activate' }],
+          };
+        })
+        .mockImplementationOnce(async (_connection, input) => {
+          expect(input.tools).toEqual(initialProviderTools);
+          const planTool = input.tools.find((tool: { name: string }) => tool.name === 'agent.plan.set');
+          expect(planTool.inputSchema.properties.steps.items.properties.toolName.enum)
+            .toEqual(expect.arrayContaining(['media_extractAudio', 'file_stat', 'file_delete', 'file_rename']));
+          expect(input.systemPrompt).toContain('file_delete');
+          expect(input.tools.find((tool: { name: string }) => tool.name === 'file.delete').inputSchema)
+            .toEqual(agentToolRegistry.get('file.delete')?.inputSchema);
+          return {
+            content: '',
+            toolCalls: [{
+              id: 'plan-extract-verify-delete',
+              input: { steps: [
+                { title: '提取并保存音频', toolName: 'media_extractAudio' },
+                { title: '核对新音频', toolName: 'file_stat' },
+                { title: '删除源视频', toolName: 'file_delete' },
+              ] },
+              name: 'agent.plan.set',
+            }],
+          };
+        });
+      const readLibraryMetadata = vi.fn(async () => ({
+        libraryId: 3,
+        node: { id: 32, libraryId: 3, parentId: 10, name: 'movie-audio', ext: 'm4a', type: 'file' as const, path: '/视频/movie-audio.m4a' },
+      }));
+      const { approval, orchestrator, started, webContents } = await startPreparedAudioApproval({
+        orchestratorOptions: { readLibraryMetadata },
+        userPrompt: '提取当前视频的音频，保存并核对成功后删除源视频',
+      });
+      const finalMessage = deleteDecision === 'approve' ? '音频已保存，源视频已移入回收站。' : '音频已保存，已取消删除源视频。';
+      mocks.streamAgentProviderTurn
+        .mockImplementationOnce(async (_connection, input) => {
+          expect(input.tools).toEqual(initialProviderTools);
+          expect(JSON.parse(input.messages.at(-1).content)).toMatchObject({
+            data: { createdNodeId: 32, uploadCommitState: 'committed', verified: true },
+            ok: true,
+          });
+          return { content: '', toolCalls: [{ id: 'verify-output-before-delete', input: { nodeId: 32 }, name: 'file.stat' }] };
+        })
+        .mockImplementationOnce(async (_connection, input) => {
+          expect(input.tools).toEqual(initialProviderTools);
+          expect(JSON.parse(input.messages.at(-1).content)).toMatchObject({
+            data: { id: 32, path: '/视频/movie-audio.m4a' },
+            ok: true,
+          });
+          return { content: '', toolCalls: [{ id: 'delete-source-after-extraction', input: { path: '/视频/movie.mp4' }, name: 'file.delete' }] };
+        })
+        .mockImplementationOnce(async (_connection, input, onDelta) => {
+          expect(input.tools).toEqual(initialProviderTools);
+          const result = JSON.parse(input.messages.at(-1).content);
+          expect(result.ok).toBe(deleteDecision === 'approve');
+          if (deleteDecision === 'approve') expect(result.data.deleteCommitState).toBe('committed');
+          else expect(result.message).toContain('用户取消了');
+          onDelta(finalMessage);
+          return { content: finalMessage, toolCalls: [] };
+        });
+
+      if (!approval.preparation) throw new Error('expected prepared audio approval');
+      const resolvingAudioApproval = orchestrator.resolveToolApproval(webContents.id, {
+        approvalId: approval.approvalId,
+        approved: true,
+        libraryId: 3,
+        ownerScope: OWNER_SCOPE,
+        preparedAction: approval.preparation.action,
+        preparedActionId: approval.preparation.preparedActionId,
+        runId: started.runId,
+        sessionId: started.sessionId,
+      });
+      await vi.waitFor(() => expect(webContents.send.mock.calls.map(call => call[1])
+        .filter(event => event?.type === 'tool-prepare-requested')).toHaveLength(2));
+      const preparation = webContents.send.mock.calls.map(call => call[1])
+        .filter(event => event?.type === 'tool-prepare-requested')[1].preparation;
+      expect(orchestrator.completeToolPreparation(webContents.id, {
+        callId: preparation.callId,
+        inputHash: preparation.inputHash,
+        libraryId: 3,
+        ownerScope: OWNER_SCOPE,
+        prepareId: preparation.prepareId,
+        result: { providerBindings: { m4a: { providerAlias: 'local-minio', providerLabel: '本机 MinIO' } } },
+        runId: started.runId,
+        sessionId: started.sessionId,
+        toolRunId: preparation.toolRunId,
+      })).toBe(true);
+      const audioDecision = await resolvingAudioApproval;
+      if (!audioDecision.approved || !audioDecision.execution) throw new Error('expected audio execution');
+      expect(audioDecision.execution.toolName).toBe('media.extractAudio');
+      // The renderer boundary reports the verified upload; this test exercises scheduling and approval,
+      // while the extraction/upload capability and storage transaction have their own integration cases.
+      orchestrator.completeToolExecution(webContents.id, {
+        executionId: audioDecision.execution.executionId,
+        libraryId: 3,
+        ownerScope: OWNER_SCOPE,
+        result: {
+          data: { createdNodeId: 32, destination: 'library', format: 'm4a', name: 'movie-audio.m4a', parentId: 10, uploadCommitState: 'committed', verified: true },
+          message: '已提取并上传“movie-audio.m4a”',
+          ok: true,
+        },
+        runId: started.runId,
+        sessionId: started.sessionId,
+      });
+      await vi.waitFor(() => {
+        const events = webContents.send.mock.calls.map(call => call[1]);
+        expect(events.filter(event => event?.type === 'error').map(event => event.message)).toEqual([]);
+        expect(events.filter(event => event?.type === 'tool-approval-required')).toHaveLength(2);
+      });
+      const deleteApproval = webContents.send.mock.calls.map(call => call[1])
+        .filter(event => event?.type === 'tool-approval-required')[1].approval as AgentToolApprovalSnapshot;
+      expect(deleteApproval.call).toMatchObject({ input: { path: '/视频/movie.mp4' }, name: 'file.delete' });
+      expect(deleteApproval.preview).toMatchObject({ risk: 'write', title: '移入回收站' });
+      expect(readLibraryMetadata).toHaveBeenCalledTimes(1);
+      const beforeDelete = await store.getSession(started.sessionId, OWNER_SCOPE, 3);
+      expect(beforeDelete?.runs[0].plan?.steps.map(step => step.expectedToolName))
+        .toEqual(['media.extractAudio', 'file.stat', 'file.delete']);
+      expect(beforeDelete?.toolActivities.at(-1)).toMatchObject({
+        approval: { status: 'pending' },
+        permissionBehavior: 'ask',
+        planStepId: beforeDelete?.runs[0].plan?.steps[2].id,
+        status: 'awaiting_approval',
+      });
+      const deleteApprovalResponse = {
+        approvalId: deleteApproval.approvalId,
+        approved: deleteDecision === 'approve',
+        libraryId: 3,
+        ownerScope: OWNER_SCOPE,
+        runId: started.runId,
+        sessionId: started.sessionId,
+      };
+      if (deleteDecision === 'cancel') {
+        expect(orchestrator.stop(started.sessionId, webContents.id)).toBe(true);
+        await vi.waitFor(() => expect(webContents.send.mock.calls.map(call => call[1]))
+          .toContainEqual(expect.objectContaining({ runId: started.runId, type: 'cancelled' })));
+        await expect(orchestrator.resolveToolApproval(webContents.id, { ...deleteApprovalResponse, approved: true }))
+          .rejects.toThrow('不存在或已经失效');
+      } else {
+        const decision = await orchestrator.resolveToolApproval(webContents.id, deleteApprovalResponse);
+        if (deleteDecision === 'approve') {
+          if (!decision.approved || !decision.execution) throw new Error('expected delete execution');
+          expect(decision.execution).toMatchObject({ input: { libraryId: 3, path: '/视频/movie.mp4', recursive: false }, toolName: 'file.delete' });
+          orchestrator.completeToolExecution(webContents.id, {
+            executionId: decision.execution.executionId,
+            libraryId: 3,
+            ownerScope: OWNER_SCOPE,
+            result: { data: { deletedNodeId: 8, parentId: 10, deleteCommitState: 'committed' }, message: '源视频已移入回收站', ok: true },
+            runId: started.runId,
+            sessionId: started.sessionId,
+          });
+        } else expect(decision).toEqual({ approved: false });
+        await waitForCompletedFinal(webContents, finalMessage, started);
+      }
+      const snapshot = await store.getSession(started.sessionId, OWNER_SCOPE, 3);
+      expect(snapshot?.toolActivities.map(activity => activity.call.name))
+        .toEqual(['skill.activate', 'media.extractAudio', 'file.stat', 'file.delete']);
+      expect(snapshot?.toolActivities.at(-1)).toMatchObject({
+        approval: { status: deleteDecision === 'approve' ? 'approved' : deleteDecision === 'deny' ? 'denied' : 'cancelled' },
+        permissionBehavior: 'ask',
+        status: deleteDecision === 'approve' ? 'completed' : deleteDecision === 'deny' ? 'failed' : 'cancelled',
+      });
+      if (deleteDecision !== 'approve') {
+        expect(webContents.send.mock.calls.map(call => call[1]).filter(event => event?.type === 'tool-execution-requested')
+          .some(event => event.execution.toolName === 'file.delete')).toBe(false);
+      }
+    },
+  );
+
   it('keeps a Skill activation larger than 1,024 tokens complete for the provider', async () => {
     const skillId = 'test.large-provider-activation';
     const instructions = 'Read the authoritative Tool result before continuing. '.repeat(400).trim();
@@ -1273,7 +1589,6 @@ describe('Agent orchestrator', () => {
       optionalTools: [],
       requiredTools: ['file.list'],
       source: 'built-in',
-      toolAllowlist: ['file.list'],
       version: '1.0.0',
       whenToUse: '只用于 Agent Orchestrator 的长 Skill 激活预算测试。',
     });
@@ -3397,7 +3712,7 @@ describe('Agent orchestrator', () => {
         ownerScope: OWNER_SCOPE,
         ownerWebContentsId: webContents.id,
         preparedActionId: approval.preparation.preparedActionId,
-        runCapabilityIdentity: expect.stringMatching(/^v2:[a-f0-9]{64}$/u),
+        runCapabilityIdentity: expect.stringMatching(/^v3:[a-f0-9]{64}$/u),
         runId: started.runId,
         sessionId: started.sessionId,
         toolInputHash: hashAgentToolInputForPreparation({ format: 'm4a' }),
@@ -6171,7 +6486,6 @@ describe('Agent orchestrator', () => {
       optionalTools: [],
       requiredTools: skillTools,
       source: 'built-in',
-      toolAllowlist: skillTools,
       version: '1.0.0',
       whenToUse: '只用于测试 continuation 剩余预算不足时必须在执行前拒绝。',
     });
@@ -6322,15 +6636,15 @@ describe('Agent orchestrator', () => {
     expect(webContents.send.mock.calls.map(call => call[1]?.type)).not.toContain('tool-started');
   });
 
-  it('budgets a valid Skill activation against the narrowed next-turn Tool set', async () => {
-    const skillId = 'test.activation-narrowed-budget';
+  it('budgets a valid Skill activation with the complete unchanged next-turn Tool set', async () => {
+    const skillId = 'test.activation-unchanged-budget';
     const paddingToolNames = Array.from(
       { length: 12 },
       (_, index) => `test.activation-budget-padding-${index + 1}`,
     );
     paddingToolNames.forEach((name) => {
       agentToolRegistry.register({
-        description: `Only used to make the pre-activation Provider schema larger. ${'detail '.repeat(30)}`,
+        description: `Only used to verify all Provider schemas remain budgeted after activation. ${'detail '.repeat(30)}`,
         execute: vi.fn(async () => ({ message: name, ok: true })),
         inputSchema: {
           additionalProperties: false,
@@ -6347,20 +6661,19 @@ describe('Agent orchestrator', () => {
       });
     });
     builtInAgentSkillRegistry.register({
-      description: '用于验证激活续接预算使用收窄后的 Tool 集。',
+      description: '用于验证激活续接预算保留完整 Tool 集。',
       id: skillId,
       instructions: 'Call file.list once, then answer from its authoritative result.',
       optionalTools: [],
       requiredTools: ['file.list'],
       source: 'built-in',
-      toolAllowlist: ['file.list'],
       version: '1.0.0',
-      whenToUse: '只用于激活前后 Provider Tool schema 大小差异测试。',
+      whenToUse: '只用于激活前后 Provider Tool schema 保持一致的预算测试。',
     });
 
     const currentRequest = {
       ...request(),
-      userPrompt: '执行收窄预算测试流程',
+      userPrompt: '执行完整工具集预算测试流程',
     };
     const capabilitySnapshot = createAgentRunCapabilitySnapshot({
       capabilitySnapshot: availableCapabilitySnapshot(),
@@ -6379,7 +6692,7 @@ describe('Agent orchestrator', () => {
       omittedSkillCount,
     );
     const activationCall = {
-      id: 'call-activation-narrowed-budget',
+      id: 'call-activation-unchanged-budget',
       input: { skillId },
       name: 'skill.activate',
     };
@@ -6445,7 +6758,8 @@ describe('Agent orchestrator', () => {
       initialTurnTokens,
       activatedCompleteContinuationTokens,
     );
-    expect(unactivatedMinimumContinuationTokens).toBeGreaterThan(providerRequestLimit);
+    expect(activatedProviderTools).toEqual(initialProviderTools);
+    expect(unactivatedMinimumContinuationTokens).toBeLessThan(providerRequestLimit);
 
     mocks.streamAgentProviderTurn
       .mockResolvedValueOnce({ content: '', toolCalls: [activationCall] })
@@ -6453,13 +6767,14 @@ describe('Agent orchestrator', () => {
         const visibleToolNames = input.tools.map((tool: { name: string }) => tool.name);
         expect(visibleToolNames).toContain('file.list');
         expect(visibleToolNames).toContain('skill.activate');
-        expect(visibleToolNames).not.toContain(paddingToolNames[0]);
+        expect(visibleToolNames).toEqual(expect.arrayContaining(paddingToolNames));
+        expect(input.tools).toEqual(initialProviderTools);
         expect(JSON.parse(input.messages.at(-1).content)).toMatchObject({
           data: { skillId },
           ok: true,
         });
-        onDelta('收窄后的续接请求已成功。');
-        return { content: '收窄后的续接请求已成功。', toolCalls: [] };
+        onDelta('保留完整工具集的续接请求已成功。');
+        return { content: '保留完整工具集的续接请求已成功。', toolCalls: [] };
       });
     const outputReserveTokens = 1_000;
     const webContents = sender();
@@ -6481,7 +6796,7 @@ describe('Agent orchestrator', () => {
     });
 
     const started = await orchestrator.start(webContents as never, currentRequest);
-    await waitForCompletedFinal(webContents, '收窄后的续接请求已成功。', {
+    await waitForCompletedFinal(webContents, '保留完整工具集的续接请求已成功。', {
       runId: started.runId,
     });
     expect(mocks.streamAgentProviderTurn).toHaveBeenCalledTimes(2);
@@ -6517,7 +6832,6 @@ describe('Agent orchestrator', () => {
           optionalTools: [],
           requiredTools: [liveToolName],
           source: 'built-in',
-          toolAllowlist: [liveToolName],
           version: '1.0.0',
           whenToUse: '只用于验证当前 Run 不读取 live Registry。',
         });

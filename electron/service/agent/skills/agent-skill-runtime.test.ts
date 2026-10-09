@@ -1,9 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 
 import { createAgentRunCapabilitySnapshot } from '../agent-run-capability-snapshot';
 import { createAgentCapabilitySnapshot } from '../capabilities/agent-capability-registry';
-import { agentToolRegistry } from '../agent-tool-registry';
-import { fileListTool, fileStatTool, fileSearchTool, fileResolveTool } from '../tools/file-read-tools';
+import { agentToolRegistry, createAgentToolRegistry } from '../agent-tool-registry';
+import { fileListTool, fileStatTool, getBuiltInReadTools } from '../tools/file-read-tools';
+import { getBuiltInActionTools } from '../tools/directory-create-tool';
 import { interactionRequestTool } from '../tools/interaction-request-tool';
 import { mediaExtractAudioTool } from '../tools/media-extract-audio-tool';
 import { mediaInspectTool } from '../tools/media-inspect-tool';
@@ -15,21 +16,24 @@ import {
   AGENT_SKILL_ACTIVATE_TOOL_NAME,
   AGENT_SKILL_ACTIVATE_TOOL_REGISTRATION_ID,
 } from './agent-skill.types';
+import { resourceOrganizationSkill } from './agent-skill-catalog';
+import { createAgentSkillRegistry } from './agent-skill-registry';
+import { resolveAgentSkillActivationResult, skillActivateTool } from './skill-activate-tool';
 
 describe('built-in Agent Skill runtime', () => {
-  it('registers the control Tool and validated built-in catalog idempotently', () => {
+  beforeAll(() => {
     [
-      fileListTool,
-      fileSearchTool,
-      fileResolveTool,
-      fileStatTool,
+      ...getBuiltInReadTools(),
+      ...getBuiltInActionTools(),
       mediaInspectTool,
       interactionRequestTool,
       mediaExtractAudioTool,
     ].forEach((tool) => {
       if (!agentToolRegistry.get(tool.name)) agentToolRegistry.register(tool);
     });
+  });
 
+  it('registers the control Tool and validated built-in catalog idempotently', () => {
     expect(() => ensureBuiltInAgentCapabilities()).not.toThrow();
     expect(() => ensureBuiltInAgentCapabilities()).not.toThrow();
 
@@ -72,5 +76,31 @@ describe('built-in Agent Skill runtime', () => {
       skillId: 'media-extract-audio',
     });
     expect(runSnapshot.listTools('media-extract-audio').some(tool => tool.name === 'shell.run')).toBe(false);
+  });
+
+  it('loads resource knowledge when the Run has no write Tools without granting any', () => {
+    const skills = createAgentSkillRegistry({
+      maxActivationTokens: 10_000,
+      toolExists: name => Boolean(agentToolRegistry.get(name)),
+    });
+    skills.register(resourceOrganizationSkill);
+    const readTools = createAgentToolRegistry([skillActivateTool, fileListTool, fileStatTool]);
+    const runSnapshot = createAgentRunCapabilitySnapshot({
+      skillSnapshot: skills.createRunSnapshot(),
+      toolSnapshot: readTools.createSnapshot(),
+    });
+
+    expect(runSnapshot.getSkillReadiness(resourceOrganizationSkill.id)?.state).toBe('degraded');
+    expect(resolveAgentSkillActivationResult(
+      { skillId: resourceOrganizationSkill.id },
+      { runCapabilitySnapshot: runSnapshot },
+    )).toMatchObject({
+      data: { instructions: resourceOrganizationSkill.instructions, skillId: resourceOrganizationSkill.id },
+      ok: true,
+    });
+    expect(runSnapshot.listTools(resourceOrganizationSkill.id)).toBe(runSnapshot.listTools());
+    expect(runSnapshot.listTools(resourceOrganizationSkill.id).every(tool => tool.risk === 'read')).toBe(true);
+    expect(runSnapshot.getTool('node.configure', resourceOrganizationSkill.id)).toBeNull();
+    expect(runSnapshot.getTool('directory.create', resourceOrganizationSkill.id)).toBeNull();
   });
 });

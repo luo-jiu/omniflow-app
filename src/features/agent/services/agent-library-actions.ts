@@ -8,19 +8,21 @@ import { IpcRequestError } from '@/service/request/ipcRequest';
 import { createNode, fetchRecycleBinItems, moveNodesBatch, renameNode, restoreNodeAndChildren } from '@/features/file-explorer/services/file.api';
 import { notifyLibraryNodesMutated } from '@/features/file-explorer/services/node-mutation-events';
 import { readAgentLibraryNode, resolveAgentLibraryPath } from './agent-library.api';
-import { copyAgentLibraryNode } from './agent-library-actions.api';
+import { configureAgentLibraryNode, copyAgentLibraryNode } from './agent-library-actions.api';
 import { reportAgentToolExecutionProgress } from './agent.api';
 import type { AgentRendererToolOutcome } from './agent-tool-executor';
 
 export interface AgentLibraryActionDependencies {
   assertOwner?: () => void;
   beforeCommit?: () => Promise<void>;
+  reportProgress?: typeof reportAgentToolExecutionProgress;
   readLibraryNode?: typeof readAgentLibraryNode;
   resolvePath?: typeof resolveAgentLibraryPath;
   createDirectory?: typeof createNode;
   rename?: typeof renameNode;
   move?: typeof moveNodesBatch;
   copy?: typeof copyAgentLibraryNode;
+  configure?: typeof configureAgentLibraryNode;
   recycleItems?: typeof fetchRecycleBinItems;
   restore?: typeof restoreNodeAndChildren;
   notifyMutation?: typeof notifyLibraryNodesMutated;
@@ -28,13 +30,13 @@ export interface AgentLibraryActionDependencies {
   signal?: AbortSignal;
 }
 
-function sameNode(before: AgentLibraryNode, after: AgentLibraryNode): boolean {
+export function sameAgentLibraryNode(before: AgentLibraryNode, after: AgentLibraryNode): boolean {
   return before.id === after.id && before.libraryId === after.libraryId && before.parentId === after.parentId
     && before.name === after.name && (before.ext || '') === (after.ext || '') && before.type === after.type
     && before.path === after.path && before.updatedAt === after.updatedAt;
 }
 
-function scopedCheck(request: AgentToolExecutionRequest, deps: AgentLibraryActionDependencies, abort = true) {
+export function assertAgentLibraryActionScope(request: AgentToolExecutionRequest, deps: AgentLibraryActionDependencies, abort = true) {
   if (abort) deps.signal?.throwIfAborted();
   if (deps.assertOwner) deps.assertOwner();
   else if (serializeAgentOwnerScope(createAgentOwnerScope(API_CONFIG.BASE_URL, auth.getUserInfo()?.id)) !== serializeAgentOwnerScope(request.ownerScope)) {
@@ -46,7 +48,7 @@ export async function executeAgentLibraryAction(request: AgentToolExecutionReque
   let attempted = false;
   let committed: AgentToolResult | undefined;
   try {
-    scopedCheck(request, deps);
+    assertAgentLibraryActionScope(request, deps);
     const raw = request.input as Record<string, unknown>;
     if (!raw || !Number.isSafeInteger(raw.libraryId) || raw.libraryId !== request.appContext.libraryId || Number(raw.libraryId) <= 0) throw new Error('资料库操作范围无效');
     const { libraryId: rawLibrary, observedSource, ...args } = raw;
@@ -58,7 +60,7 @@ export async function executeAgentLibraryAction(request: AgentToolExecutionReque
     const source = operation === 'directory.create' || operation === 'recycle.restore' ? undefined
       : input.path ? await resolve(libraryId, input.path) : await read(libraryId, input.nodeId!);
     if (source && (source.libraryId !== libraryId || source.parentId <= 0 || source.path === '/')) throw new Error('不能操作其他资料库或根目录');
-    if (source && observedSource && !sameNode(observedSource as AgentLibraryNode, source)) throw new Error('目标已变化，请重新定位后操作');
+    if (source && observedSource && !sameAgentLibraryNode(observedSource as AgentLibraryNode, source)) throw new Error('目标已变化，请重新定位后操作');
     const parent = ['directory.create', 'file.move', 'file.copy'].includes(operation)
       ? input.parentPath ? await resolve(libraryId, input.parentPath, 'dir') : input.parentId ? await read(libraryId, input.parentId)
         : await resolve(libraryId, '/', 'dir') : undefined;
@@ -68,21 +70,21 @@ export async function executeAgentLibraryAction(request: AgentToolExecutionReque
     const recycle = operation === 'recycle.restore'
       ? (await (deps.recycleItems || fetchRecycleBinItems)(libraryId)).find(item => item.id === input.nodeId && item.libraryId === libraryId) : undefined;
     if (operation === 'recycle.restore' && !recycle) throw new Error('回收站条目不存在，请先 recycle.list 重新确认');
-    scopedCheck(request, deps);
+    assertAgentLibraryActionScope(request, deps);
     for (const node of [source, parent]) if (node) {
       const fresh = await read(libraryId, node.id);
-      if (!sameNode(node, fresh)) throw new Error('节点位置、名称或版本已变化，请重新定位');
-      scopedCheck(request, deps);
+      if (!sameAgentLibraryNode(node, fresh)) throw new Error('节点位置、名称或版本已变化，请重新定位');
+      assertAgentLibraryActionScope(request, deps);
     }
     if (recycle) {
       const fresh = (await (deps.recycleItems || fetchRecycleBinItems)(libraryId)).find(item => item.id === recycle.id && item.libraryId === libraryId);
       if (!fresh || fresh.deletedAt !== recycle.deletedAt || fresh.parentId !== recycle.parentId || fresh.name !== recycle.name) throw new Error('回收站条目已变化，请重新查询');
     }
-    scopedCheck(request, deps);
+    assertAgentLibraryActionScope(request, deps);
     if (deps.beforeCommit) await deps.beforeCommit();
     else await reportAgentToolExecutionProgress({ executionId: request.executionId, libraryId, ownerScope: request.ownerScope,
       runId: request.runId, sessionId: request.sessionId, phase: 'committing', progress: { message: '正在提交资料库操作' } });
-    scopedCheck(request, deps);
+    assertAgentLibraryActionScope(request, deps);
     let nodeId = source?.id || recycle?.id || 0;
     let parentId = parent?.id || source?.parentId || recycle?.parentId || 0;
     let nextName = source?.name || recycle?.name || input.name || '';
@@ -116,7 +118,7 @@ export async function executeAgentLibraryAction(request: AgentToolExecutionReque
     try { await deps.onCommitted?.(committed); } catch { /* Final completion retries the receipt. */ }
     let refreshed: AgentLibraryNode | undefined, refreshFailed = false;
     try {
-      scopedCheck(request, deps, false);
+      assertAgentLibraryActionScope(request, deps, false);
       refreshed = await read(libraryId, nodeId);
       if (refreshed.libraryId !== libraryId || refreshed.id !== nodeId) throw new Error('结果范围不匹配');
       parentId = refreshed.parentId;
@@ -125,7 +127,7 @@ export async function executeAgentLibraryAction(request: AgentToolExecutionReque
       (committed.data as Record<string, unknown>).path = refreshed.path;
     } catch { refreshFailed = true; }
     try {
-      scopedCheck(request, deps, false);
+      assertAgentLibraryActionScope(request, deps, false);
       await (deps.notifyMutation || notifyLibraryNodesMutated)({ ...request.ownerScope, libraryId, nodeId,
         affectedParentIds, parentId, name: refreshed?.name || nextName, ext: refreshed?.ext ?? nextExt, type: nodeType });
     } catch { refreshFailed = true; }
@@ -142,7 +144,7 @@ export async function executeAgentLibraryAction(request: AgentToolExecutionReque
 
 export async function executeAgentRecycleList(request: AgentToolExecutionRequest, deps: AgentLibraryActionDependencies = {}): Promise<AgentRendererToolOutcome> {
   try {
-    scopedCheck(request, deps);
+    assertAgentLibraryActionScope(request, deps);
     const query = request.input as { libraryId: number; keyword?: string; limit?: number; offset?: number; revision?: string };
     if (!query || query.libraryId !== request.appContext.libraryId || !Number.isSafeInteger(query.libraryId) || query.libraryId <= 0) throw new Error('回收站范围无效');
     const limit = query.limit ?? 50, offset = query.offset ?? 0;
@@ -152,7 +154,7 @@ export async function executeAgentRecycleList(request: AgentToolExecutionRequest
       && (!query.keyword || `${item.name}.${item.ext || ''}`.toLocaleLowerCase().includes(query.keyword.toLocaleLowerCase())))
       .sort((a, b) => b.id - a.id).map(item => ({ nodeId: item.id, parentId: item.parentId, name: item.name, ext: item.ext || '',
         type: item.type, deletedAt: item.deletedAt, fileSize: item.fileSize, deletedDescendantCount: item.deletedDescendantCount }));
-    scopedCheck(request, deps);
+    assertAgentLibraryActionScope(request, deps);
     const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify({ keyword: query.keyword || '', rows })));
     const revision = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
     if (query.revision !== undefined && query.revision !== revision) throw new Error('回收站或查询条件已变化，请从头查询');

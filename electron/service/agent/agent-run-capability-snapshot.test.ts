@@ -72,17 +72,15 @@ function shellProviderRegistry() {
 }
 
 function skill(overrides: Partial<AgentSkillDefinitionV1> = {}): AgentSkillDefinitionV1 {
-  const toolAllowlist = overrides.toolAllowlist || ['file.list'];
   return {
     description: '测试流程',
     id: 'test.skill',
     instructions: '先读取，再执行，最后重新感知。',
     source: 'built-in',
     optionalTools: overrides.optionalTools || [],
-    requiredTools: overrides.requiredTools || toolAllowlist,
-    toolAllowlist,
+    requiredTools: overrides.requiredTools || ['file.list'],
     version: '1.0.0',
-    whenToUse: '用于测试 Skill 能力收窄。',
+    whenToUse: '用于测试 Skill 流程依赖。',
     ...overrides,
   };
 }
@@ -114,7 +112,7 @@ function createFixture(skillOverrides: Partial<AgentSkillDefinitionV1> = {}) {
 }
 
 describe('Agent Run capability snapshot', () => {
-  it('keeps controls visible and intersects business Tools with the active Skill allowlist', () => {
+  it('keeps the same frozen Tool view after loading a Skill, including unrelated business Tools', () => {
     const { snapshot } = createFixture();
 
     expect(snapshot.listTools().map(item => item.name)).toEqual([
@@ -124,25 +122,28 @@ describe('Agent Run capability snapshot', () => {
     ]);
     expect(snapshot.listTools('test.skill').map(item => item.name)).toEqual([
       'file.list',
+      'file.stat',
       'skill.activate',
     ]);
-    expect(snapshot.listBusinessTools('test.skill').map(item => item.name)).toEqual(['file.list']);
+    expect(snapshot.listTools('test.skill')).toBe(snapshot.listTools());
+    expect(snapshot.listBusinessTools('test.skill').map(item => item.name)).toEqual(['file.list', 'file.stat']);
     expect(snapshot.listControlTools('test.skill').map(item => item.name)).toEqual(['skill.activate']);
-    expect(snapshot.isToolVisible('file.stat', 'test.skill')).toBe(false);
-    expect(snapshot.getTool('file.stat', 'test.skill')).toBeNull();
+    expect(snapshot.isToolVisible('file.stat', 'test.skill')).toBe(true);
+    expect(snapshot.getTool('file.stat', 'test.skill')).toBe(snapshot.getTool('file.stat'));
     expect(snapshot.getToolKind('skill.activate')).toBe('control');
+    expect(snapshot.identity).toMatch(/^v3:[a-f0-9]{64}$/u);
   });
 
   it('rejects unknown active Skills instead of widening or silently falling back', () => {
     const { snapshot } = createFixture();
 
     expect(() => snapshot.listTools('missing.skill')).toThrow('Agent Skill 不存在');
-    expect(() => snapshot.validateInput('file.stat', {}, 'test.skill')).toThrow('未被 Run capability');
+    expect(() => snapshot.validateInput('file.stat', {}, 'missing.skill')).toThrow('Agent Skill 不存在');
     expect(() => snapshot.execute('file.stat', {}, {
       appContext: { platform: 'darwin', selectedNodeIds: [] },
       onProgress: () => undefined,
       signal: new AbortController().signal,
-    }, 'test.skill')).toThrow('未被 Run capability');
+    }, 'missing.skill')).toThrow('Agent Skill 不存在');
   });
 
   it('executes and validates only through the captured Tool snapshot', async () => {
@@ -159,7 +160,11 @@ describe('Agent Run capability snapshot', () => {
       ok: true,
     });
     expect(executeList).toHaveBeenCalledTimes(1);
-    expect(() => snapshot.validateInput('file.stat', {}, 'test.skill')).toThrow();
+    expect(snapshot.validateInput('file.stat', {}, 'test.skill')).toEqual({ ok: true });
+    await expect(snapshot.execute('file.stat', {}, context, 'test.skill')).resolves.toEqual({
+      message: 'file.stat', ok: true,
+    });
+    expect(() => snapshot.validateInput('file.unknown', {}, 'test.skill')).toThrow('未被 Run capability');
   });
 
   it('rejects an explicitly empty expected registration identity', async () => {
@@ -181,7 +186,7 @@ describe('Agent Run capability snapshot', () => {
     const identity = snapshot.identity;
 
     registry.register(tool('file.new'));
-    skills.register(skill({ id: 'later.skill', toolAllowlist: ['file.new'] }));
+    skills.register(skill({ id: 'later.skill', requiredTools: ['file.new'] }));
 
     expect(snapshot.identity).toBe(identity);
     expect(snapshot.listTools().map(item => item.name)).toEqual([
@@ -190,6 +195,8 @@ describe('Agent Run capability snapshot', () => {
       'skill.activate',
     ]);
     expect(snapshot.getSkill('later.skill')).toBeNull();
+    expect(snapshot.getTool('file.new', 'test.skill')).toBeNull();
+    expect(() => snapshot.validateInput('file.new', {}, 'test.skill')).toThrow('未被 Run capability');
     expect(snapshot.getSkillSummary('test.skill')?.id).toBe('test.skill');
     expect(snapshot.getSkillActivationEnvelope('test.skill')?.skillId).toBe('test.skill');
     expect(Object.isFrozen(snapshot)).toBe(true);
@@ -330,7 +337,6 @@ describe('Agent Run capability snapshot', () => {
       id: 'media.inspect-flow',
       optionalTools: [],
       requiredTools: ['media.inspect'],
-      toolAllowlist: ['media.inspect'],
     }));
     const snapshot = createAgentRunCapabilitySnapshot({
       capabilitySnapshot: capabilities([{
@@ -366,7 +372,6 @@ describe('Agent Run capability snapshot', () => {
       id: 'media.inspect-flow',
       optionalTools: [],
       requiredTools: ['media.inspect'],
-      toolAllowlist: ['media.inspect'],
     }));
     const snapshot = createAgentRunCapabilitySnapshot({
       capabilitySnapshot: capabilities([{
@@ -382,6 +387,28 @@ describe('Agent Run capability snapshot', () => {
     expect(snapshot.getToolReadiness('media.inspect')).toMatchObject({ state: 'degraded' });
     expect(snapshot.getSkillReadiness('media.inspect-flow')).toMatchObject({ state: 'degraded' });
     expect(snapshot.getSkillSummary('media.inspect-flow')?.id).toBe('media.inspect-flow');
+  });
+
+  it('does not expose environment-blocked Tools when loading a usable Skill', () => {
+    const executeMedia = vi.fn(async () => ({ ok: true }));
+    const registry = createAgentToolRegistry([
+      tool('file.list'),
+      tool('file.stat'),
+      tool('media.inspect', 'business', executeMedia, { requiredCapabilities: ['media.ffprobe'] }),
+    ]);
+    const skills = createAgentSkillRegistry();
+    skills.register(skill({ optionalTools: ['media.inspect'] }));
+    const snapshot = createAgentRunCapabilitySnapshot({
+      capabilitySnapshot: capabilities([{ id: 'media.ffprobe', state: 'unavailable' }]),
+      skillSnapshot: skills.createRunSnapshot(), toolSnapshot: registry.createSnapshot(),
+    });
+
+    expect(snapshot.getSkillReadiness('test.skill')?.state).toBe('degraded');
+    expect(snapshot.listTools('test.skill').map(item => item.name)).toEqual(['file.list', 'file.stat']);
+    expect(snapshot.getTool('media.inspect', 'test.skill')).toBeNull();
+    expect(() => snapshot.validateInput('media.inspect', {}, 'test.skill')).toThrow('未被 Run capability');
+    expect(() => snapshot.execute('media.inspect', {}, {} as never, 'test.skill')).toThrow('未被 Run capability');
+    expect(executeMedia).not.toHaveBeenCalled();
   });
 
   it('ignores checkedAt in Run identity but includes normalized Capability state', () => {

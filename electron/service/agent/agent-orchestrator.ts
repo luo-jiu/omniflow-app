@@ -7,6 +7,7 @@ import { getAgentPluginToolRegistrations, executeAgentPluginTool, type AgentPlug
 import type { PluginToolRegistration } from '../extensions/plugin-tool-catalog';
 import crypto from 'node:crypto';
 import { isAgentRendererMutationTool } from '../../../src/shared/agent/agent-library-actions';
+import { normalizeAgentNodeConfigFields } from '../../../src/shared/agent/agent-node-config';
 import { attachmentManifest } from '../../../src/shared/agent/agent-attachments';
 import { getAgentAttachmentStore, hydrateAgentAttachmentImages } from './agent-attachment-runtime';
 import { operateAgentAttachment } from './documents/attachment-documents';
@@ -568,6 +569,7 @@ function normalizePerception(
     const availability: 'available' | 'unavailable' | 'unknown' = storage?.availability === 'available'
       || storage?.availability === 'unavailable' ? storage.availability : 'unknown';
     return {
+      ...normalizeAgentNodeConfigFields(source),
       ...(providerAlias ? { storage: {
         providerAlias,
         ...(providerLabel ? { providerLabel } : {}),
@@ -608,6 +610,7 @@ function normalizePerception(
     ...(Number.isFinite(directoryId) && directoryId > 0 && directoryName
       ? {
           currentDirectory: {
+            ...normalizeAgentNodeConfigFields(input.currentDirectory),
             entryCount,
             truncated: input.currentDirectory?.truncated === true || entryCount > entries.length,
             entries,
@@ -1008,6 +1011,25 @@ function getActivatedSkillId(result: AgentToolResult): string | undefined {
   return skillId || undefined;
 }
 
+function getSkillActivationContextResult(
+  result: AgentToolResult,
+  loadedSkillIds: ReadonlySet<string>,
+): AgentToolResult {
+  const skillId = getActivatedSkillId(result);
+  if (!skillId || !loadedSkillIds.has(skillId)) return result;
+  const data = result.data as Record<string, unknown>;
+  return {
+    data: {
+      alreadyLoaded: true,
+      instructionsHash: data.instructionsHash,
+      skillId,
+      version: data.version,
+    },
+    message: `Skill ${skillId}（${data.version}）已加载；继续使用上下文中的完整说明，无需重复加载`,
+    ok: true,
+  };
+}
+
 function sameOwnerScope(left: AgentOwnerScope, right: AgentOwnerScope): boolean {
   return left.accountScope === right.accountScope && left.backendScope === right.backendScope;
 }
@@ -1017,7 +1039,8 @@ export function updatePerceptionAfterLibraryMutation(
   toolName: string,
   nodeId?: number,
 ): AgentPerceptionSnapshot {
-  if (toolName === 'file.delete') {
+  if (toolName === 'file.delete' || toolName === 'node.configure') {
+    // 配置提交后旧版本不能继续成为下一次配置的 observedSource；下一动作重新读取。
     return {
       ...perception,
       knownNodes: perception.knownNodes?.filter(node => node.id !== nodeId) || [],
@@ -3119,6 +3142,11 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         role: message.role as 'user' | 'assistant',
       }));
       let currentPerception = input.perception;
+      // The Run snapshot freezes each Skill version. Successful activation
+      // bodies remain protected from compaction, so later loads need only an
+      // identity receipt. activeSkillId stays the most recent ID for existing
+      // Tool dispatch interfaces; it does not limit available Skills or Tools.
+      const loadedSkillIds = new Set<string>();
       let activeSkillId: string | undefined;
       const seenToolCallIds = new Set<string>();
       const compactActiveContext = async (fitInput: {
@@ -3568,7 +3596,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
             const expectedCapabilityView = minimumContinuationCapabilityView;
             const activationResultPolicy = resolveAgentProviderToolResultPolicy(call.name);
             expectedActivationProjection = projectAgentToolResultForProvider(
-              expectedActivationResult,
+              getSkillActivationContextResult(expectedActivationResult, loadedSkillIds),
               activationResultPolicy.maxTokens,
               activationResultPolicy.projectionOptions,
             );
@@ -3684,9 +3712,12 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
             toolCallId: call.id,
           };
           const resultPolicy = resolveAgentProviderToolResultPolicy(call.name);
+          const contextResult = call.name === AGENT_SKILL_ACTIVATE_TOOL_NAME
+            ? getSkillActivationContextResult(result, loadedSkillIds)
+            : result;
           let projectedResult = expectedActivationProjection
             || projectAgentToolResultForProvider(
-              result,
+              contextResult,
               resultPolicy.maxTokens,
               resultPolicy.projectionOptions,
             );
@@ -3740,7 +3771,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
               );
             }
             projectedResult = projectAgentToolResultForProvider(
-              result,
+              contextResult,
               resultTokenBudget,
               resultPolicy.projectionOptions,
             );
@@ -3771,6 +3802,10 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
             toolName: call.name,
             toolResults: activeToolResults,
           });
+          if (call.name === AGENT_SKILL_ACTIVATE_TOOL_NAME) {
+            const loadedSkillId = getActivatedSkillId(result);
+            if (loadedSkillId) loadedSkillIds.add(loadedSkillId);
+          }
           if (result.ok) completedToolCalls += 1;
           await publishContextUsage({ messages, systemPrompt: currentSystemPrompt,
             tools: continuationCapabilityView.providerTools }, 'after-tool');

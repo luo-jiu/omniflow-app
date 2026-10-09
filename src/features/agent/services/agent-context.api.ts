@@ -8,6 +8,7 @@ import {
   getChildrenByNodeId,
 } from '@/features/file-explorer/services/file.api';
 import { ensureStorageProviderAvailable } from '@/features/resource-monitor/services/storage-provider-health';
+import { normalizeAgentNodeConfigFields } from '@/shared/agent/agent-node-config';
 
 function toPositiveId(value: unknown): number | null {
   const id = Number(value);
@@ -39,6 +40,7 @@ function normalizeEntry(value: unknown): AgentDirectoryEntry | null {
       : {}),
     name,
     type,
+    ...normalizeAgentNodeConfigFields({ builtInType: source.builtInType ?? source.built_in_type, archiveMode: source.archiveMode ?? source.archive_mode }),
     ...(source.updatedAt || source.updated_at
       ? { updatedAt: String(source.updatedAt ?? source.updated_at) }
       : {}),
@@ -68,10 +70,16 @@ export async function readAgentPerception(
     }
   });
 
-  const [rawEntries, rawSelectedNodes] = await Promise.all([
+  const currentDirectoryDetail = currentDirectoryId && libraryId
+    ? fetchNodeDetailById(currentDirectoryId).catch(() => null) : Promise.resolve(null);
+  const [rawEntries, rawSelectedNodes, rawCurrentDirectory] = await Promise.all([
     currentDirectoryPromise,
     Promise.all(selectedNodePromises),
+    currentDirectoryDetail,
   ]);
+  const directoryConfig = rawCurrentDirectory?.id === currentDirectoryId && rawCurrentDirectory.type === 'dir'
+    && (rawCurrentDirectory.libraryId === undefined || rawCurrentDirectory.libraryId === libraryId)
+    ? normalizeAgentNodeConfigFields(rawCurrentDirectory) : {};
 
   const allEntries = rawEntries
     .map(normalizeEntry)
@@ -104,6 +112,7 @@ export async function readAgentPerception(
     ...(currentDirectoryId && libraryId
       ? {
           currentDirectory: {
+            ...directoryConfig,
             entryCount: allEntries.length,
             truncated: allEntries.length > entries.length,
             entries,

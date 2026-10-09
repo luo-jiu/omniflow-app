@@ -519,7 +519,7 @@ describe('Agent tool broker', () => {
       vi.useRealTimers();
     }
   });
-  it.each(['directory.create', 'file.rename', 'file.move', 'file.copy', 'recycle.restore', 'tag.update'])('settles uncertain %s commits after cancellation', async toolName => {
+  it.each(['directory.create', 'node.configure', 'file.rename', 'file.move', 'file.copy', 'recycle.restore', 'tag.update'])('settles uncertain %s commits after cancellation', async toolName => {
     const controller = new AbortController();
     const broker = createAgentToolBroker({ createId: () => 'mutation' });
     const prepared = broker.prepareRendererExecution({ ...prepareInput(controller.signal), toolName });
@@ -538,6 +538,31 @@ describe('Agent tool broker', () => {
     broker.markRendererExecutionCommitted(77, { ...identity, result });
     broker.completeRendererExecution(77, { ...identity, result: { ok: true, data: { nodeId: 99 }, message: '已移入回收站，但预览清理失败' } });
     await expect(prepared.outcome).resolves.toEqual({ perception: undefined, result: { ...result, message: '已移入回收站，但预览清理失败' } });
+  });
+  it.each(['verified', 'changed'] as const)('retains the final %s configuration observation after the early commit receipt', async configVerification => {
+    const broker = createAgentToolBroker({ createId: () => 'configure' });
+    const prepared = broker.prepareRendererExecution({ ...prepareInput(new AbortController().signal), toolName: 'node.configure' });
+    const identity = { executionId: 'configure', libraryId: 3, ownerScope: OWNER_SCOPE, runId: 'run-1', sessionId: 'session-1' };
+    const committed = { ok: true, message: '已提交', data: { operation: 'node.configure', mutationCommitState: 'committed', operationId: 'configure',
+      libraryId: 3, nodeId: 20, affectedParentIds: [10, 20], requestedConfig: { builtInType: 'COMIC', archiveMode: 1 }, configVerification: 'unavailable' } };
+    broker.markRendererExecutionCommitted(77, { ...identity, result: committed });
+    const node = { id: 20, libraryId: 3, parentId: 10, name: '作品', type: 'dir', builtInType: configVerification === 'verified' ? 'COMIC' : 'ASMR', archiveMode: 1 };
+    broker.completeRendererExecution(77, { ...identity, result: { ok: true, message: configVerification, data: { ...committed.data,
+      configVerification, node, requestedConfig: { builtInType: 'DEF', archiveMode: 0 } } } });
+    await expect(prepared.outcome).resolves.toMatchObject({ result: { ok: true, message: configVerification, data: {
+      mutationCommitState: 'committed', requestedConfig: { builtInType: 'COMIC', archiveMode: 1 }, node, configVerification } } });
+  });
+  it.each([{ nodeId: 21 }, { libraryId: 4 }, { operationId: 'other' }, { mutationCommitState: 'uncommitted' },
+    { node: { id: 20, libraryId: 4, parentId: 10, name: 'foreign', type: 'dir' } }])('does not replace committed configuration identity or state with %j', async patch => {
+    const broker = createAgentToolBroker({ createId: () => 'configure' });
+    const prepared = broker.prepareRendererExecution({ ...prepareInput(new AbortController().signal), toolName: 'node.configure' });
+    const identity = { executionId: 'configure', libraryId: 3, ownerScope: OWNER_SCOPE, runId: 'run-1', sessionId: 'session-1' };
+    const committed = { ok: true, message: '已提交', data: { operation: 'node.configure', mutationCommitState: 'committed', operationId: 'configure',
+      libraryId: 3, nodeId: 20, requestedConfig: { builtInType: 'COMIC', archiveMode: 1 }, configVerification: 'unavailable' } };
+    broker.markRendererExecutionCommitted(77, { ...identity, result: committed });
+    broker.completeRendererExecution(77, { ...identity, result: { ok: true, message: '不能采用', data: { ...committed.data, configVerification: 'verified',
+      node: { id: 20, libraryId: 3, parentId: 10, name: '作品', type: 'dir', builtInType: 'COMIC', archiveMode: 1 }, ...patch } } });
+    await expect(prepared.outcome).resolves.toMatchObject({ result: committed });
   });
   it.each(['file.write', 'file.delete'])('retains a %s commit that arrives just after cancellation', async toolName => {
     const controller = new AbortController();

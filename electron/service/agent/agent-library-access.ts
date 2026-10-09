@@ -62,6 +62,7 @@ function intentFor(name: string, value: unknown, context: AgentAppContext, actio
   if (name === 'file.write') return { targets: input.revision ? [source(true)]
     : [{ path: parentPath(String(input.path || '')), write: true }] };
   if (name === 'directory.create') return { targets: [text(input.path) ? { path: parentPath(String(input.path)), write: true } : parent()] };
+  if (name === 'node.configure') return { targets: [{ ...source(true), directoryOnly: true }] };
   if (name === 'file.rename' || name === 'file.delete' || name === 'tag.update') return { targets: [source(true, name !== 'tag.update')] };
   if (name === 'file.move' || name === 'file.copy') return { targets: [source(name === 'file.move', name === 'file.move'), parent()] };
   if (name === 'file.stage') {
@@ -133,7 +134,7 @@ export function createAgentLibraryAccessGuard(options: {
       if (!node || node.libraryId !== Number(options.context.libraryId)) throw new Error('目标不存在或不属于当前资料库');
       if ((target.nodeId && node.id !== target.nodeId) || (target.path && node.path !== normalizeAgentLibraryDirectoryPath(target.path))) throw new Error('目标身份或目录位置已变化');
       if (target.singleFile && node.type !== 'file') throw new Error('插件 Tool 只允许访问普通文件');
-      if (target.directoryOnly && node.type !== 'dir') throw new Error('插件产物目标必须为普通目录');
+      if (target.directoryOnly && node.type !== 'dir') throw new Error('操作目标必须为普通目录');
       return node;
     };
     if (lookup?.has(key)) return validate(await lookup.get(key)!);
@@ -261,6 +262,7 @@ export function createAgentLibraryAccessGuard(options: {
     if (intent.external) return false;
     const input = record(call.input);
     const operationDescription = [call.name, input.path, input.name, record(input.source).path,
+      input.builtInType, input.archiveMode === 0 ? '关闭归档' : input.archiveMode === 1 ? '开启归档' : undefined,
       record(input.destination).directoryPath,
       typeof input.content === 'string' ? `正文 ${input.content.length} 字符` : undefined]
       .filter(value => typeof value === 'string').join(' · ').slice(0, 600);
@@ -349,7 +351,7 @@ export function createAgentLibraryAccessGuard(options: {
     }
     const listing = await options.read({ kind: 'list', directoryId: root.id, limit: 50 }, options.signal);
     await checkMetadata(listing);
-    result.currentDirectory = { id: root.id, name: root.name, entryCount: listing.entries?.length || 0,
+    result.currentDirectory = { id: root.id, name: root.name, builtInType: root.builtInType, archiveMode: root.archiveMode, entryCount: listing.entries?.length || 0,
       entries: listing.entries || [], truncated: listing.hasMore || false };
     const selectedNodes: AgentLibraryNode[] = [];
     for (const selected of input?.selectedNodes || []) {

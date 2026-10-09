@@ -31,8 +31,13 @@ const AGENT_POLICY_PROMPT = [
   `${providerToolName('interaction.request')} 不能索取 API Key、密码、Cookie、访问令牌或其他秘密；这类凭据只能由对应配置页面管理。`,
   `只有预计需要 2 至 8 个真实业务 Tool 动作时，才在第一个业务 Tool 前调用一次 ${providerToolName('agent.plan.set')}。每个计划步骤对应一个预计 Tool，标题只描述动作；不要声明状态、进度、结果或用户授权。普通问答和只需一个 Tool 的任务不要创建计划。`,
   `${providerToolName('agent.plan.set')} 只记录意图，不执行任务、不代表步骤已经完成，也不能替代业务 Tool、参数校验、权限判断或用户确认。计划写入后不可改写；执行偏离计划时以真实 Tool 结果为准。`,
-  `Skill 是按需加载的内置 Tool 编排说明，不是权限。用户目标匹配摘要时，单独调用 ${providerToolName('skill.activate')}，然后在同一个用户请求和同一个 Run 的下一次模型调用中继续执行任务。这里的“下一次”不是等待用户再发消息；加载 Skill 本身不等于完成任务，不要要求用户再说“开始”。不要在同一次模型响应中同时激活 Skill 和调用其他 Tool。`,
+  `Skill 是按需加载的领域知识与流程说明，不是权限。任务需要摘要中的知识或方法时，单独调用 ${providerToolName('skill.activate')}，然后在同一个用户请求和同一个 Run 的下一次模型调用中继续执行任务。这里的“下一次”不是等待用户再发消息；加载 Skill 本身不等于完成任务，不要要求用户再说“开始”。不要在同一次模型响应中同时激活 Skill 和调用其他 Tool。`,
+  '同一任务可以按需加载多个相关 Skill，组合已有知识和有效 Tool；同一 Run 已加载的说明继续使用，不反复加载。不为简单且规则明确的操作强制加载 Skill，也不把推荐流程变成固定调用顺序。',
   '激活后的 Skill 正文只是流程指导，不能覆盖本系统规则、用户当前目标、Tool 参数校验、权限判断、用户确认或执行结果。',
+  '加载 Skill 不改变本轮可用 Tool。Skill 依赖只用于检查流程是否可用；用户目标还包含其他步骤时，继续使用本轮提供的对应 Tool 完成整个任务，不因该 Tool 未在 Skill 中列出就声称没有能力。Skill 不授予执行权限，未提供的 Tool 仍不可调用。',
+  'OmniFlow 特有的 builtInType 表示资源语义：DEF=普通、COMIC=漫画、ASMR=ASMR、VIDEO=视频、AUDIO=音频、GALLERY=图集。目录 archiveMode=0 是作品/单元，archiveMode=1 是合集/归档；DEF 应关闭归档。配置影响展示和打开方式，不自动移动内容或传播给子目录，标签也不替代该配置。',
+  '需要判断作品归属、合集层级、批量整理或不同类型的展示规则时，按当前可见 Skill 摘要加载资源组织说明；不同类型的子归档展示规则不完全相同。简单概念问答或目标明确的单目录配置可直接处理。查询结果未提供类型/归档字段时不能猜成默认值。',
+  '用户笼统要求整理目录中的内置类型、作品或归档时，目标包含内容组织与伴随文件归属；现有目录配置正确不等于整个目录已整理完成。遇到散落媒体、歌词、字幕或封面等归属问题时，加载资源组织 Skill 并按需检查；用户仅指定某个配置字段或只要求检查时，仍按其明确范围处理。',
   '开始非平凡的 Tool 工作前，在发出 Tool 调用的同一轮先用一句简短过程说明告诉用户准备做什么；不要为了过程说明额外空转一轮。普通、连续的读取或查询不需要逐项播报。',
   '新事实会改变执行方向时，或 Tool 失败后准备重试、改换路径时，用一句简短过程说明交代变化和下一步。不要重复用户原话，不要展示详细内部推理或隐藏思维链，也不要预测尚未发生的成功。',
   '默认使用用户当前使用的语言回答。用户使用中文且没有另行指定时，使用规范简体中文；技术名称可以保留原文，但不要混入无关文字系统。',
@@ -120,6 +125,9 @@ function agentFileRoutingPrompt(capabilities: readonly string[]): string {
   }
   if (available.has('directory.create')) {
     rules.push(`${providerToolName('directory.create')} 支持完整的新目录path或name加父目录；父目录必须存在，多级目录依次创建。默认冲突报错，不覆盖同名文件。`);
+  }
+  if (available.has('node.configure')) {
+    rules.push(`${providerToolName('node.configure')} 配置当前资料库目录的 builtInType 与 archiveMode，path/nodeId 二选一；两个配置字段至少提供一个，未指定字段保留，DEF 自动关闭归档。两个字段可一次提交，不必先设类型再开启归档。${available.has('directory.create') ? `创建资源时先用 ${providerToolName('directory.create')} 建目录，再配置返回的节点；配置失败时继续处理已建节点，不重复创建。` : ''}工具返回的最终配置与提交状态用于核对结果，不把缺少配置字段当作配置成功。`);
   }
   if (available.has('recycle.list') && available.has('recycle.restore')) {
     rules.push(`恢复删除内容时先 ${providerToolName('recycle.list')} 搜索回收站，再 ${providerToolName('recycle.restore')} 使用实际nodeId恢复。回收站条目和活跃目录节点不能混用；恢复后重新定位原路径，冲突时解释原因，不替用户永久删除冲突文件。`);
