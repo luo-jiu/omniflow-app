@@ -16,7 +16,7 @@ Agent发布后的目录刷新、根目录右键刷新及折叠分支缓存失效
 
 B1 的目录基础菜单通过稳定 omniflow.node.* 命令 ID 回传，DirectoryTree 使用宿主捕获的原节点上下文经注册表转回原 handleAction。旧类型/归档/排序动作保留兼容，确认与业务事务不变。参见 [B1 贡献入口](plugin-system-b1-contributions.md)。
 
-A1 目录图标由 ThemedDirectoryIcon 消费只读外观投影，可在彩色/线条两套内置资产间切换。节点事实、expanded owner、未知类型警告及 DEF+archive 的既有特殊行为不变；树数据不因外观切换重写。归档文字使用独立 token。详见 [外观系统](appearance-system.md)。
+A1 目录图标由 ThemedDirectoryIcon 消费只读外观投影，可在彩色/线条两套内置资产间切换。两套图标均按内置类型和开合状态选择，开启归档不再切换图标或附加角标；归档名称保留独立文字色 token 和既有字重。默认彩色文件夹的闭合、展开两态已去除右下黄色矩形块。节点事实、expanded owner、未知类型警告及 DEF+archive 的既有特殊行为不变；树数据不因外观切换重写。详见 [外观系统](appearance-system.md)。
 
 OmniFlow 当前的文件浏览主链路不是一个模块完成的，而是 3 层配合：
 

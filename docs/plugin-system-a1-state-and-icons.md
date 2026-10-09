@@ -1,6 +1,6 @@
 # A1 主题事务、快照与图标契约
 
-更新时间：2026-09-14
+更新时间：2026-10-02
 
 状态：纯模型现已由 ThemeContext 和目录图标实际使用，存储/IPC/设置接入见 [外观系统](appearance-system.md)。本文记录内部模型约束；A1 最终结果见 [验收记录](plugin-system-a1-acceptance.md)。
 
@@ -63,6 +63,8 @@
 ### 3.1 目录语义
 
 `resolveDirectoryIconSemantic` 读取 builtInType、archiveMode、expanded，返回 folder.* 语义键、expanded 和宿主 warnings。已知类型为 DEF/COMIC/ASMR/VIDEO/AUDIO/GALLERY；非 DEF 的归档使用 `.archive` 后缀，开合不改变语义键。
+
+归档语义继续保留；当前彩色和线条目录图标在视觉上复用普通同类型的闭合 / 展开图标，归档仅通过名称文字色及既有字重体现，不再选择 `-archive` 资产。
 
 未知类型使用 folder.unknown 并报告 unknown-type；DEF + archive=1 报告 invalid-default-archive，不改写事实。**现有 getDirectoryBuiltInIcon 在 DEF+archive=1 返回 undefined 的行为仍保留**；已接入的语义适配继续保留该分支，不能把新 fallback 当成既有黑盒行为。
 

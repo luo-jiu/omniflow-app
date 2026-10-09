@@ -471,7 +471,8 @@ export function getDirectoryBuiltInIcon(
   const normalized = String(builtInType || 'DEF').toUpperCase();
   if (semantic.warnings.includes('unknown-type')) return createWarningIconNode(`未知内置类型: ${normalized}`);
   const kind = normalized === 'DEF' ? 'base' : normalized.toLowerCase();
-  const assetName = `folder-${kind}${semantic.key.endsWith('.archive') ? '-archive' : ''}${expanded ? '-open' : ''}`;
+  // 归档状态由名称文字表达；同类型目录共用图标，只随展开状态切换。
+  const assetName = `folder-${kind}${expanded ? '-open' : ''}`;
   const fallback = normalized === 'VIDEO' ? 'video' : normalized === 'AUDIO' ? 'audio' : normalized === 'GALLERY' ? 'image' : `folder-${kind}`;
   return React.createElement(ThemedDirectoryIcon, {
     assetName,

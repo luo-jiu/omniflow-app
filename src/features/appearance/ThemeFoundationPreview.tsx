@@ -9,7 +9,6 @@ import {
 import { workspaceScrollbarStyles } from '@/components/ui/workspace-scrollbar';
 import folderIcon from '@/assets/icons/material/folder-base.svg';
 import galleryIcon from '@/assets/icons/material/folder-gallery.svg';
-import archiveIcon from '@/assets/icons/material/folder-gallery-archive.svg';
 import { AppearanceControlContext, AppearanceViewContext } from './appearance.context';
 import { BUILT_IN_COLOR_THEMES } from './built-in-themes';
 import ThemedDirectoryIcon from './ThemedDirectoryIcon';
@@ -97,7 +96,7 @@ const Footer = styled.footer`font-size: 12px; display: grid; gap: 4px;`;
 const directories = [
   { id: 'notes', name: '阅读笔记', detail: '普通目录', icon: folderIcon, assetName: 'folder-base', archived: false },
   { id: 'gallery', name: '旅行照片', detail: '图集目录', icon: galleryIcon, assetName: 'folder-gallery', archived: false },
-  { id: 'archive', name: '旅行照片 · 年度归档', detail: '归档已开启', icon: archiveIcon, assetName: 'folder-gallery-archive', archived: true },
+  { id: 'archive', name: '旅行照片 · 年度归档', detail: '归档已开启', icon: galleryIcon, assetName: 'folder-gallery', archived: true },
   { id: 'long', name: '一段很长的目录名称，用于观察窄空间中的截断与选中状态', detail: '普通目录', icon: folderIcon, assetName: 'folder-base', archived: false },
 ] as const;
 const surfaces = [

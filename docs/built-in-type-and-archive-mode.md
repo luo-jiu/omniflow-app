@@ -1,6 +1,6 @@
 # 内置类型与归档模式说明
 
-更新时间：2026-08-16
+更新时间：2026-10-02
 适用范围：`features/file-explorer`、`features/file-viewer`、`features/archive-viewer`、`views/library/detail/` 中与节点内置类型、归档模式、目录树限制和视图选择相关的代码。
 
 ## 1. 概述
@@ -94,18 +94,15 @@ OmniFlow 里有一组不是通用前端术语、而是项目自己定义出来�
 
 ### 3.2 图标
 
-目录图标当前由内置类型和归档模式共同影响：
+目录图标当前按内置类型和闭合 / 展开状态选择；归档模式通过名称文字色及既有字重体现，不再改变同一类型的目录图标。彩色、线条两套内置图标均遵循这一规则：
 
-- `DEF`（默认目录）使用经典黄色文件夹图标 `folder-base.svg` / `folder-base-open.svg`
-- `COMIC` 非归档目录使用漫画文件夹图标；`COMIC + archiveMode=1` 使用漫画归档文件夹图标
-- `ASMR` 非归档目录使用 ASMR 文件夹图标；`ASMR + archiveMode=1` 使用 ASMR 归档文件夹图标
-- `VIDEO` 非归档目录使用视频文件夹图标；`VIDEO + archiveMode=1` 使用视频归档文件夹图标
-- `AUDIO` 非归档目录使用音频文件夹图标；`AUDIO + archiveMode=1` 使用音频归档文件夹图标
-- `GALLERY` 非归档目录使用图集文件夹图标；`GALLERY + archiveMode=1` 使用图集归档文件夹图标并进入图集归档 viewer
-- 六类目录图标都必须提供闭合 / 展开两态，目录树展开后切到对应 `*-open` 图标；切换由 Semi Tree 的 `icon(props.expanded)` 动态完成，不把展开状态写回 `treeData`
-- 归档与非归档在所有内置类型目录上必须有图标区分：普通媒体文件继续按扩展名使用 `video.svg` / `audio.svg` 等文件图标，非归档内置目录使用 `folder-{type}.svg`，归档目录使用 `folder-{type}-archive.svg`；归档语义同时保留目录树文本绿色加粗（`tree-node-text-archive`）
-- 归档目录图标统一使用右下角绿色归档盒角标；同为音频符号的 `ASMR` 与 `AUDIO` 保持相同的音符图形，但 `ASMR` 使用樱花粉文件夹与高对比白色音符，`AUDIO` 使用红色文件夹与浅红音符，避免只靠名称判断
-- `VIDEO` 非归档目录和归档目录使用同一套蓝青色视频文件夹主体；归档目录仅额外增加右下角绿色归档盒角标
+- `DEF`（默认目录）使用 `folder-base.svg` / `folder-base-open.svg`；彩色版本保留黄色文件夹主体，闭合与展开两态均去除右下黄色矩形块
+- `COMIC`、`ASMR`、`VIDEO`、`AUDIO`、`GALLERY` 分别使用对应的 `folder-{type}.svg` / `folder-{type}-open.svg`，开启归档后仍使用相同资产，不附加归档角标
+- 六类目录图标都必须提供闭合 / 展开两态；开合由现有 `expandedKeys` 的只读 Context 投影驱动，不把展开状态写回 `treeData`
+- 归档目录名称继续使用独立主题色 `--app-folder-archive-label` 和既有 `600` 字重，并保留 `tree-node-text-archive` 标识；选中背景不覆盖归档名称色
+- 两套图标包中的历史 `folder-{type}-archive.svg` / `folder-{type}-archive-open.svg` 暂时保留，但当前目录展示不再选择这些资产
+- 彩色包中的 `ASMR` 使用樱花粉文件夹与高对比白色音符，`AUDIO` 使用红色文件夹与浅红音符；`VIDEO` 保留蓝青色视频文件夹主体
+- 普通媒体文件继续按扩展名使用 `video.svg` / `audio.svg` 等文件图标；归档业务语义及对应 viewer 分发保持不变
 - 未知内置类型会显示警告图标
 - 在某些归档语义不匹配的文件上会显示警告图标
 
