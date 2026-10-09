@@ -1,6 +1,6 @@
 # OmniFlow App 前端架构基线
 
-更新时间：2026-08-26
+更新时间：2026-10-05
 
 适用范围：`omniflow-app` 的 React renderer、Electron preload/main、页面分层、状态所有权、IPC 边界和前端文档维护。
 
@@ -61,7 +61,16 @@ React 18 兼容层：
 
 - `vite.config.ts` 当前把裸 `react-dom` alias 到 `src/utils/react-dom-compat.ts`，只用于兼容第三方库仍调用 `ReactDOM.render` / `unmountComponentAtNode` 的旧入口。
 - 应用自身入口继续从 `react-dom/client` 使用 `createRoot`；不要在业务代码里新增 `ReactDOM.render`。
-- 修改该 alias 或兼容层后，dev 环境需要用 `npm run dev -- --force` 重建 Vite optimized deps，避免继续加载旧的 `node_modules/.vite/deps/chunk-*.js`。
+- 修改该 alias 或兼容层后，dev 环境需要用 `npm run dev -- --force` 重建 Vite optimized deps。当前 `cacheDir` 默认位于系统临时目录的 `omniflow-vite/<PID>`，每个进程独立；`OMNIFLOW_VITE_CACHE_DIR` 可覆盖路径，但并行开发服务不能指向同一目录，避免互相清理依赖 chunk。
+
+开发版黑屏 / 白屏排查：
+
+- 先记录 DevTools Console 的首个异常及失败资源 URL：源码 `ReferenceError` 应定位对应源码行；依赖 chunk 的 404 / 过期错误应检查当前 Vite 服务与缓存；`Invalid contribution batch` 应检查插件 Viewer 注册，历史 Tool-only 插件空 Viewer 列表曾导致入库白屏。
+- `npm run dev -- --force` 只强制重建依赖缓存，不执行 `tsc`；源码异常不会因清缓存消失。修正源码后执行 `npm run lint` 和 `npm run build`，并复验原触发路径。
+- 缓存隔离不等于产物隔离：同一 checkout 的 `npm run dev` / `npm run build` 仍共用 `dist-electron`、`dist-plugins` 等生成目录。开发启动与构建应串行进行，或在独立 checkout 中运行，避免覆盖正在使用的主进程、preload 或插件产物。
+- 保留 Electron `userData`；不要通过删除账号会话、IndexedDB 或本机配置来处理源码或依赖加载错误。
+
+2026-10-05：在开发版以 `npm run dev -- --force` 启动后，进入 Win（libraryId=3）仍出现灰黑空白；首个 Console 异常为 `ReferenceError: œœ is not defined`，定位到 `src/service/overlay/overlay.api.ts:16:1` 的孤立 `œœ`。移除后 lint、全量测试和 build 通过；退出开发进程后串行构建，再以普通 `npm run dev` 启动，Win 资料库目录树与 Agent 工作区正常显示。本次证据确认源码异常，未将其归因于并行构建；验证范围见[前端验证矩阵](frontend-validation-matrix.md)。
 
 Electron `userData`：
 

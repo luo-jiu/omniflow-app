@@ -1,10 +1,21 @@
 import { defineConfig, loadEnv } from 'vite'
+import os from 'node:os'
 import path from 'node:path'
 import electron from 'vite-plugin-electron/simple'
 import react from '@vitejs/plugin-react'
 
 function normalizeBaseUrl(url: string): string {
   return String(url || '').replace(/\/+$/, '');
+}
+
+function resolveViteCacheDir(): string {
+  const configured = process.env.OMNIFLOW_VITE_CACHE_DIR?.trim();
+  if (configured) {
+    return path.resolve(configured);
+  }
+  // Each dev server gets an isolated optimized-deps directory. Sharing
+  // node_modules/.vite lets parallel agents delete one another's chunks.
+  return path.join(os.tmpdir(), 'omniflow-vite', String(process.pid));
 }
 
 function parseHttpOrigins(value: string, variableName: string): string[] {
@@ -77,6 +88,7 @@ export default defineConfig(({ mode }) => {
     process.env.VITE_UPDATE_BASE_URL || env.VITE_UPDATE_BASE_URL || '',
   );
   return {
+  cacheDir: resolveViteCacheDir(),
   plugins: [
     {
       name: 'omniflow-csp-network-origins',
