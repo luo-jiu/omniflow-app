@@ -43,10 +43,8 @@ import { TREE_LOCATE_NODE_EVENT, type TreeLocateNodeDetail } from '@/features/fi
 import { useDirectoryUpload } from './hooks/useDirectoryUpload';
 import {
   type ExternalUploadResolution,
-  type VisibleRowBounds,
-  computeVisibleRowBounds,
   resolveExternalUpload,
-  resolveVisibleTreeNodeByClientY,
+  resolveVisibleTreeNodeAtPoint,
 } from './utils/external-upload';
 import {
   buildNodeLogicalPath,
@@ -303,7 +301,6 @@ export default function DirectoryTree({
   // 为每个“可见行”的 label 与其内部文字 span 保持引用
   type RowRefs = { label: HTMLElement | null; text: HTMLElement | null; option: HTMLElement | null };
   const rowRefs = useRef<Map<string, RowRefs>>(new Map());
-  const visibleRowBoundsRef = useRef<VisibleRowBounds[]>([]);
   const treeDataRef = useRef<any[]>(treeData);
 
   // 只记录名称所需宽度；视口下限由 CSS 的 100% 实时计算。
@@ -768,6 +765,9 @@ export default function DirectoryTree({
     collectVisibleTreeNodes(renderTreeData, new Set(expandedKeys), acc);
     return acc;
   }, [expandedKeys, renderTreeData]);
+  const visibleNodesByKey = React.useMemo(() => new Map(
+    visibleNodesLinear.map(node => [String(node.key || ''), node]),
+  ), [visibleNodesLinear]);
 
   const getVisibleNodesLinear = (): any[] => visibleNodesLinear;
 
@@ -817,14 +817,6 @@ export default function DirectoryTree({
     });
 
   }, [selectedNodeIds, visibleNodesLinear]);
-
-  const refreshVisibleRowBounds = useCallback(() => {
-    visibleRowBoundsRef.current = computeVisibleRowBounds(
-      visibleNodesLinear,
-      rowRefs.current,
-      wrapperRef.current?.parentElement ?? null,
-    );
-  }, [visibleNodesLinear]);
 
   const buildParentIdMap = (nodes: any[]): Map<number, number> => {
     const parentMap = new Map<number, number>();
@@ -2515,19 +2507,9 @@ export default function DirectoryTree({
     syncRenderedSelectionStyles();
   }, [syncRenderedSelectionStyles]);
 
-  React.useLayoutEffect(() => {
-    refreshVisibleRowBounds();
-  }, [refreshVisibleRowBounds]);
-
-  const resolveExternalUploadAtPointer = (clientY: number): { hoveredNode: any | null; resolution: ExternalUploadResolution } => {
+  const resolveExternalUploadAtPointer = (clientX: number, clientY: number): { hoveredNode: any | null; resolution: ExternalUploadResolution } => {
     const container = wrapperRef.current?.parentElement ?? null;
-    let visibleRows = visibleRowBoundsRef.current;
-    if (visibleRows.length === 0) {
-      visibleRows = computeVisibleRowBounds(visibleNodesLinear, rowRefs.current, container);
-      visibleRowBoundsRef.current = visibleRows;
-    }
-
-    const hoveredNode = resolveVisibleTreeNodeByClientY(clientY, container, visibleRows);
+    const hoveredNode = resolveVisibleTreeNodeAtPoint(clientX, clientY, container, visibleNodesByKey);
     const resolution = resolveExternalUpload(hoveredNode, treeDataRef.current || []);
     return { hoveredNode, resolution };
   };
@@ -2537,7 +2519,7 @@ export default function DirectoryTree({
       return;
     }
     e.preventDefault();
-    const { hoveredNode, resolution } = resolveExternalUploadAtPointer(e.clientY);
+    const { hoveredNode, resolution } = resolveExternalUploadAtPointer(e.clientX, e.clientY);
     if (resolution.targetNode && !resolution.blockedReason) {
       e.dataTransfer.dropEffect = 'copy';
     } else {
@@ -2557,7 +2539,7 @@ export default function DirectoryTree({
     }
     e.preventDefault();
     e.stopPropagation();
-    const { resolution } = resolveExternalUploadAtPointer(e.clientY);
+    const { resolution } = resolveExternalUploadAtPointer(e.clientX, e.clientY);
     handleExternalUploadDrop(e, resolution);
   };
 

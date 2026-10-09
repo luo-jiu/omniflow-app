@@ -6,12 +6,6 @@ export type ExternalUploadResolution = {
   targetNode: any | null;
 };
 
-export type VisibleRowBounds = {
-  bottom: number;
-  node: any;
-  top: number;
-};
-
 export function resolveExternalUpload(node: any | null, treeData: any[]): ExternalUploadResolution {
   const finalize = (targetNode: any | null, blockedReason: 'archive' | null): ExternalUploadResolution => ({
     blockedReason,
@@ -50,49 +44,28 @@ export function resolveExternalUpload(node: any | null, treeData: any[]): Extern
   return finalize(null, null);
 }
 
-export function computeVisibleRowBounds(
-  visibleNodes: any[],
-  rowRefs: Map<string, { option: HTMLElement | null }>,
-  container: HTMLElement | null,
-): VisibleRowBounds[] {
-  if (!container) {
-    return [];
-  }
-
-  const containerRect = container.getBoundingClientRect();
-  const scrollTop = container.scrollTop;
-
-  return visibleNodes.flatMap((node) => {
-    const nodeKey = String(node?.key || '');
-    const option = nodeKey ? rowRefs.get(nodeKey)?.option : null;
-    if (!option) {
-      return [];
-    }
-    const rect = option.getBoundingClientRect();
-    return [{
-      node,
-      top: rect.top - containerRect.top + scrollTop,
-      bottom: rect.bottom - containerRect.top + scrollTop,
-    }];
-  });
-}
-
-export function resolveVisibleTreeNodeByClientY(
+export function resolveVisibleTreeNodeAtPoint(
+  clientX: number,
   clientY: number,
   container: HTMLElement | null,
-  visibleRows: VisibleRowBounds[],
+  visibleNodesByKey: ReadonlyMap<string, any>,
 ): any | null {
-  if (!container || visibleRows.length === 0) {
+  if (!container || !Number.isFinite(clientX) || !Number.isFinite(clientY)) {
     return null;
   }
 
-  const containerRect = container.getBoundingClientRect();
-  const localY = clientY - containerRect.top + container.scrollTop;
-
-  for (const row of visibleRows) {
-    if (localY >= row.top && localY <= row.bottom) {
-      return row.node;
-    }
+  const bounds = container.getBoundingClientRect();
+  if (clientX < bounds.left || clientX >= bounds.right || clientY < bounds.top || clientY >= bounds.bottom) {
+    return null;
   }
-  return null;
+
+  // Semi Tree can finish expanding after its parent's layout effect. Hit the
+  // currently painted row instead of caching bounds before that child update.
+  const hit = container.ownerDocument.elementFromPoint(clientX, clientY);
+  if (!hit || !container.contains(hit)) return null;
+  const option = hit.closest('.semi-tree-option');
+  if (!option || !container.contains(option)) return null;
+  const label = option.querySelector<HTMLElement>('.tree-node-label[data-node-key]');
+  const nodeKey = label?.dataset.nodeKey;
+  return nodeKey ? visibleNodesByKey.get(nodeKey) ?? null : null;
 }

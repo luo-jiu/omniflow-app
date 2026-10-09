@@ -1,6 +1,6 @@
 # OmniFlow App Frontend Review Standard
 
-更新时间：2026-09-23
+更新时间：2026-09-30
 
 适用范围：`omniflow-app` 前端、Electron renderer / preload / main、IPC、工作区交互和前端文档相关改动的代码评审。
 
@@ -92,6 +92,7 @@ views -> features -> components / hooks -> service / bridge -> backend or electr
 - 每次 rerender 都全量扫描目录树、tab 或 DOM
 - 原生 view 已隐藏，但资源和事件还活着
 - 用“收起再展开”掩盖同步问题，却影响拖拽或命中体验
+- 父组件 layout effect 测量树 / 虚拟列表时，子组件可能尚未完成内部展开或异步渲染；拖拽命中不能依赖这类过期坐标缓存。悬停和 drop 必须核对当前实际覆盖行及视口范围，避免高亮正确性与提交目标分离，也不得用逐帧全量 DOM 测量补偿。
 
 ### 2.5 主题、布局与桌面细节
 
