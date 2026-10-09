@@ -34,9 +34,13 @@ import type {
   FileViewerSubtitleSource,
   FileViewerVideoPlaylist,
   FileViewerVideoPlaylistItem,
+  FileViewerVideoTransition,
 } from '@/contexts/file-viewer.context';
 import VideoSubtitlePanel from './VideoSubtitlePanel';
 import { useTimedText } from '@/features/file-viewer/timed-text/useTimedText';
+import { AudioDockMeteor } from '@/features/audio-viewer/components/unified-audio-viewer/AudioDockMeteor';
+import { AudioDockProgress } from '@/features/audio-viewer/components/unified-audio-viewer/audio-dock-progress';
+import { useVideoDockMeteor } from './use-video-dock-meteor';
 import { useFileViewer } from '@/hooks/useFileViewer';
 import {
   buildVideoSubtitleSources,
@@ -80,6 +84,7 @@ interface VideoViewerProps {
   subtitleSources?: FileViewerSubtitleSource[];
   playlist?: FileViewerVideoPlaylist | null;
   autoPlay?: boolean;
+  transition?: FileViewerVideoTransition;
   reloadToken?: number;
 }
 
@@ -271,9 +276,10 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
   subtitleSources,
   playlist,
   autoPlay = false,
+  transition,
   reloadToken = 0,
 }) => {
-  const { setFileUrl } = useFileViewer();
+  const { setFileUrl, consumeVideoTransition } = useFileViewer();
   const containerRef = useRef<HTMLDivElement>(null);
   const videoHostRef = useRef<HTMLDivElement>(null);
   const viewerRootRef = useRef<HTMLDivElement>(null);
@@ -340,6 +346,13 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
 
   const isVideoHostedOutsideInline = floatingVideoState.key === videoElementKey
     && floatingVideoState.hostMode !== 'inline';
+  const { meteor, start: startMeteor, cancel: cancelMeteor, finish: finishMeteor } = useVideoDockMeteor({
+    transition,
+    tabId,
+    url,
+    enabled: active && !isVideoHostedOutsideInline,
+    consumeTransition: consumeVideoTransition,
+  });
   controlsLockedRef.current = isVolumePanelOpen || isRatePanelOpen || isPlaylistPanelOpen;
 
   const clearControlsHideTimer = useCallback(() => {
@@ -830,9 +843,10 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
 
   const updatePendingSeek = useCallback((nextTime: number) => {
     const normalizedTime = Math.min(Math.max(nextTime, 0), Math.max(duration, 0));
+    cancelMeteor();
     pendingSeekTimeRef.current = normalizedTime;
     setSeekingTime(normalizedTime);
-  }, [duration]);
+  }, [cancelMeteor, duration]);
 
   const commitPendingSeek = useCallback(() => {
     const targetTime = pendingSeekTimeRef.current;
@@ -892,6 +906,7 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
       setCurrentTime(video.currentTime || 0);
       setIsBuffering(false);
       scheduleVideoThumbnailCapture();
+      startMeteor();
     };
     const onTimeUpdate = () => {
       setCurrentTime(video.currentTime || 0);
@@ -900,7 +915,10 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
     const onPlay = () => {
       setIsPlaying(true);
     };
-    const onPause = () => setIsPlaying(false);
+    const onPause = () => {
+      setIsPlaying(false);
+      cancelMeteor();
+    };
     const onEnded = () => {
       setIsPlaying(false);
       persistVideoProgress(true);
@@ -930,7 +948,7 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
       video.removeEventListener('canplay', onCanPlay);
       video.removeEventListener('playing', onCanPlay);
     };
-  }, [applyPendingRestoreTime, persistVideoProgress, scheduleVideoThumbnailCapture]);
+  }, [applyPendingRestoreTime, cancelMeteor, persistVideoProgress, scheduleVideoThumbnailCapture, startMeteor]);
 
   useEffect(() => {
     const onFullscreenChange = () => {
@@ -980,6 +998,12 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
     setIsPlaying(false);
     setIsBuffering(true);
   }, [nodeId, scheduleVideoThumbnailCapture, url]);
+
+  useEffect(() => {
+    // A retained playlist target can already have metadata; it need not emit
+    // loadedmetadata again merely because a transition hint arrived.
+    if ((videoRef.current?.readyState ?? 0) >= HTMLMediaElement.HAVE_METADATA) startMeteor();
+  }, [startMeteor, transition?.id]);
 
   useEffect(() => {
     if (!autoPlay) return;
@@ -1223,6 +1247,11 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
         }
         : playlist;
       setIsPlaylistPanelOpen(false);
+      const previousVideo = videoRef.current;
+      const previousDuration = previousVideo?.duration ?? 0;
+      const videoTransitionRatio = previousVideo && Number.isFinite(previousDuration) && previousDuration > 0
+        ? Math.min(Math.max(previousVideo.currentTime / previousDuration, 0), 1)
+        : undefined;
       setFileUrl(
         nextUrl,
         item.title,
@@ -1235,6 +1264,7 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
           videoSubtitleSources: nextSubtitleSources,
           videoPlaylist: nextPlaylist,
           videoAutoPlay: true,
+          videoTransitionRatio,
         },
       );
     } catch (error: any) {
@@ -1340,22 +1370,6 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
     }
     setIsConsoleOpen(prev => !prev);
   }, [isWideMode]);
-
-  const handleProgressPointerDown = (event: React.PointerEvent<HTMLInputElement>) => {
-    clearControlsHideTimer();
-    setAreControlsVisible(true);
-    updatePendingSeek(Number(event.currentTarget.value));
-  };
-
-  const handleProgressPointerUp = (event: React.PointerEvent<HTMLInputElement>) => {
-    commitPendingSeek();
-    event.currentTarget.blur();
-  };
-
-  const handleProgressPointerCancel = (event: React.PointerEvent<HTMLInputElement>) => {
-    cancelPendingSeek();
-    event.currentTarget.blur();
-  };
 
   const toggleFullscreen = useCallback(async () => {
     try {
@@ -1481,9 +1495,7 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
   }, [active, adjustVolumeBy, markVideoSessionInteracted, seekBy, toggleFullscreen, togglePlay]);
 
   const visibleCurrentTime = seekingTime ?? currentTime;
-  const progressPercent = duration > 0
-    ? Math.min(Math.max((visibleCurrentTime / duration) * 100, 0), 100)
-    : 0;
+  const controlsVisible = areControlsVisible || Boolean(meteor);
   const displayedVolume = Math.round((isMuted ? 0 : volume) * 100);
   const detachedPosterUrl = floatingVideoState.thumbnailUrl || thumbnailUrl;
   const detachedPosterStyle = useMemo<React.CSSProperties | undefined>(() => (
@@ -1560,8 +1572,9 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
               )}
 
               <div
-                className={`controls-panel ${areControlsVisible ? 'visible' : 'hidden'}`}
-                aria-hidden={!areControlsVisible}
+                className={`controls-panel ${controlsVisible ? 'visible' : 'hidden'}`}
+                data-meteor-active={Boolean(meteor)}
+                aria-hidden={!controlsVisible}
                 onPointerEnter={() => {
                   setAreControlsVisible(true);
                   scheduleControlsHide();
@@ -1586,27 +1599,30 @@ const VideoViewer: React.FC<VideoViewerProps> = ({
                   scheduleControlsHide();
                 }}
               >
-                <div className="timeline-progress">
-                  <input
-                    type="range"
-                    min={0}
-                    max={Math.max(duration, 0)}
-                    step={0.1}
-                    value={Math.min(visibleCurrentTime, Math.max(duration, 0))}
-                    disabled={duration <= 0}
-                    onChange={(event) => updatePendingSeek(Number(event.currentTarget.value))}
-                    onPointerDown={handleProgressPointerDown}
-                    onPointerUp={handleProgressPointerUp}
-                    onPointerCancel={handleProgressPointerCancel}
-                    onKeyUp={commitPendingSeek}
-                    onBlur={commitPendingSeek}
-                    aria-label="播放进度"
-                    aria-valuetext={`${formatTime(visibleCurrentTime)} / ${formatTime(duration)}`}
+                {meteor && (
+                  <AudioDockMeteor
+                    key={meteor.id}
+                    event={meteor}
+                    color="var(--app-accent)"
+                    onFinish={() => {
+                      finishMeteor(meteor.id);
+                      scheduleControlsHide();
+                    }}
                   />
-                  <span className="timeline-progress-track" aria-hidden="true">
-                    <span style={{ width: `${progressPercent}%` }} />
-                  </span>
-                </div>
+                )}
+                <AudioDockProgress
+                  visible={controlsVisible}
+                  disabled={duration <= 0}
+                  duration={duration}
+                  value={visibleCurrentTime}
+                  startColor="var(--app-accent-active)"
+                  endColor="var(--app-accent)"
+                  smooth={isPlaying && seekingTime === null && !meteor}
+                  readTime={() => videoRef.current?.currentTime ?? null}
+                  onPreview={updatePendingSeek}
+                  onCommit={commitPendingSeek}
+                  onCancel={cancelPendingSeek}
+                />
 
                 <div className="controls-row">
                   <div className="left-controls">

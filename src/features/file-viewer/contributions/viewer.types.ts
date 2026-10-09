@@ -1,5 +1,5 @@
 import type { FileViewerFileType } from '@/shared/file-viewer-types';
-import type { FileViewerReturnTarget, FileViewerSubtitleSource, FileViewerVideoPlaylist } from '@/contexts/file-viewer.context';
+import type { FileViewerReturnTarget, FileViewerSubtitleSource, FileViewerVideoPlaylist, FileViewerVideoTransition } from '@/contexts/file-viewer.context';
 export interface FileDispatcherProps {
   viewerId?: string;
   viewerGeneration?: number;
@@ -14,6 +14,7 @@ export interface FileDispatcherProps {
   videoSubtitleSources?: FileViewerSubtitleSource[];
   videoPlaylist?: FileViewerVideoPlaylist | null;
   videoAutoPlay?: boolean;
+  videoTransition?: FileViewerVideoTransition;
   loading: boolean;
   active?: boolean;
   reloadToken?: number;

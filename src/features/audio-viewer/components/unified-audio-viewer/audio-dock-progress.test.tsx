@@ -42,7 +42,16 @@ function renderProgress(overrides: Partial<ProgressInput> = {}) {
   const rootNode = {};
   const fillNode = { setAttribute: vi.fn() };
   const gradientNode = { setAttribute: vi.fn() };
-  const inputNode = { focus: vi.fn() };
+  let inputFocused = false;
+  const inputNode = {
+    focus: vi.fn(() => { inputFocused = true; }),
+    blur: vi.fn(() => {
+      if (!inputFocused) return;
+      inputFocused = false;
+      renderer.root.findByType('input').props.onBlur();
+    }),
+    get focused() { return inputFocused; },
+  };
   const svgNode = {
     getBoundingClientRect: vi.fn(() => ({ left: 100, top: 50 })),
     setPointerCapture: vi.fn((pointerId: number) => capturedPointers.add(pointerId)),
@@ -187,6 +196,8 @@ describe('audio dock border progress', () => {
     expect(view.svg().props.viewBox).toBe('0 0 300 80');
     expect(view.props.onCancel).toHaveBeenCalledOnce();
     expect(view.svgNode.releasePointerCapture.mock.calls).toEqual([[9]]);
+    expect(view.inputNode.focused).toBe(false);
+    expect(view.inputNode.blur).toHaveBeenCalledOnce();
     expect(view.observe).toHaveBeenCalledOnce();
     act(() => view.renderer.unmount());
     expect(view.disconnect).toHaveBeenCalledOnce();
@@ -231,6 +242,9 @@ describe('audio dock border progress', () => {
     expect(view.svgNode.getBoundingClientRect).toHaveBeenCalledOnce();
     expect(view.svgNode.releasePointerCapture.mock.calls).toEqual([[9]]);
 
+    expect(view.inputNode.blur).toHaveBeenCalledOnce();
+    expect(view.inputNode.focused).toBe(false);
+
     act(() => {
       view.svg().props.onLostPointerCapture(view.pointer(198.5, 24));
       view.svg().props.onPointerUp(view.pointer(198.5, 24));
@@ -273,6 +287,8 @@ describe('audio dock border progress', () => {
     expect(view.props.onCancel).toHaveBeenCalledOnce();
     expect(view.props.onCommit).not.toHaveBeenCalled();
     expect(view.props.onPreview.mock.calls).toEqual([[50]]);
+    expect(view.inputNode.blur).toHaveBeenCalledOnce();
+    expect(view.inputNode.focused).toBe(false);
     if (handler === 'onPointerCancel') expect(view.svgNode.releasePointerCapture.mock.calls).toEqual([[9]]);
   });
 
@@ -290,11 +306,13 @@ describe('audio dock border progress', () => {
     expect(view.props.onCancel).toHaveBeenCalledOnce();
     expect(view.props.onCommit).not.toHaveBeenCalled();
     expect(view.svgNode.releasePointerCapture.mock.calls).toEqual([[9]]);
+    expect(view.inputNode.focused).toBe(false);
   });
 
   it('previews range changes and commits only after the keyboard key is released', () => {
     const view = renderProgress();
     const preventDefault = vi.fn();
+    view.inputNode.focus(); // Keyboard Tab navigation focuses the real range.
     act(() => {
       view.input().props.onKeyDown({ key: 'ArrowRight', preventDefault });
       view.input().props.onChange({ currentTarget: { value: '25.1' } });
@@ -307,6 +325,22 @@ describe('audio dock border progress', () => {
     expect(view.props.onCommit).toHaveBeenCalledOnce();
     expect(view.props.onCancel).not.toHaveBeenCalled();
     expect(view.svgNode.getBoundingClientRect).not.toHaveBeenCalled();
+    expect(view.inputNode.blur).not.toHaveBeenCalled();
+    expect(view.inputNode.focused).toBe(true);
+  });
+
+  it('keeps keyboard focus when Escape cancels a keyboard-only preview', () => {
+    const view = renderProgress();
+    view.inputNode.focus();
+    act(() => {
+      view.input().props.onChange({ currentTarget: { value: '30' } });
+      view.input().props.onKeyDown({ key: 'Escape', preventDefault: vi.fn() });
+      view.input().props.onKeyUp({ key: 'Escape' });
+    });
+    expect(view.props.onCancel).toHaveBeenCalledOnce();
+    expect(view.props.onCommit).not.toHaveBeenCalled();
+    expect(view.inputNode.blur).not.toHaveBeenCalled();
+    expect(view.inputNode.focused).toBe(true);
   });
 
   it.each([{ visible: false }, { disabled: true }, { duration: 0 }])('cancels an active preview when availability changes to %j', next => {
@@ -319,5 +353,7 @@ describe('audio dock border progress', () => {
     expect(view.props.onCancel).toHaveBeenCalledOnce();
     expect(view.props.onCommit).not.toHaveBeenCalled();
     expect(view.svgNode.releasePointerCapture.mock.calls).toEqual([[9]]);
+    expect(view.inputNode.blur).toHaveBeenCalledOnce();
+    expect(view.inputNode.focused).toBe(false);
   });
 });

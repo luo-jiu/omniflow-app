@@ -1,5 +1,6 @@
 import styled from 'styled-components';
 import { workspaceScrollbarStyles } from '@/components/ui/workspace-scrollbar';
+import { AUDIO_DOCK_RADIUS } from '@/features/audio-viewer/components/unified-audio-viewer/audio-dock-progress-geometry';
 import {
   focusVisibleStyles,
   interactiveItemStyles,
@@ -67,6 +68,14 @@ export const VideoViewerWrapper = styled.div`
     position: relative;
     background: #000;
     box-shadow: none;
+  }
+
+  .video-shell:fullscreen {
+    background: #000;
+  }
+
+  .video-shell:fullscreen::backdrop {
+    background: transparent;
   }
 
   .video-shell.controls-hidden {
@@ -447,14 +456,20 @@ export const VideoViewerWrapper = styled.div`
 
   .controls-panel {
     position: absolute;
-    left: 0;
-    right: 0;
-    bottom: 0;
+    left: 50%;
+    right: auto;
+    bottom: 20px;
+    width: min(900px, calc(100% - 32px));
+    box-sizing: border-box;
     z-index: 6;
-    padding: 26px 16px 12px;
-    background: linear-gradient(180deg, transparent 0%, rgba(0, 0, 0, 0.42) 36%, rgba(0, 0, 0, 0.82) 100%);
+    padding: 12px 16px 10px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: ${AUDIO_DOCK_RADIUS}px;
+    background: rgba(18, 20, 24, 0.82);
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.28);
+    backdrop-filter: blur(16px);
     opacity: 0;
-    transform: translateY(8px);
+    transform: translate(-50%, 12px);
     visibility: hidden;
     pointer-events: none;
     transition:
@@ -465,10 +480,74 @@ export const VideoViewerWrapper = styled.div`
 
   .controls-panel.visible {
     opacity: 1;
-    transform: translateY(0);
+    transform: translate(-50%, 0);
     visibility: visible;
     pointer-events: auto;
     transition-delay: 0s;
+  }
+
+  .audio-dock-progress {
+    position: absolute;
+    inset: -1px;
+    z-index: 2;
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  .audio-dock-progress[data-visible='true'] {
+    visibility: visible;
+  }
+
+  .audio-dock-progress-svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+    pointer-events: none;
+  }
+
+  .audio-dock-progress-track {
+    stroke: rgba(255, 255, 255, 0.22);
+  }
+
+  .controls-panel[data-meteor-active='true'] .audio-dock-progress-fill {
+    opacity: 0;
+  }
+
+  .audio-dock-meteor {
+    position: absolute;
+    inset: -1px;
+    width: calc(100% + 2px);
+    height: calc(100% + 2px);
+    overflow: visible;
+    pointer-events: none;
+    z-index: 3;
+  }
+
+  .audio-dock-meteor-light {
+    transition: color 260ms linear;
+    filter: drop-shadow(0 0 3px currentColor);
+  }
+
+  .audio-dock-progress-keyboard {
+    position: absolute;
+    top: -6px;
+    left: ${AUDIO_DOCK_RADIUS}px;
+    width: calc(100% - ${AUDIO_DOCK_RADIUS * 2}px);
+    height: 14px;
+    margin: 0;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .audio-dock-progress-keyboard:focus-visible + .audio-dock-progress-svg .audio-dock-progress-track {
+    stroke: var(--app-accent);
+    stroke-width: 5px;
+  }
+
+  .audio-dock-progress-hit {
+    cursor: pointer;
+    touch-action: none;
   }
 
   .timeline-progress {

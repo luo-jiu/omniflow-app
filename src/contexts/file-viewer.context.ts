@@ -52,6 +52,12 @@ export interface FileViewerOpenOptions {
   videoSubtitleSources?: FileViewerSubtitleSource[];
   videoPlaylist?: FileViewerVideoPlaylist | null;
   videoAutoPlay?: boolean;
+  videoTransitionRatio?: number;
+}
+
+export interface FileViewerVideoTransition {
+  id: string;
+  ratio: number;
 }
 
 export interface FileViewerTabResourceUpdate {
@@ -86,6 +92,7 @@ export interface FileViewerTab {
   videoSubtitleSources?: FileViewerSubtitleSource[];
   videoPlaylist?: FileViewerVideoPlaylist | null;
   videoAutoPlay?: boolean;
+  videoTransition?: FileViewerVideoTransition;
   loading: boolean;
   reloadToken?: number;
   contentRevision: string | null;
@@ -112,6 +119,7 @@ export interface FileViewerContextType {
   closeTabByNodeId: (nodeId: number) => void;
   reloadActiveTab: () => void;
   selectViewer: (tabId: string, viewerId: string, remember?: boolean) => void;
+  consumeVideoTransition: (tabId: string, transitionId: string) => void;
   reorderTabs: (
     draggedTabId: string,
     targetTabId: string,

@@ -1,4 +1,6 @@
 import styled from 'styled-components';
+import { floatingViewerDockSurfaceStyles } from '@/components/ui/floating-viewer-dock-styles';
+import { interactiveItemStyles } from '@/components/ui/theme-foundation-styles';
 import { workspaceScrollbarStyles } from '@/components/ui/workspace-scrollbar';
 import { AUDIO_DOCK_RADIUS } from '@/features/audio-viewer/components/unified-audio-viewer/audio-dock-progress-geometry';
 
@@ -14,6 +16,9 @@ export const AsmrViewerWrapper = styled.div`
   width: 100%;
   height: 100%;
   min-height: 0;
+  position: relative;
+  container: asmr-viewer / inline-size;
+  --audio-dock-width: min(900px, calc(100% - 32px));
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -235,6 +240,10 @@ export const AsmrViewerWrapper = styled.div`
     overflow: auto;
     padding: 4px 6px 6px;
     ${workspaceScrollbarStyles}
+  }
+
+  &[data-player-active='true'] .list-shell {
+    padding-bottom: 134px;
   }
 
   .state-loading,
@@ -503,17 +512,24 @@ export const AsmrViewerWrapper = styled.div`
   }
 
   .audio-player-bar {
-    position: relative;
-    flex-shrink: 0;
-    height: 76px;
+    ${floatingViewerDockSurfaceStyles}
+    --player-dock-bottom: 28px;
+    position: absolute;
+    z-index: 5;
+    left: 50%;
+    bottom: var(--player-dock-bottom);
+    transform: translateX(-50%);
+    box-sizing: border-box;
+    width: var(--audio-dock-width);
+    min-height: 76px;
     display: grid;
-    grid-template-columns: minmax(180px, 1fr) minmax(190px, auto) minmax(220px, 1fr);
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
     align-items: center;
-    gap: 18px;
-    padding: 10px 16px 9px;
-    border-top: 1px solid var(--semi-color-border);
-    background: color-mix(in srgb, var(--semi-color-bg-1) 94%, transparent);
-    box-shadow: 0 -8px 22px rgba(0, 0, 0, 0.08);
+    align-content: center;
+    column-gap: 12px;
+    row-gap: 0;
+    padding: 12px 16px 10px;
+    border-radius: ${AUDIO_DOCK_RADIUS}px;
   }
 
   .audio-dock-progress {
@@ -640,6 +656,7 @@ export const AsmrViewerWrapper = styled.div`
     align-items: center;
     justify-content: center;
     gap: 12px;
+    grid-column: 2;
   }
 
   .audio-player-bar .player-controls .play-main {
@@ -656,11 +673,73 @@ export const AsmrViewerWrapper = styled.div`
     gap: 8px;
   }
 
+  .audio-player-bar .semi-button {
+    color: var(--app-text-secondary);
+    background: transparent;
+    border-radius: var(--app-radius-medium);
+    box-shadow: none;
+    ${interactiveItemStyles}
+
+    &:not(:disabled):not([aria-disabled='true']):hover {
+      color: var(--app-text);
+    }
+  }
+
+  .audio-player-bar .semi-button.play-main:not(:disabled):not([aria-disabled='true']) {
+    &, &:hover, &:active, &:focus-visible { color: var(--app-accent); }
+  }
+
   .time-display {
     color: var(--semi-color-text-2);
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     font-size: 11px;
     white-space: nowrap;
+  }
+
+  @container asmr-viewer (max-width: 760px) {
+    &[data-player-active='true'] .list-shell {
+      padding-bottom: 154px;
+    }
+
+    .audio-player-bar {
+      --player-dock-bottom: 24px;
+      --audio-dock-width: calc(100% - 24px);
+      width: var(--audio-dock-width);
+      column-gap: 10px;
+    }
+
+    .player-extra {
+      grid-column: 1 / -1;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-top: 6px;
+      row-gap: 6px;
+    }
+  }
+
+  @container asmr-viewer (max-width: 440px) {
+    &[data-player-active='true'] .list-shell {
+      padding-bottom: 226px;
+    }
+
+    .audio-player-bar {
+      --player-dock-bottom: 20px;
+      grid-template-columns: minmax(0, 1fr);
+      padding-inline: 12px;
+    }
+
+    .player-track {
+      min-width: 0;
+    }
+
+    .player-brief {
+      justify-content: center;
+    }
+
+    .audio-player-bar .player-controls {
+      grid-column: 1;
+      margin-top: 6px;
+    }
   }
 
   @keyframes asmr-cover-wave {

@@ -89,6 +89,7 @@ const BuiltInDispatcher: React.FC<FileDispatcherProps> = ({
   videoSubtitleSources,
   videoPlaylist,
   videoAutoPlay = false,
+  videoTransition,
   loading,
   active = true,
   reloadToken = 0,
@@ -155,6 +156,7 @@ const BuiltInDispatcher: React.FC<FileDispatcherProps> = ({
           subtitleSources={videoSubtitleSources}
           playlist={videoPlaylist}
           autoPlay={videoAutoPlay}
+          transition={videoTransition}
           reloadToken={reloadToken}
         />
       );

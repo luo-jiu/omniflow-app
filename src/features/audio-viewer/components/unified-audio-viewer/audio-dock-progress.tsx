@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type PointerEvent } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type PointerEvent } from 'react';
 import { useSmoothAudioDockProgress } from './use-smooth-audio-dock-progress';
 import {
   AUDIO_DOCK_PROGRESS_STROKE,
@@ -30,6 +30,7 @@ export function AudioDockProgress({
   const fillRef = useRef<SVGPathElement>(null);
   const gradientRef = useRef<SVGLinearGradientElement>(null);
   const gestureRef = useRef<{ pointerId: number; left: number; top: number } | null>(null);
+  const suppressBlurCommitRef = useRef(false);
   const cancelRef = useRef(onCancel);
   cancelRef.current = onCancel;
   const [size, setSize] = useState({ width: 0, height: 0 });
@@ -51,6 +52,17 @@ export function AudioDockProgress({
     return gesture;
   };
 
+  const releasePointerFocus = useCallback(() => {
+    // Pointer completion already committed/cancelled the seek. Its blur must
+    // not submit again, and must not leave the invisible range owning shortcuts.
+    suppressBlurCommitRef.current = true;
+    try {
+      inputRef.current?.blur();
+    } finally {
+      suppressBlurCommitRef.current = false;
+    }
+  }, []);
+
   useEffect(() => {
     const root = rootRef.current;
     if (!root) return;
@@ -71,8 +83,9 @@ export function AudioDockProgress({
     if (gesture) {
       if (svgRef.current?.hasPointerCapture(gesture.pointerId)) svgRef.current.releasePointerCapture(gesture.pointerId);
       cancelRef.current();
+      releasePointerFocus();
     }
-  }, [enabled, geometry]);
+  }, [enabled, geometry, releasePointerFocus]);
 
   const previewPointer = (event: PointerEvent<SVGSVGElement>) => {
     const gesture = gestureRef.current;
@@ -97,11 +110,13 @@ export function AudioDockProgress({
         onKeyDown={event => {
           if (event.key !== 'Escape') return;
           event.preventDefault();
-          releaseGesture();
+          const pointerGesture = releaseGesture();
           onCancel();
+          if (pointerGesture) releasePointerFocus();
         }}
         onKeyUp={event => { if (event.key !== 'Escape') onCommit(); }}
         onBlur={() => {
+          if (suppressBlurCommitRef.current) return;
           if (releaseGesture()) onCancel();
           else onCommit();
         }}
@@ -129,16 +144,19 @@ export function AudioDockProgress({
             previewPointer(event);
             releaseGesture();
             onCommit();
+            releasePointerFocus();
           }}
           onPointerCancel={event => {
             if (gestureRef.current?.pointerId !== event.pointerId) return;
             releaseGesture();
             onCancel();
+            releasePointerFocus();
           }}
           onLostPointerCapture={event => {
             if (gestureRef.current?.pointerId !== event.pointerId) return;
             gestureRef.current = null;
             onCancel();
+            releasePointerFocus();
           }}
         >
           <defs>

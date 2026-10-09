@@ -164,6 +164,7 @@ function normalizeStoreState(
     contentRevision: normalizeContentRevision(tab.contentRevision),
     returnTarget: normalizeFileViewerReturnTarget(tab.returnTarget),
     videoAutoPlay: false,
+    videoTransition: undefined,
     viewerId: isViewerContributionId(tab.viewerId) ? tab.viewerId : undefined,
     viewerGeneration: Number.isSafeInteger(tab.viewerGeneration) && Number(tab.viewerGeneration) >= 0 ? tab.viewerGeneration : 0,
   }));
@@ -363,6 +364,10 @@ export const FileViewerProvider: React.FC<{
 
     const tabId = resolveTabId(url, nodeId);
     const replaceTabId = options?.replaceTabId || null;
+    const videoTransition = fileType === 'video' && replaceTabId && replaceTabId !== tabId
+      && typeof options?.videoTransitionRatio === 'number' && Number.isFinite(options.videoTransitionRatio)
+      ? { id: crypto.randomUUID(), ratio: Math.min(Math.max(options.videoTransitionRatio, 0), 1) }
+      : undefined;
     const association = viewerAccountScope && libraryId && nodeId
       ? readViewerAssociation(viewerAccountScope, libraryId, { fileName, fileType, libraryId, nodeId }) : undefined;
     const currentTab = tabsRef.current.find(tab => tab.id === tabId);
@@ -403,6 +408,7 @@ export const FileViewerProvider: React.FC<{
         videoSubtitleSources,
         videoPlaylist,
         videoAutoPlay: Boolean(options?.videoAutoPlay),
+        videoTransition,
         loading: false,
         reloadToken: baseTab?.reloadToken ?? 0,
         contentRevision: hasContentRevision
@@ -638,6 +644,18 @@ export const FileViewerProvider: React.FC<{
     setFileViewerStateCache<FileViewerStoreState>(cacheKey, viewerState);
   }, [cacheKey, libraryId, viewerState]);
 
+  const consumeVideoTransition = React.useCallback((tabId: string, transitionId: string) => {
+    setViewerState(previous => {
+      const index = previous.tabs.findIndex(tab => tab.id === tabId && tab.videoTransition?.id === transitionId);
+      if (index < 0) return previous;
+      const tabs = [...previous.tabs];
+      const tab = { ...tabs[index] };
+      delete tab.videoTransition;
+      tabs[index] = tab;
+      return { ...previous, tabs };
+    });
+  }, []);
+
   return (
     <FileViewerContext.Provider
       value={{
@@ -652,6 +670,7 @@ export const FileViewerProvider: React.FC<{
         closeTabByNodeId,
         reloadActiveTab,
         selectViewer,
+        consumeVideoTransition,
         reorderTabs,
       }}
     >
