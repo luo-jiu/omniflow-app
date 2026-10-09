@@ -216,6 +216,8 @@ file-backed MSE 输出此前虽然在 tab-scoped `mse-download` task 内，但�
 
 `embeddedBrowserMainIpc.ts` 只负责 channel 到 handler 的转发，不承担业务规则。
 
+浏览器导航状态继续经 `embedded-browser:state` 推送，但主进程暂时注释 `[embedded-browser:main]` 的完整 payload 日志，避免频繁输出包含大段 `iconUrl` 的对象拖慢开发终端。异常与失败日志仍由原有 runtime logger 记录。
+
 `embeddedBrowserMainController.ts` 负责：
 
 - `tabId -> WebContentsView` 的真实映射

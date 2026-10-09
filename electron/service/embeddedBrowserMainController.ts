@@ -413,7 +413,8 @@ export function createEmbeddedBrowserMainController(
   }
 
   function emitEmbeddedBrowserState(payload: EmbeddedBrowserStatePayload) {
-    runtimeLogger.log('[embedded-browser:main]', payload)
+    // 状态更新频繁，完整 iconUrl 可能很大，暂时关闭控制台输出以免拖慢开发环境。
+    // runtimeLogger.log('[embedded-browser:main]', payload)
     const mainWindow = options.getMainWindow()
     if (!mainWindow || mainWindow.isDestroyed()) {
       return
