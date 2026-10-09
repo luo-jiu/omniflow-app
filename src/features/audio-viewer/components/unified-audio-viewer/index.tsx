@@ -16,6 +16,7 @@ import {
   batchGetFileLinks,
   fetchArchiveCardsPage,
   getChildrenByNodeId,
+  getFileLink,
 } from '@/features/file-explorer/services/file.api';
 import { runtimeLogger } from '@/utils/runtimeLogger';
 import { useGlobalAudioPlayback } from '@/features/file-viewer/hooks/useGlobalAudioPlayback';
@@ -37,6 +38,7 @@ import {
   type AudioArchiveChildNode,
   type AudioArchiveSidecarIndex,
 } from './audio-viewer-content';
+import { loadAudioMetadataDuration, normalizeAudioDuration } from './audio-duration';
 import { UnifiedAudioViewerWrapper } from './style';
 import { AudioDockMeteor, type AudioDockMeteorEvent } from './AudioDockMeteor';
 import {
@@ -152,6 +154,8 @@ const UnifiedAudioViewer: React.FC<UnifiedAudioViewerProps> = ({
   const lastHandledEndedSerialRef = useRef(0);
   const coverClickTimerRef = useRef<number>(0);
   const pendingSeekTimeRef = useRef<number | null>(null);
+  const durationLoadingRef = useRef<Set<string>>(new Set());
+  const durationAbortRef = useRef<AbortController | null>(null);
 
   const title = useMemo(() => normalizeArchiveTitle(fileName), [fileName]);
   const playlistTitle = useMemo(() => formatPlaylistTitle(title), [title]);
@@ -229,22 +233,24 @@ const UnifiedAudioViewer: React.FC<UnifiedAudioViewerProps> = ({
     && playerState.src === currentAudioUrl,
   );
   const currentTime = isCurrentAudioSource ? playerState.currentTime : 0;
-  const duration = isCurrentAudioSource ? playerState.duration : 0;
+  const playerDuration = isCurrentAudioSource ? normalizeAudioDuration(playerState.duration) : null;
+  const cardDuration = normalizeAudioDuration(effectiveCard?.durationSeconds);
+  const duration = playerDuration ?? cardDuration ?? 0;
   const visibleCurrentTime = seekingTime ?? currentTime;
   useEffect(() => {
-    if (!isCurrentAudioSource || currentCardId === null || !Number.isFinite(duration) || duration <= 0) return;
+    if (!isCurrentAudioSource || currentCardId === null || playerDuration === null) return;
     setCards((previous) => {
       let changed = false;
       const next = previous.map((card) => {
-        if (card.id !== currentCardId || Math.abs(Number(card.durationSeconds || 0) - duration) < 0.1) {
+        if (card.id !== currentCardId || Math.abs(Number(card.durationSeconds || 0) - playerDuration) < 0.1) {
           return card;
         }
         changed = true;
-        return { ...card, durationSeconds: duration };
+        return { ...card, durationSeconds: playerDuration };
       });
       return changed ? next : previous;
     });
-  }, [currentCardId, duration, isCurrentAudioSource]);
+  }, [currentCardId, isCurrentAudioSource, playerDuration]);
   const readLiveProgressTime = useCallback(() => {
     const live = getPlayerState();
     return live.src === currentAudioUrl && isGlobalAudioOwnedBy(live, { ownerType: 'default', ownerKey: audioOwnerKey, tabId, libraryId })
@@ -484,6 +490,51 @@ const UnifiedAudioViewer: React.FC<UnifiedAudioViewerProps> = ({
     };
   }), []);
 
+  const hydrateMissingCardDurations = useCallback((inputCards: AudioArchiveCard[], requestId: number) => {
+    const controller = durationAbortRef.current;
+    const isCurrent = () => Boolean(controller && !controller.signal.aborted && requestId === requestIdRef.current);
+    if (!isCurrent() || !controller) return;
+    const candidates = inputCards.filter(card => (
+      normalizeAudioDuration(card.durationSeconds) === null
+      && !durationLoadingRef.current.has(`${requestId}:${card.id}`)
+    ));
+    if (candidates.length === 0) return;
+
+    const loadDuration = async (card: AudioArchiveCard) => {
+      if (!isCurrent()) return;
+      const loadingKey = `${requestId}:${card.id}`;
+      durationLoadingRef.current.add(loadingKey);
+      try {
+        const audioUrl = bareAudioMode
+          ? fileUrl
+          : await getFileLink(card.mediaNodeId || card.id, libraryId || 0, LINK_EXPIRY_MINUTES);
+        if (!audioUrl || !isCurrent()) return;
+        const duration = await loadAudioMetadataDuration(audioUrl, { signal: controller.signal });
+        if (duration === null || !isCurrent()) return;
+        setCards((previous) => previous.map((current) => (
+          current.id === card.id && normalizeAudioDuration(current.durationSeconds) === null
+            ? { ...current, durationSeconds: duration }
+            : current
+        )));
+      } catch (durationError) {
+        if (isCurrent()) runtimeLogger.warn('加载音频时长失败:', durationError);
+      } finally {
+        durationLoadingRef.current.delete(loadingKey);
+      }
+    };
+
+    let cursor = 0;
+    const worker = async () => {
+      while (isCurrent() && cursor < candidates.length) {
+        const card = candidates[cursor];
+        cursor += 1;
+        if (card) await loadDuration(card);
+      }
+    };
+    const workerCount = Math.min(4, candidates.length);
+    void Promise.all(Array.from({ length: workerCount }, () => worker()));
+  }, [bareAudioMode, fileUrl, libraryId]);
+
   const loadPage = useCallback(async (offset: number, append: boolean) => {
     if (!folderNodeId || !libraryId || !Number.isFinite(folderNodeId)) return;
     const requestId = requestIdRef.current;
@@ -512,13 +563,19 @@ const UnifiedAudioViewer: React.FC<UnifiedAudioViewerProps> = ({
         const byId = new Map<number, AudioArchiveCard>();
         merged.forEach((card) => {
           const existing = byId.get(card.id);
-          byId.set(card.id, existing ? { ...existing, ...card, coverUrl: card.coverUrl || existing.coverUrl } : card);
+          byId.set(card.id, existing ? {
+            ...existing,
+            ...card,
+            coverUrl: card.coverUrl || existing.coverUrl,
+            durationSeconds: card.durationSeconds ?? existing.durationSeconds,
+          } : card);
         });
         return Array.from(byId.values()).sort((a, b) => {
           if (a.sortOrder !== b.sortOrder) return a.sortOrder - b.sortOrder;
           return a.id - b.id;
         });
       });
+      hydrateMissingCardDurations(cardsWithCover, requestId);
       setHasLoadedList(true);
       setTotal(page.total);
       setNextOffset(page.offset + page.items.length);
@@ -536,7 +593,7 @@ const UnifiedAudioViewer: React.FC<UnifiedAudioViewerProps> = ({
         setLoadingMore(false);
       }
     }
-  }, [folderNodeId, libraryId, mapArchiveCards, resolveCardCoverUrls]);
+  }, [folderNodeId, hydrateMissingCardDurations, libraryId, mapArchiveCards, resolveCardCoverUrls]);
 
   const loadSingleFolder = useCallback(async () => {
     if (!folderNodeId || !libraryId || !Number.isFinite(folderNodeId)) return;
@@ -564,6 +621,7 @@ const UnifiedAudioViewer: React.FC<UnifiedAudioViewerProps> = ({
       const [card] = await resolveCardCoverUrls([content.card]);
       if (requestId !== requestIdRef.current) return;
       setCards(card ? [card] : []);
+      if (card) hydrateMissingCardDurations([card], requestId);
       setTotal(card ? 1 : 0);
       setSelectedCardId(card?.id ?? null);
       setFolderSubtitleSources(content.subtitleSources.length > 0 ? content.subtitleSources : undefined);
@@ -583,7 +641,7 @@ const UnifiedAudioViewer: React.FC<UnifiedAudioViewerProps> = ({
         setHasMore(false);
       }
     }
-  }, [folderNodeId, libraryId, resolveCardCoverUrls, title]);
+  }, [folderNodeId, hydrateMissingCardDurations, libraryId, resolveCardCoverUrls, title]);
 
   const loadBareAudio = useCallback(() => {
     const card = buildBareAudioCard(Number(folderNodeId), title);
@@ -597,7 +655,8 @@ const UnifiedAudioViewer: React.FC<UnifiedAudioViewerProps> = ({
     setLoadingMore(false);
     setNextOffset(0);
     setHasMore(false);
-  }, [folderNodeId, title]);
+    hydrateMissingCardDurations([card], requestIdRef.current);
+  }, [folderNodeId, hydrateMissingCardDurations, title]);
 
   const loadMore = useCallback(() => {
     if (listLoading || loadingMore || !hasMore) return;
@@ -829,7 +888,15 @@ const UnifiedAudioViewer: React.FC<UnifiedAudioViewerProps> = ({
   }, [isCurrentAudioSource, playNextCard, playerState.endedSerial]);
 
   useEffect(() => {
-    requestIdRef.current += 1;
+    const requestId = ++requestIdRef.current;
+    durationAbortRef.current?.abort();
+    const durationController = new AbortController();
+    durationAbortRef.current = durationController;
+    const cleanup = () => {
+      durationController.abort();
+      if (durationAbortRef.current === durationController) durationAbortRef.current = null;
+      if (requestIdRef.current === requestId) requestIdRef.current += 1;
+    };
     cancelPendingPlayback();
     cardElementMapRef.current.clear();
     restoreTriggeredLoadMoreRef.current = false;
@@ -851,7 +918,7 @@ const UnifiedAudioViewer: React.FC<UnifiedAudioViewerProps> = ({
       setSelectedCardId(null);
       setCurrentAudioUrl(null);
       setFolderSubtitleSources(undefined);
-      return;
+      return cleanup;
     }
     if (pendingSessionResourceNodeIdRef.current !== folderNodeId) {
       pendingSessionRestoreRef.current = null;
@@ -875,6 +942,7 @@ const UnifiedAudioViewer: React.FC<UnifiedAudioViewerProps> = ({
     } else {
       void loadPage(0, false);
     }
+    return cleanup;
   }, [
     bareAudioMode,
     cancelPendingPlayback,

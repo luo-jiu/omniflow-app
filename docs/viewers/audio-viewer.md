@@ -17,6 +17,8 @@
 
 实际出声和播放状态继续由 `globalAudioPlayer` 的单例 `<audio>` 拥有。裸音频、普通音乐文件夹、音频归档和 ASMR 都通过 `useGlobalAudioPlayback` 订阅同一播放状态并复用 `MediaVolumeControl`，组件不得创建第二个可播放音频实例，也不得绕过服务层注册 MediaHub。viewer 判断当前播放源时必须同时校验 `ownerType + ownerKey + tabId + libraryId`，不能只比较临时 URL；`sourceNodeId` 用于同一 owner 重建后恢复歌曲投影。
 
+缺失的卡片时长通过只加载元数据的临时 `<audio>` 补齐，不调用 `play()`、不接管全局播放器。每批最多四路并发，每个媒体元数据请求最多等待 15 秒；成功、失败、超时或取消都移除源、监听器和定时器。切换入口资源或卸载 viewer 时取消当前批次，尚未开始的旧卡片不再请求链接，已经发出的链接请求返回后也不创建媒体元素或更新新资源。
+
 统一 viewer 负责三种入口的页面编排。直属资源发现收敛在 `audio-viewer-content.ts`，封面、歌词滚动和时间格式化等纯展示逻辑收敛在 `audio-viewer-presenters.tsx`，异步链接解析与组件侧请求清理收敛在 `use-audio-card-playback.ts`；裸音频遵守 `audio` 的 `warm: none` policy，不注册归档 snapshot adapter。
 
 歌词候选和读取由 `use-audio-card-subtitles.ts` 与共享 `useTimedText` 拥有，独立于播放请求。归档当前展示歌曲（当前播放歌曲、选中歌曲或首张卡片）确定后，只读取该歌曲文件夹的直属歌词候选；普通音乐文件夹复用首次目录发现的候选，不重复扫描；裸音频与历史直属媒体卡片不扫描伴随文件。歌词重置以资料库、入口资源、歌曲节点与内容 / reload 版本为 key，开始播放或签名音频 URL 改变不会重新清空 / 请求同一首歌词；切歌、换库和卸载后的旧目录结果不得写回，新歌无歌词时清除旧歌文本。读取歌词不请求音频播放链接、不接管全局播放器，也不创建播放实体；播放流程只处理音频源与出声。
