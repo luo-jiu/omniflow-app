@@ -6,6 +6,7 @@ import { workspaceScrollbarStyles } from '@/components/ui/workspace-scrollbar';
 import type { AgentSessionSummary } from '@/shared/agent/agent.types';
 import type { AgentSessionDirectorySummary, AgentSessionGroup } from '@/shared/agent/agent-session-management';
 import { agentGroupPageKey, type AgentGroupPage } from '../hooks/useAgentSessionGroups';
+import { loadAgentSessionGroupCollapse, saveAgentSessionGroupCollapse } from '../agent-session-directory-preferences';
 import {
   AGENT_DIRECTORY_BREAKPOINT,
   AGENT_DIRECTORY_BUBBLE_SIZE,
@@ -178,30 +179,32 @@ export default function AgentSessionPeek({ sessions, total, activeSessionId, loa
   onArchive?: (session: AgentSessionSummary) => void; onArchives?: () => void; onRetry?: () => void;
 }) {
   const workspaceActive = React.useContext(WorkspaceVisibilityContext);
-  const [closedGroups, setClosedGroups] = React.useState<Record<string, boolean>>(() => {
-    try {
-      const value: unknown = storageKey ? JSON.parse(localStorage.getItem(storageKey) || '{}') : {};
-      return value && typeof value === 'object' && !Array.isArray(value)
-        ? Object.fromEntries(Object.entries(value).filter(([key, closed]) => key.length < 220 && typeof closed === 'boolean').slice(0, 101)) : {};
-    } catch { return {}; }
-  });
+  const [closedGroups, setClosedGroups] = React.useState<Record<string, boolean>>(
+    () => loadAgentSessionGroupCollapse(storageKey),
+  );
   const [visibleCounts, setVisibleCounts] = React.useState<Record<string, number>>({});
   const sections = directory ? [{ id: null, name: '未分组', count: directory.ungroupedCount },
     ...directory.groups.map(group => ({ id: group.id, name: group.name, count: group.sessionCount }))] : [];
-  const groupOpen = (id: string | null) => !(closedGroups[agentGroupPageKey(id)] ?? Boolean(id && id !== currentGroupId));
+  const groupOpen = (id: string | null) => !(closedGroups[agentGroupPageKey(id)] ?? !(id === null || id === currentGroupId));
+  React.useEffect(() => {
+    saveAgentSessionGroupCollapse(storageKey, closedGroups);
+  }, [closedGroups, storageKey]);
   React.useEffect(() => {
     if (!directory) return;
     for (const section of sections) if (groupOpen(section.id) && !pages[agentGroupPageKey(section.id)]) onLoadGroup?.(section.id);
   });
   React.useEffect(() => {
-    if (revealGroupId) setClosedGroups(current => ({ ...current, [revealGroupId]: false }));
+    if (revealGroupId) setClosedGroups(current => ({ ...current, [agentGroupPageKey(revealGroupId)]: false }));
   }, [revealGroupId]);
-  React.useEffect(() => { setClosedGroups(current => ({ ...current, [agentGroupPageKey(currentGroupId)]: false })); }, [currentGroupId]);
+  React.useEffect(() => {
+    const key = agentGroupPageKey(currentGroupId);
+    setClosedGroups(current => Object.prototype.hasOwnProperty.call(current, key)
+      ? current : { ...current, [key]: false });
+  }, [currentGroupId]);
   const toggleGroup = (id: string | null) => {
     if (!groupOpen(id)) setVisibleCounts(current => ({ ...current, [agentGroupPageKey(id)]: SESSION_REVEAL_STEP }));
-    const next = { ...closedGroups, [agentGroupPageKey(id)]: groupOpen(id) };
-    setClosedGroups(next);
-    if (storageKey) { try { localStorage.setItem(storageKey, JSON.stringify(next)); } catch { /* Display preference only. */ } }
+    const open = groupOpen(id);
+    setClosedGroups(current => ({ ...current, [agentGroupPageKey(id)]: open }));
   };
   const layerRef = React.useRef<HTMLDivElement>(null);
   const bubbleRef = React.useRef<HTMLButtonElement>(null);

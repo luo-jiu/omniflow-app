@@ -6,6 +6,60 @@ import type { AgentSessionDirectorySummary } from '@/shared/agent/agent-session-
 import type { AgentSessionSummary } from '@/shared/agent/agent.types';
 
 describe('Agent session peek', () => {
+  it('restores group expansion locally and keeps different repository keys isolated', () => {
+    const values = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+    });
+    const group = { id: 'g', name: '文档组', sessionCount: 1 } as AgentSessionDirectorySummary['groups'][number];
+    const props = {
+      sessions: [] as AgentSessionSummary[], total: 1, activeSessionId: null, loading: false,
+      onOpen: vi.fn(), onManage: vi.fn(), onNew: vi.fn(), onMemories: vi.fn(),
+      directory: { groups: [group], total: 1, archivedCount: 0, ungroupedCount: 0 },
+      pages: { g: { sessions: [], total: 1, loading: false } },
+    };
+    let renderer!: TestRenderer.ReactTestRenderer;
+    try {
+      act(() => { renderer = TestRenderer.create(<AgentSessionPeek {...props} storageKey="repository-a" />); });
+      const groupToggle = () => renderer.root.findAllByProps({ className: 'peek-group-toggle' })[1];
+      expect(groupToggle().props['aria-expanded']).toBe(false);
+      act(() => groupToggle().props.onClick());
+      expect(groupToggle().props['aria-expanded']).toBe(true);
+      act(() => renderer.unmount());
+
+      act(() => { renderer = TestRenderer.create(<AgentSessionPeek {...props} storageKey="repository-a" />); });
+      expect(groupToggle().props['aria-expanded']).toBe(true);
+      act(() => renderer.unmount());
+
+      act(() => { renderer = TestRenderer.create(<AgentSessionPeek {...props} storageKey="repository-b" />); });
+      expect(groupToggle().props['aria-expanded']).toBe(false);
+    } finally {
+      if (renderer) act(() => renderer.unmount());
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('does not override a locally collapsed current group when the session changes', () => {
+    const values = new Map<string, string>([['repository-a', JSON.stringify({ g: true })]]);
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+    });
+    const group = { id: 'g', name: '文档组', sessionCount: 1 } as AgentSessionDirectorySummary['groups'][number];
+    let renderer!: TestRenderer.ReactTestRenderer;
+    try {
+      act(() => { renderer = TestRenderer.create(<AgentSessionPeek sessions={[]} total={1} activeSessionId={null} loading={false}
+        onOpen={vi.fn()} onManage={vi.fn()} onNew={vi.fn()} onMemories={vi.fn()} currentGroupId="g"
+        directory={{ groups: [group], total: 1, archivedCount: 0, ungroupedCount: 0 }}
+        pages={{ g: { sessions: [], total: 1, loading: false } }} storageKey="repository-a" />); });
+      expect(renderer.root.findAllByProps({ className: 'peek-group-toggle' })[1].props['aria-expanded']).toBe(false);
+    } finally {
+      if (renderer) act(() => renderer.unmount());
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('reveals five more sessions per group and resets the limit when collapsed', () => {
     const items = Array.from({ length: 12 }, (_, index) => ({ id: `s${index}`, title: `会话 ${index}` } as AgentSessionSummary));
     const group = { id: 'g', name: '文档组', sessionCount: 12 } as AgentSessionDirectorySummary['groups'][number];
