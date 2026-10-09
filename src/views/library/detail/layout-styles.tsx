@@ -165,8 +165,10 @@ export const SidePanel = styled.div`
   max-width: var(--side-panel-max-width, 80vw);
   display: flex;
   flex-direction: column;
-  /* macOS 原生 sidebar vibrancy 自己负责材质与透色，目录树不再叠加主题色蒙版。 */
-  background: transparent;
+  /* Keep a renderer-side glass fallback while the native backing is rebuilding after fullscreen. */
+  background: color-mix(in srgb, var(--app-bg-sidebar) 72%, transparent);
+  backdrop-filter: blur(18px) saturate(125%);
+  -webkit-backdrop-filter: blur(18px) saturate(125%);
   flex-shrink: 0;
   height: 100%;
   overflow: hidden;
