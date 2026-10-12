@@ -65,6 +65,7 @@ import {
 import { useAgentMemories } from './hooks/useAgentMemories';
 import { useAgentSession } from './hooks/useAgentSession';
 import { useAgentSessionResume } from './hooks/useAgentSessionResume';
+import { isAgentComputerRunCurrent, useAgentComputerControls } from './hooks/useAgentComputerControls';
 import { loadAgentSessionSelection, saveAgentSessionSelection } from './agent-session-selection';
 import {
   deleteAgentSession,
@@ -217,10 +218,9 @@ const Composer = styled.form`
   ${agentColumnStyles}
   position: relative;
   pointer-events: auto;
-  border: 1px solid var(--app-border-strong);
+  border: 1px solid transparent;
   border-radius: 20px;
   background: var(--app-bg-elevated);
-  box-shadow: var(--app-shadow);
   overflow: hidden;
 
   textarea {
@@ -384,6 +384,8 @@ export default function AgentWorkspace({
   const scrollFrameRef = React.useRef<number | null>(null);
   const shouldFollowScrollRef = React.useRef(true);
   const indexNavigationRef = React.useRef(false);
+  const computerScrollRef = React.useRef(false);
+  const pointerInteractionRef = React.useRef(false);
   const sessionsRequestIdRef = React.useRef(0);
   const ownerScopeKey = serializeAgentOwnerScope(ownerScope);
   const sessionScopeKey = `${ownerScopeKey}\u0000${libraryId}`;
@@ -505,6 +507,22 @@ export default function AgentWorkspace({
   activeSessionIdRef.current = currentSessionId;
   const currentGroupId = currentSessionId ? session.sessionInfo?.groupId || null : draftGroupId;
   const permissionMode = currentSessionId ? session.sessionInfo?.permissionMode || 'ask' : draftPermissionMode;
+  React.useLayoutEffect(() => {
+    computerScrollRef.current = false;
+    pointerInteractionRef.current = false;
+    indexNavigationRef.current = false;
+    shouldFollowScrollRef.current = true;
+    compositionGuard.current.reset();
+  }, [sessionScopeKey, currentSessionId]);
+  React.useEffect(() => {
+    const finishPointer = () => { pointerInteractionRef.current = false; };
+    window.addEventListener('pointerup', finishPointer);
+    window.addEventListener('pointercancel', finishPointer);
+    return () => {
+      window.removeEventListener('pointerup', finishPointer);
+      window.removeEventListener('pointercancel', finishPointer);
+    };
+  }, []);
 
   const configRequestId = React.useRef(0);
   const modelRequestId = React.useRef(0);
@@ -704,6 +722,34 @@ export default function AgentWorkspace({
   const workspaceError = ownerScope
     ? configError
     : '当前账号身份不完整，Agent 会话暂不可用';
+  const scrollContentVersion = React.useMemo(() => ({ messages: session.messages, composerHeight, composerDockHeight }),
+    [session.messages, composerHeight, composerDockHeight]);
+  useAgentComputerControls({
+    context: ownerScope && currentSessionId ? { ownerScope, libraryId, sessionId: currentSessionId } : null,
+    active: workspaceActive && !managerMode,
+    blocked: session.isPreparing || resume.loading || resume.failed || sessionMutationBusy || permissionsSaving
+      || groupEditor !== undefined || !!groupPicker || !!archivedPreview,
+    textareaRef, scrollRef,
+    readDraft: session.readComputerDraft,
+    compareAndSetDraft: session.compareAndSetComputerDraft,
+    compositionActive: () => compositionGuard.current.isActive(),
+    navigationActive: () => indexNavigationRef.current || pointerInteractionRef.current,
+    isRunCurrent: runId => isAgentComputerRunCurrent(session.runs, currentSessionId, runId),
+    applyScroll: (top, beginApply) => {
+      const element = scrollRef.current;
+      if (!element || !workspaceActive || managerMode || pointerInteractionRef.current || indexNavigationRef.current) return false;
+      beginApply();
+      if (scrollFrameRef.current !== null) {
+        window.cancelAnimationFrame(scrollFrameRef.current);
+        scrollFrameRef.current = null;
+      }
+      shouldFollowScrollRef.current = false;
+      computerScrollRef.current = true;
+      element.scrollTo({ top, behavior: 'instant' });
+      return true;
+    },
+    scrollContentVersion,
+  });
   const hasTimelineContent = session.messages.length > 0
     || session.runs.length > 0
     || session.toolActivities.length > 0;
@@ -977,13 +1023,16 @@ export default function AgentWorkspace({
       /> : null}
       <AgentScroll
         data-directory-visible={!managerMode ? true : undefined}
-        onWheel={() => { indexNavigationRef.current = false; }}
-        onPointerDown={() => { indexNavigationRef.current = false; }}
+        onWheel={() => { indexNavigationRef.current = false; computerScrollRef.current = false; }}
+        onPointerDown={() => { indexNavigationRef.current = false; computerScrollRef.current = false; pointerInteractionRef.current = true; }}
         onKeyDown={event => {
-          if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End'].includes(event.key)) indexNavigationRef.current = false;
+          if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End'].includes(event.key)) {
+            indexNavigationRef.current = false;
+            computerScrollRef.current = false;
+          }
         }}
         onScroll={(event) => {
-          if (managerMode || indexNavigationRef.current) return;
+          if (managerMode || indexNavigationRef.current || computerScrollRef.current) return;
           const element = event.currentTarget;
           shouldFollowScrollRef.current = (
             element.scrollHeight - element.scrollTop - element.clientHeight <= 48
@@ -1096,7 +1145,7 @@ export default function AgentWorkspace({
         key={`${sessionScopeKey}:${session.sessionId}`}
         storageKey={`agent-index-marks:v1:${encodeURIComponent(sessionScopeKey)}:${session.sessionId}`}
         messages={session.messages} runs={session.runs} scrollRef={scrollRef}
-        onNavigate={() => { indexNavigationRef.current = true; shouldFollowScrollRef.current = false; }}
+        onNavigate={() => { indexNavigationRef.current = true; computerScrollRef.current = false; shouldFollowScrollRef.current = false; }}
       /> : null}
         {!managerMode ? <ComposerFrame ref={composerFrameRef}>
           <Composer onDragOver={event => { if (event.dataTransfer.types.includes('Files')) event.preventDefault(); }}
@@ -1104,6 +1153,7 @@ export default function AgentWorkspace({
             onSubmit={(event) => {
             event.preventDefault();
             if (resume.loading || resume.failed || sessionMutationBusy) return;
+            computerScrollRef.current = false;
             shouldFollowScrollRef.current = true;
             void session.submit();
           }}>
@@ -1126,6 +1176,7 @@ export default function AgentWorkspace({
               const composing = compositionGuard.current.keyDown(event.key, event.timeStamp);
               if (shouldSubmitAgentComposer(event, sessionBusy || resume.failed, composing)) {
                 event.preventDefault();
+                computerScrollRef.current = false;
                 shouldFollowScrollRef.current = true;
                 void session.submit();
               }

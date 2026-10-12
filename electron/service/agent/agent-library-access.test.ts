@@ -121,6 +121,11 @@ describe('Client-owned Agent directory authorization', () => {
     assertCurrent.mockRejectedValue(new Error('Group revoked'));
     await expect(guard.authorizeTool(call('file.read', { path: '/docs/a.txt' }), 'inside')).rejects.toThrow('revoked');
   });
+  it.each(['computer.windows', 'computer.observe', 'computer.click', 'computer.setText', 'computer.scroll'])('leaves %s authorization to its own window capability instead of library directory grants', async name => {
+    const { guard, call, approve } = fixture('group', 'read');
+    expect(await guard.authorizeTool(call(name, { observationId: 'test', elementId: 'test' }), name)).toBe(false);
+    expect(approve).not.toHaveBeenCalled();
+  });
 
   it('preserves explicit full access and rejects unsolicited out-of-scope metadata', async () => {
     const full = fixture('full-access');

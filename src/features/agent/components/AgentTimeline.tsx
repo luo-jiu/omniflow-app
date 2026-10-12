@@ -70,15 +70,20 @@ const LiveStatus = styled.div`
   display: flex;
   align-items: flex-start;
   gap: 7px;
-  min-height: 0;
+  box-sizing: border-box;
+  height: 31px;
+  flex: 0 0 31px;
   width: 100%;
   max-width: 100%;
   padding: 4px 0;
   font-size: 14px;
   font-weight: 400;
-  line-height: 1.65;
+  line-height: 23px;
   color: var(--app-text-muted);
+  overflow: hidden;
+  white-space: nowrap;
   > .semi-icon { flex: none; width: 20px; height: 20px; }
+  > span { overflow: hidden; text-overflow: ellipsis; }
 `;
 
 const UserMessageBubble = styled.article`
@@ -233,6 +238,7 @@ export default function AgentTimeline({
     [continuation, messages, prepared, runs],
   );
   const liveStatus = selectAgentLiveStatus(runs, messages, toolActivities);
+  const reserveLiveStatus = runs.some(run => run.status === 'running' || run.status === 'preparing');
   const expansionScope = JSON.stringify([serializeAgentOwnerScope(ownerScope), libraryId, messages[0]?.sessionId || runs[0]?.sessionId || '']);
   const { expanded: expandedRuns, setExpanded: setRunExpanded } = useAgentProcessExpansion(expansionScope);
   const restoredRuns = React.useRef(new Set(runs.filter(run => !isAgentRunActive(run)).map(run => run.id)));
@@ -260,7 +266,7 @@ export default function AgentTimeline({
     }));
   }, [continuation, items]);
 
-  const renderItem = (item: AgentTimelineItem) => {
+  const renderItem = (item: AgentTimelineItem, detailsVisible: boolean) => {
         if (item.type === 'run-status') {
           const labels: Record<string, string> = { failed: '执行失败', cancelled: '已停止', interrupted: '任务已中断' };
           return (
@@ -278,6 +284,7 @@ export default function AgentTimeline({
         if (item.type === 'tool-group') {
           return (
             <AgentToolActivityGroup
+              detailsVisible={detailsVisible}
               receiptBusyIds={receiptBusyIds}
               activities={item.activities}
               approvalBusyIds={approvalBusyIds}
@@ -294,6 +301,7 @@ export default function AgentTimeline({
         if (item.type === 'tool-activity') {
           return (
             <AgentToolActivityCard
+              detailsVisible={detailsVisible}
               receiptBusy={receiptBusyIds?.has(item.activity.id)}
               activity={item.activity}
               approvalBusy={Boolean(
@@ -367,7 +375,7 @@ export default function AgentTimeline({
             data-agent-question={user && item.type === 'message' ? item.message.id : undefined}
             aria-hidden={collapsed || undefined} {...(collapsed ? { inert: '' } : {})}>
             <div className="agent-timeline-entry-inner">
-              <div className="agent-timeline-entry-content">{renderItem(item)}</div>
+              <div className="agent-timeline-entry-content">{renderItem(item, !collapsed)}</div>
             </div>
           </div>
           {user ? elapsed : null}
@@ -376,10 +384,11 @@ export default function AgentTimeline({
       {[...runPresentations.values()].filter(presentation => !presentation.firstKey).map(({ run }) => (
         <AgentRunElapsed key={run.id} run={run} collapsible={false} expanded={false} onToggle={() => {}} />
       ))}
-      {liveStatus ? (
-        <LiveStatus role="status" aria-live="polite" data-agent-live-status={liveStatus.kind} key={`live:${liveStatus.runId}`}>
-          {liveStatus.kind === 'compaction' ? <IconShrink aria-hidden="true" /> : null}
-          <AgentActivityText $active>{liveStatus.label}</AgentActivityText>
+      {reserveLiveStatus ? (
+        <LiveStatus role={liveStatus ? 'status' : undefined} aria-live={liveStatus ? 'polite' : undefined}
+          aria-hidden={!liveStatus || undefined} data-agent-live-status={liveStatus?.kind} data-agent-live-status-slot>
+          {liveStatus?.kind === 'compaction' ? <IconShrink aria-hidden="true" /> : null}
+          {liveStatus ? <AgentActivityText $active>{liveStatus.label}</AgentActivityText> : null}
         </LiveStatus>
       ) : null}
     </Timeline>

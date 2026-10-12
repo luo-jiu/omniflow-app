@@ -2,6 +2,16 @@ import { describe, expect, it } from 'vitest';
 import { createAgentCompositionGuard, shouldSubmitAgentComposer } from './agent-composer-keyboard';
 
 describe('Agent composer keyboard', () => {
+  it('shares a read-only IME activity guard with the controlled input route', () => {
+    const guard = createAgentCompositionGuard();
+    expect(guard.isActive(0)).toBe(false);
+    guard.start(); expect(guard.isActive(10)).toBe(true);
+    guard.end(20); expect(guard.isActive(21)).toBe(true);
+    expect(guard.isActive(80)).toBe(false);
+    guard.keyDown('Enter', 21); expect(guard.isActive(100)).toBe(true);
+    guard.keyUp('Enter'); expect(guard.isActive(101)).toBe(false);
+    guard.start(); guard.reset(); expect(guard.isActive(102)).toBe(false);
+  });
   const enter = { key: 'Enter', shiftKey: false, nativeEvent: {} };
   it('submits ordinary Enter but preserves newlines, IME confirmation and running drafts', () => {
     expect(shouldSubmitAgentComposer(enter, false)).toBe(true);

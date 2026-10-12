@@ -60,6 +60,25 @@ describe('trusted model adaptation', () => {
     expect(buildAgentProviderRequestBody(openai, { ...input, modelAdapter: adapter })).toMatchObject({ parallel_tool_calls: false });
   });
 
+  it('hides desktop observation and clicks together when the frozen model cannot see images', async () => {
+    const execute = vi.fn(async () => ({ ok: true }));
+    const names = ['file.read', 'shell.run', 'attachment.view', 'computer.windows', 'computer.observe', 'computer.click', 'computer.setText', 'computer.scroll'];
+    const original = createAgentToolRegistry(names.map(name => ({ name, description: name, risk: 'read' as const,
+      inputSchema: { type: 'object' }, execute }))).createSnapshot();
+    const restricted = restrictAgentToolsForModel(original, resolveAgentModelAdapter(openai, input.model, { supportsImages: false }));
+    expect(restricted.list().map(tool => tool.name)).toEqual(['file.read', 'shell.run', 'computer.windows']);
+    for (const name of ['attachment.view', 'computer.observe', 'computer.click', 'computer.setText', 'computer.scroll']) {
+      expect(restricted.get(name)).toBeNull();
+      expect(restricted.validateInput(name, {}).ok).toBe(false);
+      await expect(restricted.execute(name, {}, {} as never)).rejects.toThrow('未开放');
+      expect(() => restricted.sealMainPreparedExecution(name, {} as never)).toThrow('未开放');
+    }
+    expect(execute).not.toHaveBeenCalled();
+    expect(original.list().map(tool => tool.name)).toEqual(names);
+    const visual = restrictAgentToolsForModel(original, resolveAgentModelAdapter(openai, input.model, { supportsImages: true, supportsShellTool: false }));
+    expect(visual.list().map(tool => tool.name)).toEqual(names.filter(name => name !== 'shell.run'));
+  });
+
   it('keeps optional-dependent Skills while model restrictions still block Tool execution after activation', async () => {
     const execute = vi.fn(async () => ({ ok: true }));
     const originalTools = createAgentToolRegistry(['file.read', 'shell.run'].map(name => ({

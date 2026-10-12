@@ -3,6 +3,8 @@ import type {
   AgentToolActivitySnapshot,
 } from '@/shared/agent/agent.types';
 import { buildFileFullName } from '@/utils/fileTreeSettings';
+import { normalizeAgentPreparedActionPublic } from '@/shared/agent/agent-prepared-action';
+import { normalizeComputerElementOperations } from '@/shared/computer-use/computer-use-contract';
 import { committedAgentFileParents, getPluginOperationPreparedAction } from './agent-published-file';
 
 type ToolPresenter = (
@@ -23,6 +25,139 @@ function textValue(value: unknown): string {
 function positiveId(value: unknown): number | null {
   const id = Number(value);
   return Number.isFinite(id) && id > 0 ? id : null;
+}
+
+const COMPUTER_REFERENCE_ID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u;
+const COMPUTER_AX_MAX_BYTES = 12 * 1024;
+
+function computerElementText(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0 && Array.from(value).length <= 200
+    && new TextEncoder().encode(value).length <= 1024
+    && !Array.from(value).some(character => {
+      const code = character.codePointAt(0)!;
+      return code < 32 || code >= 127 && code <= 159 || code >= 0x202a && code <= 0x202e
+        || code >= 0x2066 && code <= 0x2069 || character.length === 1 && code >= 0xd800 && code <= 0xdfff;
+    });
+}
+
+function computerElementDetails(data: Record<string, unknown>): AgentPresentationBlock[] {
+  if (!Array.isArray(data.elements) || data.elements.length > 128) return [];
+  const entries = data.elements.flatMap(value => {
+    const element = asRecord(value);
+    if (!element || typeof element.elementId !== 'string' || !COMPUTER_REFERENCE_ID.test(element.elementId)
+      || !computerElementText(element.label) || !computerElementText(element.role)) return [];
+    try {
+      const operations = normalizeComputerElementOperations(element.operations);
+      const actions = [
+        ...(operations.includes('press') ? ['点击'] : []),
+        ...(operations.includes('replaceText') ? ['替换文本'] : []),
+        ...(operations.includes('insertText') ? ['插入文本'] : []),
+        ...(operations.some(operation => operation.startsWith('scroll')) ? ['滚动'] : []),
+      ];
+      return [{ label: element.label, value: `${element.role} · ${actions.join('、')}` }];
+    } catch { return []; }
+  });
+  return entries.length ? [{ type: 'details', title: data.elementsTruncated === true ? '控件 · 已截断' : '控件', entries }] : [];
+}
+
+function computerObservationScope(data: Record<string, unknown>): Pick<Extract<AgentPresentationBlock, { type: 'computer-ax' }>, 'scope' | 'scopeScanComplete'> | null {
+  const scopeDescriptor = Object.getOwnPropertyDescriptor(data, 'scope');
+  if (!scopeDescriptor) return Object.prototype.hasOwnProperty.call(data, 'scopeScanComplete') ? null : {};
+  const completeDescriptor = Object.getOwnPropertyDescriptor(data, 'scopeScanComplete');
+  if (!scopeDescriptor.enumerable || !('value' in scopeDescriptor) || !completeDescriptor?.enumerable
+    || !('value' in completeDescriptor) || typeof completeDescriptor.value !== 'boolean') return null;
+  const scope: unknown = scopeDescriptor.value;
+  if (!scope || typeof scope !== 'object' || Array.isArray(scope)
+    || ![Object.prototype, null].includes(Object.getPrototypeOf(scope))) return null;
+  const descriptors = Object.getOwnPropertyDescriptors(scope);
+  const keys = Reflect.ownKeys(scope);
+  if (keys.some(key => typeof key !== 'string' || !['kind', 'ancestorLevels'].includes(key))
+    || Object.values(descriptors).some(descriptor => !descriptor.enumerable || !('value' in descriptor))) return null;
+  const kind = descriptors.kind?.value;
+  if (kind === 'window' && keys.length === 1) return { scope: { kind }, scopeScanComplete: completeDescriptor.value };
+  const levels: unknown = descriptors.ancestorLevels?.value;
+  const candidateComplete = Object.getOwnPropertyDescriptor(data, 'candidateScanComplete');
+  const coordinateReady = Object.getOwnPropertyDescriptor(data, 'coordinateClickReady');
+  if (kind !== 'element-ancestor' || keys.length !== 2 || typeof levels !== 'number' || !Number.isSafeInteger(levels)
+    || levels < 0 || levels > 3 || !candidateComplete?.enumerable || !('value' in candidateComplete) || candidateComplete.value !== false
+    || !coordinateReady?.enumerable || !('value' in coordinateReady) || coordinateReady.value !== false) return null;
+  return { scope: { kind, ancestorLevels: levels }, scopeScanComplete: completeDescriptor.value };
+}
+
+function builtInComputerAction(activity: AgentToolActivitySnapshot, libraryId?: number) {
+  const operation = activity.toolMetadata?.builtinComputerTool;
+  if (!operation || activity.pluginSource || activity.toolMetadata?.kind !== 'business'
+    || activity.call.name !== `computer.${operation}`) return null;
+  try {
+    const action = normalizeAgentPreparedActionPublic(activity.preparation?.action);
+    return (action.kind === 'computer.observe' || action.kind === 'computer.click'
+      || action.kind === 'computer.setText' || action.kind === 'computer.scroll')
+      && action.kind === activity.call.name && (libraryId === undefined || action.libraryId === libraryId) ? action : null;
+  } catch {
+    return null;
+  }
+}
+
+function computerObservationPresenter(activity: AgentToolActivitySnapshot, libraryId: number): AgentPresentationBlock[] {
+  const action = builtInComputerAction(activity, libraryId);
+  const data = asRecord(activity.result?.data);
+  if (action?.kind !== 'computer.observe' || activity.result?.ok !== true || !data
+    || (action.version === 2 ? data.captureScope !== 'window' || data.targetId !== action.targetId
+      : data.displayId !== action.displayId)
+    || typeof data.observationId !== 'string' || !COMPUTER_REFERENCE_ID.test(data.observationId)) return [];
+  const mode = action.version === 2 ? action.mode ?? 'both' : 'both';
+  if (action.version === 2 && (mode === 'ax' ? data.observationSource !== 'ax'
+    : data.observationSource !== undefined && data.observationSource !== 'screenshot')) return [];
+  const blocks: AgentPresentationBlock[] = [];
+  if (mode !== 'ax' && typeof data.imageId === 'string' && COMPUTER_REFERENCE_ID.test(data.imageId)
+    && Number.isInteger(data.screenshotWidth) && Number(data.screenshotWidth) >= 1 && Number(data.screenshotWidth) <= 2048
+    && Number.isInteger(data.screenshotHeight) && Number(data.screenshotHeight) >= 1 && Number(data.screenshotHeight) <= 2048) {
+    blocks.push({ type: 'attachment-image', attachmentId: data.imageId,
+      alt: action.version === 2 ? `${action.applicationLabel} · ${action.windowLabel}的窗口截图` : `${action.displayLabel}的屏幕截图` });
+  }
+  const observationScope = computerObservationScope(data);
+  if (!observationScope) return blocks;
+  if (action.version === 2 && mode !== 'screenshot' && typeof data.axTree === 'string' && data.axTree.trim()
+    && data.axTree.length <= COMPUTER_AX_MAX_BYTES && new TextEncoder().encode(data.axTree).length <= COMPUTER_AX_MAX_BYTES
+    && !Array.from(data.axTree).some(character => {
+      const code = character.codePointAt(0)!;
+      return code < 32 && code !== 10 || code >= 127 && code <= 159 || code >= 0x202a && code <= 0x202e
+        || code >= 0x2066 && code <= 0x2069 || character.length === 1 && code >= 0xd800 && code <= 0xdfff;
+    })
+    && typeof data.axTreeTruncated === 'boolean') {
+    blocks.push({ type: 'computer-ax', tree: data.axTree, truncated: data.axTreeTruncated, ...observationScope });
+  }
+  if (mode === 'ax') blocks.push(...computerElementDetails(data));
+  return blocks;
+}
+
+function computerClickDispatched(activity: AgentToolActivitySnapshot, libraryId: number): boolean {
+  const action = builtInComputerAction(activity, libraryId);
+  const data = asRecord(activity.result?.data);
+  return activity.status === 'completed' && activity.result?.ok === true && action?.kind === 'computer.click'
+    && data?.operation === 'computer.click' && data.operationId === activity.id && data.dispatchState === 'dispatched'
+    && data.mutationCommitState === 'committed' && data.observationId === action.observationId
+    && (action.version === 1 ? data.displayId === action.displayId : data.targetId === action.targetId)
+    && (action.version === 3 ? data.elementId === action.elementId
+      && data.libraryId === action.libraryId && data.applicationLabel === action.applicationLabel
+      && data.windowLabel === action.windowLabel && data.nextAction === 'observe' && data.retryAllowed === false
+      : data.x === action.x && data.y === action.y);
+}
+
+function computerInputDispatched(activity: AgentToolActivitySnapshot, libraryId: number): boolean {
+  const action = builtInComputerAction(activity, libraryId);
+  const data = asRecord(activity.result?.data);
+  if (activity.status !== 'completed' || activity.result?.ok !== true
+    || (action?.kind !== 'computer.setText' && action?.kind !== 'computer.scroll')
+    || data?.operation !== action.kind || data.operationId !== activity.id
+    || data.dispatchState !== 'dispatched' || data.mutationCommitState !== 'committed'
+    || data.libraryId !== action.libraryId || data.targetId !== action.targetId
+    || data.applicationLabel !== action.applicationLabel || data.windowLabel !== action.windowLabel
+    || data.observationId !== action.observationId || data.elementId !== action.elementId
+    || data.nextAction !== 'observe' || data.retryAllowed !== false) return false;
+  return action.kind === 'computer.setText'
+    ? data.mode === action.mode && data.textLength === action.textLength && data.textBytes === action.textBytes
+    : data.direction === action.direction && data.unit === action.unit;
 }
 
 function formatBytes(value: unknown): string {
@@ -111,6 +246,10 @@ const TOOL_TITLES: Record<string, string> = {
   'attachment.inspect': '检查附件',
   'attachment.query': '查询工作表',
   'attachment.view': '查看附件页面',
+  'computer.observe': '查看屏幕',
+  'computer.click': '点击屏幕',
+  'computer.setText': '输入文本',
+  'computer.scroll': '滚动窗口',
   'file.write': '保存文件',
   'file.delete': '移入回收站',
   'file.rename': '重命名文件',
@@ -144,6 +283,13 @@ export function buildAgentToolSummary(activity: AgentToolActivitySnapshot, libra
     ...(activity.call.name === 'file.read' ? { subject: path.replace(/\\/g, '/').split('/').pop() || undefined } : {}) };
   }
   if (activity.status !== 'completed') return { label: getAgentToolTitle(activity) };
+  if (activity.call.name === 'computer.observe') return { label: builtInComputerAction(activity, libraryId)?.version === 2 ? '已查看窗口' : '已查看屏幕' };
+  if (activity.call.name === 'computer.click') return { label: computerClickDispatched(activity, libraryId) ? '已发送点击' : getAgentToolTitle(activity) };
+  if (activity.call.name === 'computer.setText' || activity.call.name === 'computer.scroll') return {
+    label: computerInputDispatched(activity, libraryId)
+      ? activity.call.name === 'computer.setText' ? '已发送文本输入' : '已发送滚动'
+      : getAgentToolTitle(activity),
+  };
   if (activity.call.name === 'file.write') return { label: '已保存', subject: textValue(data?.fileName) || undefined };
   if (activity.call.name === 'file.grep') return {
     label: data?.complete === false && !data?.hasMore ? '已搜索正文 · 结果不完整' : '已搜索正文',
@@ -185,12 +331,16 @@ export function buildAgentToolSummary(activity: AgentToolActivitySnapshot, libra
 }
 
 const TOOL_PRESENTERS: Record<string, ToolPresenter> = {
+  'computer.observe': computerObservationPresenter,
   'directory.create': artifactPresenter,
   'media.extractAudio': artifactPresenter,
   'media.inspect': mediaInspectPresenter,
 };
 
 export function getAgentToolTitle(activity: AgentToolActivitySnapshot): string {
+  const computerAction = builtInComputerAction(activity);
+  if (computerAction?.kind === 'computer.observe' && computerAction.version === 2) return '查看窗口';
+  if (computerAction?.kind === 'computer.click' && computerAction.version !== 1) return '点击窗口';
   return getAgentToolNameTitle(activity.call.name);
 }
 
@@ -271,6 +421,7 @@ export function buildAgentToolPresentation(
     }) });
   }
   if (activity.status === 'completed') {
+    if (computerClickDispatched(activity, libraryId) || computerInputDispatched(activity, libraryId)) return [];
     const specific = TOOL_PRESENTERS[activity.call.name]?.(activity, libraryId) || [];
     return [
       ...pluginSourceBlocks,

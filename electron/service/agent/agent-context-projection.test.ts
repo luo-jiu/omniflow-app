@@ -7,6 +7,7 @@ import type {
   AgentToolActivitySnapshot,
 } from '@/shared/agent/agent.types';
 import type { AgentConversationSummaryV1 } from './agent-conversation-summary';
+import { projectAgentToolResultForProvider } from './agent-tool-result-projection';
 import {
   createAgentContextProjection,
   estimateAgentTextTokens,
@@ -80,6 +81,37 @@ function toolActivity(runId: string): AgentToolActivitySnapshot {
     runId,
     sessionId: 'session-1',
     status: 'completed',
+  };
+}
+
+function computerObservation(runId: string): AgentToolActivitySnapshot {
+  const targetId = '805f4b48-ec6e-4f78-b45b-000000001000';
+  const observationId = '805f4b48-ec6e-4f78-b45b-000000001001';
+  return {
+    ...toolActivity(runId),
+    call: { id: `call-${runId}`, input: {}, name: 'computer.observe' },
+    preparation: {
+      action: {
+        applicationLabel: '测试应用', kind: 'computer.observe', libraryId: 3,
+        mode: 'ax', targetId, version: 2, windowLabel: '测试窗口',
+      },
+      preparedActionId: `prepared-${runId}`,
+      snapshotHash: 'd'.repeat(64),
+    },
+    result: { ok: true, message: '已查看窗口', data: {
+      captureScope: 'window', targetId, observationId,
+      applicationLabel: '测试应用', windowLabel: '测试窗口',
+      mode: 'ax', observationSource: 'ax', capturedAt: '2026-10-12T03:00:00.000Z',
+      candidateScanComplete: false, coordinateClickReady: false,
+      elements: Array.from({ length: 128 }, (_, index) => ({
+        elementId: `805f4b48-ec6e-4f78-b45b-${index.toString(16).padStart(12, '0')}`,
+        label: `按钮 ${index}`, operations: ['press'], role: 'AXButton',
+      })),
+      axTree: 'AXWindow\n中'.repeat(1024), axTreeTruncated: false,
+      scope: { kind: 'element-ancestor', ancestorLevels: 2 }, scopeScanComplete: true,
+      changeSummary: { baselineAvailable: true, scopeScanComplete: true, previousScopeScanComplete: false },
+    } },
+    toolMetadata: { builtinComputerTool: 'observe', kind: 'business', risk: 'read' },
   };
 }
 
@@ -346,6 +378,106 @@ describe('Agent context projection', () => {
     expect(serializedFacts).not.toContain('run-active');
     expect(serializedFacts).toContain('run-recent-1');
     expect(serializedFacts).toContain('run-recent-12');
+  });
+
+  it('retains trusted historical local observation scope under the unchanged per-fact budget', () => {
+    const activity = computerObservation('run-observe');
+    const projection = createAgentContextProjection({
+      fixedInputTokens: 100,
+      messages: [message('m-current', 'run-current', 'user', '继续处理')],
+      runs: [run('run-observe', 'completed'), run('run-current', 'running')],
+      toolActivities: [activity],
+    });
+    const memory = JSON.parse(projection.messages[1].content);
+    const fact = memory.recentExecutionFacts[0];
+
+    expect(fact.result.data).toMatchObject({
+      observationId: '805f4b48-ec6e-4f78-b45b-000000001001',
+      scope: { kind: 'element-ancestor', ancestorLevels: 2 }, scopeScanComplete: true,
+      candidateScanComplete: false, coordinateClickReady: false,
+      changeSummary: { scopeScanComplete: true, previousScopeScanComplete: false },
+      elementsTruncated: true, axTreeTruncated: true,
+    });
+    expect(fact.result.data.scope).toEqual({ kind: 'element-ancestor', ancestorLevels: 2 });
+    expect(estimateAgentTextTokens(JSON.stringify(fact.result))).toBeLessThanOrEqual(1024);
+    expect(projection.estimatedHistoryTokens).toBeLessThanOrEqual(projection.historyBudgetTokens);
+  });
+
+  it.each(['name only', 'plugin source', 'invalid action', 'control metadata'] as const)(
+    'keeps historical observations with %s on the generic projection path', reason => {
+      let activity = computerObservation('run-observe');
+      if (reason === 'name only') activity = { ...activity, toolMetadata: undefined };
+      if (reason === 'plugin source') activity = { ...activity, pluginSource: {
+        pluginId: 'fake', pluginVersion: '1', packageFingerprint: 'a'.repeat(64),
+        toolId: 'computer.observe', registrationId: 'fake',
+      } };
+      const action = activity.preparation!.action;
+      if (reason === 'invalid action' && action.kind === 'computer.observe' && action.version === 2) {
+        activity = { ...activity, preparation: {
+          ...activity.preparation!, action: { ...action, targetId: 'invalid' },
+        } };
+      }
+      if (reason === 'control metadata') activity = { ...activity, toolMetadata: {
+        builtinComputerTool: 'observe', kind: 'control', risk: 'read',
+      } };
+      const projection = createAgentContextProjection({
+        fixedInputTokens: 100,
+        messages: [message('m-current', 'run-current', 'user', '继续处理')],
+        runs: [run('run-observe', 'completed'), run('run-current', 'running')],
+        toolActivities: [activity],
+      });
+      const memory = JSON.parse(projection.messages[1].content);
+      const fact = memory.recentExecutionFacts[0];
+
+      expect(fact.result).toEqual(JSON.parse(projectAgentToolResultForProvider(activity.result!, 1024).content));
+      expect(fact.result).not.toEqual(JSON.parse(projectAgentToolResultForProvider(activity.result!, 1024,
+        { mode: 'computer-observe' }).content));
+    },
+  );
+
+  it.each(['malformed scope', 'missing scoped controls', 'insufficient scope budget'] as const)(
+    'omits a trusted historical observation with %s and keeps older facts and the current Run usable', reason => {
+      const activity = computerObservation('run-observe');
+      if (reason === 'malformed scope') {
+        (activity.result!.data as Record<string, unknown>).scope = {
+          kind: 'element-ancestor', ancestorLevels: 2, path: [0, 1], anchor: 'private-anchor',
+        };
+      }
+      if (reason === 'missing scoped controls') delete (activity.result!.data as Record<string, unknown>).elements;
+      const projection = createAgentContextProjection({
+        budget: { contextWindowTokens: 16_384 },
+        fixedInputTokens: reason === 'insufficient scope budget' ? 10_000 : 100,
+        messages: [message('m-current', 'run-current', 'user', '继续处理')],
+        runs: [run('run-old', 'completed'), run('run-observe', 'completed'), run('run-current', 'running')],
+        toolActivities: [toolActivity('run-old'), activity],
+      });
+      const memory = JSON.parse(projection.messages[1].content);
+
+      expect(memory.recentExecutionFacts.map((fact: { runId: string }) => fact.runId)).toEqual(['run-old']);
+      expect(projection.messages.at(-1)?.content).toBe('继续处理');
+      expect(JSON.stringify(projection.messages)).not.toContain('private-anchor');
+      expect(projection.estimatedHistoryTokens).toBeLessThanOrEqual(projection.historyBudgetTokens);
+    },
+  );
+
+  it('preserves compatible historical observations without the new scope fields', () => {
+    const activity = computerObservation('run-observe');
+    const data = activity.result!.data as Record<string, unknown>;
+    delete data.scope;
+    delete data.scopeScanComplete;
+    const projection = createAgentContextProjection({
+      fixedInputTokens: 100,
+      messages: [message('m-current', 'run-current', 'user', '继续处理')],
+      runs: [run('run-observe', 'completed'), run('run-current', 'running')],
+      toolActivities: [activity],
+    });
+    const memory = JSON.parse(projection.messages[1].content);
+    const fact = memory.recentExecutionFacts[0];
+
+    expect(fact).toMatchObject({ runId: 'run-observe', toolName: 'computer.observe' });
+    expect(fact.result.data.observationId).toBe('805f4b48-ec6e-4f78-b45b-000000001001');
+    expect(fact.result.data.scope).toBeUndefined();
+    expect(fact.result.data.scopeScanComplete).toBeUndefined();
   });
 
   it('keeps the latest complete Shell stdout available after a cancelled Run', () => {

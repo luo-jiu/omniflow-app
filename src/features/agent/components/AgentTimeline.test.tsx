@@ -78,6 +78,53 @@ afterEach(() => {
 });
 
 describe('AgentTimeline commentary presentation', () => {
+  it('preserves one computer entry and the live status slot while a new scroll operation prepares', () => {
+    const run: AgentRunSnapshot = { id: 'run-1', sessionId: 'session-1', model: 'test', profileId: 'test',
+      reasoningEffort: 'medium', revision: 1, status: 'running', userPrompt: 'test',
+      createdAt: '2026-09-10T00:00:00Z', updatedAt: '2026-09-10T00:00:00Z' };
+    const observe: AgentToolActivitySnapshot = { ...toolActivity(),
+      call: { id: 'observe', input: {}, name: 'computer.observe' },
+      toolMetadata: { kind: 'business', risk: 'read', builtinComputerTool: 'observe' },
+      preparation: { preparedActionId: 'prepared-observe', snapshotHash: 'a'.repeat(64), action: {
+        kind: 'computer.observe', version: 2, libraryId: 3, targetId: '12022dc1-f61c-4c2a-aac6-2963b60e5f7a',
+        applicationLabel: 'OmniFlow', windowLabel: 'Win Agent' } } };
+    const preparing: AgentToolActivitySnapshot = { ...toolActivity(), id: 'scroll', ordinal: 2,
+      call: { id: 'scroll', input: {}, name: 'computer.scroll' }, status: 'preparing',
+      permissionBehavior: 'ask', result: undefined, toolMetadata: { kind: 'business', risk: 'write', builtinComputerTool: 'scroll' } };
+    const props = { approvalBusyIds: new Set<string>(), interactionBusyIds: new Set<string>(), libraryId: 3,
+      ownerScope: null, onResolveApproval: vi.fn(), messages: [], runs: [run], toolActivities: [observe] };
+    let renderer!: TestRenderer.ReactTestRenderer;
+    act(() => { renderer = TestRenderer.create(<AgentTimeline {...props} />); });
+    renderers.push(renderer);
+    const entries = () => renderer.root.findAll(node => node.type === 'div' && node.props.className === 'agent-timeline-entry');
+    const slot = () => renderer.root.findAll(node => node.type === 'div' && node.props['data-agent-live-status-slot'])[0];
+    expect(entries()).toHaveLength(1);
+    const computerEntry = entries()[0];
+    const statusSlot = slot();
+    expect(statusSlot.props['data-agent-live-status']).toBe('working');
+    act(() => renderer.update(<AgentTimeline {...props} runs={[{ ...run, status: 'preparing', revision: 2 }]}
+      toolActivities={[observe, preparing]} />));
+    expect(entries()).toEqual([computerEntry]);
+    expect(slot()).toBe(statusSlot);
+    expect(statusSlot.props['aria-hidden']).toBe(true);
+    expect(statusSlot.findAllByType('span')).toHaveLength(0);
+    const scroll: AgentToolActivitySnapshot = { ...preparing, status: 'running', permissionBehavior: 'allow',
+      preparation: { preparedActionId: 'prepared-scroll', snapshotHash: 'a'.repeat(64), action: {
+        kind: 'computer.scroll', version: 1, libraryId: 3, targetId: '12022dc1-f61c-4c2a-aac6-2963b60e5f7a',
+        applicationLabel: 'OmniFlow', windowLabel: 'Win Agent', observationId: '237e3952-2a40-4c7b-b2f4-bec335a79cce',
+        elementId: 'b5de6d3f-b8ec-4e73-a6be-81b717adf7ba', direction: 'up', unit: 'page' } } };
+    act(() => renderer.update(<AgentTimeline {...props} toolActivities={[observe, scroll]} />));
+    expect(entries()).toEqual([computerEntry]);
+    expect(slot()).toBe(statusSlot);
+    act(() => renderer.update(<AgentTimeline {...props} toolActivities={[observe, { ...scroll, status: 'completed', result: { ok: true } }]} />));
+    expect(entries()).toEqual([computerEntry]);
+    expect(slot()).toBe(statusSlot);
+    expect(statusSlot.props['data-agent-live-status']).toBe('working');
+    expect(statusSlot.props['aria-hidden']).toBeUndefined();
+    act(() => renderer.update(<AgentTimeline {...props} runs={[{ ...run, status: 'completed' }]} />));
+    expect(slot()).toBeUndefined();
+  });
+
   it('shows a continued task as one question and collapses all attempts under one final result', () => {
     const stopped: AgentRunSnapshot = {
       id: 'continued-root', sessionId: 'continued-session', model: 'test', profileId: 'test', reasoningEffort: 'medium',

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type {
+  AgentComputerSetTextPreparedActionPublicV1,
   AgentMediaArtifactUploadResult,
   AgentMediaExtractAudioPreparedActionPublicV1,
   AgentPreparedActionPublic,
@@ -18,6 +19,10 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('./agent-provider-client', () => ({
   streamAgentProviderTurn: mocks.streamAgentProviderTurn,
+}));
+vi.mock('electron', async (importOriginal) => ({
+  ...await importOriginal<typeof import('electron')>(),
+  app: { getPath: () => '/isolated/orchestrator-no-filesystem-access' },
 }));
 vi.mock('../aiServiceClient', () => ({
   streamAIServiceProfile: mocks.streamAIServiceProfile,
@@ -42,6 +47,12 @@ vi.mock('./capabilities/agent-capability-runtime', () => ({
 }));
 
 import { createAgentOrchestrator } from './agent-orchestrator';
+import { AgentAttachmentStore } from './agent-attachment-store';
+import type { AgentComputerSharedWindow } from '../../platform/computer-use';
+import { createAgentComputerRuntime, type AgentComputerRuntimeDependencies } from './computer/agent-computer-runtime';
+import { agentComputerRuntime } from './computer/agent-computer-service-runtime';
+import { agentFileAuthorityBroker } from './agent-file-authority-broker';
+import { getBuiltInAgentComputerTools } from './tools/computer-tools';
 import { AGENT_ACTIVE_CONTEXT_SUMMARY_PREFIX } from './agent-active-context';
 import { AGENT_COMPLETION_CHECK_PROMPT } from './agent-completion-check';
 import type { AgentProviderMessage } from './agent-provider-model';
@@ -73,6 +84,7 @@ import { sealAgentShellPreparedActionPublicV1 } from './shell/agent-shell-prepar
 import { builtInAgentSkillRegistry } from './skills/agent-skill-runtime';
 import { resolveAgentSkillActivationResult } from './skills/skill-activate-tool';
 import { createAIServiceRunSessionRegistry } from '../aiServiceRunSession';
+import { validateComputerText } from '../../../src/shared/computer-use/computer-use-contract';
 
 const OWNER_SCOPE = {
   accountScope: 'user:7',
@@ -254,6 +266,762 @@ describe('Agent orchestrator', () => {
       ...options,
     });
   }
+
+  function computerTextFixture(behavior: 'allow' | 'ask' = 'allow', toolInput: Record<string, unknown> = {
+    observationId: '83fc584b-037d-4c82-8883-a609846ea0d4', elementId: '805f4b48-ec6e-4f78-b45b-e01f10bb247e',
+    mode: 'replace', text: '中🪟a',
+  }, requestedToolName = 'computer.setText') {
+    const prepareMain = vi.fn<NonNullable<AgentTool['prepareMain']>>(async input => {
+      const value = input as typeof toolInput;
+      const mode = value.mode as 'replace' | 'insert';
+      const { text, textLength, textBytes } = validateComputerText(value.text, mode);
+      const publicAction: AgentComputerSetTextPreparedActionPublicV1 = { kind: 'computer.setText', version: 1, libraryId: 3,
+        targetId: '237e3952-2a40-4c7b-b2f4-bec335a79cce', applicationLabel: 'OmniFlow', windowLabel: 'QA',
+        observationId: String(value.observationId), elementId: String(value.elementId), mode, textLength, textBytes };
+      return { binding: { text }, publicAction, decision: { behavior, risk: 'write',
+        preview: { title: text, description: `prepared ${text}`, risk: 'write' } } };
+    });
+    const execute = vi.fn<NonNullable<AgentTool['execute']>>(async (input, context) => {
+      expect(input).toEqual(toolInput);
+      expect(context.preparation?.binding).toEqual({ text: toolInput.text });
+      expect(context.preparation?.identity.toolInputHash).toBe(hashAgentToolInputForPreparation(toolInput));
+      const action = context.preparation!.publicAction as AgentComputerSetTextPreparedActionPublicV1;
+      context.onProgress({ message: `progress ${toolInput.text}` });
+      const result = { ok: true, message: `executed ${toolInput.text}`, data: { ...action,
+        operation: 'computer.setText', operationId: context.preparation!.identity.toolRunId, dispatchState: 'dispatched',
+        mutationCommitState: 'committed', nextAction: 'observe', retryAllowed: false,
+        text: toolInput.text, textHash: 'main-only-text-hash', nested: { text: toolInput.text } } };
+      context.commitSettlement?.begin({ ok: false, data: { ...result.data, dispatchState: 'unknown', mutationCommitState: 'commit_unknown' } });
+      context.commitSettlement?.settle(result);
+      return result;
+    });
+    const tool: AgentTool = { name: 'computer.setText', registrationId: 'builtin:computer.setText@1', executor: 'main', risk: 'write',
+      description: 'Isolated native text tool', inputSchema: { type: 'object', additionalProperties: false,
+        properties: { observationId: { type: 'string' }, elementId: { type: 'string' },
+          mode: { enum: ['replace', 'insert'], type: 'string' }, text: { type: 'string' } },
+        required: ['observationId', 'elementId', 'mode', 'text'] }, prepareMain, execute };
+    const registry = createAgentToolRegistry([tool]);
+    const snapshotSpy = vi.spyOn(agentToolRegistry, 'createSnapshot').mockReturnValue(registry.createSnapshot());
+    mocks.streamAgentProviderTurn
+      .mockResolvedValueOnce({ content: '', toolCalls: [{ id: 'isolated-text', name: requestedToolName, input: toolInput }] })
+      .mockImplementationOnce(async (_connection, _input, onDelta) => {
+        onDelta('文字工具验证完成。'); return { content: '文字工具验证完成。', toolCalls: [] };
+      });
+    return { prepareMain, execute, toolInput, restore: () => snapshotSpy.mockRestore() };
+  }
+
+  it.each(['allow', 'ask'] as const)('keeps builtin setText body private through %s preparation, execution, SQLite, IPC and provider continuation', async behavior => {
+    const fixture = computerTextFixture(behavior);
+    const webContents = sender();
+    const orchestrator = createOrchestrator({ contextBudget: { contextWindowTokens: 128_000 },
+      getModelMetadata: async () => ({ supportsImages: true }) });
+    try {
+      const started = await orchestrator.start(webContents as never, { ...request(), userPrompt: '验证文字输入工具' });
+      if (behavior === 'ask') {
+        const approval = await pendingWindowApproval(webContents);
+        expect(JSON.stringify(approval)).not.toContain(fixture.toolInput.text);
+        expect(approval.call.input).toEqual({ observationId: fixture.toolInput.observationId, elementId: fixture.toolInput.elementId,
+          mode: 'replace', textLength: 3, textBytes: 8 });
+        expect(approval.preview).toMatchObject({ title: '输入窗口文字', description: expect.stringContaining('3 个字符，8 字节') });
+        await expect(approveWindow(orchestrator, webContents, approval)).resolves.toMatchObject({ approved: true });
+      }
+      await waitForCompletedFinal(webContents, '文字工具验证完成。', started);
+      expect(fixture.prepareMain).toHaveBeenCalledTimes(behavior === 'ask' ? 2 : 1);
+      for (const [input] of fixture.prepareMain.mock.calls) expect(input).toEqual(fixture.toolInput);
+      expect(fixture.execute).toHaveBeenCalledOnce();
+      const session = (await store.getSession(started.sessionId, OWNER_SCOPE, 3))!;
+      const activity = session.toolActivities[0];
+      expect(activity.call.input).toEqual({ observationId: fixture.toolInput.observationId, elementId: fixture.toolInput.elementId,
+        mode: 'replace', textLength: 3, textBytes: 8 });
+      expect(activity.preparation?.action).toMatchObject({ kind: 'computer.setText', textLength: 3, textBytes: 8 });
+      expect(activity.progress).toEqual({ message: '正在输入文字' });
+      expect(activity.result).toMatchObject({ ok: true, message: '已发送文字输入', data: { operation: 'computer.setText',
+        operationId: activity.id, dispatchState: 'dispatched', mutationCommitState: 'committed', nextAction: 'observe', retryAllowed: false } });
+      expect(activity.preparation?.action).not.toHaveProperty('text');
+      expect(activity.preparation?.action).not.toHaveProperty('textHash');
+      const continuation = mocks.streamAgentProviderTurn.mock.calls[1][1];
+      expect(continuation.messages.find((message: AgentProviderMessage) => message.role === 'assistant' && message.toolCalls?.length)?.toolCalls?.[0].input)
+        .toEqual(activity.call.input);
+      expect(JSON.parse(continuation.messages.at(-1).content)).toEqual(activity.result);
+      for (const value of [session, webContents.send.mock.calls, continuation]) {
+        expect(JSON.stringify(value)).not.toContain(fixture.toolInput.text);
+        expect(JSON.stringify(value)).not.toContain('main-only-text-hash');
+      }
+      expect(fixture.toolInput.text).toBe('中🪟a');
+    } finally { await orchestrator.shutdown(); fixture.restore(); }
+  });
+
+  it('denies sensitive original setText input before preparation while keeping the private body out of every public record', async () => {
+    const fixture = computerTextFixture('allow', { observationId: '83fc584b-037d-4c82-8883-a609846ea0d4',
+      elementId: '805f4b48-ec6e-4f78-b45b-e01f10bb247e', mode: 'replace', text: 'password=private-credential-value' });
+    const webContents = sender();
+    const orchestrator = createOrchestrator({ getModelMetadata: async () => ({ supportsImages: true }) });
+    try {
+      const started = await orchestrator.start(webContents as never, { ...request(), userPrompt: '验证文字输入安全检查' });
+      await waitForCompletedFinal(webContents, '文字工具验证完成。', started);
+      expect(fixture.prepareMain).not.toHaveBeenCalled();
+      expect(fixture.execute).not.toHaveBeenCalled();
+      const session = (await store.getSession(started.sessionId, OWNER_SCOPE, 3))!;
+      expect(session.toolActivities[0].result).toEqual({ ok: false, message: 'Agent Tool 参数包含不能进入会话的敏感凭据' });
+      for (const value of [session, webContents.send.mock.calls, mocks.streamAgentProviderTurn.mock.calls[1][1]]) {
+        expect(JSON.stringify(value)).not.toContain('private-credential-value');
+        expect(JSON.stringify(value)).not.toContain('password=');
+      }
+    } finally { await orchestrator.shutdown(); fixture.restore(); }
+  });
+
+  it.each(['computer.setText', 'computer_setText'])('keeps filtered builtin setText body private when the provider returns unavailable %s', async name => {
+    const fixture = computerTextFixture('allow', undefined, name);
+    const webContents = sender();
+    const orchestrator = createOrchestrator({ getModelMetadata: async () => ({ supportsImages: false }) });
+    try {
+      const started = await orchestrator.start(webContents as never, { ...request(), userPrompt: '验证不可用文字工具拒绝路径' });
+      await waitForCompletedFinal(webContents, '文字工具验证完成。', started);
+      expect(mocks.streamAgentProviderTurn.mock.calls[0][1].tools.map((tool: { name: string }) => tool.name))
+        .not.toContain('computer.setText');
+      expect(fixture.prepareMain).not.toHaveBeenCalled();
+      expect(fixture.execute).not.toHaveBeenCalled();
+      const session = (await store.getSession(started.sessionId, OWNER_SCOPE, 3))!;
+      expect(session.toolActivities[0].permissionBehavior).toBe('deny');
+      expect(session.toolActivities[0].call).toMatchObject({ name, input: { observationId: fixture.toolInput.observationId,
+        elementId: fixture.toolInput.elementId, mode: 'replace', textLength: 3, textBytes: 8 } });
+      for (const value of [session, webContents.send.mock.calls, mocks.streamAgentProviderTurn.mock.calls[1][1]]) {
+        expect(JSON.stringify(value)).not.toContain(fixture.toolInput.text);
+      }
+    } finally { await orchestrator.shutdown(); fixture.restore(); }
+  });
+
+  it.each(['prepare-error', 'invalid-schema'] as const)('does not expose setText body through %s failures', async failure => {
+    const input = { observationId: '83fc584b-037d-4c82-8883-a609846ea0d4',
+      elementId: '805f4b48-ec6e-4f78-b45b-e01f10bb247e', mode: failure === 'invalid-schema' ? 'bad-mode' : 'replace', text: '中🪟a' };
+    const fixture = computerTextFixture('allow', input);
+    if (failure === 'prepare-error') fixture.prepareMain.mockRejectedValueOnce(new Error(`failed on ${input.text}`));
+    const webContents = sender();
+    const orchestrator = createOrchestrator({ getModelMetadata: async () => ({ supportsImages: true }) });
+    try {
+      const started = await orchestrator.start(webContents as never, { ...request(), userPrompt: '验证文字输入失败路径' });
+      await waitForCompletedFinal(webContents, '文字工具验证完成。', started);
+      expect(fixture.execute).not.toHaveBeenCalled();
+      if (failure === 'invalid-schema') expect(fixture.prepareMain).not.toHaveBeenCalled();
+      const continuation = mocks.streamAgentProviderTurn.mock.calls[1][1];
+      expect(JSON.parse(continuation.messages.at(-1).content)).toEqual({ ok: false,
+        message: failure === 'prepare-error' ? '文字输入准备失败，请重新查看窗口' : '文字输入参数无效' });
+      for (const value of [await store.getSession(started.sessionId, OWNER_SCOPE, 3), webContents.send.mock.calls, continuation]) {
+        expect(JSON.stringify(value)).not.toContain(input.text);
+      }
+    } finally { await orchestrator.shutdown(); fixture.restore(); }
+  });
+
+  it('preserves complete ordinary tool inputs beyond generic audit preview limits', async () => {
+    const input = { content: 'ordinary document content '.repeat(80) };
+    const execute = vi.fn<NonNullable<AgentTool['execute']>>(async value => {
+      expect(value).toEqual(input);
+      return { ok: true, message: 'ordinary completed' };
+    });
+    const name = 'ordinary.read';
+    const registry = createAgentToolRegistry([{ name, description: name, risk: 'read',
+      inputSchema: { type: 'object', properties: { content: { type: 'string' } }, required: ['content'], additionalProperties: false }, execute }]);
+    const snapshotSpy = vi.spyOn(agentToolRegistry, 'createSnapshot').mockReturnValue(registry.createSnapshot());
+    mocks.streamAgentProviderTurn
+      .mockResolvedValueOnce({ content: '', toolCalls: [{ id: 'ordinary-call', name, input }] })
+      .mockImplementationOnce(async (_connection, _input, onDelta) => {
+        onDelta('普通工具完成。'); return { content: '普通工具完成。', toolCalls: [] };
+      });
+    const webContents = sender();
+    const orchestrator = createOrchestrator();
+    try {
+      const started = await orchestrator.start(webContents as never, request());
+      await waitForCompletedFinal(webContents, '普通工具完成。', started);
+      expect(execute).toHaveBeenCalledOnce();
+      expect((await store.getSession(started.sessionId, OWNER_SCOPE, 3))!.toolActivities[0].call.input).toEqual(input);
+      const continuation = mocks.streamAgentProviderTurn.mock.calls[1][1];
+      expect(continuation.messages.find((message: AgentProviderMessage) => message.role === 'assistant' && message.toolCalls?.length)?.toolCalls?.[0].input).toEqual(input);
+    } finally { await orchestrator.shutdown(); snapshotSpy.mockRestore(); }
+  });
+
+  function computerObservationFixture(
+    registrationId = 'builtin:computer.observe@1',
+    resultData?: Record<string, unknown>,
+    toolName: 'computer.observe' | 'computer.windows' = 'computer.observe',
+  ) {
+    const image = {
+      id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', name: 'isolated-screen.png',
+      kind: 'image' as const, mimeType: 'image/png', sizeBytes: 32, width: 640, height: 400,
+    };
+    const imageData = 'data:image/png;base64,aXNvbGF0ZWQtc2NyZWVu';
+    const tool: AgentTool = {
+      name: toolName, registrationId, description: 'Isolated computer observation', risk: 'read',
+      inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+      execute: vi.fn(async () => ({ ok: true, data: resultData ?? { imageId: image.id, observationId: 'test-observation' } })),
+    };
+    const registry = createAgentToolRegistry([
+      ...agentToolRegistry.list().filter(item => item.name !== tool.name), tool,
+    ]);
+    const snapshotSpy = vi.spyOn(agentToolRegistry, 'createSnapshot').mockReturnValue(registry.createSnapshot());
+    const resolveImage = vi.spyOn(AgentAttachmentStore.prototype, 'resolve').mockResolvedValue([image]);
+    const readImage = vi.spyOn(AgentAttachmentStore.prototype, 'image').mockResolvedValue(imageData);
+    const releaseSession = vi.spyOn(AgentAttachmentStore.prototype, 'releaseSession').mockResolvedValue(undefined);
+    mocks.streamAgentProviderTurn
+      .mockResolvedValueOnce({ content: '', toolCalls: [{ id: 'isolated-observe', name: tool.name, input: {} }] })
+      .mockImplementationOnce(async (_connection, _input, onDelta) => {
+        onDelta('屏幕核对完成。');
+        return { content: '屏幕核对完成。', toolCalls: [] };
+      });
+    return {
+      image, imageData, resolveImage, readImage, releaseSession,
+      restore: () => {
+        snapshotSpy.mockRestore(); resolveImage.mockRestore(); readImage.mockRestore(); releaseSession.mockRestore();
+      },
+    };
+  }
+
+  function preparedComputerWindowFixture(observationMode?: 'ax' | 'screenshot' | 'both') {
+    let window: AgentComputerSharedWindow = { windowId: 24, pid: 800, processStartedAt: 1_770_000_000_000, layer: 0,
+      bounds: { x: 100, y: 100, width: 1280, height: 800 }, title: 'OmniFlow QA', applicationLabel: 'Electron', windowLabel: 'OmniFlow QA' };
+    const image = { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', name: 'isolated-window.png',
+      kind: 'image' as const, mimeType: 'image/png', sizeBytes: 32, width: 1280, height: 800 };
+    const capture = vi.fn<AgentComputerRuntimeDependencies['capture']>(async () => Buffer.from('isolated-window'));
+    const renderingRelease = vi.fn();
+    const keepWindowRendering = vi.fn(() => renderingRelease);
+    const imageStore = { import: vi.fn(async () => image), bind: vi.fn(async () => [image.id]),
+      rollbackBinding: vi.fn(async () => undefined), discard: vi.fn(async () => undefined) };
+    const targets = vi.fn<AgentComputerRuntimeDependencies['targets']>(async approvedWindow => ({
+      target: { windowId: approvedWindow.windowId, pid: approvedWindow.pid,
+        processStartedAt: approvedWindow.processStartedAt, layer: approvedWindow.layer, bounds: { ...approvedWindow.bounds }, title: approvedWindow.title,
+        candidates: [{ path: [0], role: 'AXButton', title: 'Fixture button', bounds: { ...approvedWindow.bounds } }] },
+      truncated: false, axTree: 'AXWindow "OmniFlow QA"\n  AXButton "Fixture button"\n', axTreeTruncated: false,
+    }));
+    const runtime = createAgentComputerRuntime({
+      windows: async () => ({ windows: [structuredClone(window)], truncated: false }), ownerWindowId: () => 24, capture,
+      targets,
+      click: async () => undefined, setText: async () => undefined, scroll: async () => undefined, clickStatus: async () => ({ available: true }), requestClickPermission: async () => undefined,
+      images: () => imageStore,
+      keepWindowRendering,
+    });
+    const prepareObserve = vi.spyOn(agentComputerRuntime, 'prepareObserve').mockImplementation(runtime.prepareObserve);
+    const runtimeSpies = [
+      prepareObserve,
+      vi.spyOn(agentComputerRuntime, 'observe').mockImplementation(runtime.observe),
+      vi.spyOn(agentComputerRuntime, 'releaseRun').mockImplementation(runtime.releaseRun),
+    ];
+    const platformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    let tools: AgentTool[];
+    try {
+      Object.defineProperty(process, 'platform', { configurable: true, value: 'darwin' });
+      tools = getBuiltInAgentComputerTools();
+    } finally { Object.defineProperty(process, 'platform', platformDescriptor); }
+    const registry = createAgentToolRegistry([
+      ...agentToolRegistry.list().filter(tool => !['computer.windows', 'computer.observe', 'computer.click', 'computer.setText', 'computer.scroll'].includes(tool.name)), ...tools,
+    ]);
+    const snapshotSpy = vi.spyOn(agentToolRegistry, 'createSnapshot').mockReturnValue(registry.createSnapshot());
+    const resolveImage = vi.spyOn(AgentAttachmentStore.prototype, 'resolve').mockResolvedValue([image]);
+    const readImage = vi.spyOn(AgentAttachmentStore.prototype, 'image').mockResolvedValue('data:image/png;base64,aXNvbGF0ZWQtd2luZG93');
+    const observationInput = observationMode === undefined ? {} : { mode: observationMode };
+    mocks.streamAgentProviderTurn
+      .mockResolvedValueOnce({ content: '', toolCalls: [{ id: 'approved-window-first', input: observationInput, name: 'computer.observe' }] })
+      .mockResolvedValueOnce({ content: '', toolCalls: [{ id: 'approved-window-second', input: observationInput, name: 'computer.observe' }] })
+      .mockImplementationOnce(async (_connection, _input, onDelta) => {
+        onDelta('窗口核对完成。'); return { content: '窗口核对完成。', toolCalls: [] };
+      });
+    return { capture, imageStore, prepareObserve, targets, resolveImage, readImage, image, keepWindowRendering, renderingRelease,
+      setWindow: (update: Partial<AgentComputerSharedWindow>) => { window = { ...window, ...update }; },
+      getWindow: () => structuredClone(window),
+      restore: () => { runtimeSpies.forEach(spy => spy.mockRestore()); snapshotSpy.mockRestore(); resolveImage.mockRestore(); readImage.mockRestore(); },
+    };
+  }
+
+  async function pendingWindowApproval(webContents: ReturnType<typeof sender>, index = 0): Promise<AgentToolApprovalSnapshot> {
+    await vi.waitFor(() => expect(webContents.send.mock.calls.filter(call => call[1]?.type === 'tool-approval-required').length).toBeGreaterThan(index));
+    return webContents.send.mock.calls.filter(call => call[1]?.type === 'tool-approval-required')[index][1].approval;
+  }
+
+  function approveWindow(orchestrator: ReturnType<typeof createOrchestrator>, webContents: ReturnType<typeof sender>,
+    approval: AgentToolApprovalSnapshot, preparedAction = approval.preparation!.action) {
+    return orchestrator.resolveToolApproval(webContents.id, { approvalId: approval.approvalId, approved: true,
+      libraryId: 3, ownerScope: OWNER_SCOPE, preparedAction, preparedActionId: approval.preparation!.preparedActionId,
+      runId: approval.runId, sessionId: approval.sessionId });
+  }
+
+  function ownerRenderingFixture() {
+    let held = false;
+    const release = vi.fn(() => { held = false; });
+    const keepOwnerRendering = vi.fn(() => { held = true; return release; });
+    return { keepOwnerRendering, release, held: () => held };
+  }
+
+  it('keeps a plain Agent Run rendering before started and through its terminal event, without any computer observation', async () => {
+    const rendering = ownerRenderingFixture();
+    const webContents = sender();
+    const orchestrator = createOrchestrator({ keepOwnerRendering: rendering.keepOwnerRendering });
+    webContents.send.mockImplementation((_channel, event) => {
+      if (event.type === 'started' || event.type === 'completed') expect(rendering.held()).toBe(true);
+    });
+    mocks.streamAgentProviderTurn.mockImplementation(async (_connection, _input, onDelta) => {
+      expect(rendering.held()).toBe(true);
+      onDelta('普通任务完成。'); return { content: '普通任务完成。', toolCalls: [] };
+    });
+    const observe = vi.spyOn(agentComputerRuntime, 'observe');
+    try {
+      const started = await orchestrator.start(webContents as never, request());
+      expect(rendering.keepOwnerRendering).toHaveBeenCalledOnce();
+      expect(rendering.keepOwnerRendering).toHaveBeenCalledWith(webContents.id);
+      await waitForCompletedFinal(webContents, '普通任务完成。', started);
+      await vi.waitFor(() => expect(rendering.release).toHaveBeenCalledOnce());
+      expect(rendering.held()).toBe(false);
+      expect(observe).not.toHaveBeenCalled();
+    } finally { await orchestrator.shutdown(); observe.mockRestore(); }
+  });
+
+  it.each(['stop', 'release-owner', 'shutdown'] as const)('holds the owner at the first sharing approval and releases synchronously on %s', async reason => {
+    const fixture = preparedComputerWindowFixture('ax');
+    const rendering = ownerRenderingFixture();
+    const webContents = sender();
+    const orchestrator = createOrchestrator({ keepOwnerRendering: rendering.keepOwnerRendering,
+      contextBudget: { contextWindowTokens: 128_000 } });
+    let stopping: Promise<boolean> | undefined;
+    try {
+      const started = await orchestrator.start(webContents as never, { ...request(), userPrompt: '只读当前窗口AX' });
+      const approval = await pendingWindowApproval(webContents);
+      expect(approval.preparation?.action.kind).toBe('computer.observe');
+      expect(rendering.held()).toBe(true);
+      expect(rendering.release).not.toHaveBeenCalled();
+      expect(fixture.keepWindowRendering).not.toHaveBeenCalled();
+      expect(fixture.targets).not.toHaveBeenCalled();
+      expect(fixture.capture).not.toHaveBeenCalled();
+      if (reason === 'stop') expect(orchestrator.stop(started.sessionId, webContents.id)).toBe(true);
+      else if (reason === 'release-owner') orchestrator.releaseOwner(webContents.id);
+      else stopping = orchestrator.shutdown();
+      expect(rendering.release).toHaveBeenCalledOnce();
+      expect(rendering.held()).toBe(false);
+      if (stopping) await expect(stopping).resolves.toBe(true);
+      await vi.waitFor(() => expect(webContents.send.mock.calls.map(call => call[1])).toContainEqual(
+        expect.objectContaining({ type: 'cancelled', runId: started.runId }),
+      ));
+      await expect(approveWindow(orchestrator, webContents, approval)).rejects.toThrow();
+      expect(rendering.keepOwnerRendering).toHaveBeenCalledOnce();
+      expect(rendering.release).toHaveBeenCalledOnce();
+      expect(fixture.capture).not.toHaveBeenCalled();
+    } finally { await orchestrator.shutdown(); fixture.restore(); }
+  });
+
+  it('does not release the owner while waiting for a user interaction', async () => {
+    const rendering = ownerRenderingFixture();
+    const webContents = sender();
+    const orchestrator = createOrchestrator({ keepOwnerRendering: rendering.keepOwnerRendering });
+    mocks.streamAgentProviderTurn.mockResolvedValueOnce({ content: '', toolCalls: [{ id: 'rendering-interaction',
+      name: 'interaction.request', input: { title: '选择范围', prompt: '请选择范围', kind: 'choice',
+        options: [{ id: 'current', label: '当前范围' }, { id: 'all', label: '全部范围' }] } }] });
+    try {
+      const started = await orchestrator.start(webContents as never, request());
+      await vi.waitFor(() => expect(webContents.send.mock.calls.map(call => call[1])).toContainEqual(
+        expect.objectContaining({ type: 'tool-interaction-required', runId: started.runId }),
+      ));
+      expect(rendering.held()).toBe(true);
+      expect(rendering.release).not.toHaveBeenCalled();
+      expect(orchestrator.stop(started.sessionId, webContents.id)).toBe(true);
+      expect(rendering.release).toHaveBeenCalledOnce();
+    } finally { await orchestrator.shutdown(); }
+  });
+
+  it('releases rendering after a provider failure without letting restoration change its terminal result', async () => {
+    const rendering = ownerRenderingFixture();
+    rendering.release.mockImplementation(() => { throw new Error('Renderer restoration failed'); });
+    const webContents = sender();
+    const orchestrator = createOrchestrator({ keepOwnerRendering: rendering.keepOwnerRendering });
+    mocks.streamAgentProviderTurn.mockRejectedValue(new Error('Provider unavailable'));
+    webContents.send.mockImplementation((_channel, event) => {
+      if (event.type === 'error') expect(rendering.held()).toBe(true);
+    });
+    try {
+      const started = await orchestrator.start(webContents as never, request());
+      await vi.waitFor(() => expect(webContents.send.mock.calls.map(call => call[1])).toContainEqual(
+        expect.objectContaining({ type: 'error', runId: started.runId }),
+      ));
+      await vi.waitFor(() => expect(rendering.release).toHaveBeenCalledOnce());
+      expect((await store.getSession(started.sessionId, OWNER_SCOPE, 3))!.runs[0]).toMatchObject({
+        status: 'failed', error: expect.stringContaining('Provider unavailable'),
+      });
+    } finally { await orchestrator.shutdown(); }
+  });
+
+  it('cleans the acquired owner lease when started delivery fails before the Run task exists', async () => {
+    const rendering = ownerRenderingFixture();
+    const webContents = sender();
+    const authorizeQuery = vi.fn(async () => undefined);
+    mocks.createAgentLibraryAccessGuard.mockReturnValue({ authorizeQuery });
+    const runSessionRegistry = createAIServiceRunSessionRegistry();
+    const endRunSession = vi.spyOn(runSessionRegistry, 'end');
+    const releaseComputer = vi.spyOn(agentComputerRuntime, 'releaseRun');
+    const orchestrator = createOrchestrator({ keepOwnerRendering: rendering.keepOwnerRendering, runSessionRegistry });
+    webContents.send.mockImplementationOnce(() => {
+      expect(rendering.held()).toBe(true);
+      throw new Error('Started delivery failed');
+    });
+    try {
+      await expect(orchestrator.start(webContents as never, { ...request(), permissionMode: 'full-access' })).rejects.toThrow('Started delivery failed');
+      expect(rendering.release).toHaveBeenCalledOnce();
+      expect(rendering.held()).toBe(false);
+      expect(endRunSession).toHaveBeenCalledWith(expect.any(String), webContents.id);
+      expect(releaseComputer).toHaveBeenCalledOnce();
+      expect(mocks.streamAgentProviderTurn).not.toHaveBeenCalled();
+      const sessions = await store.listSessions(OWNER_SCOPE, 3);
+      const session = (await store.getSession(sessions.sessions[0].id, OWNER_SCOPE, 3))!;
+      expect(session.runs[0].status).toBe('failed');
+      // Probe the real frozen broker after failed startup. A leaked Run guard
+      // would authorize this query before the destroyed sender rejection; a
+      // released guard sends no authorization and creates no pending request.
+      await expect(agentFileAuthorityBroker.request({ sender: { ...webContents, isDestroyed: () => true } as never,
+        libraryId: 3, ownerScope: OWNER_SCOPE, sessionId: session.id, runId: session.runs[0].id,
+        toolRunId: 'failed-start-guard-probe', signal: new AbortController().signal,
+        operation: { operation: 'query-library-metadata', query: { kind: 'list', directoryId: 10 } },
+      })).rejects.toThrow('授权窗口不可用');
+      expect(authorizeQuery).not.toHaveBeenCalled();
+      expect(await orchestrator.shutdown()).toBe(true);
+    } finally { await orchestrator.shutdown(); endRunSession.mockRestore(); releaseComputer.mockRestore(); }
+  });
+
+  it('cleans active Run registration on rendering acquisition failure and accepts a subsequent Run', async () => {
+    const rendering = ownerRenderingFixture();
+    rendering.keepOwnerRendering.mockImplementationOnce(() => { throw new Error('Rendering acquisition failed'); });
+    const webContents = sender();
+    const orchestrator = createOrchestrator({ keepOwnerRendering: rendering.keepOwnerRendering });
+    try {
+      await expect(orchestrator.start(webContents as never, request())).rejects.toThrow('Rendering acquisition failed');
+      expect(rendering.release).not.toHaveBeenCalled();
+      expect(mocks.streamAgentProviderTurn).not.toHaveBeenCalled();
+      const session = (await store.listSessions(OWNER_SCOPE, 3)).sessions[0];
+      mocks.streamAgentProviderTurn.mockImplementation(async (_connection, _input, onDelta) => {
+        onDelta('恢复完成。'); return { content: '恢复完成。', toolCalls: [] };
+      });
+      const started = await orchestrator.start(webContents as never, { ...request(), sessionId: session.id });
+      await waitForCompletedFinal(webContents, '恢复完成。', started);
+      await vi.waitFor(() => expect(rendering.release).toHaveBeenCalledOnce());
+    } finally { await orchestrator.shutdown(); }
+  });
+
+  it('does not acquire owner rendering for a rejected start request', async () => {
+    const rendering = ownerRenderingFixture();
+    const orchestrator = createOrchestrator({ keepOwnerRendering: rendering.keepOwnerRendering });
+    await expect(orchestrator.start(sender() as never, { ...request(), profileId: '' })).rejects.toThrow();
+    expect(rendering.keepOwnerRendering).not.toHaveBeenCalled();
+    await orchestrator.shutdown();
+  });
+
+  it('approves the real built-in window preparation once, captures it, and reuses its target for the next observation', async () => {
+    const fixture = preparedComputerWindowFixture();
+    const webContents = sender();
+    // Exercise window approval and image continuation without introducing an
+    // unrelated semantic-compaction turn from the complete built-in tool schema.
+    const orchestrator = createOrchestrator({ contextBudget: { contextWindowTokens: 128_000 },
+      getModelMetadata: async () => ({ supportsImages: true }) });
+    try {
+      const started = await orchestrator.start(webContents as never, { ...request(), userPrompt: '查看当前应用窗口两次' });
+      const approval = await pendingWindowApproval(webContents);
+      expect(approval.preparation?.action).toMatchObject({ kind: 'computer.observe', version: 2, applicationLabel: 'Electron', windowLabel: 'OmniFlow QA' });
+      expect(fixture.capture).not.toHaveBeenCalled();
+      expect(fixture.imageStore.import).not.toHaveBeenCalled();
+      await expect(approveWindow(orchestrator, webContents, approval)).resolves.toMatchObject({ approved: true });
+      await waitForCompletedFinal(webContents, '窗口核对完成。', started);
+      expect(webContents.send.mock.calls.filter(call => call[1]?.type === 'tool-approval-required')).toHaveLength(1);
+      expect(fixture.capture).toHaveBeenCalledTimes(2);
+      const session = (await store.getSession(started.sessionId, OWNER_SCOPE, 3))!;
+      const targetId = Reflect.get(approval.preparation!.action, 'targetId');
+      expect(session.toolActivities).toHaveLength(2);
+      for (const activity of session.toolActivities) {
+        expect(activity.status).toBe('completed');
+        expect(activity.preparation?.action).toMatchObject({ targetId, version: 2 });
+        expect(activity.result).toMatchObject({ ok: true, data: {
+          targetId, captureScope: 'window', clickReady: true, candidateScanComplete: true, coordinateClickReady: true,
+        } });
+      }
+      expect(session.toolActivities[0].approval?.status).toBe('approved');
+      expect(fixture.prepareObserve.mock.calls[1][1].preparationIdentity.preparedActionId)
+        .not.toBe(fixture.prepareObserve.mock.calls[0][1].preparationIdentity.preparedActionId);
+    } finally { await orchestrator.shutdown(); fixture.restore(); }
+  });
+
+  it('delivers approved AX-only built-in observations through the real continuation without resolving or hydrating images', async () => {
+    const fixture = preparedComputerWindowFixture('ax');
+    const webContents = sender();
+    const orchestrator = createOrchestrator({ contextBudget: { contextWindowTokens: 128_000 },
+      getModelMetadata: async () => ({ supportsImages: true }) });
+    try {
+      const started = await orchestrator.start(webContents as never, { ...request(), userPrompt: '只读取当前窗口的 AX 两次' });
+      const approval = await pendingWindowApproval(webContents);
+      expect(approval.preparation?.action).toMatchObject({ kind: 'computer.observe', version: 2, mode: 'ax' });
+      expect(fixture.targets).not.toHaveBeenCalled();
+      await expect(approveWindow(orchestrator, webContents, approval)).resolves.toMatchObject({ approved: true });
+      await waitForCompletedFinal(webContents, '窗口核对完成。', started);
+      expect(webContents.send.mock.calls.filter(call => call[1]?.type === 'tool-approval-required')).toHaveLength(1);
+      expect(fixture.targets).toHaveBeenCalledTimes(4);
+      expect(fixture.capture).not.toHaveBeenCalled();
+      expect(fixture.imageStore.import).not.toHaveBeenCalled();
+      expect(fixture.imageStore.bind).not.toHaveBeenCalled();
+      expect(fixture.resolveImage).not.toHaveBeenCalled();
+      expect(fixture.readImage).not.toHaveBeenCalled();
+      expect(mocks.streamAgentProviderTurn).toHaveBeenCalledTimes(3);
+      for (const call of mocks.streamAgentProviderTurn.mock.calls.slice(1)) {
+        const continuation = call[1];
+        const observedMessages = continuation.messages.filter((message: AgentProviderMessage) => message.role === 'tool' && message.name === 'computer.observe');
+        expect(observedMessages.length).toBeGreaterThan(0);
+        for (const message of observedMessages) {
+          expect(message).not.toHaveProperty('attachments');
+          expect(message).not.toHaveProperty('images');
+          const delivered = JSON.parse(message.content);
+          expect(delivered).toMatchObject({ ok: true, data: { mode: 'ax', observationSource: 'ax', captureScope: 'window',
+            coordinateClickReady: false, candidateScanComplete: true, axTreeTruncated: false,
+            elements: [expect.objectContaining({ label: 'Fixture button', role: 'AXButton', operations: ['press'] })] } });
+          expect(delivered.data.axTree).toContain('AXButton "Fixture button"');
+          expect(delivered.data).not.toHaveProperty('imageId');
+          expect(delivered.data).not.toHaveProperty('screenshotWidth');
+          expect(delivered.data).not.toHaveProperty('screenshotHeight');
+        }
+      }
+      const session = (await store.getSession(started.sessionId, OWNER_SCOPE, 3))!;
+      expect(session.toolActivities).toHaveLength(2);
+      for (const activity of session.toolActivities) {
+        expect(activity.status).toBe('completed');
+        expect(activity.preparation?.action).toMatchObject({ mode: 'ax' });
+        expect(activity.result).toMatchObject({ ok: true, data: { mode: 'ax', observationSource: 'ax' } });
+        expect(activity.result?.data).not.toHaveProperty('imageId');
+      }
+    } finally { await orchestrator.shutdown(); fixture.restore(); }
+  });
+
+  it('hydrates approved screenshot-only built-in observations into the real continuation while avoiding all AX scans', async () => {
+    const fixture = preparedComputerWindowFixture('screenshot');
+    const webContents = sender();
+    const orchestrator = createOrchestrator({ contextBudget: { contextWindowTokens: 128_000 },
+      getModelMetadata: async () => ({ supportsImages: true }) });
+    try {
+      const started = await orchestrator.start(webContents as never, { ...request(), userPrompt: '只查看当前窗口图片两次' });
+      const approval = await pendingWindowApproval(webContents);
+      expect(approval.preparation?.action).toMatchObject({ kind: 'computer.observe', version: 2, mode: 'screenshot' });
+      expect(fixture.capture).not.toHaveBeenCalled();
+      await expect(approveWindow(orchestrator, webContents, approval)).resolves.toMatchObject({ approved: true });
+      await waitForCompletedFinal(webContents, '窗口核对完成。', started);
+      expect(fixture.capture).toHaveBeenCalledTimes(2);
+      expect(fixture.imageStore.import).toHaveBeenCalledTimes(2);
+      expect(fixture.imageStore.bind).toHaveBeenCalledTimes(2);
+      expect(fixture.targets).not.toHaveBeenCalled();
+      expect(fixture.resolveImage).toHaveBeenCalledWith(
+        { ownerScope: OWNER_SCOPE, libraryId: 3 }, [fixture.image.id], started.sessionId,
+      );
+      expect(fixture.readImage).toHaveBeenCalledWith(
+        { ownerScope: OWNER_SCOPE, libraryId: 3 }, fixture.image.id, started.sessionId,
+      );
+      expect(mocks.streamAgentProviderTurn).toHaveBeenCalledTimes(3);
+      for (const call of mocks.streamAgentProviderTurn.mock.calls.slice(1)) {
+        const message = call[1].messages.at(-1);
+        expect(message).toMatchObject({ role: 'tool', name: 'computer.observe',
+          attachments: [fixture.image], images: ['data:image/png;base64,aXNvbGF0ZWQtd2luZG93'] });
+        const delivered = JSON.parse(message.content);
+        expect(delivered).toMatchObject({ ok: true, data: { mode: 'screenshot', observationSource: 'screenshot', captureScope: 'window',
+          imageId: fixture.image.id, screenshotWidth: 1280, screenshotHeight: 800,
+          elements: [], clickReady: false, textReady: false, scrollReady: false, coordinateClickReady: false } });
+        expect(delivered.data).not.toHaveProperty('axTree');
+      }
+      const session = (await store.getSession(started.sessionId, OWNER_SCOPE, 3))!;
+      expect(session.toolActivities).toHaveLength(2);
+      expect(session.toolActivities.every(activity => activity.status === 'completed')).toBe(true);
+      expect(JSON.stringify(session)).not.toContain('data:image/png;base64,aXNvbGF0ZWQtd2luZG93');
+    } finally { await orchestrator.shutdown(); fixture.restore(); }
+  });
+
+  it.each(['stop', 'release-owner', 'shutdown'] as const)('releases the approved window rendering lease synchronously on Run %s after the first Tool signal has ended', async reason => {
+    const fixture = preparedComputerWindowFixture();
+    const webContents = sender();
+    const orchestrator = createOrchestrator({ contextBudget: { contextWindowTokens: 128_000 },
+      getModelMetadata: async () => ({ supportsImages: true }) });
+    let completeCapture!: (value: Buffer) => void;
+    const lateCapture = new Promise<Buffer>(resolve => { completeCapture = resolve; });
+    fixture.capture.mockImplementationOnce(async () => Buffer.from('first observed frame'))
+      .mockImplementationOnce(async () => lateCapture);
+    let stopping: Promise<boolean> | undefined;
+    try {
+      const started = await orchestrator.start(webContents as never, { ...request(), userPrompt: '查看当前应用窗口两次' });
+      const approval = await pendingWindowApproval(webContents);
+      await expect(approveWindow(orchestrator, webContents, approval)).resolves.toMatchObject({ approved: true });
+      await vi.waitFor(() => expect(fixture.capture).toHaveBeenCalledTimes(2));
+      expect(fixture.keepWindowRendering).toHaveBeenCalledOnce();
+      expect(fixture.renderingRelease).not.toHaveBeenCalled();
+      const firstToolSignal = fixture.capture.mock.calls[0][1];
+      const secondToolSignal = fixture.capture.mock.calls[1][1];
+      expect(firstToolSignal).not.toBe(secondToolSignal);
+      if (reason === 'stop') expect(orchestrator.stop(started.sessionId, webContents.id)).toBe(true);
+      else if (reason === 'release-owner') orchestrator.releaseOwner(webContents.id);
+      else stopping = orchestrator.shutdown();
+      // The first successful Tool's relay is gone, and the next Tool is still
+      // waiting for its capture. Restoration must not wait for either callback.
+      expect(firstToolSignal.aborted).toBe(false);
+      expect(secondToolSignal.aborted).toBe(true);
+      expect(fixture.renderingRelease).toHaveBeenCalledOnce();
+      completeCapture(Buffer.from('late observed frame'));
+      if (stopping) await expect(stopping).resolves.toBe(true);
+      await vi.waitFor(() => expect(webContents.send.mock.calls.map(call => call[1])).toContainEqual(
+        expect.objectContaining({ type: 'cancelled', runId: started.runId, sessionId: started.sessionId }),
+      ));
+      expect(fixture.imageStore.import).toHaveBeenCalledOnce();
+      expect(fixture.renderingRelease).toHaveBeenCalledOnce();
+      expect((await store.getSession(started.sessionId, OWNER_SCOPE, 3))!.runs[0].status).toBe('cancelled');
+    } finally {
+      completeCapture(Buffer.from('cleanup observed frame'));
+      await orchestrator.shutdown();
+      fixture.restore();
+    }
+  });
+
+  it.each([
+    { title: 'Updated title', windowLabel: '更新后的窗口标题' },
+    { bounds: { x: 200, y: 100, width: 1280, height: 800 } },
+    { pid: 801 }, { processStartedAt: 1_770_000_000_001 },
+  ])('replaces the pending built-in window approval after facts change: %j', async update => {
+    const fixture = preparedComputerWindowFixture();
+    const webContents = sender();
+    const orchestrator = createOrchestrator({ contextBudget: { contextWindowTokens: 128_000 },
+      getModelMetadata: async () => ({ supportsImages: true }) });
+    try {
+      const started = await orchestrator.start(webContents as never, { ...request(), userPrompt: '查看当前应用窗口两次' });
+      const initial = await pendingWindowApproval(webContents);
+      fixture.setWindow(update);
+      await expect(approveWindow(orchestrator, webContents, initial)).resolves.toEqual({ approved: false, reapprovalRequired: true });
+      const refreshed = await pendingWindowApproval(webContents, 1);
+      expect(refreshed.approvalId).not.toBe(initial.approvalId);
+      expect(refreshed.preparation?.action).not.toMatchObject({ targetId: Reflect.get(initial.preparation!.action, 'targetId') });
+      expect(fixture.capture).not.toHaveBeenCalled();
+      await expect(approveWindow(orchestrator, webContents, refreshed)).resolves.toMatchObject({ approved: true });
+      await waitForCompletedFinal(webContents, '窗口核对完成。', started);
+      expect(fixture.capture).toHaveBeenCalledTimes(2);
+      const window = fixture.getWindow();
+      for (const [capturedWindow] of fixture.capture.mock.calls) expect(capturedWindow).toEqual(window);
+      expect(webContents.send.mock.calls.filter(call => call[1]?.type === 'tool-approval-required')).toHaveLength(2);
+    } finally { await orchestrator.shutdown(); fixture.restore(); }
+  });
+
+  it('replaces forged requested window action with the canonical target without capturing another application', async () => {
+    const fixture = preparedComputerWindowFixture();
+    const webContents = sender();
+    const orchestrator = createOrchestrator({ contextBudget: { contextWindowTokens: 128_000 },
+      getModelMetadata: async () => ({ supportsImages: true }) });
+    try {
+      const started = await orchestrator.start(webContents as never, { ...request(), userPrompt: '查看当前应用窗口两次' });
+      const initial = await pendingWindowApproval(webContents);
+      const forged = { ...initial.preparation!.action, targetId: '237e3952-2a40-4c7b-b2f4-bec335a79cce',
+        applicationLabel: 'Other app', windowLabel: 'Other private window' } as AgentPreparedActionPublic;
+      await expect(approveWindow(orchestrator, webContents, initial, forged)).resolves.toEqual({ approved: false, reapprovalRequired: true });
+      const refreshed = await pendingWindowApproval(webContents, 1);
+      expect(refreshed.preparation?.action).toEqual(initial.preparation?.action);
+      expect(fixture.capture).not.toHaveBeenCalled();
+      await expect(approveWindow(orchestrator, webContents, refreshed)).resolves.toMatchObject({ approved: true });
+      await waitForCompletedFinal(webContents, '窗口核对完成。', started);
+      expect(fixture.capture).toHaveBeenCalledTimes(2);
+      for (const [capturedWindow] of fixture.capture.mock.calls) expect(capturedWindow).toEqual(fixture.getWindow());
+    } finally { await orchestrator.shutdown(); fixture.restore(); }
+  });
+
+  it('hydrates only the exact built-in computer observation into the next provider turn with owner-bound pixels', async () => {
+    const fixture = computerObservationFixture();
+    const webContents = sender();
+    const orchestrator = createOrchestrator({ getModelMetadata: async () => ({ supportsImages: true }) });
+    try {
+      const started = await orchestrator.start(webContents as never, { ...request(), userPrompt: '查看测试屏幕' });
+      await waitForCompletedFinal(webContents, '屏幕核对完成。', started);
+      expect(fixture.resolveImage).toHaveBeenCalledWith(
+        { ownerScope: OWNER_SCOPE, libraryId: 3 }, [fixture.image.id], started.sessionId,
+      );
+      expect(fixture.readImage).toHaveBeenCalledWith(
+        { ownerScope: OWNER_SCOPE, libraryId: 3 }, fixture.image.id, started.sessionId,
+      );
+      expect(mocks.streamAgentProviderTurn).toHaveBeenCalledTimes(2);
+      const continuation = mocks.streamAgentProviderTurn.mock.calls[1][1];
+      expect(continuation.messages.at(-1)).toMatchObject({
+        role: 'tool', name: 'computer.observe', toolCallId: 'isolated-observe',
+        attachments: [fixture.image], images: [fixture.imageData],
+      });
+      expect(JSON.parse(continuation.messages.at(-1).content)).toMatchObject({ ok: true, data: { imageId: fixture.image.id } });
+      const session = await store.getSession(started.sessionId, OWNER_SCOPE, 3);
+      expect(session?.toolActivities[0].result).toMatchObject({ ok: true, data: { imageId: fixture.image.id } });
+      expect(JSON.stringify(session)).not.toContain(fixture.imageData);
+    } finally {
+      await orchestrator.shutdown();
+      fixture.restore();
+    }
+  });
+
+  it.each(['computer.observe', 'computer.windows'] as const)('delivers bounded %s records intact in the actual provider continuation', async toolName => {
+    const reference = (index: number) => `805f4b48-ec6e-4f78-b45b-${index.toString(16).padStart(12, '0')}`;
+    const data: Record<string, unknown> = toolName === 'computer.observe' ? {
+      captureScope: 'window', targetId: reference(1000), imageId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', observationId: reference(1002),
+      applicationLabel: '测试应用', windowLabel: '测试窗口', screenshotWidth: 2048, screenshotHeight: 1280,
+      capturedAt: '2026-10-10T03:00:00.000Z', expiresInMs: 60_000, clickReady: true,
+      clickMethod: 'AXPress', observationSource: 'screenshot', elementsScope: 'stable-AXPress-controls',
+      elements: Array.from({ length: 128 }, (_, index) => ({ elementId: reference(index), role: 'AXButton',
+        label: `按钮${index}${'中'.repeat(12)}`, description: '界面控件'.repeat(3) })),
+      axTree: '中'.repeat(4096), axTreeTruncated: false,
+    } : {
+      windows: Array.from({ length: 64 }, (_, index) => ({ windowRef: reference(index),
+        applicationLabel: '应'.repeat(200), windowLabel: '窗'.repeat(200) })), truncated: false,
+    };
+    const fixture = computerObservationFixture(`builtin:${toolName}@1`, data, toolName);
+    const webContents = sender();
+    const orchestrator = createOrchestrator({ contextBudget: { contextWindowTokens: 128_000 },
+      getModelMetadata: async () => ({ supportsImages: true }) });
+    try {
+      const started = await orchestrator.start(webContents as never, { ...request(), userPrompt: '验证应用窗口信息' });
+      await waitForCompletedFinal(webContents, '屏幕核对完成。', started);
+      const continuation = mocks.streamAgentProviderTurn.mock.calls[1][1];
+      const delivered = continuation.messages.at(-1);
+      expect(delivered.name).toBe(toolName);
+      expect(JSON.parse(delivered.content)).toEqual({ ok: true, data });
+      expect(estimateAgentTextTokens(delivered.content)).toBeGreaterThan(1024);
+      if (toolName === 'computer.observe') expect(delivered.images).toEqual([fixture.imageData]);
+      else expect(fixture.readImage).not.toHaveBeenCalled();
+    } finally {
+      await orchestrator.shutdown();
+      fixture.restore();
+    }
+  });
+
+  it('does not read a claimed screenshot from a computer observation with the wrong registration identity', async () => {
+    const fixture = computerObservationFixture('builtin:computer.observe@999');
+    const webContents = sender();
+    const orchestrator = createOrchestrator({ getModelMetadata: async () => ({ supportsImages: true }) });
+    try {
+      const started = await orchestrator.start(webContents as never, request());
+      await waitForCompletedFinal(webContents, '屏幕核对完成。', started);
+      expect(fixture.resolveImage).not.toHaveBeenCalled();
+      expect(fixture.readImage).not.toHaveBeenCalled();
+      const resultMessage = mocks.streamAgentProviderTurn.mock.calls[1][1].messages.at(-1);
+      expect(resultMessage).toMatchObject({ role: 'tool', name: 'computer.observe' });
+      expect(resultMessage).not.toHaveProperty('attachments');
+      expect(resultMessage).not.toHaveProperty('images');
+      expect(JSON.parse(resultMessage.content)).toMatchObject({ ok: true, data: { imageId: fixture.image.id } });
+    } finally {
+      await orchestrator.shutdown();
+      fixture.restore();
+    }
+  });
+
+  it('releases screenshot attachments when deleting a session that has only computer observations', async () => {
+    const fixture = computerObservationFixture();
+    const webContents = sender();
+    const orchestrator = createOrchestrator({ getModelMetadata: async () => ({ supportsImages: true }) });
+    try {
+      const started = await orchestrator.start(webContents as never, request());
+      await waitForCompletedFinal(webContents, '屏幕核对完成。', started);
+      const session = (await store.getSession(started.sessionId, OWNER_SCOPE, 3))!;
+      expect(session.messages.every(message => !message.attachments?.length)).toBe(true);
+      expect(session.toolActivities.map(activity => activity.call.name)).toEqual(['computer.observe']);
+      await orchestrator.archiveSession(started.sessionId, OWNER_SCOPE, 3, true, session.revision!);
+      await expect(orchestrator.deleteSession(started.sessionId, OWNER_SCOPE, 3)).resolves.toBe(true);
+      expect(fixture.releaseSession).toHaveBeenCalledOnce();
+      expect(fixture.releaseSession).toHaveBeenCalledWith({ ownerScope: OWNER_SCOPE, libraryId: 3 }, started.sessionId);
+      expect(await store.getSession(started.sessionId, OWNER_SCOPE, 3, true)).toBeNull();
+    } finally {
+      await orchestrator.shutdown();
+      fixture.restore();
+    }
+  });
 
   it('preserves observed resource configuration while dropping invalid or missing fields', async () => {
     const execute = vi.fn<NonNullable<AgentTool['execute']>>(async () => ({ ok: true }));

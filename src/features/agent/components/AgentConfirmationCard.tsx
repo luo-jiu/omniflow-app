@@ -1,6 +1,7 @@
 import React from 'react';
 import { WorkspaceVisibilityContext } from '@/components/ui/workspace-visibility';
 import { IconFolder, IconTerminal } from '@douyinfe/semi-icons';
+import { Monitor } from 'lucide-react';
 import styled from 'styled-components';
 import { workspaceScrollbarStyles } from '@/components/ui/workspace-scrollbar';
 
@@ -18,6 +19,56 @@ import type {
 } from '@/shared/agent/agent.types';
 import { normalizeAgentPreparedActionPublic } from '@/shared/agent/agent-prepared-action';
 import { formatAgentShellCommandForDisplay } from '../agent-shell-command-display';
+
+type ComputerPreparedAction = Extract<AgentPreparedActionPublic, {
+  kind: 'computer.observe' | 'computer.click' | 'computer.setText' | 'computer.scroll';
+}>;
+
+function computerApprovalDisplay(action: ComputerPreparedAction): {
+  title: string;
+  description: string;
+  details: Array<{ label: string; value: string }>;
+} {
+  if (action.kind === 'computer.setText' || action.kind === 'computer.scroll') {
+    const details = [
+      { label: '应用', value: action.applicationLabel },
+      { label: '窗口', value: action.windowLabel },
+    ];
+    if (action.kind === 'computer.setText') {
+      details.push({ label: '方式', value: action.mode === 'replace' ? '替换文本' : '在当前选区插入文本' },
+        { label: '长度', value: `${action.textLength} 字符 · ${action.textBytes} 字节` });
+    } else {
+      const directions = { up: '向上', down: '向下', left: '向左', right: '向右' };
+      details.push({ label: '方向', value: directions[action.direction] },
+        { label: '幅度', value: action.unit === 'page' ? '一页' : action.unit === 'step' ? '一步' : '滚动范围的 10%' });
+    }
+    return {
+      title: action.kind === 'computer.setText' ? '允许在应用窗口输入文本' : '允许在应用窗口滚动',
+      description: '本次操作仅针对这个应用窗口中的已确认控件；发送后需重新查看确认结果，结果不确定时不会自动重发。',
+      details,
+    };
+  }
+  if (action.version === 1) return {
+    title: '允许本次任务共享此屏幕并点击',
+    description: '本次任务可将此屏幕截图发送给当前模型，并保存在本机会话，同时允许在该屏幕上简单点击；停止或任务结束后授权失效。首次可能需要系统的屏幕录制和辅助功能权限。',
+    details: [{ label: '屏幕', value: action.displayLabel }],
+  };
+  const operations = action.kind === 'computer.observe' ? action.operations : undefined;
+  const allowed = operations ? [
+    ...(operations.includes('press') ? ['点击'] : []),
+    ...(operations.includes('replaceText') || operations.includes('insertText') ? ['文本输入'] : []),
+    ...(operations.some(operation => operation.startsWith('scroll')) ? ['滚动'] : []),
+  ] : ['点击'];
+  return {
+    title: allowed.length === 1 && allowed[0] === '点击' ? '共享应用窗口并允许点击' : '共享应用窗口并允许操作',
+    description: `本次任务仅将这个应用窗口的图像和界面控件信息发送给当前 AI 服务，并保存在本机会话，同时允许在该窗口中${allowed.join('、')}；切换到另一个窗口需重新批准，停止或任务结束后授权失效。首次可能需要系统的屏幕录制和辅助功能权限。`,
+    details: [
+      { label: '应用', value: action.applicationLabel },
+      { label: '窗口', value: action.windowLabel },
+      ...(operations ? [{ label: '允许操作', value: allowed.join('、') }] : []),
+    ],
+  };
+}
 
 const ConfirmationCard = styled.article`
   width: min(620px, 100%);
@@ -353,6 +404,15 @@ export default function AgentConfirmationCard({
         && approval.call.name.startsWith(`${action.pluginId}.`) ? action : undefined;
     } catch { return undefined; }
   }, [preparation?.action, libraryId, approval.call.name]);
+  const computerAction = React.useMemo(() => {
+    try {
+      const action = normalizeAgentPreparedActionPublic(preparation?.action);
+      return (action.kind === 'computer.observe' || action.kind === 'computer.click'
+        || action.kind === 'computer.setText' || action.kind === 'computer.scroll')
+        && action.libraryId === libraryId && action.kind === approval.call.name ? action : undefined;
+    } catch { return undefined; }
+  }, [preparation?.action, libraryId, approval.call.name]);
+  const computerDisplay = computerAction ? computerApprovalDisplay(computerAction) : undefined;
   const [preparedActionDraft, setPreparedActionDraft] = React.useState<PreparedActionDraft | undefined>(
     () => initialAction && preparedActionId
       ? { action: initialAction, preparedActionId }
@@ -362,8 +422,11 @@ export default function AgentConfirmationCard({
   const preparedAction = preparedActionDraft && preparedActionDraft.preparedActionId === preparedActionId
     ? preparedActionDraft.action
     : initialAction;
+  const expectsComputerAction = approval.call.name === 'computer.observe' || approval.call.name === 'computer.click'
+    || approval.call.name === 'computer.setText' || approval.call.name === 'computer.scroll';
   const unsupportedPreparation = Boolean(
-    preparation && !initialAction && !shellAction && !fileBridgeAction && !renameAction && !fileOutputAction,
+    expectsComputerAction ? !computerAction
+      : preparation && !initialAction && !shellAction && !fileBridgeAction && !renameAction && !fileOutputAction && !computerAction,
   );
   const libraryTargetRef = React.useRef<LibraryTargetDraft>({
     parentId: initialAction?.parentId,
@@ -446,15 +509,21 @@ export default function AgentConfirmationCard({
       <ConfirmationCard>
         <div className="agent-confirmation-heading">
           <span className="agent-confirmation-icon">
-            {shellAction
+            {computerAction
+              ? <Monitor aria-hidden="true" size={16} strokeWidth={1.25} />
+              : shellAction
               ? <IconTerminal aria-hidden="true" />
               : <IconFolder aria-hidden="true" />}
           </span>
-          <h3>{approval.preview.title}</h3>
+          <h3>{computerDisplay?.title ?? approval.preview.title}</h3>
         </div>
-        <p>{approval.preview.description}</p>
+        <p>{computerDisplay?.description ?? approval.preview.description}</p>
         {unsupportedPreparation ? (
           <p role="alert">当前版本无法识别此准备动作，请取消后重试。</p>
+        ) : computerDisplay ? (
+          <dl>{computerDisplay.details.map(detail => <React.Fragment key={detail.label}>
+            <dt>{detail.label}</dt><dd>{detail.value}</dd>
+          </React.Fragment>)}</dl>
         ) : shellAction ? (
           <div className="agent-confirmation-shell">
             <pre className="agent-confirmation-shell-command">
@@ -613,7 +682,7 @@ export default function AgentConfirmationCard({
             className="agent-confirmation-allow"
             disabled={busy || unsupportedPreparation || Boolean(initialAction && !preparedAction)
               || (preparedAction?.destination === 'library' && !(Number.isSafeInteger(preparedAction.parentId) && Number(preparedAction.parentId) > 0))}
-            onClick={() => onResolve(true, fileOutputAction ?? renameAction ?? (shellAction ? undefined : preparedAction))}
+            onClick={() => onResolve(true, computerAction ?? fileOutputAction ?? renameAction ?? (shellAction ? undefined : preparedAction))}
             type="button"
           >
             {busy ? '处理中' : '允许'}

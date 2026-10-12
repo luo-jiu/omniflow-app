@@ -11,6 +11,7 @@ import {
   type AgentShellProviderOutputV1,
   type AgentShellProviderStreamOutputV1,
 } from './shell/agent-shell-output-projection';
+import { normalizeAgentComputerObservationScopeForProvider, projectAgentComputerResultForProvider } from './computer/agent-computer-provider-projection';
 
 const PROVIDER_RESULT_PROJECTION_VERSION = 1;
 const REDACTED_VALUE = '[REDACTED]';
@@ -49,7 +50,7 @@ export interface AgentProviderToolResultProjection {
 }
 
 export interface AgentProviderToolResultProjectionOptions {
-  mode?: 'default' | 'shell';
+  mode?: 'default' | 'shell' | 'computer-observe' | 'computer-windows';
 }
 
 const PROJECTION_TIERS: readonly ProjectionLimits[] = [
@@ -343,7 +344,7 @@ export function projectAgentToolResultForProvider(
 ): AgentProviderToolResultProjection {
   const sourceResult = options.mode === 'shell'
     ? shellProviderResult(result)
-    : result;
+    : options.mode === 'computer-observe' ? normalizeAgentComputerObservationScopeForProvider(result) : result;
   const sanitized = sanitizeAgentSensitiveValue(sourceResult);
   const safeResult = sanitized && typeof sanitized === 'object' && !Array.isArray(sanitized)
     ? sanitized as AgentToolResult
@@ -374,6 +375,10 @@ export function projectAgentToolResultForProvider(
     );
     if (shellProjection) return shellProjection;
   } else {
+    if (options.mode === 'computer-observe' || options.mode === 'computer-windows') {
+      const computerProjection = projectAgentComputerResultForProvider(safeResult, normalizedBudget, options.mode);
+      if (computerProjection) return computerProjection;
+    }
     for (const limits of PROJECTION_TIERS) {
       const projected = projectedPayload(safeResult, limits);
       const content = serialize({

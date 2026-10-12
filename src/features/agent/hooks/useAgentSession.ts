@@ -101,6 +101,13 @@ function ensureToolTimelineAnchor(
   ];
 }
 
+export interface AgentComputerDraft {
+  scopeKey: string;
+  sessionId: string | null;
+  revision: number;
+  value: string;
+}
+
 export function useAgentSession({
   groupId,
   permissionMode,
@@ -116,8 +123,10 @@ export function useAgentSession({
   const [messages, setMessages] = React.useState<AgentMessage[]>([]);
   const [draft, setDraftState] = React.useState('');
   const draftRef = React.useRef('');
+  const draftRevisionRef = React.useRef(1);
   const setDraft = React.useCallback((value: React.SetStateAction<string>) => {
     draftRef.current = typeof value === 'function' ? value(draftRef.current) : value;
+    draftRevisionRef.current += 1;
     setDraftState(draftRef.current);
   }, []);
   const readDraft = React.useCallback(() => draftRef.current, []);
@@ -155,6 +164,20 @@ export function useAgentSession({
   const preparationTokenRef = React.useRef(0);
   const isPreparingRef = React.useRef(false);
   const mountedRef = React.useRef(true);
+  const readComputerDraft = React.useCallback((): AgentComputerDraft => ({
+    scopeKey: sessionScopeKeyRef.current,
+    sessionId: sessionIdRef.current,
+    revision: draftRevisionRef.current,
+    value: draftRef.current,
+  }), []);
+  const compareAndSetComputerDraft = React.useCallback((expected: AgentComputerDraft, value: string, beginApply: () => void): boolean => {
+    if (!mountedRef.current || isPreparingRef.current || expected.scopeKey !== sessionScopeKeyRef.current
+      || expected.sessionId !== sessionIdRef.current || expected.revision !== draftRevisionRef.current
+      || expected.value !== draftRef.current) return false;
+    beginApply();
+    setDraft(value);
+    return true;
+  }, [setDraft]);
   const refreshedPublicationsRef = React.useRef({ scope: '', ids: new Set<string>() });
   const liveRenameCompletionsRef = React.useRef(new Set<string>());
   React.useEffect(() => {
@@ -1091,24 +1114,27 @@ export function useAgentSession({
     }
   }, [appContext.libraryId, ownerScope, sessionScopeKey]);
 
+  const safeMessages = React.useMemo(() => messages.filter(isAgentMessage), [messages]);
   return {
     sessionInfo: sessionInfo?.id === sessionId ? sessionInfo : null,
     updateSessionInfo: (value: AgentSessionSummary) => {
       if (value.id === sessionIdRef.current && value.libraryId === Number(appContext.libraryId)) setSessionInfo(pickAgentSessionSummary(value));
     },
     attachments,
+    compareAndSetComputerDraft,
     draft,
     error,
     isBusy: isPreparing || isStreaming,
     isPreparing,
     isStreaming,
-    messages: messages.filter(isAgentMessage),
+    messages: safeMessages,
     runs,
     toolActivities,
     approvalBusyIds,
     interactionBusyIds,
     receiptBusyIds,
     reconcileOperation,
+    readComputerDraft,
     reset,
     continueTask,
     resumableRunId,

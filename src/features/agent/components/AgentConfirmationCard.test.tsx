@@ -14,6 +14,7 @@ import type {
   AgentToolApprovalSnapshot,
 } from '@/shared/agent/agent.types';
 import AgentConfirmationCard from './AgentConfirmationCard';
+import { COMPUTER_ELEMENT_OPERATIONS } from '@/shared/computer-use/computer-use-contract';
 
 vi.mock('@douyinfe/semi-icons', () => ({
   IconFolder: () => null,
@@ -212,6 +213,197 @@ afterEach(() => {
 });
 
 describe('AgentConfirmationCard', () => {
+  it('approves a semantic V3 click using its window identity without image coordinates', () => {
+    const action = { kind: 'computer.click' as const, version: 3 as const, libraryId: 3,
+      targetId: '237e3952-2a40-4c7b-b2f4-bec335a79cce', applicationLabel: 'OmniFlow', windowLabel: '测试窗口',
+      observationId: '12022dc1-f61c-4c2a-aac6-2963b60e5f7a', elementId: 'b5de6d3f-b8ec-4e73-a6be-81b717adf7ba',
+      button: 'left' as const, clickCount: 1 as const };
+    const input = approval(action); input.call.name = 'computer.click';
+    input.call.input = { x: 500, y: 600, windowLabel: 'forged window' };
+    const { renderer, onResolve } = renderCard(input);
+    expect(renderer.root.findAllByType('dd').map(textContent)).toEqual(['OmniFlow', '测试窗口']);
+    expect(textContent(renderer.root)).not.toContain('forged');
+    const allow = renderer.root.findAllByType('button').find(button => textContent(button) === '允许')!;
+    expect(allow.props.disabled).toBe(false); act(() => allow.props.onClick());
+    expect(onResolve).toHaveBeenCalledWith(true, action);
+  });
+
+  it.each(['ax', 'screenshot', 'both'] as const)('retains the immutable observation mode %s when approving window sharing', mode => {
+    const action = { kind: 'computer.observe' as const, version: 2 as const, libraryId: 3, mode,
+      targetId: '237e3952-2a40-4c7b-b2f4-bec335a79cce', applicationLabel: 'OmniFlow', windowLabel: '测试窗口' };
+    const input = approval(action); input.call.name = 'computer.observe';
+    const { renderer, onResolve } = renderCard(input);
+    const allow = renderer.root.findAllByType('button').find(button => textContent(button) === '允许')!;
+    expect(allow.props.disabled).toBe(false); act(() => allow.props.onClick());
+    expect(onResolve).toHaveBeenCalledWith(true, action);
+  });
+
+  it('explains the explicit click, text and scroll grant on the same immutable window', () => {
+    const action = { kind: 'computer.observe' as const, version: 2 as const, libraryId: 3,
+      targetId: '237e3952-2a40-4c7b-b2f4-bec335a79cce', applicationLabel: 'OmniFlow', windowLabel: '测试窗口',
+      operations: [...COMPUTER_ELEMENT_OPERATIONS] };
+    const input = approval(action); input.call.name = 'computer.observe';
+    input.call.input = { operations: ['rightClick'], text: 'private body' };
+    const { renderer, onResolve } = renderCard(input);
+    expect(textContent(renderer.root.findByType('h3'))).toBe('共享应用窗口并允许操作');
+    expect(textContent(renderer.root)).toContain('在该窗口中点击、文本输入、滚动');
+    expect(renderer.root.findAllByType('dt').map(textContent)).toEqual(['应用', '窗口', '允许操作']);
+    expect(renderer.root.findAllByType('dd').map(textContent)).toEqual(['OmniFlow', '测试窗口', '点击、文本输入、滚动']);
+    expect(textContent(renderer.root)).not.toContain('private body');
+    expect(textContent(renderer.root)).not.toContain('rightClick');
+    const allow = renderer.root.findAllByType('button').find(button => textContent(button) === '允许')!;
+    act(() => allow.props.onClick()); expect(onResolve).toHaveBeenCalledWith(true, action);
+  });
+
+  it.each([
+    { operations: ['press'], label: '点击', heading: '共享应用窗口并允许点击' },
+    { operations: ['replaceText', 'insertText'], label: '文本输入', heading: '共享应用窗口并允许操作' },
+    { operations: ['scrollDownPage'], label: '滚动', heading: '共享应用窗口并允许操作' },
+  ])('describes only the exact window grant $label', ({ operations, label, heading }) => {
+    const input = approval({ kind: 'computer.observe', version: 2, libraryId: 3,
+      targetId: '237e3952-2a40-4c7b-b2f4-bec335a79cce', applicationLabel: 'OmniFlow', windowLabel: '测试窗口', operations });
+    input.call.name = 'computer.observe'; const { renderer } = renderCard(input);
+    expect(textContent(renderer.root.findByType('h3'))).toBe(heading);
+    expect(renderer.root.findAllByType('dd').map(textContent)).toEqual(['OmniFlow', '测试窗口', label]);
+  });
+
+  it.each([[], ['press', 'press'], ['rightClick'], 'press', null])('refuses invalid window operations: %j', operations => {
+    const input = approval({ kind: 'computer.observe', version: 2, libraryId: 3,
+      targetId: '237e3952-2a40-4c7b-b2f4-bec335a79cce', applicationLabel: 'OmniFlow', windowLabel: '测试窗口', operations });
+    input.call.name = 'computer.observe'; const { renderer } = renderCard(input);
+    expect(renderer.root.findAllByType('button').find(button => textContent(button) === '允许')!.props.disabled).toBe(true);
+  });
+
+  it.each(['setText', 'scroll'] as const)('uses the %s window action instead of treating V1 as legacy screen sharing', operation => {
+    const identity = { libraryId: 3, targetId: '237e3952-2a40-4c7b-b2f4-bec335a79cce',
+      applicationLabel: 'OmniFlow', windowLabel: '测试窗口', observationId: '12022dc1-f61c-4c2a-aac6-2963b60e5f7a',
+      elementId: 'b5de6d3f-b8ec-4e73-a6be-81b717adf7ba', version: 1 };
+    const action = operation === 'setText' ? { ...identity, kind: 'computer.setText', mode: 'insert', textLength: 2, textBytes: 6 }
+      : { ...identity, kind: 'computer.scroll', direction: 'left', unit: 'step' };
+    const input = approval(action); input.call.name = `computer.${operation}`;
+    input.call.input = { text: 'private input body', direction: 'down' };
+    input.preview.description = 'forged description'; input.preview.details = [{ label: '正文', value: 'private body' }];
+    const { renderer, onResolve } = renderCard(input); const content = textContent(renderer.root);
+    expect(content).toContain(operation === 'setText' ? '允许在应用窗口输入文本' : '允许在应用窗口滚动');
+    expect(content).toContain(operation === 'setText' ? '在当前选区插入文本' : '向左');
+    expect(content).toContain(operation === 'setText' ? '2 字符 · 6 字节' : '一步');
+    expect(content).not.toContain('共享此屏幕'); expect(content).not.toContain('private'); expect(content).not.toContain('forged');
+    expect(renderer.root.findAllByType('input')).toHaveLength(0);
+    const allow = renderer.root.findAllByType('button').find(button => textContent(button) === '允许')!;
+    expect(allow.props.disabled).toBe(false); act(() => allow.props.onClick());
+    expect(onResolve).toHaveBeenCalledWith(true, action);
+    input.call.name = operation === 'setText' ? 'computer.scroll' : 'computer.setText';
+    act(() => renderer.update(React.createElement(AgentConfirmationCard, { approval: input, busy: false, libraryId: 3, onResolve })));
+    expect(renderer.root.findAllByType('button').find(button => textContent(button) === '允许')!.props.disabled).toBe(true);
+  });
+
+  it('describes an approved fractional scroll without taking its magnitude from tool input', () => {
+    const action = { kind: 'computer.scroll', version: 1, libraryId: 3,
+      targetId: '237e3952-2a40-4c7b-b2f4-bec335a79cce', applicationLabel: 'OmniFlow', windowLabel: '测试窗口',
+      observationId: '12022dc1-f61c-4c2a-aac6-2963b60e5f7a',
+      elementId: 'b5de6d3f-b8ec-4e73-a6be-81b717adf7ba', direction: 'down', unit: 'fraction' };
+    const input = approval(action); input.call.name = 'computer.scroll';
+    input.call.input = { unit: 'page', amount: 999, value: 'private position' };
+    const { renderer, onResolve } = renderCard(input);
+    expect(renderer.root.findAllByType('dd').map(textContent)).toEqual(['OmniFlow', '测试窗口', '向下', '滚动范围的 10%']);
+    expect(textContent(renderer.root)).not.toContain('一页');
+    expect(textContent(renderer.root)).not.toContain('一步');
+    expect(textContent(renderer.root)).not.toContain('private position');
+    const allow = renderer.root.findAllByType('button').find(button => textContent(button) === '允许')!;
+    expect(allow.props.disabled).toBe(false);
+    act(() => allow.props.onClick()); expect(onResolve).toHaveBeenCalledWith(true, action);
+  });
+
+  it('authorizes only the immutable V2 application window and explains AI storage and window changes', () => {
+    const action = { kind: 'computer.observe' as const, version: 2 as const, libraryId: 3,
+      targetId: '237e3952-2a40-4c7b-b2f4-bec335a79cce', applicationLabel: 'OmniFlow', windowLabel: '测试资料库窗口' };
+    const input = approval(action);
+    input.call.name = 'computer.observe';
+    input.call.input = { applicationLabel: 'forged app', windowLabel: 'forged window', pid: 500, nativeHandle: 'private-handle' };
+    input.preview.title = 'forged heading';
+    input.preview.description = 'forged description';
+    input.preview.details = [{ label: '窗口', value: 'forged detail' }];
+    const { renderer, onResolve } = renderCard(input);
+    const content = textContent(renderer.root);
+    expect(renderer.root.findByType('h3').children).toEqual(['共享应用窗口并允许点击']);
+    expect(content).toContain('仅将这个应用窗口的图像和界面控件信息发送给当前 AI 服务');
+    expect(content).toContain('保存在本机会话');
+    expect(content).toContain('切换到另一个窗口需重新批准');
+    expect(content).toContain('停止或任务结束后授权失效');
+    expect(content).toContain('屏幕录制和辅助功能权限');
+    expect(renderer.root.findAllByType('dt').map(textContent)).toEqual(['应用', '窗口']);
+    expect(renderer.root.findAllByType('dd').map(textContent)).toEqual(['OmniFlow', '测试资料库窗口']);
+    expect(content).not.toContain(action.targetId);
+    expect(content).not.toContain('forged');
+    expect(content).not.toContain('private-handle');
+    expect(renderer.root.findAllByType('input')).toHaveLength(0);
+    expect(renderer.root.findAllByType('select')).toHaveLength(0);
+    const allow = renderer.root.findAllByType('button').find(button => textContent(button) === '允许')!;
+    expect(allow.props.disabled).toBe(false);
+    act(() => allow.props.onClick());
+    expect(onResolve).toHaveBeenCalledWith(true, action);
+  });
+
+  it.each([
+    { libraryId: 4 }, { version: 3 }, { targetId: '500' }, { applicationLabel: '\ud800' },
+    { windowLabel: '窗口\u202e' }, { nativeHandle: 500 }, { displayId: '1' },
+  ])('refuses malformed or foreign V2 window approvals: %j', overrides => {
+    const input = approval({ kind: 'computer.observe', version: 2, libraryId: 3,
+      targetId: '237e3952-2a40-4c7b-b2f4-bec335a79cce', applicationLabel: 'OmniFlow', windowLabel: '测试窗口', ...overrides });
+    input.call.name = 'computer.observe';
+    const { renderer } = renderCard(input);
+    const allow = renderer.root.findAllByType('button').find(button => textContent(button) === '允许')!;
+    expect(allow.props.disabled).toBe(true);
+    expect(textContent(renderer.root)).toContain('当前版本无法识别此准备动作');
+  });
+
+  it('authorizes the immutable screen for this task without displaying Tool input or editing targets', () => {
+    const action = { kind: 'computer.observe' as const, version: 1 as const, libraryId: 3,
+      displayId: '1', displayLabel: '内置屏幕' };
+    const input = approval(action);
+    input.call.name = 'computer.observe';
+    input.call.input = { displayLabel: 'forged screen', path: '/private/path' };
+    input.preview.details = [{ label: '内部数据', value: 'private-handle' }];
+    const { renderer, onResolve } = renderCard(input);
+    const content = textContent(renderer.root);
+    expect(content).toContain('允许本次任务共享此屏幕并点击');
+    expect(content).toContain('此屏幕截图发送给当前模型');
+    expect(content).toContain('保存在本机会话');
+    expect(content).toContain('屏幕录制和辅助功能权限');
+    expect(content).toContain('任务结束后授权失效');
+    expect(content).toContain('内置屏幕');
+    expect(content).not.toContain('forged screen');
+    expect(content).not.toContain('/private/path');
+    expect(content).not.toContain('private-handle');
+    expect(renderer.root.findAllByType('input')).toHaveLength(0);
+    const allow = renderer.root.findAllByType('button').find(button => textContent(button) === '允许')!;
+    expect(allow.props.disabled).toBe(false);
+    act(() => allow.props.onClick());
+    expect(onResolve).toHaveBeenCalledWith(true, action);
+  });
+
+  it.each([
+    { libraryId: 4, kind: 'computer.observe' },
+    { libraryId: 3, kind: 'computer.click' },
+    { libraryId: 3, kind: 'computer.observe', displayLabel: 'screen\nother' },
+  ])('refuses a malformed or mismatched screen approval: %j', overrides => {
+    const input = approval(Object.assign({ kind: 'computer.observe', version: 1, libraryId: 3,
+      displayId: '1', displayLabel: '内置屏幕' }, overrides));
+    input.call.name = 'computer.observe';
+    const { renderer } = renderCard(input);
+    const allow = renderer.root.findAllByType('button').find(button => textContent(button) === '允许')!;
+    expect(allow.props.disabled).toBe(true);
+    expect(textContent(renderer.root)).toContain('当前版本无法识别此准备动作');
+  });
+
+  it.each([undefined, shellAction()])('requires a matching screen action even if another prepared kind is valid', action => {
+    const input = approval(action);
+    input.call.name = 'computer.observe';
+    const { renderer } = renderCard(input);
+    const allow = renderer.root.findAllByType('button').find(button => textContent(button) === '允许')!;
+    expect(allow.props.disabled).toBe(true);
+  });
+
   it('renders all 50 immutable renames from the normalized action without truncating to preview details', () => {
     const action = renameAction(50); const { renderer, onResolve } = renderCard(renameApproval(action));
     const region = renderer.root.findByProps({ role: 'region', 'aria-label': '完整重命名预览' });

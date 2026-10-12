@@ -13,6 +13,9 @@ export function createAgentCompositionGuard() {
   let endedAt = Number.NEGATIVE_INFINITY;
   let confirmingEnter = false;
   return {
+    isActive(time = performance.now()) {
+      return composing || confirmingEnter || (time >= endedAt && time - endedAt < 50);
+    },
     start() { composing = true; endedAt = Number.NEGATIVE_INFINITY; },
     end(time: number) { composing = false; endedAt = time; },
     keyDown(key: string, time: number) {

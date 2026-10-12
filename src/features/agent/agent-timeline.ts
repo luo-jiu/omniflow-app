@@ -8,12 +8,14 @@ import {
   isAgentAssistantItem,
   isAgentConversationMessage,
 } from '@/shared/agent/agent.types';
+import { normalizeAgentPreparedActionPublic } from '@/shared/agent/agent-prepared-action';
 import {
   buildAgentWorkflowProjectionFromRunActivities,
   type AgentWorkflowProjection,
 } from './agent-workflow-projection';
 
 type TimelineLayer = 'conversation' | 'work-journal' | 'execution-facts';
+type ToolGroupKind = 'resource-read' | 'internal-operation' | 'computer-use';
 
 export type AgentTimelineItem =
   | {
@@ -32,7 +34,7 @@ export type AgentTimelineItem =
     }
   | {
       activities: AgentToolActivitySnapshot[];
-      groupKind: 'resource-read' | 'internal-operation';
+      groupKind: ToolGroupKind;
       key: string;
       layer: 'execution-facts';
       occurredAt: string;
@@ -169,7 +171,47 @@ function canJoinInternalGroup(activity: AgentToolActivitySnapshot): boolean {
     ));
 }
 
-function groupReadActivities(items: AgentTimelineItem[]): AgentTimelineItem[] {
+function canJoinComputerGroup(activity: AgentToolActivitySnapshot): boolean {
+  const operation = activity.toolMetadata?.builtinComputerTool;
+  if (!operation || activity.pluginSource || activity.toolMetadata?.kind !== 'business'
+    || activity.call.name !== `computer.${operation}`
+    || activity.approval?.status === 'pending' || activity.interaction) return false;
+  // Main may identify an initial preparation before its action exists. Keep
+  // that record in the same display group without implying approval or success.
+  if (activity.status === 'preparing' && !activity.preparation && !activity.result && !activity.approval && !activity.finishedAt) {
+    return activity.toolMetadata.risk === (operation === 'observe' ? 'read' : 'write')
+      && (activity.permissionBehavior === 'allow' || activity.permissionBehavior === 'ask');
+  }
+  try {
+    const action = normalizeAgentPreparedActionPublic(activity.preparation?.action);
+    if ((action.kind !== 'computer.observe' && action.kind !== 'computer.click'
+      && action.kind !== 'computer.setText' && action.kind !== 'computer.scroll')
+      || action.kind !== activity.call.name) return false;
+  } catch {
+    return false;
+  }
+  const data = activity.result?.data;
+  if (data && typeof data === 'object' && !Array.isArray(data)
+    && ('dispatchState' in data && data.dispatchState === 'unknown'
+      || 'mutationCommitState' in data && data.mutationCommitState === 'commit_unknown')) return false;
+  if (canGroupFailedActivity(activity)) return true;
+  return (activity.status === 'completed' || activity.status === 'running' || activity.status === 'preparing')
+    && activity.result?.ok !== false
+    && (activity.permissionBehavior === 'allow' && !activity.approval
+      || activity.permissionBehavior === 'ask' && activity.approval?.status === 'approved');
+}
+
+function activityGroupKind(activity: AgentToolActivitySnapshot): ToolGroupKind | null {
+  if (activity.call.name === 'computer.observe' || activity.call.name === 'computer.click'
+    || activity.call.name === 'computer.setText' || activity.call.name === 'computer.scroll'
+    || activity.toolMetadata?.builtinComputerTool) {
+    return canJoinComputerGroup(activity) ? 'computer-use' : null;
+  }
+  if (canJoinReadGroup(activity)) return 'resource-read';
+  return canJoinInternalGroup(activity) ? 'internal-operation' : null;
+}
+
+function groupToolActivities(items: AgentTimelineItem[]): AgentTimelineItem[] {
   const grouped: AgentTimelineItem[] = [];
   items.forEach((item) => {
     if (item.type !== 'tool-activity') {
@@ -177,19 +219,16 @@ function groupReadActivities(items: AgentTimelineItem[]): AgentTimelineItem[] {
       return;
     }
     const activity = item.activity;
-    const eligible = canJoinReadGroup(activity) || canJoinInternalGroup(activity);
-    if (!eligible) {
+    const nextGroupKind = activityGroupKind(activity);
+    if (!nextGroupKind) {
       grouped.push(item);
       return;
     }
-    const nextGroupKind = canJoinReadGroup(activity) ? 'resource-read' : 'internal-operation';
     const previous = grouped.at(-1);
     if (
       previous?.type === 'tool-group'
       && previous.runId === activity.runId
       && previous.groupKind === nextGroupKind
-      && previous.activities.every(itemActivity => nextGroupKind === 'resource-read'
-        ? canJoinReadGroup(itemActivity) : canJoinInternalGroup(itemActivity))
     ) {
       previous.activities.push(activity);
       return;
@@ -376,7 +415,7 @@ export function buildAgentTimelineItemsFromProjection(
     !renderedActivityIds.has(item.activity.id)
     && !lastMessageItemIndexByRun.has(prepared.activityRunById.get(item.activity.id) || '')
   ));
-  return groupReadActivities(stableMergeByOccurredAt(
+  return groupToolActivities(stableMergeByOccurredAt(
     itemsWithFallbackActivities,
     stableSortByOccurredAt([
       ...orphanActivities,

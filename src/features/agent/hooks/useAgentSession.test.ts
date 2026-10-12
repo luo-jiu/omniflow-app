@@ -216,6 +216,45 @@ function renderSessionHook(onRefreshDirectory?: (id: number) => Promise<void> | 
 }
 
 describe('useAgentSession event coordination', () => {
+  it('uses the existing draft owner for synchronous compare-and-set and rejects stale or cross-scope writes', async () => {
+    apiMocks.getAgentSession.mockResolvedValue(sessionSnapshot());
+    const hook = renderSessionHook(vi.fn());
+    try {
+      await act(async () => { await hook.current.restore('session-1'); });
+      const original = hook.current.readComputerDraft();
+      act(() => hook.current.setDraft('用户草稿😀'));
+      const current = hook.current.readComputerDraft();
+      expect(current.revision).toBeGreaterThan(original.revision);
+      const begin = vi.fn();
+      expect(hook.current.compareAndSetComputerDraft(original, '覆盖', begin)).toBe(false);
+      expect(begin).not.toHaveBeenCalled(); expect(hook.current.draft).toBe('用户草稿😀');
+      act(() => { expect(hook.current.compareAndSetComputerDraft(current, '受控修改', begin)).toBe(true); });
+      expect(begin).toHaveBeenCalledOnce(); expect(hook.current.draft).toBe('受控修改');
+      expect(hook.current.readComputerDraft().revision).toBeGreaterThan(current.revision);
+      expect(hook.current.compareAndSetComputerDraft(current, '重放', begin)).toBe(false);
+      const oldScope = hook.current.readComputerDraft();
+      hook.changeScope({ ...OWNER_SCOPE, accountScope: 'user:8' }, 4);
+      expect(hook.current.compareAndSetComputerDraft(oldScope, '跨库修改', begin)).toBe(false);
+      expect(hook.current.draft).toBe(''); expect(begin).toHaveBeenCalledOnce();
+    } finally { hook.unmount(); }
+  });
+  it('rejects controlled draft mutation during restore and keeps a cancelled pre-apply callback uncommitted', async () => {
+    apiMocks.getAgentSession.mockResolvedValue(sessionSnapshot());
+    const hook = renderSessionHook(vi.fn());
+    try {
+      await act(async () => { await hook.current.restore('session-1'); });
+      act(() => hook.current.setDraft('保留')); const expected = hook.current.readComputerDraft();
+      expect(() => hook.current.compareAndSetComputerDraft(expected, '修改', () => { throw new Error('cancelled'); })).toThrow('cancelled');
+      expect(hook.current.draft).toBe('保留'); expect(hook.current.readComputerDraft().revision).toBe(expected.revision);
+      const pending = deferred<AgentSessionSnapshot>(); apiMocks.getAgentSession.mockReturnValue(pending.promise);
+      let restoring!: Promise<boolean>;
+      act(() => { restoring = hook.current.restore('session-2'); });
+      const begin = vi.fn(); expect(hook.current.compareAndSetComputerDraft(expected, '恢复期间修改', begin)).toBe(false);
+      expect(begin).not.toHaveBeenCalled();
+      await act(async () => { pending.resolve({ ...sessionSnapshot(), id: 'session-2' }); await restoring; });
+      expect(hook.current.readComputerDraft().revision).toBeGreaterThan(expected.revision);
+    } finally { hook.unmount(); }
+  });
   it('queries once, merges the same ToolRun revision and refreshes without broadcasting historical names', async () => {
     const settled = renameActivity(); settled.revision = 3;
     const original = { ...settled, revision: 2, status: 'interrupted' as const, result: { ok: false, data: { mutationCommitState: 'commit_unknown' } } };

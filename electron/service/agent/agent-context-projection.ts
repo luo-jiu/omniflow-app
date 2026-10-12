@@ -339,6 +339,18 @@ function checkpointTail(
   };
 }
 
+function isBuiltInWindowObservation(activity: AgentToolActivitySnapshot): boolean {
+  if (activity.call.name !== 'computer.observe' || activity.pluginSource
+    || activity.toolMetadata?.kind !== 'business'
+    || activity.toolMetadata.builtinComputerTool !== 'observe') return false;
+  try {
+    const action = normalizeAgentPreparedActionPublic(activity.preparation?.action);
+    return action.kind === 'computer.observe' && action.version === 2;
+  } catch {
+    return false;
+  }
+}
+
 function summarizeToolActivities(
   activities: readonly AgentToolActivitySnapshot[],
   terminalIds: ReadonlySet<string>,
@@ -401,6 +413,7 @@ function summarizeToolActivities(
         };
       }
     } else if (activity.result) {
+      const windowObservation = isBuiltInWindowObservation(activity);
       const envelopeTokens = estimateAgentTextTokens(JSON.stringify({
         ...factBase,
         result: null,
@@ -411,19 +424,33 @@ function summarizeToolActivities(
           : DEFAULT_EXECUTION_FACT_RESULT_TOKENS,
         remainingTokens - envelopeTokens - EXECUTION_FACT_SEPARATOR_TOKENS,
       );
-      if (resultTokenBudget < MINIMUM_AGENT_PROVIDER_TOOL_RESULT_TOKENS) break;
+      if (resultTokenBudget < MINIMUM_AGENT_PROVIDER_TOOL_RESULT_TOKENS) {
+        if (windowObservation) continue;
+        break;
+      }
 
       let fittedFact: AgentExecutionFact | null = null;
       let fittedTokens = 0;
       for (let attempt = 0; attempt < 3; attempt += 1) {
-        const projection = projectAgentToolResultForProvider(
-          activity.result,
-          resultTokenBudget,
-          activity.call.name === AGENT_SHELL_RUN_TOOL_NAME ? { mode: 'shell' } : {},
-        );
+        let projection;
+        try {
+          projection = projectAgentToolResultForProvider(
+            activity.result,
+            resultTokenBudget,
+            activity.call.name === AGENT_SHELL_RUN_TOOL_NAME
+              ? { mode: 'shell' }
+              : windowObservation ? { mode: 'computer-observe' } : {},
+          );
+        } catch (error) {
+          // Historical observations may be malformed or lack room for their exact scope/identity.
+          // Omit that fact without turning old memory into a failure of the current Run.
+          if (windowObservation) break;
+          throw error;
+        }
         try {
           result = JSON.parse(projection.content);
         } catch {
+          if (windowObservation) break;
           result = { ok: activity.result.ok === true };
         }
         const fact: AgentExecutionFact = { ...factBase, result };
@@ -438,7 +465,10 @@ function summarizeToolActivities(
         if (nextBudget < MINIMUM_AGENT_PROVIDER_TOOL_RESULT_TOKENS) break;
         resultTokenBudget = nextBudget;
       }
-      if (!fittedFact) break;
+      if (!fittedFact) {
+        if (windowObservation) continue;
+        break;
+      }
       selected.unshift(fittedFact);
       remainingTokens -= fittedTokens;
       continue;

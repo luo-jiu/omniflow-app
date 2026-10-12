@@ -3,6 +3,12 @@ import {
   AGENT_SHELL_RUN_TOOL_NAME,
   type AgentShellPreparedActionPublicV1,
 } from './shell/agent-shell.types';
+import type {
+  ComputerElementOperation,
+  ComputerScrollDirection,
+  ComputerScrollUnit,
+  ComputerTextMode,
+} from '../computer-use/computer-use-contract';
 
 export {
   AGENT_SHELL_PREPARED_ACTION_VERSION,
@@ -24,6 +30,8 @@ export interface AgentToolDisplayMetadata {
 }
 
 export interface AgentToolRendererMetadata {
+  /** Main-owned display provenance only; never an execution or attachment grant. */
+  builtinComputerTool?: 'observe' | 'click' | 'setText' | 'scroll';
   groupKind?: AgentToolDisplayGroupKind;
   kind: 'business' | 'control';
   operationKind?: AgentToolDisplayOperationKind;
@@ -322,6 +330,20 @@ export const AGENT_PLUGIN_RENAME_PREPARED_ACTION_VERSION = 1 as const;
 export const AGENT_PLUGIN_FILE_OUTPUT_PREPARED_ACTION_KIND = 'plugin.file-output' as const;
 export const AGENT_PLUGIN_FILE_OUTPUT_PREPARED_ACTION_VERSION = 1 as const;
 
+export const AGENT_COMPUTER_OBSERVE_PREPARED_ACTION_KIND = 'computer.observe' as const;
+export const AGENT_COMPUTER_OBSERVE_PREPARED_ACTION_VERSION = 1 as const;
+export const AGENT_COMPUTER_OBSERVE_PREPARED_ACTION_VERSION_V2 = 2 as const;
+export const AGENT_COMPUTER_CLICK_PREPARED_ACTION_KIND = 'computer.click' as const;
+export const AGENT_COMPUTER_CLICK_PREPARED_ACTION_VERSION = 1 as const;
+export const AGENT_COMPUTER_CLICK_PREPARED_ACTION_VERSION_V2 = 2 as const;
+export const AGENT_COMPUTER_CLICK_PREPARED_ACTION_VERSION_V3 = 3 as const;
+export const AGENT_COMPUTER_WINDOWS_PREPARED_ACTION_KIND = 'computer.windows' as const;
+export const AGENT_COMPUTER_WINDOWS_PREPARED_ACTION_VERSION = 1 as const;
+export const AGENT_COMPUTER_SET_TEXT_PREPARED_ACTION_KIND = 'computer.setText' as const;
+export const AGENT_COMPUTER_SET_TEXT_PREPARED_ACTION_VERSION = 1 as const;
+export const AGENT_COMPUTER_SCROLL_PREPARED_ACTION_KIND = 'computer.scroll' as const;
+export const AGENT_COMPUTER_SCROLL_PREPARED_ACTION_VERSION = 1 as const;
+
 export const AGENT_PREPARED_ACTION_PUBLIC_IDENTITIES = [{
   kind: AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_KIND,
   version: AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_VERSION,
@@ -343,7 +365,139 @@ export const AGENT_PREPARED_ACTION_PUBLIC_IDENTITIES = [{
 }, {
   kind: AGENT_PLUGIN_FILE_OUTPUT_PREPARED_ACTION_KIND,
   version: AGENT_PLUGIN_FILE_OUTPUT_PREPARED_ACTION_VERSION,
+}, {
+  kind: AGENT_COMPUTER_OBSERVE_PREPARED_ACTION_KIND,
+  version: AGENT_COMPUTER_OBSERVE_PREPARED_ACTION_VERSION,
+}, {
+  kind: AGENT_COMPUTER_CLICK_PREPARED_ACTION_KIND,
+  version: AGENT_COMPUTER_CLICK_PREPARED_ACTION_VERSION,
+}, {
+  kind: AGENT_COMPUTER_OBSERVE_PREPARED_ACTION_KIND,
+  version: AGENT_COMPUTER_OBSERVE_PREPARED_ACTION_VERSION_V2,
+}, {
+  kind: AGENT_COMPUTER_CLICK_PREPARED_ACTION_KIND,
+  version: AGENT_COMPUTER_CLICK_PREPARED_ACTION_VERSION_V2,
+}, {
+  kind: AGENT_COMPUTER_CLICK_PREPARED_ACTION_KIND,
+  version: AGENT_COMPUTER_CLICK_PREPARED_ACTION_VERSION_V3,
+}, {
+  kind: AGENT_COMPUTER_WINDOWS_PREPARED_ACTION_KIND,
+  version: AGENT_COMPUTER_WINDOWS_PREPARED_ACTION_VERSION,
+}, {
+  kind: AGENT_COMPUTER_SET_TEXT_PREPARED_ACTION_KIND,
+  version: AGENT_COMPUTER_SET_TEXT_PREPARED_ACTION_VERSION,
+}, {
+  kind: AGENT_COMPUTER_SCROLL_PREPARED_ACTION_KIND,
+  version: AGENT_COMPUTER_SCROLL_PREPARED_ACTION_VERSION,
 }] as const;
+
+export interface AgentComputerWindowsPreparedActionPublicV1 {
+  kind: typeof AGENT_COMPUTER_WINDOWS_PREPARED_ACTION_KIND;
+  version: typeof AGENT_COMPUTER_WINDOWS_PREPARED_ACTION_VERSION;
+  libraryId: number;
+  query?: string;
+  application?: string;
+}
+
+export interface AgentComputerObservePreparedActionPublicV1 {
+  kind: typeof AGENT_COMPUTER_OBSERVE_PREPARED_ACTION_KIND;
+  version: typeof AGENT_COMPUTER_OBSERVE_PREPARED_ACTION_VERSION;
+  libraryId: number;
+  displayId: string;
+  displayLabel: string;
+}
+
+export interface AgentComputerClickPreparedActionPublicV1 {
+  kind: typeof AGENT_COMPUTER_CLICK_PREPARED_ACTION_KIND;
+  version: typeof AGENT_COMPUTER_CLICK_PREPARED_ACTION_VERSION;
+  libraryId: number;
+  displayId: string;
+  displayLabel: string;
+  observationId: string;
+  screenshotWidth: number;
+  screenshotHeight: number;
+  x: number;
+  y: number;
+  button: 'left' | 'right';
+  clickCount: 1 | 2;
+}
+
+export type AgentComputerObservationMode = 'ax' | 'screenshot' | 'both';
+
+export interface AgentComputerObservePreparedActionPublicV2 {
+  kind: typeof AGENT_COMPUTER_OBSERVE_PREPARED_ACTION_KIND;
+  version: typeof AGENT_COMPUTER_OBSERVE_PREPARED_ACTION_VERSION_V2;
+  libraryId: number;
+  /** Opaque main-owned target identity; never a native PID or window handle. */
+  targetId: string;
+  applicationLabel: string;
+  windowLabel: string;
+  /** Absent on historical actions, which retain combined screenshot and AX observation. */
+  mode?: AgentComputerObservationMode;
+  /** Explicit Run-scoped operation grant; absent only on historical actions. */
+  operations?: ComputerElementOperation[];
+}
+
+export interface AgentComputerClickPreparedActionPublicV2 {
+  kind: typeof AGENT_COMPUTER_CLICK_PREPARED_ACTION_KIND;
+  version: typeof AGENT_COMPUTER_CLICK_PREPARED_ACTION_VERSION_V2;
+  libraryId: number;
+  targetId: string;
+  applicationLabel: string;
+  windowLabel: string;
+  observationId: string;
+  /** Main-issued reference bound to this observation; execution revalidates its private AX candidate. */
+  elementId?: string;
+  screenshotWidth: number;
+  screenshotHeight: number;
+  x: number;
+  y: number;
+  button: 'left';
+  clickCount: 1;
+}
+
+/** Semantic click; its identity does not depend on a captured image or image coordinates. */
+export interface AgentComputerClickPreparedActionPublicV3 {
+  kind: typeof AGENT_COMPUTER_CLICK_PREPARED_ACTION_KIND;
+  version: typeof AGENT_COMPUTER_CLICK_PREPARED_ACTION_VERSION_V3;
+  libraryId: number;
+  targetId: string;
+  applicationLabel: string;
+  windowLabel: string;
+  observationId: string;
+  elementId: string;
+  button: 'left';
+  clickCount: 1;
+}
+
+export interface AgentComputerSetTextPreparedActionPublicV1 {
+  kind: typeof AGENT_COMPUTER_SET_TEXT_PREPARED_ACTION_KIND;
+  version: typeof AGENT_COMPUTER_SET_TEXT_PREPARED_ACTION_VERSION;
+  libraryId: number;
+  targetId: string;
+  applicationLabel: string;
+  windowLabel: string;
+  observationId: string;
+  elementId: string;
+  mode: ComputerTextMode;
+  /** Unicode scalar count; the exact body exists only in the sealed main binding. */
+  textLength: number;
+  textBytes: number;
+}
+
+export interface AgentComputerScrollPreparedActionPublicV1 {
+  kind: typeof AGENT_COMPUTER_SCROLL_PREPARED_ACTION_KIND;
+  version: typeof AGENT_COMPUTER_SCROLL_PREPARED_ACTION_VERSION;
+  libraryId: number;
+  targetId: string;
+  applicationLabel: string;
+  windowLabel: string;
+  observationId: string;
+  elementId: string;
+  direction: ComputerScrollDirection;
+  /** fraction moves 10% of the confirmed AX numeric range; it is not a page or viewport fraction. */
+  unit: ComputerScrollUnit;
+}
 
 export interface AgentPluginRenamePreparedActionPublicV1 {
   kind: typeof AGENT_PLUGIN_RENAME_PREPARED_ACTION_KIND;
@@ -548,6 +702,14 @@ export interface AgentFileAuthorityCompletionV1 {
 }
 
 export type AgentPreparedActionPublic =
+  | AgentComputerWindowsPreparedActionPublicV1
+  | AgentComputerSetTextPreparedActionPublicV1
+  | AgentComputerScrollPreparedActionPublicV1
+  | AgentComputerObservePreparedActionPublicV2
+  | AgentComputerClickPreparedActionPublicV2
+  | AgentComputerClickPreparedActionPublicV3
+  | AgentComputerObservePreparedActionPublicV1
+  | AgentComputerClickPreparedActionPublicV1
   | AgentPluginRenamePreparedActionPublicV1
   | AgentPluginFileOutputPreparedActionPublicV1
   | AgentFilePublishPreparedActionPublicV1
@@ -1104,6 +1266,18 @@ export type AgentPresentationBlock =
       actions?: AgentPresentationAction[];
       artifact: AgentArtifactReference;
       type: 'artifact';
+    }
+  | {
+      attachmentId: string;
+      alt: string;
+      type: 'attachment-image';
+    }
+  | {
+      tree: string;
+      truncated: boolean;
+      scope?: { kind: 'window' } | { kind: 'element-ancestor'; ancestorLevels: number };
+      scopeScanComplete?: boolean;
+      type: 'computer-ax';
     }
   | {
       entries: Array<{ label: string; value: string }>;

@@ -10,8 +10,9 @@ import type {
   AgentToolActivitySnapshot,
 } from '@/shared/agent/agent.types';
 import type { AgentShellLogPageV1 } from '@/shared/agent/shell/agent-shell.types';
-import { readAgentShellLogPage } from '../services/agent.api';
+import { previewAgentAttachment, readAgentShellLogPage } from '../services/agent.api';
 import AgentToolActivityCard from './AgentToolActivityCard';
+import AgentToolActivityGroup from './AgentToolActivityGroup';
 import AgentActivityText from './AgentActivityText';
 
 vi.mock('@douyinfe/semi-icons', () => ({
@@ -23,6 +24,7 @@ vi.mock('@douyinfe/semi-icons', () => ({
 }));
 
 vi.mock('../services/agent.api', () => ({
+  previewAgentAttachment: vi.fn(),
   readAgentShellLogPage: vi.fn(),
 }));
 
@@ -31,6 +33,10 @@ vi.mock('./AgentConfirmationCard', () => ({
 }));
 
 vi.mock('./AgentInteractionBlock', () => ({
+  default: () => null,
+}));
+
+vi.mock('./AgentAttachmentPreview', () => ({
   default: () => null,
 }));
 
@@ -180,6 +186,219 @@ function textContent(instance: TestRenderer.ReactTestInstance): string {
     typeof child === 'string' ? child : textContent(child)
   )).join('');
 }
+
+const SCREEN_IMAGE_ID = 'eddf85c3-f841-46a2-8016-2a061b58983e';
+const SCREEN_OBSERVATION_ID = '237e3952-2a40-4c7b-b2f4-bec335a79cce';
+
+function observationActivity(): AgentToolActivitySnapshot {
+  return {
+    ...shellActivity(), call: { id: 'observe-call', name: 'computer.observe', input: {} },
+    toolMetadata: { kind: 'business', risk: 'read', builtinComputerTool: 'observe' },
+    preparation: { preparedActionId: 'screen-action', snapshotHash: 'a'.repeat(64), action: {
+      kind: 'computer.observe', version: 1, libraryId: 3, displayId: '1', displayLabel: '内置屏幕',
+    } },
+    result: { ok: true, message: '已查看屏幕', data: {
+      imageId: SCREEN_IMAGE_ID, observationId: SCREEN_OBSERVATION_ID, displayId: '1', screenshotWidth: 1024, screenshotHeight: 640,
+    } },
+  };
+}
+
+describe('AgentToolActivityCard computer presentation', () => {
+  it('renders the approved local AX range without loading a screenshot or expanding coordinate permission', () => {
+    const activity: AgentToolActivitySnapshot = { ...observationActivity(),
+      preparation: { preparedActionId: 'window-action', snapshotHash: 'a'.repeat(64), action: {
+        kind: 'computer.observe', version: 2, libraryId: 3, mode: 'ax',
+        targetId: '12022dc1-f61c-4c2a-aac6-2963b60e5f7a', applicationLabel: 'OmniFlow', windowLabel: 'win',
+      } },
+      result: { ok: true, data: { captureScope: 'window', observationSource: 'ax',
+        targetId: '12022dc1-f61c-4c2a-aac6-2963b60e5f7a', observationId: SCREEN_OBSERVATION_ID,
+        scope: { kind: 'element-ancestor', ancestorLevels: 0 }, scopeScanComplete: true,
+        candidateScanComplete: false, coordinateClickReady: false,
+        axTree: 'AXButton "局部目标"', axTreeTruncated: true } },
+    };
+    const renderer = renderCard(activity);
+    act(() => renderer.root.findByProps({ className: 'agent-activity-header' }).props.onClick());
+    expect(renderer.root.findByType('summary').children).toEqual(['AX', ' · 局部', ' · 已截断']);
+    act(() => renderer.root.findByType('details').props.onToggle({ currentTarget: { open: true } }));
+    expect(renderer.root.findByType('p').children).toEqual(['局部范围：控件自身；控件扫描完整，不代表全窗口。']);
+    expect(previewAgentAttachment).not.toHaveBeenCalled();
+    expect(renderer.root.findAllByType('img')).toHaveLength(0);
+  });
+
+  it('expands AX-only details without loading an attachment or showing a thumbnail', () => {
+    const activity: AgentToolActivitySnapshot = { ...observationActivity(),
+      preparation: { preparedActionId: 'window-action', snapshotHash: 'a'.repeat(64), action: {
+        kind: 'computer.observe', version: 2, libraryId: 3, mode: 'ax',
+        targetId: '12022dc1-f61c-4c2a-aac6-2963b60e5f7a', applicationLabel: 'OmniFlow', windowLabel: 'win',
+      } },
+      result: { ok: true, data: { captureScope: 'window', observationSource: 'ax',
+        targetId: '12022dc1-f61c-4c2a-aac6-2963b60e5f7a', observationId: SCREEN_OBSERVATION_ID,
+        axTree: 'AXWindow "win"\n  AXButton "展开目录树"', axTreeTruncated: false } },
+    };
+    const renderer = renderCard(activity);
+    expect(textContent(renderer.root)).toBe('已查看窗口');
+    act(() => renderer.root.findByProps({ className: 'agent-activity-header' }).props.onClick());
+    expect(renderer.root.findByType('summary').children).toEqual(['AX']);
+    act(() => renderer.root.findByType('details').props.onToggle({ currentTarget: { open: true } }));
+    expect(renderer.root.findByType('pre').children).toEqual(['AXWindow "win"\n  AXButton "展开目录树"']);
+    expect(previewAgentAttachment).not.toHaveBeenCalled();
+    expect(renderer.root.findAllByType('img')).toHaveLength(0);
+    act(() => renderer.root.findByProps({ className: 'agent-activity-header' }).props.onClick());
+    expect(renderer.root.findAllByType('pre')).toHaveLength(0);
+  });
+
+  it('releases expanded AX text when its retained Tool group is collapsed and remounts it closed', async () => {
+    vi.mocked(previewAgentAttachment).mockResolvedValue('data:image/png;base64,YQ==');
+    const activity: AgentToolActivitySnapshot = { ...observationActivity(),
+      preparation: { preparedActionId: 'window-action', snapshotHash: 'a'.repeat(64), action: {
+        kind: 'computer.observe', version: 2, libraryId: 3,
+        targetId: '12022dc1-f61c-4c2a-aac6-2963b60e5f7a', applicationLabel: 'OmniFlow', windowLabel: 'win',
+      } },
+      result: { ok: true, data: { captureScope: 'window', targetId: '12022dc1-f61c-4c2a-aac6-2963b60e5f7a',
+        imageId: SCREEN_IMAGE_ID, observationId: SCREEN_OBSERVATION_ID, screenshotWidth: 1024, screenshotHeight: 640,
+        axTree: 'AXWindow "win"\n  AXButton "展开目录树"', axTreeTruncated: false } },
+    };
+    let renderer!: TestRenderer.ReactTestRenderer;
+    act(() => { renderer = TestRenderer.create(<AgentToolActivityGroup activities={[activity]}
+      approvalBusyIds={new Set()} interactionBusyIds={new Set()} libraryId={3}
+      onResolveApproval={vi.fn()} ownerScope={OWNER_SCOPE} />); });
+    renderers.push(renderer);
+    act(() => renderer.root.findByProps({ className: 'agent-activity-group-toggle' }).props.onClick());
+    await act(async () => renderer.root.findByProps({ className: 'agent-activity-header' }).props.onClick());
+    expect(renderer.root.findByType('summary').children).toEqual(['AX']);
+    expect(renderer.root.findAllByType('pre')).toHaveLength(0);
+    act(() => renderer.root.findByType('details').props.onToggle({ currentTarget: { open: true } }));
+    expect(renderer.root.findByType('pre').children).toEqual(['AXWindow "win"\n  AXButton "展开目录树"']);
+    act(() => renderer.root.findByProps({ className: 'agent-activity-group-toggle' }).props.onClick());
+    expect(renderer.root.findAllByType('pre')).toHaveLength(0);
+    expect(renderer.root.findAllByType('details')).toHaveLength(0);
+    await act(async () => renderer.root.findByProps({ className: 'agent-activity-group-toggle' }).props.onClick());
+    expect(renderer.root.findAllByType('pre')).toHaveLength(0);
+    expect(renderer.root.findByType('summary').children).toEqual(['AX']);
+  });
+
+  it('releases an expanded screenshot when its retained parent Tool group is collapsed', async () => {
+    const preview = vi.mocked(previewAgentAttachment);
+    let finish!: (src: string) => void;
+    preview.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    preview.mockResolvedValueOnce('data:image/png;base64,Yg==');
+    let renderer!: TestRenderer.ReactTestRenderer;
+    act(() => {
+      renderer = TestRenderer.create(<AgentToolActivityGroup activities={[observationActivity()]}
+        approvalBusyIds={new Set()} interactionBusyIds={new Set()} libraryId={3}
+        onResolveApproval={vi.fn()} ownerScope={OWNER_SCOPE} />);
+    });
+    renderers.push(renderer);
+    expect(preview).not.toHaveBeenCalled();
+    act(() => renderer.root.findByProps({ className: 'agent-activity-group-toggle' }).props.onClick());
+    act(() => renderer.root.findByProps({ className: 'agent-activity-header' }).props.onClick());
+    expect(preview).toHaveBeenCalledOnce();
+    act(() => renderer.root.findByProps({ className: 'agent-activity-group-toggle' }).props.onClick());
+    await act(async () => { finish('data:image/png;base64,YQ=='); });
+    expect(renderer.root.findAllByType('img')).toHaveLength(0);
+    await act(async () => renderer.root.findByProps({ className: 'agent-activity-group-toggle' }).props.onClick());
+    expect(preview).toHaveBeenCalledTimes(2);
+    expect(renderer.root.findByType('img').props.src).toBe('data:image/png;base64,Yg==');
+  });
+
+  it('loads the actual screenshot only while expanded and never repeats the status in its body', async () => {
+    const activity = observationActivity();
+    const preview = vi.mocked(previewAgentAttachment);
+    let finish!: (src: string) => void;
+    preview.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    preview.mockResolvedValueOnce('data:image/png;base64,Yg==');
+    const renderer = renderCard(activity);
+    expect(textContent(renderer.root)).toBe('已查看屏幕');
+    expect(preview).not.toHaveBeenCalled();
+    act(() => renderer.root.findByProps({ className: 'agent-activity-header' }).props.onClick());
+    expect(preview).toHaveBeenCalledWith({ id: SCREEN_IMAGE_ID, libraryId: 3, ownerScope: OWNER_SCOPE, sessionId: activity.sessionId });
+    act(() => renderer.root.findByProps({ className: 'agent-activity-header' }).props.onClick());
+    await act(async () => { finish('data:image/png;base64,YQ=='); });
+    expect(renderer.root.findAllByType('img')).toHaveLength(0);
+    await act(async () => renderer.root.findByProps({ className: 'agent-activity-header' }).props.onClick());
+    expect(preview).toHaveBeenCalledTimes(2);
+    expect(renderer.root.findByType('img').props).toMatchObject({ src: 'data:image/png;base64,Yg==', alt: '内置屏幕的屏幕截图' });
+    expect(textContent(renderer.root)).toBe('已查看屏幕');
+  });
+
+  it('releases a screenshot inside an open group when its parent Run process is collapsed', async () => {
+    const preview = vi.mocked(previewAgentAttachment);
+    preview.mockResolvedValue('data:image/png;base64,YQ==');
+    const group = (detailsVisible: boolean) => <AgentToolActivityGroup activities={[observationActivity()]}
+      detailsVisible={detailsVisible} approvalBusyIds={new Set()} interactionBusyIds={new Set()} libraryId={3}
+      onResolveApproval={vi.fn()} ownerScope={OWNER_SCOPE} />;
+    let renderer!: TestRenderer.ReactTestRenderer;
+    act(() => { renderer = TestRenderer.create(group(true)); });
+    renderers.push(renderer);
+    act(() => renderer.root.findByProps({ className: 'agent-activity-group-toggle' }).props.onClick());
+    await act(async () => renderer.root.findByProps({ className: 'agent-activity-header' }).props.onClick());
+    expect(renderer.root.findAllByType('img')).toHaveLength(1);
+    act(() => renderer.update(group(false)));
+    expect(renderer.root.findAllByType('img')).toHaveLength(0);
+    await act(async () => renderer.update(group(true)));
+    expect(preview).toHaveBeenCalledTimes(2);
+    expect(renderer.root.findAllByType('img')).toHaveLength(1);
+  });
+
+  it('uses one non-expandable operation line for an authoritative dispatched click', () => {
+    const activity: AgentToolActivitySnapshot = {
+      ...observationActivity(), call: { id: 'click-call', name: 'computer.click', input: {} },
+      toolMetadata: { kind: 'business', risk: 'write', builtinComputerTool: 'click' },
+      preparation: { preparedActionId: 'click-action', snapshotHash: 'a'.repeat(64), action: {
+        kind: 'computer.click', version: 1, libraryId: 3, displayId: '1', displayLabel: '内置屏幕',
+        observationId: SCREEN_OBSERVATION_ID, screenshotWidth: 1024, screenshotHeight: 640,
+        x: 300, y: 200, button: 'left', clickCount: 1,
+      } },
+      result: { ok: true, message: '已发送点击，请重新查看屏幕确认结果', data: {
+        operation: 'computer.click', operationId: 'tool-run-1', dispatchState: 'dispatched', mutationCommitState: 'committed',
+        observationId: SCREEN_OBSERVATION_ID, displayId: '1', x: 300, y: 200,
+      } },
+    };
+    const renderer = renderCard(activity);
+    expect(textContent(renderer.root)).toBe('已发送点击');
+    expect(renderer.root.findAllByType('button')).toHaveLength(0);
+    expect(renderer.root.findAllByProps({ className: 'agent-activity-collapse' })).toHaveLength(0);
+    expect(renderer.root.findByProps({ className: 'agent-activity-header' }).props.onClick).toBeUndefined();
+    const unknown = { ...activity, status: 'failed' as const,
+      result: { ok: false, message: '点击结果不确定，请重新查看屏幕，勿直接重复点击', data: { dispatchState: 'unknown' } } };
+    act(() => renderer.update(cardElement(unknown)));
+    expect(textContent(renderer.root.findByProps({ className: 'agent-activity-header' }))).not.toContain('已发送点击');
+    act(() => renderer.root.findByProps({ className: 'agent-activity-header' }).props.onClick());
+    expect(renderer.root.findByProps({ className: 'agent-activity-collapse' }).props['aria-hidden']).toBe(false);
+    expect(textContent(renderer.root)).toContain('勿直接重复点击');
+  });
+
+  it.each(['setText', 'scroll'] as const)('shows an authoritative %s as one line and keeps unknown results inspectable', operation => {
+    const identity = { libraryId: 3, targetId: '12022dc1-f61c-4c2a-aac6-2963b60e5f7a',
+      applicationLabel: 'OmniFlow', windowLabel: '测试窗口', observationId: SCREEN_OBSERVATION_ID,
+      elementId: 'b5de6d3f-b8ec-4e73-a6be-81b717adf7ba' };
+    const operationFields = operation === 'setText' ? { mode: 'replace' as const, textLength: 2, textBytes: 6 }
+      : { direction: 'down' as const, unit: 'page' as const };
+    const activity: AgentToolActivitySnapshot = {
+      ...observationActivity(), call: { id: 'input-call', name: `computer.${operation}`, input: { text: 'private body' } },
+      toolMetadata: { kind: 'business', risk: 'write', builtinComputerTool: operation },
+      preparation: { preparedActionId: 'input-action', snapshotHash: 'a'.repeat(64), action: operation === 'setText'
+        ? { ...identity, kind: 'computer.setText', version: 1, mode: 'replace', textLength: 2, textBytes: 6 }
+        : { ...identity, kind: 'computer.scroll', version: 1, direction: 'down', unit: 'page' } },
+      result: { ok: true, message: '已发送操作，请重新查看确认结果', data: {
+        ...identity, ...operationFields, operation: `computer.${operation}`, operationId: 'tool-run-1',
+        dispatchState: 'dispatched', mutationCommitState: 'committed', nextAction: 'observe', retryAllowed: false,
+      } },
+    };
+    const renderer = renderCard(activity);
+    expect(textContent(renderer.root)).toBe(operation === 'setText' ? '已发送文本输入' : '已发送滚动');
+    expect(renderer.root.findAllByType('button')).toHaveLength(0);
+    expect(renderer.root.findAllByProps({ className: 'agent-activity-collapse' })).toHaveLength(0);
+    expect(renderer.root.findByProps({ 'data-tool-icon': operation === 'setText' ? 'edit' : 'move' })).toBeDefined();
+    const unknown = { ...activity, status: 'failed' as const, result: { ok: false,
+      message: '操作结果不确定，请重新查看，勿直接重复发送', data: { dispatchState: 'unknown' } } };
+    act(() => renderer.update(cardElement(unknown)));
+    expect(textContent(renderer.root.findByProps({ className: 'agent-activity-header' }))).not.toContain('已发送');
+    act(() => renderer.root.findByProps({ className: 'agent-activity-header' }).props.onClick());
+    expect(textContent(renderer.root)).toContain('勿直接重复发送');
+    expect(textContent(renderer.root)).not.toContain('private body');
+  });
+});
 
 afterEach(() => {
   renderers.splice(0).forEach((renderer) => {

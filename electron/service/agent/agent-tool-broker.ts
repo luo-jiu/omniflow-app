@@ -252,8 +252,12 @@ export function createAgentToolBroker(options: AgentToolBrokerOptions = {}) {
       const executionRegistry = runToolRegistry || toolRegistry;
       const registeredTool = context.runCapabilitySnapshot?.getTool(name, context.activeSkillId);
       const expectedRegistrationId = registeredTool?.registrationId;
-      const supportsCommitSettlement = (registeredTool?.pluginOperation === 'rename' || registeredTool?.pluginOperation === 'file-output')
-        && registeredTool.risk === 'write' && registeredTool.executor === 'main';
+      const computerInput = ['computer.click', 'computer.setText', 'computer.scroll'].includes(name);
+      const supportsCommitSettlement = ((!computerInput && (registeredTool?.pluginOperation === 'rename' || registeredTool?.pluginOperation === 'file-output'))
+        || (computerInput && registeredTool?.name === name && registeredTool.registrationId === `builtin:${name}@1`
+          && registeredTool.kind === 'business' && !registeredTool.pluginSource && !registeredTool.pluginOperation
+          && typeof registeredTool.prepareMain === 'function'))
+        && registeredTool?.risk === 'write' && registeredTool.executor === 'main';
       const commitSettlement: AgentMainCommitSettlement | undefined = supportsCommitSettlement ? {
         begin: fallback => {
           if (settled || cancellationError || controller.signal.aborted) throw abortError('Agent Tool 提交请求已失效');

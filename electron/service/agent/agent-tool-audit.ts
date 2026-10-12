@@ -3,6 +3,10 @@ import {
   isAgentSensitiveFieldName,
   sanitizeAgentSensitiveText,
 } from './agent-sensitive-data';
+import type { AgentActionPreview, AgentComputerSetTextPreparedActionPublicV1, AgentToolResult } from '../../../src/shared/agent/agent.types';
+import { COMPUTER_TEXT_MAX_UNICODE_SCALARS, COMPUTER_TEXT_MAX_UTF8_BYTES,
+  validateComputerText } from '../../../src/shared/computer-use/computer-use-contract';
+import { toAgentProviderToolName } from './agent-provider-tool-name';
 
 const REDACTED = '[REDACTED]';
 const TRUNCATED = '[TRUNCATED]';
@@ -17,6 +21,114 @@ const MAX_SCAN_DEPTH = 16;
 const MAX_SCAN_NODES = 4_096;
 const MAX_SCAN_STRING_CHARACTERS = 64_000;
 const UNSAFE_AUDIT_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+const COMPUTER_ID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u;
+
+interface AgentToolAuditSource {
+  name: string;
+  registrationId: string;
+  executor?: 'main' | 'renderer';
+  kind?: 'business' | 'control';
+  risk: string;
+  pluginSource?: unknown;
+  pluginOperation?: unknown;
+  prepareMain?: unknown;
+}
+
+export function isBuiltinComputerSetTextTool(source?: AgentToolAuditSource | null): boolean {
+  return source?.name === 'computer.setText' && source.registrationId === 'builtin:computer.setText@1'
+    && source.executor === 'main' && source.kind === 'business' && source.risk === 'write'
+    && !source.pluginSource && !source.pluginOperation && typeof source.prepareMain === 'function';
+}
+
+/** Legacy privacy defense only; names do not establish builtin identity or execution authority. */
+export function isAgentComputerTextLegacyAuditName(name?: string): boolean {
+  return name === 'computer.setText' || name === toAgentProviderToolName('computer.setText');
+}
+
+export type AgentComputerTextAuditSourceResolver = (name: string) => AgentToolAuditSource | null;
+
+/** Capture privacy identity before model filtering; this resolver grants no execution authority. */
+export function createAgentComputerTextAuditSourceResolver(snapshot: {
+  get: (name: string) => AgentToolAuditSource | null;
+}): AgentComputerTextAuditSourceResolver {
+  const registered = snapshot.get('computer.setText');
+  if (!registered || !isBuiltinComputerSetTextTool(registered)) return () => null;
+  const source: AgentToolAuditSource = Object.freeze({
+    name: registered.name,
+    registrationId: registered.registrationId,
+    executor: registered.executor,
+    kind: registered.kind,
+    risk: registered.risk,
+    prepareMain: registered.prepareMain,
+  });
+  const providerName = toAgentProviderToolName(source.name);
+  const providerAliasAvailable = !snapshot.get(providerName);
+  return name => (name === source.name || (providerAliasAvailable && name === providerName)) ? source : null;
+}
+
+/** Also protects legacy renderer snapshots; this projection grants no execution authority. */
+export function projectAgentComputerTextInput(input: unknown): Record<string, unknown> {
+  const output: Record<string, unknown> = {};
+  if (!input || typeof input !== 'object' || Array.isArray(input) || !isPlainRecord(input)) return output;
+  const descriptors = Object.getOwnPropertyDescriptors(input);
+  const read = (key: string): unknown => descriptors[key] && 'value' in descriptors[key] ? descriptors[key].value : undefined;
+  for (const key of ['observationId', 'elementId']) {
+    const value = read(key);
+    if (typeof value === 'string' && COMPUTER_ID_PATTERN.test(value)) output[key] = value;
+  }
+  const mode = read('mode');
+  if (mode !== 'replace' && mode !== 'insert') return output;
+  output.mode = mode;
+  if (Object.prototype.hasOwnProperty.call(descriptors, 'text')) {
+    try {
+      const { textLength, textBytes } = validateComputerText(read('text'), mode);
+      Object.assign(output, { textLength, textBytes });
+    } catch { /* Invalid text is never echoed into a denied audit. */ }
+  } else {
+    const textLength = read('textLength'), textBytes = read('textBytes');
+    if (typeof textLength === 'number' && Number.isSafeInteger(textLength) && textLength >= 0 && textLength <= COMPUTER_TEXT_MAX_UNICODE_SCALARS
+      && typeof textBytes === 'number' && Number.isSafeInteger(textBytes) && textBytes >= textLength
+      && textBytes <= textLength * 4 && textBytes <= COMPUTER_TEXT_MAX_UTF8_BYTES && (mode === 'replace' || textLength > 0)) {
+      Object.assign(output, { textLength, textBytes });
+    }
+  }
+  return output;
+}
+
+export function projectAgentComputerTextPreview(action?: AgentComputerSetTextPreparedActionPublicV1): AgentActionPreview {
+  return { title: '输入窗口文字', risk: 'write', description: action
+    ? `${action.mode === 'replace' ? '替换' : '插入'} ${action.textLength} 个字符，${action.textBytes} 字节；操作后重新查看窗口。`
+    : '文字正文不进入会话审计；操作后重新查看窗口。',
+  ...(action ? { details: [{ label: '应用', value: action.applicationLabel }, { label: '窗口', value: action.windowLabel }] } : {}) };
+}
+
+export function projectAgentComputerTextResult(result: AgentToolResult, action?: AgentComputerSetTextPreparedActionPublicV1): AgentToolResult {
+  const source = result.data && typeof result.data === 'object' && !Array.isArray(result.data)
+    ? result.data as Record<string, unknown> : {};
+  const state = source.dispatchState;
+  const validState = state === 'dispatched' || state === 'not-dispatched' || state === 'unknown';
+  const commitState = state === 'dispatched' ? 'committed' : state === 'not-dispatched' ? 'uncommitted' : 'commit_unknown';
+  const receipt = action && validState && source.operation === 'computer.setText'
+    && result.ok === (state === 'dispatched')
+    && typeof source.operationId === 'string' && COMPUTER_ID_PATTERN.test(source.operationId)
+    && source.mutationCommitState === commitState && source.nextAction === 'observe' && source.retryAllowed === false
+    && (['libraryId', 'targetId', 'applicationLabel', 'windowLabel', 'observationId', 'elementId', 'mode', 'textLength', 'textBytes'] as const)
+      .every(key => source[key] === action[key]);
+  const mutationMarker = Object.keys(source).some(key => ['dispatchState', 'mutationCommitState', 'operation', 'operationId'].includes(key));
+  const safeDenial = !result.ok && !mutationMarker && ['Agent Tool 参数包含不能进入会话的敏感凭据', 'Agent Tool 参数超过安全审计上限',
+    '文字输入参数无效', '文字输入准备失败，请重新查看窗口'].includes(result.message || '') ? result.message : undefined;
+  const unknown = !receipt && (result.ok || mutationMarker);
+  return { ok: receipt ? result.ok : false, message: receipt && state === 'dispatched' ? '已发送文字输入'
+    : unknown || (receipt && state === 'unknown') ? '文字输入结果未知，请先查看窗口，勿重复输入'
+    : safeDenial || '文字输入未发送，请重新查看窗口',
+  ...(receipt ? { data: { libraryId: action.libraryId, targetId: action.targetId, applicationLabel: action.applicationLabel,
+    windowLabel: action.windowLabel, observationId: action.observationId, elementId: action.elementId, mode: action.mode,
+    textLength: action.textLength, textBytes: action.textBytes, operation: 'computer.setText', operationId: source.operationId,
+    dispatchState: state, mutationCommitState: commitState, nextAction: 'observe', retryAllowed: false,
+    ...(source.inputMethod === 'omniflow-control' ? { inputMethod: 'omniflow-control' } : {}) } }
+    : unknown ? { data: { operation: 'computer.setText', dispatchState: 'unknown', mutationCommitState: 'commit_unknown',
+      nextAction: 'observe', retryAllowed: false } } : {}) };
+}
 
 export interface AgentToolAuditProjection {
   complete: boolean;
@@ -159,9 +271,11 @@ function projectInput(input: unknown): { input: unknown; truncated: boolean } {
   return project(input, 0);
 }
 
-export function projectAgentToolAuditInput(input: unknown): AgentToolAuditProjection {
+export function projectAgentToolAuditInput(input: unknown, source?: AgentToolAuditSource | null): AgentToolAuditProjection {
   const inspection = inspectInput(input);
-  const projection = projectInput(input);
+  const projection = isBuiltinComputerSetTextTool(source)
+    ? { input: projectAgentComputerTextInput(input), truncated: false }
+    : projectInput(input);
   let serialized = '';
   try {
     serialized = JSON.stringify(projection.input);

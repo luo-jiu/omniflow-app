@@ -181,6 +181,7 @@ const ActivityGroup = styled.section`
 interface AgentToolActivityGroupProps {
   activities: AgentToolActivitySnapshot[];
   approvalBusyIds: Set<string>;
+  detailsVisible?: boolean;
   receiptBusyIds?: ReadonlySet<string>;
   interactionBusyIds: Set<string>;
   libraryId: number;
@@ -198,9 +199,11 @@ interface AgentToolActivityGroupProps {
 function activityCard(
   activity: AgentToolActivitySnapshot,
   props: Omit<AgentToolActivityGroupProps, 'activities'>,
+  detailsVisible: boolean,
 ) {
   return (
     <AgentToolActivityCard
+      detailsVisible={detailsVisible}
       receiptBusy={props.receiptBusyIds?.has(activity.id)}
       activity={activity}
       approvalBusy={Boolean(
@@ -259,7 +262,7 @@ export default function AgentToolActivityGroup({
       >
         <div className="agent-activity-group-collapse-inner">
           <div className="agent-activity-group-items">
-            {activities.map(activity => activityCard(activity, props))}
+            {activities.map(activity => activityCard(activity, props, open && props.detailsVisible !== false))}
           </div>
         </div>
       </div>

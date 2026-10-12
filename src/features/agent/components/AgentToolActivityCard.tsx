@@ -23,6 +23,8 @@ import AgentConfirmationCard from './AgentConfirmationCard';
 import AgentInteractionBlock from './AgentInteractionBlock';
 import AgentActivityText from './AgentActivityText';
 import AgentDisclosureChevron from './AgentDisclosureChevron';
+import AgentToolObservationPreview from './AgentToolObservationPreview';
+import AgentToolAxPreview from './AgentToolAxPreview';
 import { readAgentShellLogPage } from '../services/agent.api';
 
 const ActivityCard = styled.article`
@@ -535,7 +537,33 @@ function renderBlock(
   interactionBusy: boolean,
   onAction?: (action: AgentPresentationAction) => void,
   receiptBusy = false,
+  imageContext?: {
+    libraryId: number;
+    open: boolean;
+    ownerScope: AgentOwnerScope | null;
+    sessionId: string;
+    toolRunId: string;
+  },
 ) {
+  if (block.type === 'computer-ax') {
+    if (!imageContext?.open || !imageContext.ownerScope) return null;
+    return <AgentToolAxPreview key={JSON.stringify([imageContext.ownerScope.accountScope, imageContext.ownerScope.backendScope,
+      imageContext.libraryId, imageContext.sessionId, imageContext.toolRunId, 'computer-ax'])}
+      tree={block.tree} truncated={block.truncated} scope={block.scope} scopeScanComplete={block.scopeScanComplete} />;
+  }
+  if (block.type === 'attachment-image') {
+    if (!imageContext?.open) return null;
+    return <AgentToolObservationPreview
+      alt={block.alt}
+      attachmentId={block.attachmentId}
+      key={JSON.stringify([imageContext.ownerScope?.accountScope, imageContext.ownerScope?.backendScope,
+        imageContext.libraryId, imageContext.sessionId, imageContext.toolRunId, block.attachmentId])}
+      libraryId={imageContext.libraryId}
+      ownerScope={imageContext.ownerScope}
+      sessionId={imageContext.sessionId}
+      toolRunId={imageContext.toolRunId}
+    />;
+  }
   if (block.type === 'choice' || block.type === 'form') {
     if (!interactive) {
       return (
@@ -631,6 +659,7 @@ function renderBlock(
 }
 
 interface AgentToolActivityCardProps {
+  detailsVisible?: boolean;
   receiptBusy?: boolean;
   activity: AgentToolActivitySnapshot;
   approvalBusy: boolean;
@@ -840,6 +869,7 @@ function AgentShellActivity({ activity, libraryId, onExpand, ownerScope }: Agent
 }
 
 export default function AgentToolActivityCard({
+  detailsVisible = true,
   receiptBusy = false,
   activity,
   approvalBusy,
@@ -953,6 +983,7 @@ export default function AgentToolActivityCard({
                 interactionBusy,
                 onAction,
                 receiptBusy,
+                { libraryId, open: showBody && detailsVisible, ownerScope, sessionId: activity.sessionId, toolRunId: activity.id },
               ))}
             </div>
           </div>

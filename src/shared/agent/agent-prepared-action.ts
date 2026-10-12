@@ -1,4 +1,17 @@
 import {
+  AGENT_COMPUTER_OBSERVE_PREPARED_ACTION_KIND,
+  AGENT_COMPUTER_OBSERVE_PREPARED_ACTION_VERSION,
+  AGENT_COMPUTER_OBSERVE_PREPARED_ACTION_VERSION_V2,
+  AGENT_COMPUTER_CLICK_PREPARED_ACTION_KIND,
+  AGENT_COMPUTER_CLICK_PREPARED_ACTION_VERSION,
+  AGENT_COMPUTER_CLICK_PREPARED_ACTION_VERSION_V2,
+  AGENT_COMPUTER_CLICK_PREPARED_ACTION_VERSION_V3,
+  AGENT_COMPUTER_WINDOWS_PREPARED_ACTION_KIND,
+  AGENT_COMPUTER_WINDOWS_PREPARED_ACTION_VERSION,
+  AGENT_COMPUTER_SET_TEXT_PREPARED_ACTION_KIND,
+  AGENT_COMPUTER_SET_TEXT_PREPARED_ACTION_VERSION,
+  AGENT_COMPUTER_SCROLL_PREPARED_ACTION_KIND,
+  AGENT_COMPUTER_SCROLL_PREPARED_ACTION_VERSION,
   AGENT_FILE_PUBLISH_PREPARED_ACTION_KIND,
   AGENT_FILE_PUBLISH_PREPARED_ACTION_VERSION,
   AGENT_FILE_STAGE_PREPARED_ACTION_KIND,
@@ -14,6 +27,14 @@ import {
   AGENT_SHELL_PREPARED_ACTION_VERSION,
   AGENT_SHELL_RUN_TOOL_NAME,
   type AgentFilePublishPreparedActionPublicV1,
+  type AgentComputerObservePreparedActionPublicV1,
+  type AgentComputerObservePreparedActionPublicV2,
+  type AgentComputerClickPreparedActionPublicV1,
+  type AgentComputerClickPreparedActionPublicV2,
+  type AgentComputerClickPreparedActionPublicV3,
+  type AgentComputerWindowsPreparedActionPublicV1,
+  type AgentComputerSetTextPreparedActionPublicV1,
+  type AgentComputerScrollPreparedActionPublicV1,
   type AgentFileStagePreparedActionPublicV1,
   type AgentFileUploadPreparedActionPublicV1,
   type AgentMediaExtractAudioOutputFormat,
@@ -23,12 +44,40 @@ import {
   type AgentPluginFileOutputPreparedActionPublicV1,
 } from './agent.types';
 import { normalizeAgentShellPreparedActionPublicV1 } from './shell/agent-shell.types';
+import {
+  COMPUTER_TEXT_MAX_UNICODE_SCALARS,
+  COMPUTER_TEXT_MAX_UTF8_BYTES,
+  normalizeComputerElementOperations,
+} from '../computer-use/computer-use-contract';
 
 const MAX_OUTPUT_FILE_NAME_CHARACTERS = 255;
 const MAX_TARGET_LABEL_CHARACTERS = 500;
 const MAX_LOGICAL_PATH_UTF8_BYTES = 1_024;
 const UTF8_ENCODER = new TextEncoder();
 const CONTENT_HASH_PATTERN = /^sha256:[a-f0-9]{64}$/u;
+const COMPUTER_OBSERVE_FIELDS = new Set(['kind', 'version', 'libraryId', 'displayId', 'displayLabel']);
+const COMPUTER_CLICK_FIELDS = new Set([
+  'kind', 'version', 'libraryId', 'displayId', 'displayLabel', 'observationId',
+  'screenshotWidth', 'screenshotHeight', 'x', 'y', 'button', 'clickCount',
+]);
+const COMPUTER_OBSERVE_V2_FIELDS = new Set(['kind', 'version', 'libraryId', 'targetId', 'applicationLabel', 'windowLabel']);
+const COMPUTER_OBSERVE_V2_OPTIONAL_FIELDS = new Set(['operations', 'mode']);
+const COMPUTER_CLICK_V2_FIELDS = new Set([
+  ...COMPUTER_OBSERVE_V2_FIELDS, 'observationId', 'screenshotWidth', 'screenshotHeight', 'x', 'y', 'button', 'clickCount',
+]);
+const COMPUTER_CLICK_V2_OPTIONAL_FIELDS = new Set(['elementId']);
+const COMPUTER_CLICK_V3_FIELDS = new Set([
+  ...COMPUTER_OBSERVE_V2_FIELDS, 'observationId', 'elementId', 'button', 'clickCount',
+]);
+const COMPUTER_WINDOWS_FIELDS = new Set(['kind', 'version', 'libraryId']);
+const COMPUTER_WINDOWS_OPTIONAL_FIELDS = new Set(['query', 'application']);
+const COMPUTER_SET_TEXT_FIELDS = new Set([
+  ...COMPUTER_OBSERVE_V2_FIELDS, 'observationId', 'elementId', 'mode', 'textLength', 'textBytes',
+]);
+const COMPUTER_SCROLL_FIELDS = new Set([
+  ...COMPUTER_OBSERVE_V2_FIELDS, 'observationId', 'elementId', 'direction', 'unit',
+]);
+const COMPUTER_OBSERVATION_ID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u;
 const FILE_STAGE_LOCAL_FIELDS = new Set(['kind', 'sourceKind', 'targetLabel', 'version']);
 const FILE_STAGE_LOCAL_PATH_FIELDS = new Set([
   'kind', 'sourceDisplayName', 'sourceIdentity', 'sourceKind', 'sourcePath',
@@ -167,6 +216,200 @@ function positiveId(value: unknown, label: string): number {
     throw new Error(`${label}无效`);
   }
   return value;
+}
+
+function strictComputerObject(
+  input: unknown,
+  required: ReadonlySet<string>,
+  optional?: ReadonlySet<string>,
+): Record<string, unknown> {
+  const source = strictObject(input);
+  const descriptors = Object.getOwnPropertyDescriptors(source);
+  if (Array.from(required).some(key => !Object.prototype.hasOwnProperty.call(descriptors, key))
+    || Object.getOwnPropertySymbols(source).length
+    || Object.entries(descriptors).some(([key, descriptor]) => (
+      (!required.has(key) && !optional?.has(key)) || !('value' in descriptor) || !descriptor.enumerable
+    ))) throw new Error('Agent 屏幕动作字段无效');
+  return source;
+}
+
+function computerLabel(value: unknown, maximum: number): string {
+  if (typeof value !== 'string' || !value || value.trim() !== value
+    || Array.from(value).length > maximum
+    || Array.from(value).some(character => {
+      const code = character.charCodeAt(0);
+      return code < 32 || (code >= 127 && code <= 159)
+        || (code >= 0x202a && code <= 0x202e) || (code >= 0x2066 && code <= 0x2069)
+        || (character.length === 1 && code >= 0xd800 && code <= 0xdfff);
+    })) {
+    throw new Error('Agent 屏幕标识或名称无效');
+  }
+  return value;
+}
+
+export function normalizeAgentComputerObservePreparedActionPublicV1(input: unknown): AgentComputerObservePreparedActionPublicV1 {
+  const source = strictComputerObject(input, COMPUTER_OBSERVE_FIELDS);
+  if (source.kind !== AGENT_COMPUTER_OBSERVE_PREPARED_ACTION_KIND
+    || source.version !== AGENT_COMPUTER_OBSERVE_PREPARED_ACTION_VERSION) {
+    throw new Error('Agent prepared action 类型或版本不受支持');
+  }
+  return {
+    kind: AGENT_COMPUTER_OBSERVE_PREPARED_ACTION_KIND,
+    version: AGENT_COMPUTER_OBSERVE_PREPARED_ACTION_VERSION,
+    libraryId: positiveId(source.libraryId, '资料库'),
+    displayId: computerLabel(source.displayId, 128),
+    displayLabel: computerLabel(source.displayLabel, 200),
+  };
+}
+
+export function normalizeAgentComputerClickPreparedActionPublicV1(input: unknown): AgentComputerClickPreparedActionPublicV1 {
+  const source = strictComputerObject(input, COMPUTER_CLICK_FIELDS);
+  if (source.kind !== AGENT_COMPUTER_CLICK_PREPARED_ACTION_KIND
+    || source.version !== AGENT_COMPUTER_CLICK_PREPARED_ACTION_VERSION) {
+    throw new Error('Agent prepared action 类型或版本不受支持');
+  }
+  const screenshotWidth = positiveId(source.screenshotWidth, '截图宽度');
+  const screenshotHeight = positiveId(source.screenshotHeight, '截图高度');
+  if (screenshotWidth > 2048 || screenshotHeight > 2048
+    || typeof source.observationId !== 'string' || !COMPUTER_OBSERVATION_ID_PATTERN.test(source.observationId)
+    || typeof source.x !== 'number' || !Number.isSafeInteger(source.x) || source.x < 0 || source.x >= screenshotWidth
+    || typeof source.y !== 'number' || !Number.isSafeInteger(source.y) || source.y < 0 || source.y >= screenshotHeight
+    || (source.button !== 'left' && source.button !== 'right')
+    || (source.clickCount !== 1 && source.clickCount !== 2)) {
+    throw new Error('Agent 屏幕点击动作无效');
+  }
+  return {
+    kind: AGENT_COMPUTER_CLICK_PREPARED_ACTION_KIND,
+    version: AGENT_COMPUTER_CLICK_PREPARED_ACTION_VERSION,
+    libraryId: positiveId(source.libraryId, '资料库'),
+    displayId: computerLabel(source.displayId, 128),
+    displayLabel: computerLabel(source.displayLabel, 200),
+    observationId: source.observationId,
+    screenshotWidth,
+    screenshotHeight,
+    x: source.x,
+    y: source.y,
+    button: source.button,
+    clickCount: source.clickCount,
+  };
+}
+
+function computerTarget(source: Record<string, unknown>) {
+  if (typeof source.targetId !== 'string' || !COMPUTER_OBSERVATION_ID_PATTERN.test(source.targetId)) {
+    throw new Error('Agent 应用窗口目标无效');
+  }
+  return {
+    libraryId: positiveId(source.libraryId, '资料库'),
+    targetId: source.targetId,
+    applicationLabel: computerLabel(source.applicationLabel, 200),
+    windowLabel: computerLabel(source.windowLabel, 200),
+  };
+}
+
+export function normalizeAgentComputerObservePreparedActionPublicV2(input: unknown): AgentComputerObservePreparedActionPublicV2 {
+  const source = strictComputerObject(input, COMPUTER_OBSERVE_V2_FIELDS, COMPUTER_OBSERVE_V2_OPTIONAL_FIELDS);
+  if (source.kind !== AGENT_COMPUTER_OBSERVE_PREPARED_ACTION_KIND
+    || source.version !== AGENT_COMPUTER_OBSERVE_PREPARED_ACTION_VERSION_V2) {
+    throw new Error('Agent prepared action 类型或版本不受支持');
+  }
+  const hasMode = Object.prototype.hasOwnProperty.call(source, 'mode');
+  if (hasMode && source.mode !== 'ax' && source.mode !== 'screenshot' && source.mode !== 'both') {
+    throw new Error('Agent 应用窗口观察方式无效');
+  }
+  return { kind: AGENT_COMPUTER_OBSERVE_PREPARED_ACTION_KIND, version: AGENT_COMPUTER_OBSERVE_PREPARED_ACTION_VERSION_V2,
+    ...computerTarget(source), ...(hasMode ? { mode: source.mode as AgentComputerObservePreparedActionPublicV2['mode'] } : {}),
+    ...(Object.prototype.hasOwnProperty.call(source, 'operations')
+      ? { operations: normalizeComputerElementOperations(source.operations) } : {}) };
+}
+
+function computerElementTarget(source: Record<string, unknown>) {
+  if (typeof source.observationId !== 'string' || !COMPUTER_OBSERVATION_ID_PATTERN.test(source.observationId)
+    || typeof source.elementId !== 'string' || !COMPUTER_OBSERVATION_ID_PATTERN.test(source.elementId)) {
+    throw new Error('Agent 应用窗口控件身份无效');
+  }
+  return { ...computerTarget(source), observationId: source.observationId, elementId: source.elementId };
+}
+
+export function normalizeAgentComputerClickPreparedActionPublicV3(input: unknown): AgentComputerClickPreparedActionPublicV3 {
+  const source = strictComputerObject(input, COMPUTER_CLICK_V3_FIELDS);
+  if (source.kind !== AGENT_COMPUTER_CLICK_PREPARED_ACTION_KIND
+    || source.version !== AGENT_COMPUTER_CLICK_PREPARED_ACTION_VERSION_V3) {
+    throw new Error('Agent prepared action 类型或版本不受支持');
+  }
+  if (source.button !== 'left' || source.clickCount !== 1) throw new Error('Agent 应用窗口点击动作无效');
+  return { kind: AGENT_COMPUTER_CLICK_PREPARED_ACTION_KIND, version: AGENT_COMPUTER_CLICK_PREPARED_ACTION_VERSION_V3,
+    ...computerElementTarget(source), button: 'left', clickCount: 1 };
+}
+
+export function normalizeAgentComputerSetTextPreparedActionPublicV1(input: unknown): AgentComputerSetTextPreparedActionPublicV1 {
+  const source = strictComputerObject(input, COMPUTER_SET_TEXT_FIELDS);
+  if (source.kind !== AGENT_COMPUTER_SET_TEXT_PREPARED_ACTION_KIND
+    || source.version !== AGENT_COMPUTER_SET_TEXT_PREPARED_ACTION_VERSION) {
+    throw new Error('Agent prepared action 类型或版本不受支持');
+  }
+  if ((source.mode !== 'replace' && source.mode !== 'insert')
+    || typeof source.textLength !== 'number' || !Number.isSafeInteger(source.textLength)
+    || source.textLength < 0 || source.textLength > COMPUTER_TEXT_MAX_UNICODE_SCALARS
+    || typeof source.textBytes !== 'number' || !Number.isSafeInteger(source.textBytes)
+    || source.textBytes < source.textLength || source.textBytes > source.textLength * 4
+    || source.textBytes > COMPUTER_TEXT_MAX_UTF8_BYTES
+    || (source.mode === 'insert' && source.textLength === 0)) {
+    throw new Error('Agent 应用窗口文字输入动作无效');
+  }
+  return { kind: AGENT_COMPUTER_SET_TEXT_PREPARED_ACTION_KIND, version: AGENT_COMPUTER_SET_TEXT_PREPARED_ACTION_VERSION,
+    ...computerElementTarget(source), mode: source.mode, textLength: source.textLength, textBytes: source.textBytes };
+}
+
+export function normalizeAgentComputerScrollPreparedActionPublicV1(input: unknown): AgentComputerScrollPreparedActionPublicV1 {
+  const source = strictComputerObject(input, COMPUTER_SCROLL_FIELDS);
+  if (source.kind !== AGENT_COMPUTER_SCROLL_PREPARED_ACTION_KIND
+    || source.version !== AGENT_COMPUTER_SCROLL_PREPARED_ACTION_VERSION) {
+    throw new Error('Agent prepared action 类型或版本不受支持');
+  }
+  if ((source.direction !== 'up' && source.direction !== 'down' && source.direction !== 'left' && source.direction !== 'right')
+    || (source.unit !== 'page' && source.unit !== 'step' && source.unit !== 'fraction')) {
+    throw new Error('Agent 应用窗口滚动动作无效');
+  }
+  return { kind: AGENT_COMPUTER_SCROLL_PREPARED_ACTION_KIND, version: AGENT_COMPUTER_SCROLL_PREPARED_ACTION_VERSION,
+    ...computerElementTarget(source), direction: source.direction, unit: source.unit };
+}
+
+export function normalizeAgentComputerClickPreparedActionPublicV2(input: unknown): AgentComputerClickPreparedActionPublicV2 {
+  const source = strictComputerObject(input, COMPUTER_CLICK_V2_FIELDS, COMPUTER_CLICK_V2_OPTIONAL_FIELDS);
+  if (source.kind !== AGENT_COMPUTER_CLICK_PREPARED_ACTION_KIND
+    || source.version !== AGENT_COMPUTER_CLICK_PREPARED_ACTION_VERSION_V2) {
+    throw new Error('Agent prepared action 类型或版本不受支持');
+  }
+  const screenshotWidth = positiveId(source.screenshotWidth, '截图宽度');
+  const screenshotHeight = positiveId(source.screenshotHeight, '截图高度');
+  const hasElementId = Object.prototype.hasOwnProperty.call(source, 'elementId');
+  if (screenshotWidth > 2048 || screenshotHeight > 2048
+    || typeof source.observationId !== 'string' || !COMPUTER_OBSERVATION_ID_PATTERN.test(source.observationId)
+    || (hasElementId && (typeof source.elementId !== 'string' || !COMPUTER_OBSERVATION_ID_PATTERN.test(source.elementId)))
+    || typeof source.x !== 'number' || !Number.isSafeInteger(source.x) || source.x < 0 || source.x >= screenshotWidth
+    || typeof source.y !== 'number' || !Number.isSafeInteger(source.y) || source.y < 0 || source.y >= screenshotHeight
+    || source.button !== 'left' || source.clickCount !== 1) {
+    throw new Error('Agent 应用窗口点击动作无效');
+  }
+  return { kind: AGENT_COMPUTER_CLICK_PREPARED_ACTION_KIND, version: AGENT_COMPUTER_CLICK_PREPARED_ACTION_VERSION_V2,
+    ...computerTarget(source), observationId: source.observationId, screenshotWidth, screenshotHeight,
+    ...(hasElementId ? { elementId: source.elementId as string } : {}),
+    x: source.x, y: source.y, button: 'left', clickCount: 1 };
+}
+
+export function normalizeAgentComputerWindowsPreparedActionPublicV1(input: unknown): AgentComputerWindowsPreparedActionPublicV1 {
+  const source = strictComputerObject(input, COMPUTER_WINDOWS_FIELDS, COMPUTER_WINDOWS_OPTIONAL_FIELDS);
+  if (source.kind !== AGENT_COMPUTER_WINDOWS_PREPARED_ACTION_KIND
+    || source.version !== AGENT_COMPUTER_WINDOWS_PREPARED_ACTION_VERSION) {
+    throw new Error('Agent prepared action 类型或版本不受支持');
+  }
+  return {
+    kind: AGENT_COMPUTER_WINDOWS_PREPARED_ACTION_KIND,
+    version: AGENT_COMPUTER_WINDOWS_PREPARED_ACTION_VERSION,
+    libraryId: positiveId(source.libraryId, '资料库'),
+    ...(Object.prototype.hasOwnProperty.call(source, 'query') ? { query: computerLabel(source.query, 200) } : {}),
+    ...(Object.prototype.hasOwnProperty.call(source, 'application') ? { application: computerLabel(source.application, 200) } : {}),
+  };
 }
 
 function boundedText(value: unknown, label: string, maximum: number): string {
@@ -438,6 +681,33 @@ export function normalizeAgentPreparedActionPublic(
   input: unknown,
 ): AgentPreparedActionPublic {
   const source = strictObject(input);
+  const kind = Object.getOwnPropertyDescriptor(source, 'kind')?.value;
+  const version = Object.getOwnPropertyDescriptor(source, 'version')?.value;
+  if (kind === undefined || version === undefined) throw new Error('Agent prepared action 类型或版本不受支持');
+  if (kind === AGENT_COMPUTER_WINDOWS_PREPARED_ACTION_KIND && version === AGENT_COMPUTER_WINDOWS_PREPARED_ACTION_VERSION) {
+    return normalizeAgentComputerWindowsPreparedActionPublicV1(source);
+  }
+  if (kind === AGENT_COMPUTER_SET_TEXT_PREPARED_ACTION_KIND && version === AGENT_COMPUTER_SET_TEXT_PREPARED_ACTION_VERSION) {
+    return normalizeAgentComputerSetTextPreparedActionPublicV1(source);
+  }
+  if (kind === AGENT_COMPUTER_SCROLL_PREPARED_ACTION_KIND && version === AGENT_COMPUTER_SCROLL_PREPARED_ACTION_VERSION) {
+    return normalizeAgentComputerScrollPreparedActionPublicV1(source);
+  }
+  if (kind === AGENT_COMPUTER_OBSERVE_PREPARED_ACTION_KIND && version === AGENT_COMPUTER_OBSERVE_PREPARED_ACTION_VERSION_V2) {
+    return normalizeAgentComputerObservePreparedActionPublicV2(source);
+  }
+  if (kind === AGENT_COMPUTER_CLICK_PREPARED_ACTION_KIND && version === AGENT_COMPUTER_CLICK_PREPARED_ACTION_VERSION_V2) {
+    return normalizeAgentComputerClickPreparedActionPublicV2(source);
+  }
+  if (kind === AGENT_COMPUTER_CLICK_PREPARED_ACTION_KIND && version === AGENT_COMPUTER_CLICK_PREPARED_ACTION_VERSION_V3) {
+    return normalizeAgentComputerClickPreparedActionPublicV3(source);
+  }
+  if (kind === AGENT_COMPUTER_OBSERVE_PREPARED_ACTION_KIND && version === AGENT_COMPUTER_OBSERVE_PREPARED_ACTION_VERSION) {
+    return normalizeAgentComputerObservePreparedActionPublicV1(source);
+  }
+  if (kind === AGENT_COMPUTER_CLICK_PREPARED_ACTION_KIND && version === AGENT_COMPUTER_CLICK_PREPARED_ACTION_VERSION) {
+    return normalizeAgentComputerClickPreparedActionPublicV1(source);
+  }
   if (source.kind === AGENT_PLUGIN_FILE_OUTPUT_PREPARED_ACTION_KIND && source.version === AGENT_PLUGIN_FILE_OUTPUT_PREPARED_ACTION_VERSION) {
     return normalizeAgentPluginFileOutputPreparedActionPublicV1(source);
   }

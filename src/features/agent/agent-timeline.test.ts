@@ -133,7 +133,230 @@ function run(
   };
 }
 
+function computerActivity(id: string, ordinal: number, operation: 'observe' | 'click' = 'observe', version: 1 | 2 = 1): AgentToolActivitySnapshot {
+  const target = version === 1 ? { version: 1 as const, libraryId: 3, displayId: '1', displayLabel: '内置屏幕' }
+    : { version: 2 as const, libraryId: 3, targetId: '12022dc1-f61c-4c2a-aac6-2963b60e5f7a',
+      applicationLabel: 'OmniFlow', windowLabel: 'win 的聊天窗口' };
+  return {
+    ...activity(id, ordinal),
+    call: { id: `call-${id}`, input: {}, name: `computer.${operation}` },
+    toolMetadata: { kind: 'business', risk: operation === 'observe' ? 'read' : 'write',
+      ...(operation === 'observe' ? { groupKind: 'resource-read' } : {}), builtinComputerTool: operation },
+    preparation: { preparedActionId: `prepared-${id}`, snapshotHash: 'a'.repeat(64), action: operation === 'observe'
+      ? { ...target, kind: 'computer.observe' }
+      : { ...target, kind: 'computer.click', observationId: '237e3952-2a40-4c7b-b2f4-bec335a79cce',
+        screenshotWidth: 1024, screenshotHeight: 640, x: 20, y: 30, button: 'left', clickCount: 1 },
+    },
+  };
+}
+
+function computerInputActivity(id: string, ordinal: number, operation: 'setText' | 'scroll'): AgentToolActivitySnapshot {
+  const target = { version: 1 as const, libraryId: 3, targetId: '12022dc1-f61c-4c2a-aac6-2963b60e5f7a',
+    applicationLabel: 'OmniFlow', windowLabel: '测试窗口', observationId: '237e3952-2a40-4c7b-b2f4-bec335a79cce',
+    elementId: 'b5de6d3f-b8ec-4e73-a6be-81b717adf7ba' };
+  return {
+    ...activity(id, ordinal), call: { id: `call-${id}`, input: {}, name: `computer.${operation}` },
+    toolMetadata: { kind: 'business', risk: 'write', builtinComputerTool: operation },
+    preparation: { preparedActionId: `prepared-${id}`, snapshotHash: 'a'.repeat(64), action: operation === 'setText'
+      ? { ...target, kind: 'computer.setText', mode: 'replace', textLength: 2, textBytes: 6 }
+      : { ...target, kind: 'computer.scroll', direction: 'down', unit: 'page' } },
+  };
+}
+
 describe('Agent timeline projection', () => {
+  it('groups AX-only observations and semantic clicks without image coordinates', () => {
+    const before = computerActivity('before', 1, 'observe', 2);
+    before.preparation!.action = { ...before.preparation!.action, mode: 'ax' } as never;
+    const click = computerActivity('click', 2, 'click', 2);
+    click.preparation!.action = { kind: 'computer.click', version: 3, libraryId: 3,
+      targetId: '12022dc1-f61c-4c2a-aac6-2963b60e5f7a', applicationLabel: 'OmniFlow', windowLabel: 'win 的聊天窗口',
+      observationId: '237e3952-2a40-4c7b-b2f4-bec335a79cce', elementId: 'b5de6d3f-b8ec-4e73-a6be-81b717adf7ba',
+      button: 'left', clickCount: 1 };
+    const after = { ...before, id: 'after', ordinal: 3, call: { ...before.call, id: 'call-after' } };
+    const activities = [before, click, after];
+    const items = buildAgentTimelineItems(activities.map(value => toolMessage(`tool-${value.id}`, value.createdAt, value.call.id)), [], activities);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ type: 'tool-group', groupKind: 'computer-use', activities });
+    click.result = { ok: false, data: { dispatchState: 'unknown', mutationCommitState: 'commit_unknown' } };
+    const uncertain = buildAgentTimelineItems(activities.map(value => toolMessage(`tool-${value.id}`, value.createdAt, value.call.id)), [], activities);
+    expect(uncertain).toHaveLength(3);
+    expect(uncertain[1]).toMatchObject({ type: 'tool-activity', activity: click });
+  });
+
+  it.each(['observe', 'click', 'setText', 'scroll'] as const)(
+    'keeps an initial preparing %s in the same computer entry before its action is available', operation => {
+      const first = computerActivity('first', 1, 'observe', 2);
+      const next = operation === 'observe' || operation === 'click'
+        ? computerActivity('next', 2, operation, 2) : computerInputActivity('next', 2, operation);
+      const preparing: AgentToolActivitySnapshot = { ...next, preparation: undefined, result: undefined,
+        status: 'preparing', permissionBehavior: operation === 'observe' ? 'allow' : 'ask' };
+      const messages = [toolMessage('tool-first', first.createdAt, first.call.id)];
+      const initial = buildAgentTimelineItems(messages, [], [first]);
+      messages.push(toolMessage('tool-next', preparing.createdAt, preparing.call.id));
+      const stages = [preparing, { ...next, status: 'running' as const, result: undefined }, next];
+      for (const stage of stages) {
+        const items = buildAgentTimelineItems(messages, [], [first, stage]);
+        expect(items).toHaveLength(1);
+        expect(items[0]).toMatchObject({ type: 'tool-group', groupKind: 'computer-use', key: initial[0].key });
+        expect(items[0].type === 'tool-group' && items[0].activities).toEqual([first, stage]);
+      }
+      expect(preparing.preparation).toBeUndefined();
+      expect(preparing.approval).toBeUndefined();
+      expect(preparing.result).toBeUndefined();
+      expect(preparing.permissionBehavior).toBe(operation === 'observe' ? 'allow' : 'ask');
+    },
+  );
+
+  it.each(['pending', 'interaction', 'unknown', 'missing-marker', 'plugin', 'deny', 'running', 'completed', 'partial-preparation', 'finished', 'wrong-risk'] as const)(
+    'keeps an initial %s computer record outside the preparing display group', boundary => {
+      let middle: AgentToolActivitySnapshot = { ...computerInputActivity('middle', 2, 'scroll'),
+        status: 'preparing', permissionBehavior: 'ask', preparation: undefined, result: undefined };
+      if (boundary === 'pending') {
+        middle.approval = { approvalId: 'pending', status: 'pending',
+          preview: { title: '确认窗口操作', description: '待确认', risk: 'write' } };
+      } else if (boundary === 'interaction') {
+        middle.interaction = { interactionId: 'input', status: 'pending',
+          request: { kind: 'choice', prompt: '选择', options: [{ id: 'continue', label: '继续' }] } };
+      } else if (boundary === 'unknown') {
+        middle.result = { ok: false, message: '结果未知', data: { dispatchState: 'unknown', mutationCommitState: 'commit_unknown' } };
+      } else if (boundary === 'missing-marker') {
+        middle.toolMetadata = { kind: 'business', risk: 'write' };
+      } else if (boundary === 'plugin') {
+        middle = { ...middle, pluginSource: { pluginId: 'fake', pluginVersion: '1', packageFingerprint: 'a'.repeat(64),
+          toolId: 'scroll', registrationId: 'plugin-tool:fake' } };
+      } else if (boundary === 'deny') {
+        middle.permissionBehavior = 'deny';
+      } else if (boundary === 'partial-preparation') {
+        middle.preparation = { preparedActionId: 'partial' } as AgentToolActivitySnapshot['preparation'];
+      } else if (boundary === 'finished') {
+        middle.finishedAt = middle.createdAt;
+      } else if (boundary === 'wrong-risk') {
+        middle.toolMetadata = { ...middle.toolMetadata!, risk: 'read' };
+      } else {
+        middle.status = boundary;
+      }
+      const items = buildAgentTimelineItems([], [], [computerActivity('first', 1, 'observe', 2), middle,
+        computerActivity('last', 3, 'observe', 2)]);
+      expect(items.map(item => item.type)).toEqual(['tool-group', 'tool-activity', 'tool-group']);
+      expect(items[1]).toMatchObject({ activity: middle });
+    },
+  );
+
+  it('keeps observed text input and scrolling in the approved computer group with their original order', () => {
+    const first = computerActivity('first', 1, 'observe', 2);
+    first.permissionBehavior = 'ask';
+    first.approval = { approvalId: 'share-approval', status: 'approved',
+      preview: { title: '共享窗口', description: '允许点击、文本输入、滚动', risk: 'write' } };
+    const sequence = [first, computerInputActivity('text', 2, 'setText'), computerActivity('after-text', 3, 'observe', 2),
+      computerInputActivity('scroll', 4, 'scroll'), computerActivity('after-scroll', 5, 'observe', 2)];
+    const items = buildAgentTimelineItems([], [], sequence);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ type: 'tool-group', groupKind: 'computer-use' });
+    expect(items[0].type === 'tool-group' && items[0].activities.map(item => item.id))
+      .toEqual(sequence.map(item => item.id));
+  });
+
+  it.each((['setText', 'scroll'] as const).flatMap(operation => (
+    ['pending', 'unknown', 'plugin', 'missing-marker', 'malformed-action'] as const
+  ).map(boundary => [operation, boundary] as const)))(
+    'keeps %s %s visible outside the computer group', (operation, boundary) => {
+      let middle = computerInputActivity('middle', 2, operation);
+      if (boundary === 'pending') {
+        middle.permissionBehavior = 'ask'; middle.status = 'awaiting_approval';
+        middle.approval = { approvalId: 'pending', status: 'pending',
+          preview: { title: '确认窗口操作', description: '待确认', risk: 'write' } };
+      } else if (boundary === 'unknown') {
+        middle.status = 'failed'; middle.result = { ok: false, message: '结果未知',
+          data: { dispatchState: 'unknown', mutationCommitState: 'commit_unknown' } };
+      } else if (boundary === 'plugin') {
+        middle = { ...middle, pluginSource: { pluginId: 'fake', pluginVersion: '1', packageFingerprint: 'a'.repeat(64),
+          toolId: operation, registrationId: 'plugin-tool:fake' } };
+      } else if (boundary === 'missing-marker') {
+        middle.toolMetadata = { kind: 'business', risk: 'write' };
+      } else {
+        middle.preparation!.action = { ...middle.preparation!.action, text: 'not public' } as never;
+      }
+      const items = buildAgentTimelineItems([], [], [computerActivity('first', 1, 'observe', 2), middle,
+        computerActivity('last', 3, 'observe', 2)]);
+      expect(items.map(item => item.type)).toEqual(['tool-group', 'tool-activity', 'tool-group']);
+      expect(items[1]).toMatchObject({ activity: middle });
+    },
+  );
+
+  it.each(['setText', 'scroll'] as const)('retains a definite failed %s operation in the computer group for manual audit', operation => {
+    const failed = computerInputActivity('failed', 2, operation);
+    failed.status = 'failed'; failed.result = { ok: false, message: '控件不支持该操作，未发送',
+      data: { dispatchState: 'not_dispatched', mutationCommitState: 'uncommitted' } };
+    const items = buildAgentTimelineItems([], [], [computerActivity('first', 1, 'observe', 2), failed]);
+    expect(items).toHaveLength(1);
+    expect(items[0].type === 'tool-group' && items[0].activities[1]).toEqual(failed);
+  });
+
+  it.each([1, 2] as const)('keeps V%s approved observation, click and follow-up observation in one stable computer group', version => {
+    const first = computerActivity('observe-first', 1, 'observe', version);
+    first.permissionBehavior = 'ask';
+    first.approval = { approvalId: 'share-approval', status: 'approved',
+      preview: { title: '共享屏幕', description: '本次任务查看屏幕', risk: 'read' } };
+    const click = computerActivity('click', 2, 'click', version);
+    const last = computerActivity('observe-last', 3, 'observe', version);
+    const initial = buildAgentTimelineItems([], [], [first]);
+    const items = buildAgentTimelineItems([], [], [first, click, last]);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ type: 'tool-group', groupKind: 'computer-use', key: initial[0].key });
+    expect(items[0].type === 'tool-group' && items[0].activities.map(item => item.id))
+      .toEqual(['observe-first', 'click', 'observe-last']);
+  });
+
+  it.each(['commentary', 'assistant', 'user', 'other-tool', 'other-run'] as const)(
+    'does not merge computer operations across a %s boundary', boundary => {
+      const first = computerActivity('first', 1);
+      const last = computerActivity('last', 3);
+      const messages: AgentMessage[] = [toolMessage('tool-first', first.createdAt, first.call.id)];
+      const activities = [first, last];
+      if (boundary === 'other-tool') {
+        const other = activity('read', 2);
+        activities.splice(1, 0, other);
+        messages.push(toolMessage('tool-other', other.createdAt, other.call.id));
+      } else if (boundary === 'other-run') {
+        last.runId = 'run-2';
+      } else {
+        messages.push(boundary === 'user' ? user('next-user', '2026-08-23T00:00:02.000Z')
+          : assistant('process-message', '2026-08-23T00:00:02.000Z', {
+            phase: boundary === 'commentary' ? 'commentary' : 'final', content: '过程说明',
+          }));
+      }
+      messages.push(toolMessage('tool-last', last.createdAt, last.call.id, last.runId));
+      const items = buildAgentTimelineItems(messages, [], activities);
+      const computerGroups = items.filter(item => item.type === 'tool-group' && item.groupKind === 'computer-use');
+      expect(computerGroups).toHaveLength(2);
+      expect(computerGroups.every(item => item.type === 'tool-group' && item.activities.length === 1)).toBe(true);
+    },
+  );
+
+  it.each(['pending', 'unknown', 'missing-marker', 'malformed-action', 'plugin'] as const)(
+    'keeps %s computer activity visible outside the computer group', boundary => {
+      let middle = computerActivity('middle', 2, 'click');
+      if (boundary === 'pending') {
+        middle.permissionBehavior = 'ask'; middle.status = 'awaiting_approval';
+        middle.approval = { approvalId: 'pending-share', status: 'pending',
+          preview: { title: '共享屏幕', description: '待确认', risk: 'read' } };
+      } else if (boundary === 'unknown') {
+        middle.status = 'failed';
+        middle.result = { ok: false, message: '点击结果未知', data: { dispatchState: 'unknown', mutationCommitState: 'commit_unknown' } };
+      } else if (boundary === 'missing-marker') {
+        middle.toolMetadata = { kind: 'business', risk: 'write' };
+      } else if (boundary === 'malformed-action') {
+        middle.preparation = { ...middle.preparation!, action: { ...middle.preparation!.action, unexpected: true } as never };
+      } else {
+        middle = { ...middle, pluginSource: { pluginId: 'fake', pluginVersion: '1.0.0',
+          packageFingerprint: 'b'.repeat(64), toolId: 'click', registrationId: 'fake-registration' } };
+      }
+      const items = buildAgentTimelineItems([], [], [computerActivity('first', 1), middle, computerActivity('last', 3)]);
+      expect(items.map(item => item.type)).toEqual(['tool-group', 'tool-activity', 'tool-group']);
+      expect(items[1]).toMatchObject({ activity: middle });
+    },
+  );
+
   it('groups consecutive completed internal operations in one run', () => {
     const base = {
       createdAt: '2026-09-12T00:00:00.000Z', id: 'run-internal', ordinal: 1,

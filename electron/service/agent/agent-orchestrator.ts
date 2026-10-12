@@ -10,6 +10,8 @@ import { isAgentRendererMutationTool } from '../../../src/shared/agent/agent-lib
 import { normalizeAgentNodeConfigFields } from '../../../src/shared/agent/agent-node-config';
 import { attachmentManifest } from '../../../src/shared/agent/agent-attachments';
 import { getAgentAttachmentStore, hydrateAgentAttachmentImages } from './agent-attachment-runtime';
+import { getBuiltInAgentComputerTools } from './tools/computer-tools';
+import { keepAgentOwnerRendering, releaseAgentComputerRun } from './computer/agent-computer-service-runtime';
 import { operateAgentAttachment } from './documents/attachment-documents';
 import { runAgentDocument } from './documents/document-runner';
 import { createAgentContextUsageLedger, type AgentContextRequest } from './agent-context-usage-ledger';
@@ -180,11 +182,14 @@ import {
   createAgentToolPrepareBroker,
   type AgentToolPrepareBroker,
 } from './agent-tool-prepare-broker';
-import { projectAgentToolAuditInput } from './agent-tool-audit';
+import { createAgentComputerTextAuditSourceResolver, isBuiltinComputerSetTextTool,
+  projectAgentComputerTextInput, projectAgentComputerTextPreview, projectAgentComputerTextResult,
+  projectAgentToolAuditInput, type AgentComputerTextAuditSourceResolver } from './agent-tool-audit';
 import {
   MINIMUM_AGENT_PROVIDER_TOOL_RESULT_CONTENT,
   MINIMUM_AGENT_PROVIDER_TOOL_RESULT_TOKENS,
   projectAgentToolResultForProvider,
+  type AgentProviderToolResultProjectionOptions,
 } from './agent-tool-result-projection';
 import {
   agentToolRegistry,
@@ -248,6 +253,7 @@ import type {
   AgentShellLogPageV1,
 } from '@/shared/agent/shell/agent-shell.types';
 import { AGENT_SHELL_RUN_TOOL_NAME } from '../../../src/shared/agent/shell/agent-shell.types';
+import { AGENT_COMPUTER_PROVIDER_RESULT_TOKENS } from './computer/agent-computer-provider-projection';
 
 const AGENT_TOOL_PROGRESS_MAX_CYCLE_LENGTH = 8;
 const AGENT_TOOL_PROGRESS_REQUIRED_CYCLE_REPETITIONS = 3;
@@ -275,7 +281,7 @@ const AVAILABLE_PERCEPTION_BUDGET_PROBE: AgentPerceptionSnapshot = {
   selectedNodes: [],
 };
 
-[...getBuiltInReadTools(), ...libraryDocumentTools, libraryBatchTool, operationVerifyTool, interactionRequestTool, memoryProposeTool, mediaInspectTool, mediaExtractAudioTool, ...getBuiltInActionTools()].forEach((tool) => {
+[...getBuiltInReadTools(), ...libraryDocumentTools, libraryBatchTool, operationVerifyTool, interactionRequestTool, memoryProposeTool, mediaInspectTool, mediaExtractAudioTool, ...getBuiltInActionTools(), ...getBuiltInAgentComputerTools()].forEach((tool) => {
   if (!agentToolRegistry.get(tool.name)) agentToolRegistry.register(tool);
 });
 ensureBuiltInAgentCapabilities();
@@ -283,6 +289,7 @@ ensureBuiltInAgentCapabilities();
 interface ActiveAgentRun {
   accessGuard?: AgentLibraryAccessGuard;
   releaseAccess?: () => void;
+  releaseRendering?: () => void;
   groupKey?: string;
   stoppedByUser?: boolean;
   task?: Promise<void>;
@@ -375,6 +382,7 @@ interface AgentMediaArtifactFallbackGrant {
 }
 
 interface AgentOrchestratorOptions {
+  keepOwnerRendering?: (ownerWebContentsId: number) => () => void;
   releasePluginOutputs?: typeof releaseAgentPluginOutputs;
   preparePluginFileOutput?: typeof prepareAgentPluginFileOutput;
   executePluginFileOutput?: typeof executeAgentPluginFileOutput;
@@ -844,12 +852,16 @@ function hasRepeatedAgentToolProgressCycle(history: readonly string[]): boolean 
 
 interface AgentProviderToolResultPolicy {
   maxTokens: number;
-  projectionOptions?: { mode: 'shell' };
+  projectionOptions?: AgentProviderToolResultProjectionOptions;
 }
 
 function resolveAgentProviderToolResultPolicy(
   canonicalToolName: string,
 ): AgentProviderToolResultPolicy {
+  if (canonicalToolName === 'computer.observe' || canonicalToolName === 'computer.windows') {
+    return { maxTokens: AGENT_COMPUTER_PROVIDER_RESULT_TOKENS,
+      projectionOptions: { mode: canonicalToolName === 'computer.observe' ? 'computer-observe' : 'computer-windows' } };
+  }
   if (canonicalToolName === AGENT_SHELL_RUN_TOOL_NAME) {
     return {
       maxTokens: SHELL_PROVIDER_TOOL_RESULT_TOKENS,
@@ -866,6 +878,7 @@ function resolveAgentProviderToolResultPolicy(
 }
 
 interface CreatePreparedRuntimeOptions {
+  computerText?: boolean;
   pluginOperation?: 'rename' | 'file-output';
   permissionMode?: AgentRunCapabilitySnapshot['shellPermissionMode'];
   identity?: AgentToolMainPreparationIdentity;
@@ -916,7 +929,9 @@ function createPreparedRuntime(
     throw new Error('Agent Tool dynamic prepared risk 与公开动作不匹配');
   }
   const preview = Object.freeze(normalizeActionPreview(
-    result.decision.behavior === 'ask'
+    options.computerText && action.kind === 'computer.setText'
+      ? projectAgentComputerTextPreview(action)
+    : result.decision.behavior === 'ask'
       ? result.decision.preview
       : {
           description: '执行已经准备完成',
@@ -1119,6 +1134,29 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
   const activeMediaArtifactSaves = new Set<ActiveMediaArtifactSave>();
   const mediaArtifactFallbackGrants = new Map<string, AgentMediaArtifactFallbackGrant>();
   let shuttingDown = false;
+
+  function releaseRunRendering(runtime: ActiveAgentRun): void {
+    const release = runtime.releaseRendering;
+    runtime.releaseRendering = undefined;
+    try { release?.(); }
+    catch { /* Rendering cleanup must not replace the authoritative Run result. */ }
+  }
+
+  function keepRunRendering(runtime: ActiveAgentRun): void {
+    if (!options.keepOwnerRendering) return;
+    const release = options.keepOwnerRendering(runtime.ownerWebContentsId);
+    let released = false;
+    const cancel = () => releaseRunRendering(runtime);
+    runtime.releaseRendering = () => {
+      if (released) return;
+      released = true;
+      runtime.controller.signal.removeEventListener('abort', cancel);
+      release();
+    };
+    runtime.controller.signal.addEventListener('abort', cancel, { once: true });
+    if (runtime.controller.signal.aborted) cancel();
+    throwIfAborted(runtime.controller.signal);
+  }
 
   function groupKey(owner: AgentOwnerScope, libraryId: number, groupId: string): string {
     const scope = normalizeAgentOwnerScope(owner);
@@ -2090,11 +2128,14 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     activeSkillId: string | undefined,
     aiDestination: AgentToolMainAiDestinationSnapshot,
     onPerception: (next: AgentChatRequest['perception']) => void,
+    resolveComputerTextAuditSource: AgentComputerTextAuditSourceResolver,
     readOutputTokenBudget?: number,
   ): Promise<AgentToolResult> {
     const tool = capabilitySnapshot.getTool(call.name, activeSkillId);
     let pluginInputError: string | undefined;
     const registeredTool = capabilitySnapshot.toolSnapshot.get(call.name);
+    const computerTextAuditSource = resolveComputerTextAuditSource(call.name);
+    const privateComputerText = isBuiltinComputerSetTextTool(computerTextAuditSource);
     const preparationMode: AgentPreparedRuntime['preparationMode'] | 'none' = tool?.prepareMain
       ? 'main'
       : tool?.createRendererPrepareRequest && tool.finalizeRendererPreparation
@@ -2109,7 +2150,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       );
       if (!schemaValidation.ok) {
         call.input = { _omniflowAudit: 'invalid Tool input omitted' };
-        if (!tool.pluginSource) return { message: schemaValidation.message, ok: false };
+        if (!tool.pluginSource) return { message: privateComputerText ? '文字输入参数无效' : schemaValidation.message, ok: false };
         pluginInputError = schemaValidation.message;
       }
     }
@@ -2125,7 +2166,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     let activity: AgentToolActivitySnapshot | undefined;
     let progressWrites = Promise.resolve();
     const persistAndEmitProgress = (rawProgress: AgentToolProgress) => {
-      const progress = normalizeToolProgress(rawProgress);
+      const progress = normalizeToolProgress(privateComputerText ? { message: '正在输入文字' } : rawProgress);
       progressWrites = progressWrites.then(async () => {
         const progressAt = now();
         try {
@@ -2422,7 +2463,8 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         };
       }
     }
-    const auditProjection = projectAgentToolAuditInput(call.input);
+    const auditProjection = projectAgentToolAuditInput(call.input, computerTextAuditSource || tool);
+    let safeCallInput = privateComputerText ? auditProjection.input : call.input;
     if (!preflightDecision && (!auditProjection.complete || auditProjection.sensitive)) {
       omitDeniedAudit = call.name === interactionRequestTool.name && auditProjection.sensitive;
       preflightDecision = {
@@ -2438,7 +2480,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       activity = await store.createToolRun({ callId: call.id, id: toolRunId, input: auditProjection.input,
         now: now(), permissionBehavior: tool.pluginOperation ? 'ask' : 'allow', runId, status: preparationMode === 'none' ? 'running' : 'preparing', toolKind: tool.kind,
         toolName: call.name, pluginSource: tool.pluginSource });
-      emit(sender, { activity, call: { id: call.id, input: call.input, name: call.name }, runId, sessionId, type: 'tool-started' });
+      emit(sender, { activity, call: { id: call.id, input: safeCallInput, name: call.name }, runId, sessionId, type: 'tool-started' });
       persistAndEmitProgress({ message: '检查插件读取范围' });
     }
     if (!preflightDecision && !call.inputError && tool && accessGuard) {
@@ -2466,14 +2508,14 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       if (validation && !validation.ok) {
         decision = {
           behavior: 'deny',
-          message: validation.message,
+          message: privateComputerText ? '文字输入参数无效' : validation.message,
           risk: tool.risk,
         };
       } else {
         if (!activity) activity = await store.createToolRun({
           callId: call.id,
           id: toolRunId,
-          input: call.input,
+          input: safeCallInput,
           now: now(),
           permissionBehavior: tool.risk === 'read' ? 'allow' : 'ask',
           runId,
@@ -2484,7 +2526,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         });
         emit(sender, {
           activity,
-          call: { id: call.id, input: call.input, name: call.name },
+          call: { id: call.id, input: safeCallInput, name: call.name },
           runId,
           sessionId,
           type: 'tool-started',
@@ -2610,6 +2652,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
                   );
                   throwIfAborted(preparationSignal);
                   return createPreparedRuntime(result, call.name, tool.risk, tool.preparedRisk, 'main', {
+                    computerText: privateComputerText,
                     pluginOperation: tool.pluginOperation,
                     permissionMode: tool.pluginOperation ? 'ask' : await accessGuard?.canAutoApproveTool(call, toolRunId, result.publicAction) ? 'full-access' : capabilitySnapshot.shellPermissionMode,
                     identity: preparationIdentity,
@@ -2651,7 +2694,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
           });
           emit(sender, {
             activity,
-            call: { id: call.id, input: call.input, name: call.name },
+            call: { id: call.id, input: safeCallInput, name: call.name },
             runId,
             sessionId,
             type: 'tool-started',
@@ -2675,7 +2718,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
           }
           decision = {
             behavior: 'deny',
-            message: normalizeAgentErrorMessage(error, `${call.name} 准备失败`),
+            message: privateComputerText ? '文字输入准备失败，请重新查看窗口' : normalizeAgentErrorMessage(error, `${call.name} 准备失败`),
             risk: tool.risk,
           };
           await updateRunAndEmit(sender, store, sessionId, runId, {
@@ -2689,7 +2732,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       decision = preflightDecision || (call.inputError
         ? {
             behavior: 'deny' as const,
-            message: call.inputError,
+            message: privateComputerText ? '文字输入参数无效' : call.inputError,
             risk: registeredTool?.risk || 'external' as const,
           }
         : tool
@@ -2736,9 +2779,10 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       const message = sanitizeAgentSensitiveText(String(decision.message || '')).slice(0, 2_000)
         || 'Agent Tool 请求已拒绝';
       decision = { ...decision, message };
-      call.input = omitDeniedAudit
+      if (!privateComputerText) call.input = omitDeniedAudit
         ? { _omniflowAudit: 'sensitive interaction request omitted' }
         : auditProjection.input;
+      if (!privateComputerText) safeCallInput = call.input;
       if (omitDeniedAudit) {
         return { message, ok: false };
       }
@@ -2755,7 +2799,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
           : {}),
         callId: call.id,
         id: toolRunId,
-        input: call.input,
+        input: safeCallInput,
         now: now(),
         permissionBehavior: decision.behavior,
         runId,
@@ -2766,7 +2810,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       });
       emit(sender, {
         activity,
-        call: { id: call.id, input: call.input, name: call.name },
+        call: { id: call.id, input: safeCallInput, name: call.name },
         runId,
         sessionId,
         type: 'tool-started',
@@ -2790,7 +2834,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       } else if (decision.behavior === 'ask' && approvalId) {
         const approval: AgentToolApprovalSnapshot = {
           approvalId,
-          call: { id: call.id, input: call.input, name: call.name },
+          call: { id: call.id, input: safeCallInput, name: call.name },
           ...(preparedApproval
             ? {
                 preparation: {
@@ -2907,14 +2951,16 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         throw error;
       }
       result = {
-        message: normalizeAgentErrorMessage(error, `${call.name} 执行失败`),
+        message: privateComputerText ? '文字输入未发送，请重新查看窗口' : normalizeAgentErrorMessage(error, `${call.name} 执行失败`),
         ok: false,
       };
     } finally {
       if (tool?.pluginOperation === 'file-output') await (options.releasePluginOutputs ?? releaseAgentPluginOutputs)(runId, toolRunId).catch(() => undefined);
     }
 
-    result = normalizeAgentToolResult(result);
+    const textAction = preparedApproval?.current.action;
+    result = normalizeAgentToolResult(privateComputerText ? projectAgentComputerTextResult(result,
+      textAction?.kind === 'computer.setText' ? textAction : undefined) : result);
     await progressWrites;
     activity = await store.completeToolRun(toolRunId, result, now());
     await store.appendMessage(createMessage(
@@ -2926,7 +2972,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     ));
     emit(sender, {
       activity,
-      call: { id: call.id, input: call.input, name: call.name },
+      call: { id: call.id, input: safeCallInput, name: call.name },
       result,
       runId,
       sessionId,
@@ -2984,6 +3030,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     capabilitySnapshot: AgentRunCapabilitySnapshot,
     modelAdapter: AgentModelAdapter,
     windowSource: AgentContextUsageSnapshot['windowSource'],
+    resolveComputerTextAuditSource: AgentComputerTextAuditSourceResolver,
     continuationInstruction = '',
   ): Promise<void> {
     const sessionId = session.id;
@@ -3036,6 +3083,11 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         return {};
       }
     };
+    // Tool signals end with each broker execution. Window sharing must also
+    // release synchronously when the actual Run is stopped between tools.
+    const releaseComputerOnAbort = () => releaseAgentComputerRun(runId);
+    controller.signal.addEventListener('abort', releaseComputerOnAbort, { once: true });
+    if (controller.signal.aborted) releaseComputerOnAbort();
     try {
       const skillSummaries = capabilitySnapshot.skillSnapshot.listSummaries();
       const omittedSkillCount = capabilitySnapshot.skillSnapshot.omittedSkillCount;
@@ -3357,7 +3409,10 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         messages.push({
           content: turn.content,
           role: 'assistant',
-          ...(toolCalls.length > 0 ? { toolCalls } : {}),
+          ...(toolCalls.length > 0 ? { toolCalls: toolCalls.map(call =>
+            isBuiltinComputerSetTextTool(resolveComputerTextAuditSource(call.name))
+              ? { ...call, input: projectAgentComputerTextInput(call.input), inputError: call.inputError ? '文字输入参数无效' : undefined }
+              : call) } : {}),
         });
         await publishContextUsage({ messages, systemPrompt: buildAgentSystemPrompt(input.appContext, currentPerception,
           roundCapabilityView.capabilities, skillSummaries, omittedSkillCount, modelAdapter),
@@ -3673,6 +3728,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
                       .map(node => [node.id, node])).values()).slice(-500),
                   } : currentPerception;
                 },
+                resolveComputerTextAuditSource,
                 Math.min(10_000, Math.max(1, getProviderRequestLimit() - preExecutionMinimumTokens)),
               );
           if (isAgentRendererMutationTool(call.name) && !['directory.create', 'file.copy', 'file.write'].includes(call.name) && result.ok && currentPerception) {
@@ -3700,7 +3756,10 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
             omittedSkillCount,
             modelAdapter,
           );
-          const imageId = call.name === 'attachment.view' && result.ok
+          const isComputerObservation = call.name === 'computer.observe'
+            && capabilitySnapshot.toolSnapshot.get(call.name)?.registrationId === 'builtin:computer.observe@1'
+            && !capabilitySnapshot.toolSnapshot.get(call.name)?.pluginSource;
+          const imageId = (call.name === 'attachment.view' || isComputerObservation) && result.ok
             ? (result.data as { imageId?: string } | undefined)?.imageId : undefined;
           const visualAttachments = imageId ? await getAgentAttachmentStore().resolve(
             { ownerScope: input.ownerScope, libraryId: Number(input.appContext.libraryId) }, [imageId], sessionId) : [];
@@ -3903,6 +3962,10 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         });
       }
     } finally {
+      controller.signal.removeEventListener('abort', releaseComputerOnAbort);
+      releaseAgentComputerRun(runId);
+      const renderingOwner = activeRuns.get(sessionId);
+      if (renderingOwner?.runId === runId) releaseRunRendering(renderingOwner);
       await waitForMediaArtifactSaves(save => save.runId === runId);
       await (options.releasePluginOutputs ?? releaseAgentPluginOutputs)(runId).catch(() => undefined);
       agentLibraryTextReader.releaseRun(runId);
@@ -4013,6 +4076,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       const baseToolSnapshot = agentToolRegistry.createSnapshot();
       const pluginRegistrations = options.getPluginTools?.(baseToolSnapshot.tools.map(item => item.name)) ?? [];
       const combinedToolSnapshot = createAgentPluginToolSnapshot(baseToolSnapshot, pluginRegistrations);
+      const resolveComputerTextAuditSource = createAgentComputerTextAuditSourceResolver(combinedToolSnapshot);
       const pluginTools = new Map(combinedToolSnapshot.tools.flatMap(item => item.pluginSource && !item.pluginOperation ? [[item.name, item.pluginSource] as const] : []));
       const pluginRenameTools = new Map(combinedToolSnapshot.tools.flatMap(item => item.pluginSource && item.pluginOperation === 'rename' ? [[item.name, item.pluginSource] as const] : []));
       const pluginOutputTools = new Map(combinedToolSnapshot.tools.flatMap(item => item.pluginSource && item.pluginOperation === 'file-output' ? [[item.name, item.pluginSource] as const] : []));
@@ -4175,6 +4239,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         runId,
       };
       activeRuns.set(session.id, runtime);
+      keepRunRendering(runtime);
       if (accessGuard) runtime.releaseAccess = agentFileAuthorityBroker.registerRunAccess(runId, {
         before: async request => {
           if (request.sessionId !== session!.id || request.libraryId !== libraryId || request.sender.id !== sender.id
@@ -4206,7 +4271,8 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         reasoningEffort,
         sessionId: session.id,
         userPrompt,
-      }, runtimeConnection, controller, contextBudget, recalledMemories, capabilitySnapshot, modelAdapter, windowSource, continuationInstruction);
+      }, runtimeConnection, controller, contextBudget, recalledMemories, capabilitySnapshot, modelAdapter, windowSource,
+      resolveComputerTextAuditSource, continuationInstruction);
       return { runId, sessionId: session.id, session: pickAgentSessionSummary(session) };
     } catch (error) {
       let confirmedUncreated = !runCreated && !runCreationAttempted;
@@ -4235,9 +4301,14 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
           }
         }
       } finally {
-        if (session && activeRuns.get(session.id)?.runId === runId) {
+        const active = session && activeRuns.get(session.id);
+        if (session && active?.runId === runId) {
+          releaseRunRendering(active);
+          try { active.releaseAccess?.(); }
+          catch { /* Failed startup must preserve its original error. */ }
           activeRuns.delete(session.id);
         }
+        releaseAgentComputerRun(runId);
         if (runSessionStarted) runSessionRegistry.end(runId, sender.id);
       }
       throw error;
@@ -4381,7 +4452,8 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     );
     if (!deleted) throw new Error('Agent 会话不存在或不属于当前资料库');
     activeTitleTasks.get(sessionId)?.controller.abort();
-    if (deletingSession?.messages.some(message => message.attachments?.length)) {
+    if (deletingSession.messages.some(message => message.attachments?.length)
+      || deletingSession.toolActivities.some(activity => activity.call.name === 'computer.observe')) {
       await getAgentAttachmentStore().releaseSession({ ownerScope, libraryId }, sessionId).catch(() => undefined);
     }
     return true;
@@ -4562,6 +4634,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
 }
 
 export const agentOrchestrator = createAgentOrchestrator({
+  keepOwnerRendering: keepAgentOwnerRendering,
   preparePluginFileOutput: prepareAgentPluginFileOutput,
   executePluginFileOutput: executeAgentPluginFileOutput,
   getPluginTools: getAgentPluginToolRegistrations,

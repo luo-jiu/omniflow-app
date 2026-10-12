@@ -26,6 +26,7 @@ import { getAgentAttachmentStore } from '../service/agent/agent-attachment-runti
 import type { AgentAttachmentImport, AgentAttachmentScope } from '../../src/shared/agent/agent-attachments';
 import { agentShellSettingsStore } from '../service/agent/shell/agent-shell-settings-store';
 import { agentFileAuthorityBroker } from '../service/agent/agent-file-authority-broker';
+import { agentFirstPartyControls, configureAgentFirstPartyControls } from '../service/agent/computer/agent-first-party-controls';
 import type { AgentShellLogPageRequestV1 } from '@/shared/agent/shell/agent-shell.types';
 import { assertMainWindowAgentSender } from './aiServiceAccess';
 
@@ -38,6 +39,7 @@ export function registerAgentIpc(
   options: RegisterAgentIpcOptions,
 ): void {
   const ownersWithCleanup = new Set<number>();
+  configureAgentFirstPartyControls(options.getMainWindow);
 
   function requireMainWindow(event: IpcMainInvokeEvent): WebContents {
     return assertMainWindowAgentSender(event, options.getMainWindow);
@@ -50,8 +52,22 @@ export function registerAgentIpc(
       ownersWithCleanup.delete(sender.id);
       agentOrchestrator.releaseOwner(sender.id);
       agentFileAuthorityBroker.releaseOwner(sender.id);
+      agentFirstPartyControls.releaseOwner(sender.id);
     });
   }
+
+  ipcMain.handle('agent:computer-controls:register', (event, input: unknown) => {
+    const sender = requireMainWindow(event);
+    return agentFirstPartyControls.register(sender, event.senderFrame, input);
+  });
+  ipcMain.handle('agent:computer-controls:unregister', (event, input: unknown) => {
+    const sender = requireMainWindow(event);
+    return agentFirstPartyControls.unregister(sender.id, event.senderFrame, input);
+  });
+  ipcMain.handle('agent:computer-controls:complete', (event, input: unknown) => {
+    const sender = requireMainWindow(event);
+    return agentFirstPartyControls.complete(sender.id, event.senderFrame, input);
+  });
 
   ipcMain.handle('agent:chat:start', (event, input: AgentChatRequest) => {
     const sender = requireMainWindow(event);
@@ -84,6 +100,7 @@ export function registerAgentIpc(
     const sender = requireMainWindow(event);
     agentOrchestrator.releaseOwner(sender.id);
     agentFileAuthorityBroker.releaseOwner(sender.id);
+    agentFirstPartyControls.releaseOwner(sender.id);
     return true;
   });
 

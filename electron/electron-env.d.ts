@@ -269,6 +269,13 @@ interface Window {
     ) => Promise<string>;
   };
 
+  electronComputerControls?: {
+    register: (input: import('@/shared/computer-use/first-party-control-contract').FirstPartyRegistrationInput) => Promise<import('@/shared/computer-use/first-party-control-contract').FirstPartyRegistrationToken>;
+    unregister: (token: import('@/shared/computer-use/first-party-control-contract').FirstPartyRegistrationToken) => Promise<boolean>;
+    complete: (response: import('@/shared/computer-use/first-party-control-contract').FirstPartyControlResponse) => Promise<boolean>;
+    onRequest: (listener: (request: import('@/shared/computer-use/first-party-control-contract').FirstPartyControlRequest) => void) => () => void;
+  };
+
   electronAgent?: {
     reconcilePluginOperation: (input: import('@/shared/agent/agent.types').AgentPluginOperationReconcileRequest) => Promise<import('@/shared/agent/agent.types').AgentToolActivitySnapshot>;
     importAttachment: (input: import('@/shared/agent/agent-attachments').AgentAttachmentImport) => Promise<import('@/shared/agent/agent-attachments').AgentAttachment>;

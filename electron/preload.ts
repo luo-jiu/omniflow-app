@@ -261,6 +261,20 @@ contextBridge.exposeInMainWorld('electronAIService', {
   complete: (input: AIServiceCompletionInput): Promise<string> => ipcRenderer.invoke('ai-service:complete', input),
 })
 
+contextBridge.exposeInMainWorld('electronComputerControls', {
+  register: (input: import('../src/shared/computer-use/first-party-control-contract').FirstPartyRegistrationInput): Promise<import('../src/shared/computer-use/first-party-control-contract').FirstPartyRegistrationToken> =>
+    ipcRenderer.invoke('agent:computer-controls:register', input),
+  unregister: (token: import('../src/shared/computer-use/first-party-control-contract').FirstPartyRegistrationToken): Promise<boolean> =>
+    ipcRenderer.invoke('agent:computer-controls:unregister', token),
+  complete: (response: import('../src/shared/computer-use/first-party-control-contract').FirstPartyControlResponse): Promise<boolean> =>
+    ipcRenderer.invoke('agent:computer-controls:complete', response),
+  onRequest: (listener: (request: import('../src/shared/computer-use/first-party-control-contract').FirstPartyControlRequest) => void) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, request: import('../src/shared/computer-use/first-party-control-contract').FirstPartyControlRequest) => listener(request);
+    ipcRenderer.on('agent:computer-controls:requested', wrapped);
+    return () => ipcRenderer.removeListener('agent:computer-controls:requested', wrapped);
+  },
+});
+
 contextBridge.exposeInMainWorld('electronAgent', {
   reconcilePluginOperation: (input: import('../src/shared/agent/agent.types').AgentPluginOperationReconcileRequest): Promise<import('../src/shared/agent/agent.types').AgentToolActivitySnapshot> =>
     ipcRenderer.invoke('agent:plugin-operation:reconcile', input),

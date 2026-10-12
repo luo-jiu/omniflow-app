@@ -42,11 +42,10 @@ const Bubble = styled.button`
   display: flex;
   align-items: center;
   padding: 0 0 0 7px;
-  border: 1px solid var(--app-border-strong);
+  border: 1px solid transparent;
   border-radius: 16px 4px 4px 16px;
   background: var(--app-bg-elevated);
   color: var(--app-text-secondary);
-  box-shadow: var(--app-shadow);
   pointer-events: none;
   touch-action: none;
   user-select: none;
@@ -82,8 +81,8 @@ const Card = styled.aside`
   resize: none;
   overflow: hidden;
   padding: 8px;
-  border: 1px solid var(--app-border-strong);
-  border-radius: 20px; background: var(--app-bg-elevated); box-shadow: var(--app-shadow);
+  border: 1px solid transparent;
+  border-radius: 20px; background: var(--app-bg-elevated);
   .peek-head { flex:none; display:flex; align-items:center; gap:7px; padding:5px 7px 8px; color:var(--app-text); font-size:13px; line-height:20px; font-weight:600; cursor:grab; touch-action:none; user-select:none; }
   .peek-head:active { cursor:grabbing; }
   .peek-drag-label { display:inline-flex; align-items:center; gap:7px; color:inherit; }
