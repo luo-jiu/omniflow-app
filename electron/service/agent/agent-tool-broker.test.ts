@@ -60,7 +60,7 @@ function brokerDeferred<T>() {
 }
 
 describe('Agent tool broker', () => {
-  it.each(['computer.setText', 'computer.scroll'] as const)('preserves %s committed and unknown receipts after cancellation', async name => {
+  it.each(['computer.setText', 'computer.scroll', 'computer.input'] as const)('preserves %s committed and unknown receipts after cancellation', async name => {
     for (const state of ['dispatched', 'unknown'] as const) {
       const controller = new AbortController();
       const begun = brokerDeferred<void>();
@@ -84,7 +84,7 @@ describe('Agent tool broker', () => {
     }
   });
 
-  it.each(['computer.setText', 'computer.scroll'] as const)('does not grant %s a settlement through spoofed or plugin operation sources', async name => {
+  it.each(['computer.setText', 'computer.scroll', 'computer.input'] as const)('does not grant %s a settlement through spoofed or plugin operation sources', async name => {
     for (const overrides of [{ kind: 'control' as const }, { name: 'file.rename' },
       { pluginOperation: 'rename' as const }, { pluginOperation: 'file-output' as const },
       { registrationId: `builtin:${name}@2` }, { prepareMain: undefined }]) {
@@ -149,19 +149,19 @@ describe('Agent tool broker', () => {
     expect(execute).toHaveBeenCalledWith('computer.click', {}, expect.objectContaining({ commitSettlement: expect.any(Object) }), 'builtin:computer.click@1');
   });
 
-  it('retains the unknown input fallback when cancellation settlement expires without a helper receipt', async () => {
+  it.each(['computer.click', 'computer.input'])('retains the %s unknown input fallback when cancellation settlement expires without a helper receipt', async name => {
     vi.useFakeTimers();
     const completion = brokerDeferred<AgentToolResult>();
     try {
       const controller = new AbortController();
       const begun = brokerDeferred<AgentMainCommitSettlement>();
       const execute = vi.fn(async (_name: string, _input: unknown, context: AgentToolDispatchContext) => {
-        context.commitSettlement!.begin(computerCommitReceipt('unknown'));
+        context.commitSettlement!.begin(computerCommitReceipt('unknown', name));
         begun.resolve(context.commitSettlement!);
         return completion.promise;
       });
       const broker = createAgentToolBroker({ toolRegistry: { execute } });
-      const running = broker.executeMain('computer.click', {}, computerBrokerContext(controller.signal), 10_000, undefined, 50);
+      const running = broker.executeMain(name, {}, computerBrokerContext(controller.signal, { name }), 10_000, undefined, 50);
       const closure = await begun.promise;
       const settled = vi.fn();
       void running.then(settled);
@@ -169,8 +169,8 @@ describe('Agent tool broker', () => {
       await vi.advanceTimersByTimeAsync(49);
       expect(settled).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(1);
-      await expect(running).resolves.toEqual(computerCommitReceipt('unknown'));
-      expect(() => closure.settle(computerCommitReceipt('dispatched'))).toThrow('已经结束');
+      await expect(running).resolves.toEqual(computerCommitReceipt('unknown', name));
+      expect(() => closure.settle(computerCommitReceipt('dispatched', name))).toThrow('已经结束');
     } finally {
       completion.resolve({ ok: false });
       vi.useRealTimers();

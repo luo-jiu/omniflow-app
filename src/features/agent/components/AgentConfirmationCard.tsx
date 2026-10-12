@@ -19,9 +19,10 @@ import type {
 } from '@/shared/agent/agent.types';
 import { normalizeAgentPreparedActionPublic } from '@/shared/agent/agent-prepared-action';
 import { formatAgentShellCommandForDisplay } from '../agent-shell-command-display';
+import { COMPUTER_INPUT_LABELS, formatComputerInputShortcut } from '../agent-computer-input-display';
 
 type ComputerPreparedAction = Extract<AgentPreparedActionPublic, {
-  kind: 'computer.observe' | 'computer.click' | 'computer.setText' | 'computer.scroll';
+  kind: 'computer.observe' | 'computer.click' | 'computer.setText' | 'computer.scroll' | 'computer.input';
 }>;
 
 function computerApprovalDisplay(action: ComputerPreparedAction): {
@@ -29,6 +30,18 @@ function computerApprovalDisplay(action: ComputerPreparedAction): {
   description: string;
   details: Array<{ label: string; value: string }>;
 } {
+  if (action.kind === 'computer.input') {
+    const details = [{ label: '应用', value: action.applicationLabel }, { label: '窗口', value: action.windowLabel },
+      { label: '操作', value: COMPUTER_INPUT_LABELS[action.operation] }];
+    if (action.operation === 'shortcut') details.push({ label: '按键', value: formatComputerInputShortcut(action.shortcut) });
+    else {
+      details.push({ label: action.operation === 'drag' ? '起点' : '位置', value: `(${action.point.x}, ${action.point.y})` });
+      if (action.operation === 'drag') details.push({ label: '终点', value: `(${action.endPoint.x}, ${action.endPoint.y})` },
+        { label: '时长', value: `${action.durationMs} 毫秒` });
+    }
+    return { title: `允许在应用窗口发送${COMPUTER_INPUT_LABELS[action.operation]}`,
+      description: '本次操作只向这个后台应用窗口发送输入；应用可能忽略或自行响应，发送后必须重新查看确认结果，结果不确定时不会自动重发。', details };
+  }
   if (action.kind === 'computer.setText' || action.kind === 'computer.scroll') {
     const details = [
       { label: '应用', value: action.applicationLabel },
@@ -59,13 +72,15 @@ function computerApprovalDisplay(action: ComputerPreparedAction): {
     ...(operations.includes('replaceText') || operations.includes('insertText') ? ['文本输入'] : []),
     ...(operations.some(operation => operation.startsWith('scroll')) ? ['滚动'] : []),
   ] : ['点击'];
+  const inputOperations = action.kind === 'computer.observe' ? action.inputOperations : undefined;
+  if (inputOperations) allowed.push(...inputOperations.map(operation => COMPUTER_INPUT_LABELS[operation]));
   return {
     title: allowed.length === 1 && allowed[0] === '点击' ? '共享应用窗口并允许点击' : '共享应用窗口并允许操作',
-    description: `本次任务仅将这个应用窗口的图像和界面控件信息发送给当前 AI 服务，并保存在本机会话，同时允许在该窗口中${allowed.join('、')}；切换到另一个窗口需重新批准，停止或任务结束后授权失效。首次可能需要系统的屏幕录制和辅助功能权限。`,
+    description: `本次任务仅将这个应用窗口的图像和界面控件信息发送给当前 AI 服务，并保存在本机会话，同时允许在该窗口中${allowed.join('、')}；切换到另一个窗口需重新批准，停止或任务结束后授权失效。${inputOperations ? '后台定向输入发送后需重新查看确认实际结果。' : ''}首次可能需要系统的屏幕录制和辅助功能权限。`,
     details: [
       { label: '应用', value: action.applicationLabel },
       { label: '窗口', value: action.windowLabel },
-      ...(operations ? [{ label: '允许操作', value: allowed.join('、') }] : []),
+      ...(operations || inputOperations ? [{ label: '允许操作', value: allowed.join('、') }] : []),
     ],
   };
 }
@@ -408,7 +423,7 @@ export default function AgentConfirmationCard({
     try {
       const action = normalizeAgentPreparedActionPublic(preparation?.action);
       return (action.kind === 'computer.observe' || action.kind === 'computer.click'
-        || action.kind === 'computer.setText' || action.kind === 'computer.scroll')
+        || action.kind === 'computer.setText' || action.kind === 'computer.scroll' || action.kind === 'computer.input')
         && action.libraryId === libraryId && action.kind === approval.call.name ? action : undefined;
     } catch { return undefined; }
   }, [preparation?.action, libraryId, approval.call.name]);
@@ -423,7 +438,7 @@ export default function AgentConfirmationCard({
     ? preparedActionDraft.action
     : initialAction;
   const expectsComputerAction = approval.call.name === 'computer.observe' || approval.call.name === 'computer.click'
-    || approval.call.name === 'computer.setText' || approval.call.name === 'computer.scroll';
+    || approval.call.name === 'computer.setText' || approval.call.name === 'computer.scroll' || approval.call.name === 'computer.input';
   const unsupportedPreparation = Boolean(
     expectsComputerAction ? !computerAction
       : preparation && !initialAction && !shellAction && !fileBridgeAction && !renameAction && !fileOutputAction && !computerAction,

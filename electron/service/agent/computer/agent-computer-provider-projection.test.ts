@@ -30,6 +30,17 @@ function windowResult(): AgentToolResult {
 }
 
 describe('computer provider result projection', () => {
+  it('keeps window-input grants separate from available operations under context reduction', () => {
+    const base = observationResult();
+    const result = { ...base, data: { ...base.data as Record<string, unknown>, inputReady: true,
+      inputOperations: ['shortcut', 'rightClick', 'doubleClick', 'drag'], availableInputOperations: ['shortcut'],
+      inputNotice: '本次只有后台快捷键可用，必须重新观察核对。' } };
+    const projection = projectAgentToolResultForProvider(result, 2048, { mode: 'computer-observe' });
+    expect(JSON.parse(projection.content).data).toMatchObject({ inputReady: true,
+      inputOperations: ['shortcut', 'rightClick', 'doubleClick', 'drag'], availableInputOperations: ['shortcut'],
+      inputNotice: '本次只有后台快捷键可用，必须重新观察核对。', screenshotWidth: 2048, screenshotHeight: 1280 });
+    expect(projection.estimatedTokens).toBeLessThanOrEqual(2048);
+  });
   it.each([AGENT_COMPUTER_PROVIDER_RESULT_TOKENS, 2048])('retains local scope and independent scan completeness under budget %s', budget => {
     const base = observationResult();
     const result: AgentToolResult = { ...base, data: { ...base.data as Record<string, unknown>,

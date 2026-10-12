@@ -2,7 +2,7 @@
 
 更新时间：2026-10-12
 
-状态：本文保留实现前的源码与官方接口调研快照，并补充鼠标争用、窗口捕获范围和 AX 摘要的后续结论；2026-10-10 的公开实现复核见第 9 节，进一步后台输入研究与阶段方案见第 10 节。后续已实现 macOS AX-only / 按需单窗口截图、有界 AX 文本、窗口搜索、观察内元素标识、AXPress、有限原生文本替换 / 插入及语义滚动；2026-10-12 原生页子按钮后台滚动和 Finder 视图往返通过限定真机验收，最新实现与证据以[内置应用窗口操作](agent-computer-use.md)为准。本文第 5～8 节保留实现前的接线建议；无上限 AX、通用 keyboard / 画布 / 手势等多动作协议仍是目标设计。旧全局鼠标版的记录不代表当前窗口限定实现。
+状态：本文保留实现前的源码与官方接口调研快照，并补充鼠标争用、窗口捕获范围和 AX 摘要的后续结论；2026-10-10 的公开实现复核见第 9 节，进一步后台输入研究与阶段方案见第 10 节。后续已实现 macOS AX-only / 按需单窗口截图、有界 AX 文本、窗口搜索、观察内元素标识、AXPress、有限原生文本替换 / 插入及语义滚动；2026-10-12 原生页子按钮后台滚动和 Finder 视图往返通过限定真机验收，同日新增窗口定向快捷键、右键、双击和有界拖拽，路线与依据见第 11 节，最新实现与证据以[内置应用窗口操作](agent-computer-use.md)为准。本文第 5～8 节保留实现前的接线建议；无上限 AX、任意软件通用 keyboard / 画布 / 手势协议仍是目标设计。旧全局鼠标版的记录不代表当前窗口限定实现。
 
 适用范围：内置 Agent 的截图、可访问性观察、鼠标键盘输入，以及 Electron main / 平台驱动边界。
 
@@ -332,4 +332,16 @@ TextEdit AR 真实声明 `AXScrollDownByPage`，驱动对同一控件发送相�
 
 后续自研页子按钮 AV 真机闭环已通过：80行合成TextEdit正文的首次可见行01→下页30→新ID上页01→清空，保存原图及独立CUA一致，前台/指针采样端点未变。Finder AW 则在候选部分扫描中按准确工具栏标签完成AX-only定位、列表切换和按需图标恢复。两者补齐了本机轻量基础操作约80分的证据，不能推广为滚轮驱动、外部step / fraction或WebStorm失效节点已修复；具体Run与门禁由实施专题/验证矩阵持有，不以外部库研究替代实际效果。
 
-2026-10-12 用户锁屏后只继续代码：已接入以有效原生控件 ID 为锚点的有限父区域观察，沿原共享窗口身份和扫描预算，不把局部完整升级为全窗完整或坐标权限；解锁后验证复杂窗口的实际收益。快捷键下一步优先研究有限语义 command / 第一方 owner adapter。读取菜单快捷键元数据可用于发现，但应用级 AXMenuItem 通常依赖当前 key window，AXPress 不能单独证明作用于获准窗口；CGEventPostToPid 也只证明进程路由，不能保证单窗消费或用户修饰键隔离。目前两者都不作为后台快捷键 fallback，仍没有通用键盘能力。
+2026-10-12 用户锁屏后只继续代码：已接入以有效原生控件 ID 为锚点的有限父区域观察，沿原共享窗口身份和扫描预算，不把局部完整升级为全窗完整或坐标权限；解锁后验证复杂窗口的实际收益。当时快捷键下一步优先研究有限语义 command / 第一方 owner adapter。读取菜单快捷键元数据可用于发现，但应用级 AXMenuItem 通常依赖当前 key window，AXPress 不能单独证明作用于获准窗口；CGEventPostToPid 也只证明进程路由，不能保证单窗消费或用户修饰键隔离。两者不作为旧操作的后台快捷键 fallback；后续独立工具实现见第 11 节，任意软件通用键盘仍未实现。
+
+## 11. 2026-10-12 窗口定向四动作实施
+
+新增 `computer.input@1`，在独立 `inputOperations` 批准与本次 `availableInputOperations` 交集内提供 shortcut / rightClick / doubleClick / drag。它不扩展旧 AXPress 的含义，也不把失败的 AX 操作转成像素重发。完整 both 观察提供同图像的指针坐标；全窗 ax 只允许快捷键，截图独立模式或局部 AX 观察不签发新输入能力。快捷键使用固定 ANSI key / modifier，字母数字要求 Command 或 Control，正文仍走私有文本工具；拖拽限定同窗不同起终点、100～1000ms 的直线。
+
+独立 AppKit 夹具暴露了单纯公开 NSEvent / CGEvent 与 windowNumber / window hint 的限制：应用 sendEvent 收到事件，但重建出的 locationInWindow 位于窗口外，NSView 没有消费。固定 Peekaboo 的窗口路线提供私有 window-local setter 的参考；本轮自行通过 typed dlsym 解析 `CGEventSetWindowLocation`，按窗口左上原点 local points 设置同一条事件，不复制事件驱动，也不引入认证包、opaque CGEvent 内存偏移或 SkyLight 第二投递。NSEvent factory 的坐标仍按 AppKit 左下原点转换，两种空间不能混用。
+
+每条事件从 private source 构造，鼠标 global / local points 与冻结窗口编号明确绑定，只发送一次 `CGEventPostToPid`。无激活、AXRaise、真实鼠标 warp、全局 HID、MouseMoved primer、额外 Command mouse flags 或双发。私有符号缺失、未验收接收者、目标位于前台、进程 / 窗口漂移或用户修饰键 / 鼠标按住时拒绝；快捷键额外要求没有普通物理键按住，且 focusedUIElement 的非 secure 父链回到原窗。private source 没有提供第二个独立桌面；目标 App 自身仍可能请求前台，用户与 Agent 操作同一个 App 仍会竞争，因此每步监测前台与接收窗口，按应用及系统版本开放。
+
+持续手势由有界序列 runner 持有唯一配对 up。所有事件在首发前分配，拖拽发送真正 MouseDragged；中途取消只在最后已发位置释放。若同 PID 切窗或原 AX root 已失效，不将 cleanup 投给另一个窗口，保留 unknown / 释放未确认。SIGTERM / SIGINT 只置取消标志，正常路径负责释放；父 runner 最多给 2 秒退出宽限，硬杀或 crash 不承诺释放。应用的实际消费由新的观察确认，投递 / 配对 up 的回执不能替代业务结果。
+
+真实夹具已验证四动作、完整拖拽、首个 down 后主动 SIGTERM 的唯一 up、同进程第二窗成为接收者后的零派发拒绝。独立 AppKit 结果不证明 TextEdit、Electron 或浏览器兼容，也不等同于内部 AI GUI 验收。最终软件版本 gate、TextEdit 各动作结论和门禁由[实施专题](agent-computer-use.md)与[验证矩阵](frontend-validation-matrix.md)记录；第 10 节的外部 wheel 与通用输入方向仍按各自边界保留。

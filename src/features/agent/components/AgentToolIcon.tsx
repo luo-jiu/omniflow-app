@@ -19,6 +19,7 @@ const OPERATION_ICONS: Record<string, OutlineIconName> = {
   'file.write': 'edit',
   'computer.setText': 'edit',
   'computer.scroll': 'move',
+  'computer.input': 'move',
   'file.rename': 'edit',
   'tag.update': 'tags',
   'file.move': 'move',

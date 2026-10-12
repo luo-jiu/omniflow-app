@@ -204,6 +204,34 @@ function observationActivity(): AgentToolActivitySnapshot {
 }
 
 describe('AgentToolActivityCard computer presentation', () => {
+  it.each(['shortcut', 'rightClick', 'doubleClick', 'drag'] as const)('renders directed %s as a compact row and keeps release uncertainty inspectable', operation => {
+    const identity = { libraryId: 3, targetId: '12022dc1-f61c-4c2a-aac6-2963b60e5f7a',
+      applicationLabel: 'OmniFlow', windowLabel: '测试窗口', observationId: SCREEN_OBSERVATION_ID };
+    const fields = operation === 'shortcut' ? { operation, shortcut: { key: 'a' as const, modifiers: ['command' as const] } }
+      : operation === 'drag' ? { operation, point: { x: 10, y: 20 }, endPoint: { x: 30, y: 40 }, durationMs: 100 }
+        : { operation, point: { x: 10, y: 20 } };
+    const activity: AgentToolActivitySnapshot = { ...observationActivity(),
+      call: { id: 'input-call', name: 'computer.input', input: { key: 'forged', pid: 999 } },
+      toolMetadata: { kind: 'business', risk: 'write', builtinComputerTool: 'input' },
+      preparation: { preparedActionId: 'input-action', snapshotHash: 'a'.repeat(64), action: { kind: 'computer.input', version: 1, ...identity, ...fields } },
+      result: { ok: true, message: '已发送，请重新观察确认', data: {
+        ...identity, ...fields, operation: 'computer.input', inputOperation: operation, operationId: 'tool-run-1',
+        dispatchState: 'dispatched', mutationCommitState: 'committed', nextAction: 'observe', retryAllowed: false,
+        inputMethod: 'CGEventPostToPid', releaseState: 'confirmed',
+      } } };
+    const renderer = renderCard(activity);
+    const labels = { shortcut: '已发送快捷键Command + A', rightClick: '已发送右键', doubleClick: '已发送双击', drag: '已发送拖拽' };
+    expect(textContent(renderer.root)).toBe(labels[operation]);
+    expect(renderer.root.findAllByType('button')).toHaveLength(0);
+    expect(renderer.root.findAllByProps({ className: 'agent-activity-collapse' })).toHaveLength(0);
+    expect(renderer.root.findByProps({ className: 'agent-activity-header' }).props.onClick).toBeUndefined();
+    act(() => renderer.update(cardElement({ ...activity, status: 'failed', result: { ok: false,
+      message: '释放结果不确定，请重新观察，勿重复发送', data: { dispatchState: 'unknown', releaseState: 'unconfirmed' } } })));
+    expect(textContent(renderer.root.findByProps({ className: 'agent-activity-header' }))).not.toContain('已发送');
+    act(() => renderer.root.findByProps({ className: 'agent-activity-header' }).props.onClick());
+    expect(textContent(renderer.root)).toContain('勿重复发送');
+    expect(textContent(renderer.root)).not.toContain('forged');
+  });
   it('renders the approved local AX range without loading a screenshot or expanding coordinate permission', () => {
     const activity: AgentToolActivitySnapshot = { ...observationActivity(),
       preparation: { preparedActionId: 'window-action', snapshotHash: 'a'.repeat(64), action: {

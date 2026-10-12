@@ -1,5 +1,9 @@
 # 内置 Agent 架构
 
+2026-10-12 定向输入扩展：独立 `computer.input@1` 提供 shortcut / rightClick / doubleClick / drag，不改变既有 AX 单击、私有文本及滚动工具。共享 V2 action 新增独立 `inputOperations`，历史缺失字段不扩权；全窗 both 最多四动作，全窗 ax 仅 shortcut，纯截图与局部观察不授新输入。字母 / 数字快捷键必须含 command 或 control，文字正文继续走私有审计。输入 public action V1 与 private receiver profile / 同窗 points 分层封存，正式执行再核对同 Run / owner / 观察有效期与 sealed request，由真实内置注册身份取得 broker commit settlement，一次消费并保留 dispatched / unknown 回执。取消执行在 helper 的 2 秒释放宽限内收口，迟到成功不能覆盖已结束结算，unknown 不重放、不换路线。释放回执为 unconfirmed 时，原 main runtime 阻断本 Run 后续所有定向输入；新观察、重批、换窗或已封存动作不能绕过，观察及 AX 保留，Run 结束清理门禁。
+
+原生定向输入限定已验证 receiver profile：私有 `CGEventSetWindowLocation` 设置目标窗口位置，每个事件只经公开 `CGEventPostToPid` 投递一次，不设置系统指针或置前应用，没有全局事件 fallback、独立 OS 鼠标或假鼠标叠层。生产名单仅 TextEdit 1.20 / build 415 与系统 build 25F84 的 `textedit-415-25f84-v1`；原生源码验收已确认 Command + A、双击选词及同窗选区拖拽。右键打开新菜单后由临时界面守卫返回 unknown，菜单期间 readiness 关闭，不能记为成功提交或扩大窗口授权。实验原生夹具另验证四动作及取消 / 焦点漂移；内置 Agent GUI、其他 App / 软件版本 / 签名包仍须独立验收，既有 AX 通过不能替代新路线证据。模块仍是 shared contract → main computer runtime → platform adapter / helper，无新 Run、共享 owner 或 renderer 输入入口，详见[后台定向输入](agent-computer-use.md#后台定向输入2026-10-12)。
+
 2026-10-12 生命周期收口：除 active Run 外，renderer 可见的 `AgentWorkspace` 也会通过独立 service 向 main 注册绘制租约，因此新建会话、空闲预览和工作区管理画面不再依赖已有 Session / Run 才能继续绘制。注册绑定可信 mainFrame 与当前 owner 作用域，导航、崩溃、销毁、隐藏、切库 / 账号 / 后端变化和 shutdown 都释放；与 Run / 获准截图共用一个引用计数 manager。该能力仅影响自有窗口绘制，不授予观察或输入能力，也不承诺 React / compositor 已提交最后一帧。
 
 `interaction.request` 使用固定的内置 registration identity，并把 broker 创建的 Tool `AbortSignal` 传入等待闭包。内置交互默认等待 30 分钟，broker 执行预算另有 30 秒 settlement grace；普通 Tool 仍按默认 30 秒执行。停止、owner 释放、Tool signal 超时、创建期间取消和真实过期都会解除 pending interaction、写入对应终态并阻止迟到回答恢复已停止的 Run。结算已落库但异步回执迟到时，只按同 owner / 资料库 / Session / Tool 的真实交互终态补齐缺失结果和结束时间，过期失败不改写为取消；已有结果不覆盖。应用重启仍按既有 interrupted 规则处理。
@@ -20,7 +24,7 @@ TextEdit AB 的固定类别 / 阶段诊断确认 Description getter 真实失败
 
 2026-10-10：macOS 开发预览新增 `computer.windows@1` 元数据搜索，Run 绑定 opaque windowRef，经精确身份复验后进入原有单窗口共享批准。AX-only / both 的 `computer.observe` 返回独立稳定 AX 控件 elements 及有限 operations，`computer.click` 优先使用 observationId + elementId。当前 AX-only 点击为无坐标 V3 action；both 使用 V2 action，保留派生 x/y 并兼容截图坐标输入，两种定位不可混用。native 指纹增加直接读取的 description 与已声明 identifier 存在性和值；生产 AXPress 不采集非必要 subrole，旧字段仍严格兼容，私有路径、进程与原生 identifier 不进入公开控件列表。元素仍限本次观察、60 秒、一次动作；过期明确未发送，已消费/未知先观察，不自动重放。窗口发现仅元数据，不授权截图或动作，非视觉模型可用发现但仍不可 observe/click/setText/scroll。Provider 结果的独立预算及投影契约见 [屏幕查看与点击](agent-computer-use.md)。
 
-macOS 开发预览增加内置 `computer.windows@1 / computer.observe@1 / computer.click@1 / computer.setText@1 / computer.scroll@1`，观察使用 V2 窗口动作，both 点击使用 V2，AX-only 语义点击使用无坐标 V3，文本 / 滚动使用各自的 V1 单窗口动作。main 持有本 Run 的单窗口共享许可、最新观察身份及两次独立快照确认的稳定窗口/AX 控件，复用 sealed prepare、批准、ToolRun、按需视觉附件和 commit settlement。默认共享当前 OmniFlow 窗口，后续沿用已批准窗口；首次及切换窗口明确批准，完全访问不跳过。窗口清单只读元数据，macOS 14+ 的 ScreenCaptureKit 按冻结窗口身份单独截图，无显示器捕获或裁剪回退。准备时的目标 ID 在正式批准重新准备时稳定复用，窗口身份或几何变化由既有审批机制重新确认；待批准身份不授予共享权限。五种工具不依赖资料库目录授权，停止或结束撤销许可，点击 / 文本 / 滚动已发送或未知的回执保留，永久删除 Session 释放截图。点击只发送 AXPress，仅支持可访问性控件的左键单击；文本 / 滚动分别使用已确认可写的原生属性和真实声明的 AX 动作，均不移动系统指针、不置前、不提供全局事件 fallback。AX 观察提供有界文本摘要，已支持 AX-only 与按需截图；通用键盘及其他平台仍不可用。旧 observe / click V1 屏幕动作仅供历史展示。旧全局鼠标版成功记录与本次窗口捕获、后台 AX 验收分别记录，见 [应用窗口操作](agent-computer-use.md)。
+macOS 开发预览包含内置 `computer.windows@1 / computer.observe@1 / computer.click@1 / computer.setText@1 / computer.scroll@1 / computer.input@1`，观察使用 V2 窗口动作，both 点击使用 V2，AX-only 语义点击使用无坐标 V3，文本 / 滚动 / 定向输入使用各自的 V1 单窗口动作。main 持有本 Run 的单窗口共享许可、最新观察身份及两次独立快照确认的稳定窗口/AX 控件，复用 sealed prepare、批准、ToolRun、按需视觉附件和 commit settlement。默认共享当前 OmniFlow 窗口，后续沿用已批准窗口；首次及切换窗口明确批准，完全访问不跳过。窗口清单只读元数据，macOS 14+ 的 ScreenCaptureKit 按冻结窗口身份单独截图，无显示器捕获或裁剪回退。准备时的目标 ID 在正式批准重新准备时稳定复用，窗口身份或几何变化由既有审批机制重新确认；待批准身份不授予共享权限。六种工具不依赖资料库目录授权，停止或结束撤销许可，写动作已发送或未知的回执保留，永久删除 Session 释放截图。computer.click 只发送 AXPress，仅支持可访问性控件的左键单击；文本 / 滚动分别使用已确认可写的原生属性和真实声明的 AX 动作；computer.input 独立走已验证的定向事件路线，同窗直线拖拽限 100～1000ms。各路线均不主动移动系统指针、不置前、不提供全局事件 fallback。AX 观察提供有界文本摘要，已支持 AX-only 与按需截图；任意键盘正文输入、跨窗拖放及其他平台仍不可用。旧 observe / click V1 屏幕动作仅供历史展示。旧全局鼠标版、后台 AX 与新增定向事件路线的实机证据分别记录，见 [应用窗口操作](agent-computer-use.md)。
 
 `computer.observe` 支持 mode=ax / screenshot / both（省略兼容both）。ax不截图、不导入附件，observationSource=ax；screenshot只查看并清除旧动作观察；both仍交付主进程保存绑定的截图，后两者observationSource=screenshot。AX-only或both在辅助功能可用时返回身份匹配窗口的 `axTree / axTreeTruncated`。两字段成对可选，兼容没有摘要的旧 helper；AX 文字预算独立为 12 KiB UTF-8，含明确截断标记，候选扫描与摘要的完整度分别表达。摘要包含该窗口的角色、标题、描述、可读取值、状态和动作名称，不暴露 native PID、句柄、私有候选路径或 helper 路径。AX快照前候选失败或截断仍可取得匹配的后置 AX 摘要，但只有前后各自严格确认且属性一致的候选进入 ID 点击授权；扫描不完整或候选集合变化时坐标点击拒绝；AX 文本及其截断状态不扩大 `clickReady`。窗口身份不匹配、取消、Run 释放或最终窗口复验失败时不能返回摘要。窗口图像和 AX 都是外部观察内容，不能授予新动作或覆盖用户指令。开发版同窗口的目标和主要控件已与 Codex CUA 实查对应；有界摘要仍可能截断，不宣称全文或所有应用一致，证据和残余边界见 [实施专题](agent-computer-use.md)。
 
@@ -66,7 +70,7 @@ Active Context 超预算时先尝试 OpenCode 式旧正文清理，再对符合�
 
 资料库正文的 ETag 缓存由 main 持有，按 Run / owner 隔离，容量与 TTL 有界，Run 结束主动释放；缓存不是读取授权，续读仍重新授权并访问源存储验证。上传 / 发布成功后补全规范路径，元数据补全失败不得反转 committed 事实或触发重传。
 
-更新时间：2026-09-30
+更新时间：2026-10-12
 
 计划步骤的 `toolName` 同时接受本轮已注册业务 Tool 的 canonical 名称与对应 Provider 名称（如 `file.list` / `file_list`），持久化统一使用 canonical 名称；未知或映射歧义仍拒绝，不扩大本轮能力范围。真实目录与内部保存联调结论见 [Agent 资料库目录发现](agent-library-discovery.md)。
 

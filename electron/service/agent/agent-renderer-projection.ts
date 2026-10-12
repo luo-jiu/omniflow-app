@@ -61,15 +61,16 @@ function compactShellResult(result: AgentToolResult): AgentToolResult {
   };
 }
 
-function builtinComputerTool(activity: AgentToolActivitySnapshot, tool: AgentToolSnapshot): 'observe' | 'click' | 'setText' | 'scroll' | undefined {
+function builtinComputerTool(activity: AgentToolActivitySnapshot, tool: AgentToolSnapshot): 'observe' | 'click' | 'setText' | 'scroll' | 'input' | undefined {
   const operation = activity.call.name === 'computer.observe' ? 'observe'
     : activity.call.name === 'computer.click' ? 'click'
     : activity.call.name === 'computer.setText' ? 'setText'
-    : activity.call.name === 'computer.scroll' ? 'scroll' : undefined;
+    : activity.call.name === 'computer.scroll' ? 'scroll'
+    : activity.call.name === 'computer.input' ? 'input' : undefined;
   if (!operation || tool.registrationId !== `builtin:computer.${operation}@1`
     || tool.name !== activity.call.name || tool.executor !== 'main' || tool.kind !== 'business'
     || tool.pluginSource || tool.pluginOperation || activity.pluginSource
-    || ((operation === 'setText' || operation === 'scroll') && (tool.risk !== 'write' || typeof tool.prepareMain !== 'function'))) return undefined;
+    || ((operation === 'setText' || operation === 'scroll' || operation === 'input') && (tool.risk !== 'write' || typeof tool.prepareMain !== 'function'))) return undefined;
   // This classification may keep the initial prepare row in its display group; it grants no prepared action or approval.
   if (activity.status === 'preparing' && activity.preparation === undefined && activity.result === undefined
     && activity.approval === undefined && activity.interaction === undefined && activity.finishedAt === undefined

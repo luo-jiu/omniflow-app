@@ -164,6 +164,34 @@ function computerInputActivity(id: string, ordinal: number, operation: 'setText'
 }
 
 describe('Agent timeline projection', () => {
+  it('groups directed input with adjacent approved observations while preserving pending and unknown boundaries', () => {
+    const first = computerActivity('before', 1, 'observe', 2);
+    const input: AgentToolActivitySnapshot = { ...activity('input', 2),
+      call: { id: 'call-input', name: 'computer.input', input: {} },
+      toolMetadata: { kind: 'business', risk: 'write', builtinComputerTool: 'input' },
+      preparation: { preparedActionId: 'input-action', snapshotHash: 'a'.repeat(64), action: {
+        kind: 'computer.input', version: 1, libraryId: 3, targetId: '12022dc1-f61c-4c2a-aac6-2963b60e5f7a',
+        applicationLabel: 'OmniFlow', windowLabel: '测试窗口', observationId: '237e3952-2a40-4c7b-b2f4-bec335a79cce',
+        operation: 'doubleClick', point: { x: 10, y: 20 },
+      } } };
+    const last = computerActivity('after', 3, 'observe', 2);
+    const joined = buildAgentTimelineItems([], [], [first, input, last]);
+    expect(joined).toHaveLength(1);
+    expect(joined[0]).toMatchObject({ type: 'tool-group', groupKind: 'computer-use', activities: [first, input, last] });
+    const initial = { ...input, status: 'preparing' as const, preparation: undefined, result: undefined, finishedAt: undefined };
+    expect(buildAgentTimelineItems([], [], [first, initial, last])).toHaveLength(1);
+    const boundaries = [
+      { ...input, status: 'awaiting_approval' as const, permissionBehavior: 'ask' as const,
+        approval: { approvalId: 'approval', status: 'pending' as const, preview: { title: '待确认', description: '确认窗口输入', risk: 'write' as const } } },
+      { ...input, status: 'failed' as const, result: { ok: false, data: { dispatchState: 'unknown', mutationCommitState: 'commit_unknown' } } },
+      { ...input, toolMetadata: undefined },
+    ];
+    for (const boundary of boundaries) {
+      const separated = buildAgentTimelineItems([], [], [first, boundary, last]);
+      expect(separated).toHaveLength(3);
+      expect(separated[1]).toMatchObject({ type: 'tool-activity', activity: boundary });
+    }
+  });
   it('groups AX-only observations and semantic clicks without image coordinates', () => {
     const before = computerActivity('before', 1, 'observe', 2);
     before.preparation!.action = { ...before.preparation!.action, mode: 'ax' } as never;

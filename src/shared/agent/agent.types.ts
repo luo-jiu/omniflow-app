@@ -9,6 +9,7 @@ import type {
   ComputerScrollUnit,
   ComputerTextMode,
 } from '../computer-use/computer-use-contract';
+import type { WindowInputOperation, WindowInputPoint, WindowInputShortcut } from '../computer-use/window-input-contract';
 
 export {
   AGENT_SHELL_PREPARED_ACTION_VERSION,
@@ -31,7 +32,7 @@ export interface AgentToolDisplayMetadata {
 
 export interface AgentToolRendererMetadata {
   /** Main-owned display provenance only; never an execution or attachment grant. */
-  builtinComputerTool?: 'observe' | 'click' | 'setText' | 'scroll';
+  builtinComputerTool?: 'observe' | 'click' | 'setText' | 'scroll' | 'input';
   groupKind?: AgentToolDisplayGroupKind;
   kind: 'business' | 'control';
   operationKind?: AgentToolDisplayOperationKind;
@@ -343,6 +344,8 @@ export const AGENT_COMPUTER_SET_TEXT_PREPARED_ACTION_KIND = 'computer.setText' a
 export const AGENT_COMPUTER_SET_TEXT_PREPARED_ACTION_VERSION = 1 as const;
 export const AGENT_COMPUTER_SCROLL_PREPARED_ACTION_KIND = 'computer.scroll' as const;
 export const AGENT_COMPUTER_SCROLL_PREPARED_ACTION_VERSION = 1 as const;
+export const AGENT_COMPUTER_INPUT_PREPARED_ACTION_KIND = 'computer.input' as const;
+export const AGENT_COMPUTER_INPUT_PREPARED_ACTION_VERSION = 1 as const;
 
 export const AGENT_PREPARED_ACTION_PUBLIC_IDENTITIES = [{
   kind: AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_KIND,
@@ -389,6 +392,9 @@ export const AGENT_PREPARED_ACTION_PUBLIC_IDENTITIES = [{
 }, {
   kind: AGENT_COMPUTER_SCROLL_PREPARED_ACTION_KIND,
   version: AGENT_COMPUTER_SCROLL_PREPARED_ACTION_VERSION,
+}, {
+  kind: AGENT_COMPUTER_INPUT_PREPARED_ACTION_KIND,
+  version: AGENT_COMPUTER_INPUT_PREPARED_ACTION_VERSION,
 }] as const;
 
 export interface AgentComputerWindowsPreparedActionPublicV1 {
@@ -436,6 +442,8 @@ export interface AgentComputerObservePreparedActionPublicV2 {
   mode?: AgentComputerObservationMode;
   /** Explicit Run-scoped operation grant; absent only on historical actions. */
   operations?: ComputerElementOperation[];
+  /** Separately approved directed window input; historical actions never grant it implicitly. */
+  inputOperations?: WindowInputOperation[];
 }
 
 export interface AgentComputerClickPreparedActionPublicV2 {
@@ -498,6 +506,21 @@ export interface AgentComputerScrollPreparedActionPublicV1 {
   /** fraction moves 10% of the confirmed AX numeric range; it is not a page or viewport fraction. */
   unit: ComputerScrollUnit;
 }
+
+/** Directed input in one frozen window; pixel points belong to its bound screenshot observation. */
+export type AgentComputerInputPreparedActionPublicV1 = {
+  kind: typeof AGENT_COMPUTER_INPUT_PREPARED_ACTION_KIND;
+  version: typeof AGENT_COMPUTER_INPUT_PREPARED_ACTION_VERSION;
+  libraryId: number;
+  targetId: string;
+  applicationLabel: string;
+  windowLabel: string;
+  observationId: string;
+} & (
+  | { operation: 'shortcut'; shortcut: WindowInputShortcut }
+  | { operation: 'rightClick' | 'doubleClick'; point: WindowInputPoint }
+  | { operation: 'drag'; point: WindowInputPoint; endPoint: WindowInputPoint; durationMs: number }
+);
 
 export interface AgentPluginRenamePreparedActionPublicV1 {
   kind: typeof AGENT_PLUGIN_RENAME_PREPARED_ACTION_KIND;
@@ -702,6 +725,7 @@ export interface AgentFileAuthorityCompletionV1 {
 }
 
 export type AgentPreparedActionPublic =
+  | AgentComputerInputPreparedActionPublicV1
   | AgentComputerWindowsPreparedActionPublicV1
   | AgentComputerSetTextPreparedActionPublicV1
   | AgentComputerScrollPreparedActionPublicV1

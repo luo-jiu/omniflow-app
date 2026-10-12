@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { AgentToolActivitySnapshot } from '@/shared/agent/agent.types';
+import type { AgentComputerInputPreparedActionPublicV1, AgentToolActivitySnapshot } from '@/shared/agent/agent.types';
 import {
   buildAgentToolPresentation,
   buildAgentToolSummary,
@@ -56,6 +56,52 @@ function computerClick(): AgentToolActivitySnapshot {
     } },
   };
 }
+
+function directedWindowInput(operation: AgentComputerInputPreparedActionPublicV1['operation'] = 'shortcut'): AgentToolActivitySnapshot {
+  const identity = { libraryId: 3, targetId: WINDOW_TARGET_ID, applicationLabel: 'OmniFlow', windowLabel: '测试窗口', observationId: OBSERVATION_ID };
+  const fields = operation === 'shortcut' ? { operation, shortcut: { key: 'a' as const, modifiers: ['command' as const] } }
+    : operation === 'drag' ? { operation, point: { x: 10, y: 20 }, endPoint: { x: 30, y: 40 }, durationMs: 100 }
+      : { operation, point: { x: 10, y: 20 } };
+  return { ...completedActivity('computer.input', { ...identity, ...fields, operation: 'computer.input', inputOperation: operation,
+    operationId: 'activity-1', dispatchState: 'dispatched', mutationCommitState: 'committed',
+    inputMethod: 'CGEventPostToPid', releaseState: 'confirmed', nextAction: 'observe', retryAllowed: false }),
+  toolMetadata: { kind: 'business', risk: 'write', builtinComputerTool: 'input' },
+  preparation: { preparedActionId: 'prepared', snapshotHash: 'a'.repeat(64), action: { kind: 'computer.input', version: 1, ...identity, ...fields } } };
+}
+
+describe('directed window input presentation', () => {
+  it.each([['shortcut', '已发送快捷键'], ['rightClick', '已发送右键'], ['doubleClick', '已发送双击'], ['drag', '已发送拖拽']] as const)(
+    'shows %s as a compact dispatch record without asserting target success', (operation, label) => {
+      const source = directedWindowInput(operation);
+      expect(buildAgentToolSummary(source, 3)).toEqual({ label, ...(operation === 'shortcut' ? { subject: 'Command + A' } : {}) });
+      expect(buildAgentToolPresentation(source, 3)).toEqual([]);
+    },
+  );
+
+  it.each([
+    ['operation', 'computer.click'], ['inputOperation', 'rightClick'], ['operationId', 'other-tool'], ['targetId', IMAGE_ID],
+    ['libraryId', 4], ['windowLabel', 'Other'], ['observationId', IMAGE_ID], ['dispatchState', 'unknown'],
+    ['mutationCommitState', 'commit_unknown'], ['nextAction', 'retry'], ['retryAllowed', true],
+    ['inputMethod', 'global'], ['releaseState', 'unconfirmed'], ['shortcut', { key: 'b', modifiers: ['command'] }],
+  ])('keeps details when directed input %s mismatches the immutable action', (field, value) => {
+    const source = directedWindowInput();
+    (source.result!.data as Record<string, unknown>)[String(field)] = value;
+    expect(buildAgentToolSummary(source, 3).label).not.toContain('已发送');
+    expect(buildAgentToolPresentation(source, 3)).not.toEqual([]);
+  });
+
+  it('does not compact an input from untrusted origin or wrong library, and retains unknown failure guidance', () => {
+    const source = directedWindowInput();
+    for (const untrusted of [{ ...source, toolMetadata: undefined }, { ...source, pluginSource: { pluginId: 'fake',
+      pluginVersion: '1', packageFingerprint: 'a', toolId: 'input', registrationId: 'builtin:computer.input@1' } }]) {
+      expect(buildAgentToolSummary(untrusted, 3).label).not.toContain('已发送');
+      expect(buildAgentToolPresentation(untrusted, 3)).not.toEqual([]);
+    }
+    expect(buildAgentToolSummary(source, 4).label).not.toContain('已发送');
+    source.status = 'failed'; source.result = { ok: false, message: '输入结果不确定，请重新查看，勿重复发送', data: { dispatchState: 'unknown' } };
+    expect(buildAgentToolPresentation(source, 3)).toEqual([{ type: 'notice', tone: 'danger', message: source.result.message }]);
+  });
+});
 
 function windowObservation(): AgentToolActivitySnapshot {
   return { ...computerObservation(),

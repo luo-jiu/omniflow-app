@@ -46,7 +46,7 @@ function intentFor(name: string, value: unknown, context: AgentAppContext, actio
       : context.currentDirectory?.id ? { nodeId: context.currentDirectory.id } : { path: '/' }), write: true });
   if (['skill.activate', 'agent.plan.set', 'memory.propose', 'interaction.request', 'operation.verify'].includes(name)
     || ['attachment.read', 'attachment.inspect', 'attachment.view', 'attachment.query'].includes(name)) return { targets: [], external: true };
-  if (['shell.run', 'computer.windows', 'computer.observe', 'computer.click', 'computer.setText', 'computer.scroll'].includes(name)) return { targets: [], external: true };
+  if (['shell.run', 'computer.windows', 'computer.observe', 'computer.click', 'computer.setText', 'computer.scroll', 'computer.input'].includes(name)) return { targets: [], external: true };
   if (['file.list', 'file.search', 'file.stat', 'file.resolve', 'file.read', 'file.grep'].includes(name) && input.scope === 'host') return { targets: [], external: true };
   if (name === 'library.batch') {
     if (!Array.isArray(input.actions) || input.actions.length > 50) throw new Error('批量操作参数无效');

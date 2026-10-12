@@ -3,9 +3,10 @@ import type {
   AgentToolActivitySnapshot,
 } from '@/shared/agent/agent.types';
 import { buildFileFullName } from '@/utils/fileTreeSettings';
-import { normalizeAgentPreparedActionPublic } from '@/shared/agent/agent-prepared-action';
+import { equalAgentPreparedActionPublic, normalizeAgentPreparedActionPublic } from '@/shared/agent/agent-prepared-action';
 import { normalizeComputerElementOperations } from '@/shared/computer-use/computer-use-contract';
 import { committedAgentFileParents, getPluginOperationPreparedAction } from './agent-published-file';
+import { COMPUTER_INPUT_LABELS, formatComputerInputShortcut } from './agent-computer-input-display';
 
 type ToolPresenter = (
   activity: AgentToolActivitySnapshot,
@@ -91,7 +92,7 @@ function builtInComputerAction(activity: AgentToolActivitySnapshot, libraryId?: 
   try {
     const action = normalizeAgentPreparedActionPublic(activity.preparation?.action);
     return (action.kind === 'computer.observe' || action.kind === 'computer.click'
-      || action.kind === 'computer.setText' || action.kind === 'computer.scroll')
+      || action.kind === 'computer.setText' || action.kind === 'computer.scroll' || action.kind === 'computer.input')
       && action.kind === activity.call.name && (libraryId === undefined || action.libraryId === libraryId) ? action : null;
   } catch {
     return null;
@@ -158,6 +159,24 @@ function computerInputDispatched(activity: AgentToolActivitySnapshot, libraryId:
   return action.kind === 'computer.setText'
     ? data.mode === action.mode && data.textLength === action.textLength && data.textBytes === action.textBytes
     : data.direction === action.direction && data.unit === action.unit;
+}
+
+function computerWindowInputDispatched(activity: AgentToolActivitySnapshot, libraryId: number): boolean {
+  const action = builtInComputerAction(activity, libraryId);
+  const data = asRecord(activity.result?.data);
+  if (activity.status !== 'completed' || activity.result?.ok !== true || action?.kind !== 'computer.input'
+    || data?.operation !== action.kind || data.operationId !== activity.id
+    || data.dispatchState !== 'dispatched' || data.mutationCommitState !== 'committed'
+    || data.nextAction !== 'observe' || data.retryAllowed !== false
+    || data.inputMethod !== 'CGEventPostToPid' || data.releaseState !== 'confirmed') return false;
+  const fields = action.operation === 'shortcut' ? { shortcut: data.shortcut }
+    : action.operation === 'drag' ? { point: data.point, endPoint: data.endPoint, durationMs: data.durationMs }
+      : { point: data.point };
+  return equalAgentPreparedActionPublic(action, {
+    kind: 'computer.input', version: 1, libraryId: data.libraryId, targetId: data.targetId,
+    applicationLabel: data.applicationLabel, windowLabel: data.windowLabel,
+    observationId: data.observationId, operation: data.inputOperation, ...fields,
+  });
 }
 
 function formatBytes(value: unknown): string {
@@ -250,6 +269,7 @@ const TOOL_TITLES: Record<string, string> = {
   'computer.click': '点击屏幕',
   'computer.setText': '输入文本',
   'computer.scroll': '滚动窗口',
+  'computer.input': '向窗口发送输入',
   'file.write': '保存文件',
   'file.delete': '移入回收站',
   'file.rename': '重命名文件',
@@ -290,6 +310,13 @@ export function buildAgentToolSummary(activity: AgentToolActivitySnapshot, libra
       ? activity.call.name === 'computer.setText' ? '已发送文本输入' : '已发送滚动'
       : getAgentToolTitle(activity),
   };
+  if (activity.call.name === 'computer.input') {
+    const action = builtInComputerAction(activity, libraryId);
+    return { label: computerWindowInputDispatched(activity, libraryId) && action?.kind === 'computer.input'
+      ? `已发送${COMPUTER_INPUT_LABELS[action.operation]}` : getAgentToolTitle(activity),
+    ...(action?.kind === 'computer.input' && action.operation === 'shortcut'
+      ? { subject: formatComputerInputShortcut(action.shortcut) } : {}) };
+  }
   if (activity.call.name === 'file.write') return { label: '已保存', subject: textValue(data?.fileName) || undefined };
   if (activity.call.name === 'file.grep') return {
     label: data?.complete === false && !data?.hasMore ? '已搜索正文 · 结果不完整' : '已搜索正文',
@@ -341,6 +368,7 @@ export function getAgentToolTitle(activity: AgentToolActivitySnapshot): string {
   const computerAction = builtInComputerAction(activity);
   if (computerAction?.kind === 'computer.observe' && computerAction.version === 2) return '查看窗口';
   if (computerAction?.kind === 'computer.click' && computerAction.version !== 1) return '点击窗口';
+  if (computerAction?.kind === 'computer.input') return `发送${COMPUTER_INPUT_LABELS[computerAction.operation]}`;
   return getAgentToolNameTitle(activity.call.name);
 }
 
@@ -421,7 +449,8 @@ export function buildAgentToolPresentation(
     }) });
   }
   if (activity.status === 'completed') {
-    if (computerClickDispatched(activity, libraryId) || computerInputDispatched(activity, libraryId)) return [];
+    if (computerClickDispatched(activity, libraryId) || computerInputDispatched(activity, libraryId)
+      || computerWindowInputDispatched(activity, libraryId)) return [];
     const specific = TOOL_PRESENTERS[activity.call.name]?.(activity, libraryId) || [];
     return [
       ...pluginSourceBlocks,

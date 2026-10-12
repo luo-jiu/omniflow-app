@@ -7,7 +7,7 @@ import { COMPUTER_ELEMENT_OPERATIONS, validateComputerText, type ComputerElement
 import { normalizeAgentPreparedActionPublic } from '../../../../src/shared/agent/agent-prepared-action';
 import type { AgentComputerCandidate, AgentComputerPoint, AgentComputerRect, AgentComputerSharedWindow,
   AgentComputerObservationScope, AgentComputerTarget, AgentComputerWindowIdentity, AgentComputerWindowTargetObservation } from '../../../platform/computer-use';
-import { AgentComputerInputError } from '../../../platform/computer-use';
+import { AgentComputerInputError, AgentComputerWindowInputError } from '../../../platform/computer-use';
 import type { AgentMainCommitSettlement, AgentToolMainPreparationContext, AgentToolMainPreparationIdentity,
   AgentToolMainPreparationResult, AgentToolMainPreparedExecution } from '../agent-tool-registry';
 import { createAgentComputerWindowDiscovery } from './agent-computer-window-discovery';
@@ -16,11 +16,15 @@ import { FIRST_PARTY_CONTROL_LABELS, normalizeFirstPartyControlSnapshot, normali
 import { getObservationChanges, normalizeObservationQuery, projectObservationElements,
   type ComputerObservationDiffEntry } from './agent-computer-observation-query';
 import { normalizeObservationFocus, type ComputerObservationFocus } from './agent-computer-observation-focus';
+import { WINDOW_INPUT_OPERATIONS, type WindowInputOperation } from '../../../../src/shared/computer-use/window-input-contract';
+import type { AgentComputerWindowInputStatus, AgentComputerWindowInputRequest, AgentComputerWindowInputReceipt } from '../../../platform/computer-use';
+import { createWindowInputRequest, windowInputNotice } from './agent-computer-window-input';
 
 const OBSERVATION_TTL_MS = 60_000;
 const MAX_RUN_SCREENSHOTS = 32;
 const MAX_RUN_SCREENSHOT_BYTES = 64 * 1024 * 1024;
 const MAX_RUN_OBSERVATIONS = 256;
+const UNCONFIRMED_INPUT_RELEASE_NOTICE = '释放事件未确认，本次任务的后台定向输入已关闭；仍可观察窗口和使用已声明的 AX 操作。';
 type ObservationMode = 'ax' | 'screenshot' | 'both';
 
 interface ImageStore {
@@ -34,6 +38,9 @@ interface Observation {
   targetId: string;
   window: AgentComputerSharedWindow;
   operations: readonly ComputerElementOperation[];
+  inputOperations: readonly WindowInputOperation[];
+  availableInputOperations: readonly WindowInputOperation[];
+  inputProfile?: string;
   mode: ObservationMode;
   width?: number;
   height?: number;
@@ -55,6 +62,7 @@ interface RunShare {
   targetId: string;
   window: AgentComputerSharedWindow;
   operations: readonly ComputerElementOperation[];
+  inputOperations: readonly WindowInputOperation[];
   screenshotCount: number;
   screenshotBytes: number;
   observationCount: number;
@@ -70,6 +78,8 @@ export interface AgentComputerRuntimeDependencies {
   click(point: AgentComputerPoint, signal: AbortSignal): Promise<void>;
   setText(input: { target: AgentComputerPoint['target']; operation: 'replaceText' | 'insertText'; text: string }, signal: AbortSignal): Promise<void>;
   scroll(input: { target: AgentComputerPoint['target']; operation: ComputerElementOperation }, signal: AbortSignal): Promise<void>;
+  inputStatus?(window: AgentComputerSharedWindow, signal: AbortSignal): Promise<AgentComputerWindowInputStatus>;
+  input?(request: AgentComputerWindowInputRequest, signal: AbortSignal): Promise<AgentComputerWindowInputReceipt>;
   clickStatus(signal: AbortSignal): Promise<{ available: boolean }>;
   requestClickPermission(signal: AbortSignal): Promise<void>;
   images(): ImageStore;
@@ -254,6 +264,8 @@ function pointFor(observation: Observation, action: AgentComputerClickPreparedAc
 export function createAgentComputerRuntime(dependencies: AgentComputerRuntimeDependencies) {
   const shares = new Map<string, RunShare>();
   const pendingTargets = new Map<string, { identity: string; window: string; targetId: string }>();
+  // This revocation belongs to the Run, so replacing or reapproving its window cannot clear it.
+  const inputBlockedRuns = new Set<string>();
   const now = dependencies.now || Date.now;
   const discovery = createAgentComputerWindowDiscovery({ windows: dependencies.windows, now });
   let queue: Promise<unknown> = Promise.resolve();
@@ -265,6 +277,9 @@ export function createAgentComputerRuntime(dependencies: AgentComputerRuntimeDep
   function shareFor(identity: AgentToolMainPreparationIdentity): RunShare | undefined {
     const share = shares.get(identity.runId);
     return share?.active && share.identity === identityKey(identity) ? share : undefined;
+  }
+  function requireConfirmedInputRelease(runId: string): void {
+    if (inputBlockedRuns.has(runId)) throw new Error(UNCONFIRMED_INPUT_RELEASE_NOTICE);
   }
   function releaseShareRendering(share: RunShare): void {
     const release = share.releaseRendering;
@@ -370,8 +385,11 @@ export function createAgentComputerRuntime(dependencies: AgentComputerRuntimeDep
     const window = focused ? structuredClone(focused.observation.window) : await selectWindow(input, context);
     const share = shareFor(context.preparationIdentity);
     const operations = [...COMPUTER_ELEMENT_OPERATIONS];
+    const inputOperations = dependencies.input && dependencies.inputStatus && !inputBlockedRuns.has(context.preparationIdentity.runId)
+      ? [...WINDOW_INPUT_OPERATIONS] : [];
     const granted = share && sameWindow(share.window, window)
-      && operations.every(operation => share.operations.includes(operation));
+      && operations.every(operation => share.operations.includes(operation))
+      && inputOperations.every(operation => share.inputOperations.includes(operation));
     const identity = context.preparationIdentity;
     const pendingIdentity = JSON.stringify([identityKey(identity), identity.callId, identity.toolRunId,
       identity.toolName, identity.toolRegistrationId, identity.toolInputHash]);
@@ -382,12 +400,13 @@ export function createAgentComputerRuntime(dependencies: AgentComputerRuntimeDep
     if (!granted) pendingTargets.set(identity.runId, { identity: pendingIdentity, window: pendingWindow, targetId });
     const publicAction = normalizeAgentPreparedActionPublic({ kind: 'computer.observe', version: 2,
       libraryId: context.preparationIdentity.libraryId, targetId, applicationLabel: window.applicationLabel, windowLabel: window.windowLabel, operations,
+      ...(inputOperations.length ? { inputOperations } : {}),
       ...(input.mode !== undefined ? { mode } : {}) });
-    return { publicAction, binding: { window, targetId, operations, mode, query, includeChanges: input.includeChanges === true,
+    return { publicAction, binding: { window, targetId, operations, inputOperations, mode, query, includeChanges: input.includeChanges === true,
       ...(focused ? { focus, scope: focused.scope } : {}) },
       decision: granted ? { behavior: 'allow', risk: 'read' } : {
         behavior: 'ask', risk: 'read', preview: { title: '共享应用窗口并允许操作', risk: 'read',
-          description: `允许本次任务查看「${window.applicationLabel} / ${window.windowLabel}」并点击控件、输入文字和滚动。仅此窗口的图像和界面控件信息会发送给当前 AI 服务并保存到本机会话；不采集整个显示器。切换共享窗口需重新允许，停止或任务结束后停止共享。操作不会移动系统鼠标。`,
+          description: `允许本次任务查看「${window.applicationLabel} / ${window.windowLabel}」并点击控件、输入文字和滚动。${inputOperations.length ? '经过验证的软件还允许后台快捷键、右键、双击及窗内拖拽；只向目标进程投递，不主动置前，效果仍需观察确认。' : ''}仅此窗口的图像和界面控件信息会发送给当前 AI 服务并保存到本机会话；不采集整个显示器。切换共享窗口需重新允许，停止或任务结束后停止共享。操作不会移动系统鼠标。`,
           details: [{ label: '应用', value: window.applicationLabel }, { label: '窗口', value: window.windowLabel }],
         },
       } };
@@ -482,12 +501,14 @@ export function createAgentComputerRuntime(dependencies: AgentComputerRuntimeDep
       const window = preparation.binding.window as AgentComputerSharedWindow;
       if (!window || action.applicationLabel !== window.applicationLabel || action.windowLabel !== window.windowLabel) throw new Error('应用窗口身份不匹配');
       const operations = action.operations ?? ['press'] as const;
+      const inputOperations = action.inputOperations ?? [];
       const mode = action.mode ?? 'both';
       if (mode !== (preparation.binding.mode ?? 'both')) throw new Error('窗口观察模式与准备动作不匹配');
       const hasScreenshot = mode !== 'ax';
       const readsControls = mode !== 'screenshot';
       const boundOperations = preparation.binding.operations ?? ['press'];
       if (JSON.stringify(operations) !== JSON.stringify(boundOperations)) throw new Error('窗口共享操作许可不匹配');
+      if (JSON.stringify(inputOperations) !== JSON.stringify(preparation.binding.inputOperations ?? [])) throw new Error('窗口后台输入许可不匹配');
       const identity = preparation.identity;
       let share = shareFor(identity);
       const focus = preparation.binding.focus === undefined ? undefined : normalizeObservationFocus(preparation.binding.focus);
@@ -505,10 +526,11 @@ export function createAgentComputerRuntime(dependencies: AgentComputerRuntimeDep
             && scopePath.every((index, depth) => candidate.path[depth] === index))
         : receipt.scope === undefined;
       if (!share || !sameWindow(share.window, window) || share.targetId !== action.targetId
-        || JSON.stringify(share.operations) !== JSON.stringify(operations)) {
+        || JSON.stringify(share.operations) !== JSON.stringify(operations)
+        || JSON.stringify(share.inputOperations) !== JSON.stringify(inputOperations)) {
         const previous = shares.get(identity.runId);
         if (previous) deactivateShare(previous);
-        share = { active: true, identity: identityKey(identity), targetId: action.targetId, window, operations: [...operations],
+        share = { active: true, identity: identityKey(identity), targetId: action.targetId, window, operations: [...operations], inputOperations: [...inputOperations],
           screenshotCount: share?.screenshotCount || 0, screenshotBytes: share?.screenshotBytes || 0,
           observationCount: share?.observationCount || 0, permissionRequested: share?.permissionRequested || false };
         shares.set(identity.runId, share);
@@ -532,6 +554,13 @@ export function createAgentComputerRuntime(dependencies: AgentComputerRuntimeDep
       } catch { signal.throwIfAborted(); }
       if (scope && !accessibilityAvailable) throw new Error('局部 AX 观察当前不可用，请重新观察窗口');
       const capturedAt = now();
+      const inputBlocked = inputBlockedRuns.has(identity.runId);
+      const checkInput = async (): Promise<AgentComputerWindowInputStatus | undefined> => {
+        if (inputBlocked || scope || !readsControls || !accessibilityAvailable || !inputOperations.length || !dependencies.inputStatus) return undefined;
+        try { return await dependencies.inputStatus(window, signal); }
+        catch { signal.throwIfAborted(); return undefined; }
+      };
+      const inputBefore = await checkInput();
       let firstPartyBefore: FirstPartyBoundControl[] = [];
       if (readsControls && !scope && dependencies.firstPartyControls) {
         try { firstPartyBefore = firstPartyControlsFor(window, await dependencies.firstPartyControls.observe(window, identity, signal)); }
@@ -610,8 +639,16 @@ export function createAgentComputerRuntime(dependencies: AgentComputerRuntimeDep
       const scrollReady = semanticCandidates.some(({ candidate }) => candidateOperations(candidate).some(operation => operations.includes(operation) && operation.startsWith('scroll')))
         || usableFirstParty.some(control => control.snapshot.operations.some(operation => operations.includes(operation) && operation.startsWith('scroll')));
       if (!clickReady && !textReady && !scrollReady && candidates.length > 0) targetNotice = '本次观察没有可辨认标签的可操作控件，且坐标点击不可用；请勿按 AX 树或列表位置猜测控件。';
+      const inputAfter = await checkInput();
+      signal.throwIfAborted();
+      if (!share.active) throw new Error('窗口共享已结束');
+      const availableInputOperations = !inputBlocked && inputBefore?.ready && inputAfter?.ready && inputBefore.profile && inputBefore.profile === inputAfter.profile
+        ? inputAfter.operations.filter(operation => inputOperations.includes(operation) && inputBefore.operations.includes(operation)
+          && (mode === 'both' || operation === 'shortcut')) : [];
       const publish = (attachment?: AgentAttachment): AgentToolResult => {
-        const observation: Observation = { id: crypto.randomUUID(), targetId: action.targetId, window, operations: [...operations], mode,
+        const observation: Observation = { id: crypto.randomUUID(), targetId: action.targetId, window, operations: [...operations],
+          inputOperations: [...inputOperations], availableInputOperations,
+          ...(availableInputOperations.length ? { inputProfile: inputAfter!.profile } : {}), mode,
           ...(attachment ? { width: attachment.width!, height: attachment.height! } : {}), capturedAt, consumed: false,
           coordinateClickReady, candidates: structuredClone(candidates),
           elements: semanticCandidates.map(({ candidate, label }) => ({ elementId: crypto.randomUUID(), label, candidate: structuredClone(candidate) })),
@@ -674,6 +711,9 @@ export function createAgentComputerRuntime(dependencies: AgentComputerRuntimeDep
           observationId: observation.id, capturedAt: new Date(capturedAt).toISOString(),
           expiresInMs: Math.max(0, OBSERVATION_TTL_MS - (now() - capturedAt)),
           clickReady, textReady, scrollReady, operations: [...operations], coordinateClickReady, candidateScanComplete, scopeScanComplete,
+          inputReady: availableInputOperations.length > 0, inputOperations: [...inputOperations], availableInputOperations,
+          ...(inputBlocked ? { inputNotice: UNCONFIRMED_INPUT_RELEASE_NOTICE }
+            : inputOperations.length ? { inputNotice: windowInputNotice(availableInputOperations.length ? inputAfter : inputAfter?.ready ? undefined : inputAfter) } : {}),
           scope: scope ? { kind: 'element-ancestor', ancestorLevels: scope.ancestorLevels } : { kind: 'window' },
           clickMethod: 'AXPress', observationSource: mode === 'ax' ? 'ax' : 'screenshot', ...page,
           elementsScope: observation.firstPartyElements.length ? 'stable-window-controls' : 'stable-AX-controls', ...summary, ...changeData,
@@ -827,12 +867,78 @@ export function createAgentComputerRuntime(dependencies: AgentComputerRuntimeDep
     executeSemanticInput('computer.setText', preparation, signal, commit);
   const scroll = (preparation: AgentToolMainPreparedExecution, signal: AbortSignal, commit?: AgentMainCommitSettlement) =>
     executeSemanticInput('computer.scroll', preparation, signal, commit);
+  async function prepareInput(input: { observationId: string; operation: WindowInputOperation; shortcut?: unknown;
+    point?: unknown; endPoint?: unknown; durationMs?: number }, context: AgentToolMainPreparationContext): Promise<AgentToolMainPreparationResult> {
+    context.signal.throwIfAborted();
+    requireConfirmedInputRelease(context.preparationIdentity.runId);
+    const observation = observationFor(context.preparationIdentity, input.observationId);
+    const publicAction = normalizeAgentPreparedActionPublic({ ...input, kind: 'computer.input', version: 1,
+      libraryId: context.preparationIdentity.libraryId, targetId: observation.targetId,
+      applicationLabel: observation.window.applicationLabel, windowLabel: observation.window.windowLabel });
+    if (publicAction.kind !== 'computer.input' || !dependencies.input || !dependencies.inputStatus
+      || !observation.inputOperations.includes(publicAction.operation)
+      || !observation.availableInputOperations.includes(publicAction.operation)) throw new Error('本次观察未提供且未获准此后台输入能力');
+    const request = createWindowInputRequest(publicAction, observation);
+    return { publicAction, binding: { window: structuredClone(observation.window), targetId: observation.targetId, request },
+      decision: { behavior: 'allow', risk: 'write' } };
+  }
+  async function input(preparation: AgentToolMainPreparedExecution, signal: AbortSignal,
+    commit?: AgentMainCommitSettlement): Promise<AgentToolResult> {
+    return serial(signal, async () => {
+      const action = normalizeAgentPreparedActionPublic(preparation.publicAction);
+      if (action.kind !== 'computer.input' || !commit || !dependencies.inputStatus || !dependencies.input) throw new Error('后台输入缺少当前受控执行身份');
+      requireConfirmedInputRelease(preparation.identity.runId);
+      const observation = observationFor(preparation.identity, action.observationId);
+      const inputShare = shares.get(preparation.identity.runId);
+      await boundWindow(preparation, signal);
+      if (action.libraryId !== preparation.identity.libraryId || action.targetId !== observation.targetId
+        || action.targetId !== preparation.binding.targetId || action.applicationLabel !== observation.window.applicationLabel
+        || action.windowLabel !== observation.window.windowLabel || !observation.inputOperations.includes(action.operation)
+        || !observation.availableInputOperations.includes(action.operation)) throw new Error('后台输入与本次窗口许可不匹配');
+      const request = createWindowInputRequest(action, observation);
+      if (JSON.stringify(request) !== JSON.stringify(preparation.binding.request)) throw new Error('后台输入与已准备的窗口、坐标或接收者不匹配');
+      const status = await dependencies.inputStatus(observation.window, signal);
+      signal.throwIfAborted();
+      if (!status.ready || status.profile !== request.profile || !status.operations.includes(action.operation)) throw new Error(windowInputNotice(status));
+      await boundWindow(preparation, signal);
+      signal.throwIfAborted();
+      if (observationFor(preparation.identity, action.observationId) !== observation) throw new Error('窗口观察已变化，后台输入未发送');
+      const { kind: _kind, version: _version, operation: inputOperation, ...publicIdentity } = action;
+      void _kind; void _version;
+      const receipt = (state: 'dispatched' | 'not-dispatched' | 'unknown', releaseState: 'confirmed' | 'unconfirmed' | 'not-required', eventCount?: number): AgentToolResult => ({
+        ok: state === 'dispatched', message: state === 'dispatched' ? '后台输入已投递，请重新观察确认结果'
+          : state === 'not-dispatched' ? '后台输入未发送，请重新观察' : '后台输入结果未知，请重新观察，勿重复操作',
+        data: { ...publicIdentity, operation: 'computer.input', inputOperation, operationId: preparation.identity.toolRunId,
+          dispatchState: state, mutationCommitState: state === 'dispatched' ? 'committed' : state === 'not-dispatched' ? 'uncommitted' : 'commit_unknown',
+          inputMethod: 'CGEventPostToPid', releaseState, ...(eventCount === undefined ? {} : { eventCount }), nextAction: 'observe', retryAllowed: false },
+      });
+      commit.begin(receipt('unknown', 'unconfirmed'));
+      observation.consumed = true;
+      let result: AgentToolResult;
+      try {
+        const sent = await dependencies.input(request, signal);
+        result = receipt('dispatched', 'confirmed', sent.eventCount);
+      } catch (error) {
+        const state = error instanceof AgentComputerInputError && error.dispatchState === 'not-dispatched' ? 'not-dispatched' : 'unknown';
+        const releaseState = error instanceof AgentComputerWindowInputError ? error.releaseState : state === 'not-dispatched' ? 'not-required' : 'unconfirmed';
+        result = receipt(state, releaseState);
+        if (releaseState === 'unconfirmed') {
+          // releaseRun may have already disposed this share while the helper was finishing.
+          if (shares.get(preparation.identity.runId) === inputShare) inputBlockedRuns.add(preparation.identity.runId);
+          result.message += `；${UNCONFIRMED_INPUT_RELEASE_NOTICE}`;
+        }
+      }
+      commit.settle(result);
+      return result;
+    });
+  }
   function releaseRun(runId: string): void {
     const share = shares.get(runId);
     if (share) deactivateShare(share);
     shares.delete(runId);
     pendingTargets.delete(runId);
+    inputBlockedRuns.delete(runId);
     discovery.releaseRun(runId);
   }
-  return { prepareWindows, windows, prepareObserve, prepareClick, prepareSetText, prepareScroll, observe, click, setText, scroll, releaseRun };
+  return { prepareWindows, windows, prepareObserve, prepareClick, prepareSetText, prepareScroll, prepareInput, observe, click, setText, scroll, input, releaseRun };
 }

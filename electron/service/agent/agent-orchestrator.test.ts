@@ -513,8 +513,9 @@ describe('Agent orchestrator', () => {
       Object.defineProperty(process, 'platform', { configurable: true, value: 'darwin' });
       tools = getBuiltInAgentComputerTools();
     } finally { Object.defineProperty(process, 'platform', platformDescriptor); }
+    const computerToolNames = new Set(tools.map(tool => tool.name));
     const registry = createAgentToolRegistry([
-      ...agentToolRegistry.list().filter(tool => !['computer.windows', 'computer.observe', 'computer.click', 'computer.setText', 'computer.scroll'].includes(tool.name)), ...tools,
+      ...agentToolRegistry.list().filter(tool => !computerToolNames.has(tool.name)), ...tools,
     ]);
     const snapshotSpy = vi.spyOn(agentToolRegistry, 'createSnapshot').mockReturnValue(registry.createSnapshot());
     const resolveImage = vi.spyOn(AgentAttachmentStore.prototype, 'resolve').mockResolvedValue([image]);

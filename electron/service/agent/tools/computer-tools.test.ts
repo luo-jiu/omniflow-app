@@ -16,7 +16,7 @@ const elementId = '43b39553-9a74-4ba1-a976-1a6738397275';
 
 describe('built-in computer input contracts', () => {
   it('registers discovery and control only on macOS', () => {
-    expect(snapshot().list().map(tool => tool.name)).toEqual(['computer.windows', 'computer.observe', 'computer.click', 'computer.setText', 'computer.scroll']);
+    expect(snapshot().list().map(tool => tool.name)).toEqual(['computer.windows', 'computer.observe', 'computer.click', 'computer.setText', 'computer.scroll', 'computer.input']);
     expect(snapshot('win32').list()).toEqual([]);
   });
   it('accepts either element identity or coordinates and rejects ambiguous or partial input', () => {
@@ -79,6 +79,32 @@ describe('built-in computer input contracts', () => {
     }
   });
 
+  it('separates bounded targeted shortcut and pointer gestures without hidden receiver arguments', () => {
+    const tools = snapshot();
+    const point = { x: 0, y: 2047 };
+    const endPoint = { x: 100, y: 20 };
+    for (const input of [
+      { observationId, operation: 'shortcut', shortcut: { key: 'a', modifiers: ['command'] } },
+      { observationId, operation: 'shortcut', shortcut: { key: 'escape', modifiers: [] } },
+      { observationId, operation: 'rightClick', point }, { observationId, operation: 'doubleClick', point },
+      { observationId, operation: 'drag', point, endPoint, durationMs: 100 },
+    ]) expect(tools.validateInput('computer.input', input).ok).toBe(true);
+    for (const input of [
+      { observationId, operation: 'shortcut', shortcut: { key: 'A', modifiers: ['cmd'] } },
+      { observationId, operation: 'shortcut', shortcut: { key: 'a', modifiers: [] } },
+      { observationId, operation: 'shortcut', shortcut: { key: 'a', modifiers: ['shift', 'option'] } },
+      { observationId, operation: 'shortcut', shortcut: { key: 'a', modifiers: ['command', 'command'] } },
+      { observationId, operation: 'shortcut', shortcut: { key: 'a', modifiers: [] }, point },
+      { observationId, operation: 'rightClick', point, endPoint },
+      { observationId, operation: 'doubleClick', point: { x: 0.5, y: 0 } },
+      { observationId, operation: 'drag', point, endPoint, durationMs: 99 },
+      { observationId, operation: 'drag', point, endPoint, durationMs: 1001 },
+      { observationId, operation: 'drag', point, durationMs: 500 },
+      { observationId, operation: 'rightClick', point, pid: 100 },
+      { observationId, operation: 'rightClick', point, profile: 'appkit-fixture-v1' },
+    ]) expect(tools.validateInput('computer.input', input).ok).toBe(false);
+  });
+
   it('accepts bounded issued-ID focus and rejects mixing it with another window or image-only mode', () => {
     const tools = snapshot();
     const focus = { observationId, elementId };
@@ -90,6 +116,19 @@ describe('built-in computer input contracts', () => {
       { focus: { ...focus, ancestorLevels: 0.5 } }, { focus: { ...focus, path: [0] } }, { focus: { observationId } },
       { focus: { ...focus, elementId: 'AXButton' } }]) {
       expect(tools.validateInput('computer.observe', input).ok).toBe(false);
+    }
+  });
+
+  it('rejects every partial or mixed gesture payload after compacting the schema', () => {
+    const tools = snapshot();
+    const payload = { shortcut: { key: 'a', modifiers: ['command'] }, point: { x: 1, y: 2 },
+      endPoint: { x: 3, y: 4 }, durationMs: 100 };
+    const entries = Object.entries(payload);
+    for (const [operation, allowedMask] of [['shortcut', 1], ['rightClick', 2], ['doubleClick', 2], ['drag', 14]] as const) {
+      for (let mask = 0; mask < 16; mask += 1) {
+        const input = { observationId, operation, ...Object.fromEntries(entries.filter((_, index) => mask & (1 << index))) };
+        expect(tools.validateInput('computer.input', input).ok, `${operation} payload ${mask}`).toBe(mask === allowedMask);
+      }
     }
   });
 

@@ -68,7 +68,7 @@ export function resolveAgentAdapterEffort(adapter: AgentModelAdapter, effort?: s
 
 export function restrictAgentToolsForModel(snapshot: AgentToolRegistrySnapshot, adapter: AgentModelAdapter): AgentToolRegistrySnapshot {
   const tools = Object.freeze(snapshot.tools.filter(tool => adapter.toolCalling && (adapter.shellTool || tool.name !== 'shell.run')
-    && (adapter.supportsImages !== false || !['attachment.view', 'computer.observe', 'computer.click', 'computer.setText', 'computer.scroll'].includes(tool.name))));
+    && (adapter.supportsImages !== false || !['attachment.view', 'computer.observe', 'computer.click', 'computer.setText', 'computer.scroll', 'computer.input'].includes(tool.name))));
   const allowed = new Set(tools.map(tool => tool.name));
   const assertAllowed = (name: string) => { if (!allowed.has(name)) throw new Error('当前模型适配未开放该工具'); };
   return Object.freeze({ ...snapshot, tools,

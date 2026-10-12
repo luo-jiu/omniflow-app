@@ -185,7 +185,7 @@ function canJoinComputerGroup(activity: AgentToolActivitySnapshot): boolean {
   try {
     const action = normalizeAgentPreparedActionPublic(activity.preparation?.action);
     if ((action.kind !== 'computer.observe' && action.kind !== 'computer.click'
-      && action.kind !== 'computer.setText' && action.kind !== 'computer.scroll')
+      && action.kind !== 'computer.setText' && action.kind !== 'computer.scroll' && action.kind !== 'computer.input')
       || action.kind !== activity.call.name) return false;
   } catch {
     return false;
@@ -203,7 +203,7 @@ function canJoinComputerGroup(activity: AgentToolActivitySnapshot): boolean {
 
 function activityGroupKind(activity: AgentToolActivitySnapshot): ToolGroupKind | null {
   if (activity.call.name === 'computer.observe' || activity.call.name === 'computer.click'
-    || activity.call.name === 'computer.setText' || activity.call.name === 'computer.scroll'
+    || activity.call.name === 'computer.setText' || activity.call.name === 'computer.scroll' || activity.call.name === 'computer.input'
     || activity.toolMetadata?.builtinComputerTool) {
     return canJoinComputerGroup(activity) ? 'computer-use' : null;
   }

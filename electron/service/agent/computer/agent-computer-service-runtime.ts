@@ -1,6 +1,7 @@
 import { BrowserWindow, webContents } from 'electron';
 import { captureAgentComputerWindow, clickAgentComputerPoint, getAgentComputerWindows, getAgentComputerWindowTarget,
-  requestAgentComputerClickPermission, statusAgentComputerClick, setAgentComputerText, scrollAgentComputerControl } from '../../../platform/computer-use';
+  requestAgentComputerClickPermission, statusAgentComputerClick, setAgentComputerText, scrollAgentComputerControl,
+  getAgentComputerWindowInputStatus, inputAgentComputerWindow } from '../../../platform/computer-use';
 import { getAgentAttachmentStore } from '../agent-attachment-runtime';
 import { createAgentComputerRuntime } from './agent-computer-runtime';
 import { agentRenderingLeases } from './agent-computer-rendering-service-runtime';
@@ -23,6 +24,8 @@ export const agentComputerRuntime = createAgentComputerRuntime({
   click: clickAgentComputerPoint,
   setText: setAgentComputerText,
   scroll: scrollAgentComputerControl,
+  inputStatus: getAgentComputerWindowInputStatus,
+  input: inputAgentComputerWindow,
   clickStatus: statusAgentComputerClick,
   requestClickPermission: requestAgentComputerClickPermission,
   images: getAgentAttachmentStore,

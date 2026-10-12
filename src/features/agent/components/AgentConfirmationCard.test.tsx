@@ -15,6 +15,7 @@ import type {
 } from '@/shared/agent/agent.types';
 import AgentConfirmationCard from './AgentConfirmationCard';
 import { COMPUTER_ELEMENT_OPERATIONS } from '@/shared/computer-use/computer-use-contract';
+import { WINDOW_INPUT_OPERATIONS } from '@/shared/computer-use/window-input-contract';
 
 vi.mock('@douyinfe/semi-icons', () => ({
   IconFolder: () => null,
@@ -213,6 +214,56 @@ afterEach(() => {
 });
 
 describe('AgentConfirmationCard', () => {
+  it('separately displays and preserves the explicit directed input grant without trusting Tool input', () => {
+    const action = { kind: 'computer.observe' as const, version: 2 as const, libraryId: 3,
+      targetId: '237e3952-2a40-4c7b-b2f4-bec335a79cce', applicationLabel: 'OmniFlow', windowLabel: '测试窗口',
+      operations: ['press' as const], inputOperations: [...WINDOW_INPUT_OPERATIONS] };
+    const input = approval(action); input.call.name = 'computer.observe'; input.call.input = { inputOperations: ['globalClick'] };
+    const { renderer, onResolve } = renderCard(input);
+    expect(renderer.root.findAllByType('dd').map(textContent)).toEqual(['OmniFlow', '测试窗口', '点击、快捷键、右键、双击、拖拽']);
+    expect(textContent(renderer.root)).toContain('后台定向输入发送后需重新查看确认实际结果');
+    expect(textContent(renderer.root)).not.toContain('globalClick');
+    const allow = renderer.root.findAllByType('button').find(button => textContent(button) === '允许')!;
+    act(() => allow.props.onClick()); expect(onResolve).toHaveBeenCalledWith(true, action);
+  });
+
+  it.each(['shortcut', 'rightClick', 'doubleClick', 'drag'] as const)('approves only immutable directed %s fields on the named window', operation => {
+    const fields = operation === 'shortcut' ? { operation, shortcut: { key: 'a' as const, modifiers: ['command' as const] } }
+      : operation === 'drag' ? { operation, point: { x: 10, y: 20 }, endPoint: { x: 30, y: 40 }, durationMs: 100 }
+        : { operation, point: { x: 10, y: 20 } };
+    const action = { kind: 'computer.input' as const, version: 1 as const, libraryId: 3,
+      targetId: '237e3952-2a40-4c7b-b2f4-bec335a79cce', applicationLabel: 'OmniFlow', windowLabel: '测试窗口',
+      observationId: '12022dc1-f61c-4c2a-aac6-2963b60e5f7a', ...fields };
+    const input = approval(action); input.call.name = 'computer.input';
+    input.call.input = { point: { x: 999, y: 888 }, shortcut: { key: 'z', modifiers: ['control'] } };
+    input.preview.description = 'forged'; input.preview.details = [{ label: '应用', value: 'forged' }];
+    const { renderer, onResolve } = renderCard(input);
+    expect(textContent(renderer.root)).toContain('发送后必须重新查看确认结果');
+    expect(textContent(renderer.root)).not.toContain('forged');
+    expect(textContent(renderer.root)).not.toContain('999');
+    expect(textContent(renderer.root)).not.toContain('888');
+    expect(textContent(renderer.root)).toContain(operation === 'shortcut' ? 'Command + A' : '(10, 20)');
+    if (operation === 'drag') expect(textContent(renderer.root)).toContain('(30, 40)');
+    const allow = renderer.root.findAllByType('button').find(button => textContent(button) === '允许')!;
+    expect(allow.props.disabled).toBe(false); act(() => allow.props.onClick());
+    expect(onResolve).toHaveBeenCalledWith(true, action);
+    input.call.name = 'computer.click';
+    act(() => renderer.update(React.createElement(AgentConfirmationCard, { approval: input, busy: false, libraryId: 3, onResolve })));
+    expect(renderer.root.findAllByType('button').find(button => textContent(button) === '允许')!.props.disabled).toBe(true);
+  });
+
+  it.each([{ modifiers: [] }, { modifiers: ['shift'] }, { modifiers: ['option'] }, { modifiers: ['shift', 'option'] }])(
+    'refuses a printable shortcut action with modifiers=$modifiers', ({ modifiers }) => {
+    const input = approval({ kind: 'computer.input', version: 1, libraryId: 3,
+      targetId: '237e3952-2a40-4c7b-b2f4-bec335a79cce', applicationLabel: 'OmniFlow', windowLabel: '测试窗口',
+      observationId: '12022dc1-f61c-4c2a-aac6-2963b60e5f7a', operation: 'shortcut', shortcut: { key: 'a', modifiers } });
+    input.call.name = 'computer.input';
+    const { renderer, onResolve } = renderCard(input);
+    const allow = renderer.root.findAllByType('button').find(button => textContent(button) === '允许')!;
+    expect(allow.props.disabled).toBe(true);
+    expect(onResolve).not.toHaveBeenCalled();
+    },
+  );
   it('approves a semantic V3 click using its window identity without image coordinates', () => {
     const action = { kind: 'computer.click' as const, version: 3 as const, libraryId: 3,
       targetId: '237e3952-2a40-4c7b-b2f4-bec335a79cce', applicationLabel: 'OmniFlow', windowLabel: '测试窗口',

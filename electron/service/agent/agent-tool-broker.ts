@@ -252,7 +252,7 @@ export function createAgentToolBroker(options: AgentToolBrokerOptions = {}) {
       const executionRegistry = runToolRegistry || toolRegistry;
       const registeredTool = context.runCapabilitySnapshot?.getTool(name, context.activeSkillId);
       const expectedRegistrationId = registeredTool?.registrationId;
-      const computerInput = ['computer.click', 'computer.setText', 'computer.scroll'].includes(name);
+      const computerInput = ['computer.click', 'computer.setText', 'computer.scroll', 'computer.input'].includes(name);
       const supportsCommitSettlement = ((!computerInput && (registeredTool?.pluginOperation === 'rename' || registeredTool?.pluginOperation === 'file-output'))
         || (computerInput && registeredTool?.name === name && registeredTool.registrationId === `builtin:${name}@1`
           && registeredTool.kind === 'business' && !registeredTool.pluginSource && !registeredTool.pluginOperation

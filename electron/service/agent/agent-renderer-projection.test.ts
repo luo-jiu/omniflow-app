@@ -47,7 +47,7 @@ function activity(toolName = 'skill.activate'): AgentToolActivitySnapshot {
 }
 
 describe('Agent renderer projection', () => {
-  it.each(['observe', 'click', 'setText', 'scroll'] as const)('classifies initial computer.%s prepare only for display without inventing action, approval or success', operation => {
+  it.each(['observe', 'click', 'setText', 'scroll', 'input'] as const)('classifies initial computer.%s prepare only for display without inventing action, approval or success', operation => {
     const name = `computer.${operation}`;
     const prepareMain = vi.fn(async () => { throw new Error('must not prepare while projecting'); });
     const execute = vi.fn(async () => ({ ok: true }));
@@ -69,6 +69,26 @@ describe('Agent renderer projection', () => {
       { ...registry.get(name)!, risk: operation === 'observe' ? 'write' as const : 'read' as const }]) {
       expect(projectAgentToolActivityForRenderer(source, () => invalid).toolMetadata?.builtinComputerTool).toBeUndefined();
     }
+  });
+
+  it('marks a directed input only with exact built-in registration and matching prepared action', () => {
+    const registry = createAgentToolRegistry([{ name: 'computer.input', registrationId: 'builtin:computer.input@1', executor: 'main', risk: 'write',
+      description: 'Window input', inputSchema: { type: 'object' }, execute: async () => ({ ok: true }),
+      prepareMain: async () => { throw new Error('not used'); } }]);
+    const source: AgentToolActivitySnapshot = { ...activity('computer.input'), preparation: { preparedActionId: 'input', snapshotHash: 'hash', action: {
+      kind: 'computer.input', version: 1, libraryId: 3, targetId: TEXT_ACTION.targetId, applicationLabel: 'OmniFlow', windowLabel: 'QA',
+      observationId: TEXT_ACTION.observationId, operation: 'shortcut', shortcut: { key: 'a', modifiers: ['command'] },
+    } } };
+    expect(projectAgentToolActivityForRenderer(source, name => registry.get(name)).toolMetadata?.builtinComputerTool).toBe('input');
+    for (const tool of [{ ...registry.get('computer.input')!, registrationId: 'plugin:computer.input@1' },
+      { ...registry.get('computer.input')!, prepareMain: undefined }, { ...registry.get('computer.input')!, risk: 'read' as const },
+      { ...registry.get('computer.input')!, executor: 'renderer' as const }]) {
+      expect(projectAgentToolActivityForRenderer(source, () => tool).toolMetadata?.builtinComputerTool).toBeUndefined();
+    }
+    expect(projectAgentToolActivityForRenderer({ ...source, preparation: { ...source.preparation!, action: TEXT_ACTION } },
+      name => registry.get(name)).toolMetadata?.builtinComputerTool).toBeUndefined();
+    const pluginSource = { pluginId: 'fake', pluginVersion: '1', packageFingerprint: 'a', toolId: 'input', registrationId: 'builtin:computer.input@1' };
+    expect(projectAgentToolActivityForRenderer({ ...source, pluginSource }, name => registry.get(name)).toolMetadata?.builtinComputerTool).toBeUndefined();
   });
 
   it.each(['registration', 'name', 'executor', 'kind', 'plugin-source', 'plugin-operation', 'activity-plugin', 'missing-registry'] as const)(

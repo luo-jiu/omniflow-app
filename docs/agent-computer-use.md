@@ -2,19 +2,19 @@
 
 更新时间：2026-10-12
 
-适用范围：macOS 内置 Agent 的 `computer.windows@1` / `computer.observe@1` / `computer.click@1` / `computer.setText@1` / `computer.scroll@1`、Electron main 和原生窗口捕获 / AX 语义 helper。
+适用范围：macOS 内置 Agent 的 `computer.windows@1` / `computer.observe@1` / `computer.click@1` / `computer.setText@1` / `computer.scroll@1` / `computer.input@1`、Electron main 和原生窗口捕获 / AX 语义及后台定向输入 helper。
 
 ## 当前能力
 
 已接入 macOS 开发预览。Agent 观察本次任务获准的一个应用窗口，优先读取 AX、按需截图，按准确标签和本次观察内的控件 ID 执行已声明的点击、文本替换 / 插入或滚动，再次观察同一窗口确认结果。点击通过 macOS `AXPress` 激活控件，外部应用的文本与滚动各走对应的公共 AX 属性或动作；当前 OmniFlow 主窗口的两个注册控件另走固定第一方 owner 桥。截图使用 macOS 14+ 的 ScreenCaptureKit 独立窗口过滤器，不采集整屏后裁剪，也不收集其他窗口的缩略图。复用已有 Tool Registry、main prepare、授权卡、ToolRun、附件与视觉 Provider 链，不增加桌面输入 IPC 或新的 Agent 框架。
 
-需要选择支持图片的模型。非视觉模型隐藏 observe / click / setText / scroll，但可查询无图像的窗口元数据；Windows / Linux 不注册工具。点击仅支持有可访问性动作的控件；已增加明确非安全原生控件的文字替换 / 插入，以及实际声明的一页 / 一步滚动。外部 AX 已接入显式 fraction 比例滚动策略，尚无内置 Agent 成功验收结果；第一方对话区的独立实现与往返结果见下文。右键、双击、画布、快捷键、拖动和连续录像不可用；网页输入不走此 AX 文本路线。观察支持 mode=ax / screenshot / both，省略模式兼容原截图加 AX；工具建议先读 AX，需要视觉辨认时再取图。优先使用观察内 elementId；AX-only 使用无坐标的 V3 语义点击，both 保持 V2 截图坐标兼容。AX 路径、原生 identifier 及进程身份仍只用于 main 内的目标绑定。
+需要选择支持图片的模型。非视觉模型隐藏 observe / click / setText / scroll / input，但可查询无图像的窗口元数据；Windows / Linux 不注册工具。`computer.click` 仍只激活有可访问性动作的左键单击控件；`computer.setText / scroll` 沿用已确认的原生文本和滚动路线。外部 AX 已接入显式 fraction 比例滚动策略，尚无内置 Agent 成功验收结果；第一方对话区的独立实现与往返结果见下文。独立 `computer.input` 已接入规范快捷键、右键、双击和同窗直线拖拽，仅对已批准且当前观察明确提供能力的 receiver 运行，不推定任意软件或画布兼容；连续录像、通用网页输入仍不可用。观察支持 mode=ax / screenshot / both，省略模式兼容原截图加 AX；工具建议先读 AX，需要视觉辨认时再取图。优先使用观察内 elementId；AX-only 使用无坐标的 V3 语义点击，both 保持 V2 截图坐标兼容。AX 路径、原生 identifier 及进程身份仍只用于 main 内的目标绑定。
 
 可用性结论：已验收的 OmniFlow 控件、计算器边栏和访达视图按钮可完成后台查看、点击、重新观察的简单闭环；标准 AppKit 夹具与 macOS TextEdit 测试文档的文本替换、插入和清空也已完成真实闭环，TextEdit 长文后仍可定位正文。2026-10-12 AV 的原生页子按钮下翻 / 上翻恢复已通过真实后台验收；旧 AXScrollArea Page 路线曾返回 unknown，外部 step / fraction 仍未通过，不因新路线成功而改写旧结果。AW 在 Finder 合成文件目录完成 AX-only 定位、列表切换、按需截图及图标恢复；WebStorm 部分控件因实际 AX getter 失效没有可用 ID。第一方 Agent 输入的替换 / 追加 / 清空及对话区上下 page / step / fraction 的独立后台结果见 AL。AX 摘要截断不要求将整个方案判为不可用，但模型没有隐藏完整树；AX 和 Provider 投影均有预算。复杂页面、任意第三方软件与 Electron / 网页编辑器的文本操作仍须分别验证。
 
-早期 CoreGraphics 全局鼠标事件实现会与用户争用系统鼠标，现已改为 `AXUIElementPerformAction(..., kAXPressAction)`。驱动不发送 CGHID 鼠标事件、不移动指针、不激活应用或 `AXRaise`，没有全局点击 fallback。独立窗口捕获不受其他应用遮挡影响，`ignoreGlobalClipSingleWindow` 保留部分移出屏幕的窗口完整表面；AX 动作也不要求该窗仍为前台。目标应用可能自行改变焦点，具体 App 的后台支持仍须实机验证；尚无虚拟光标叠层。
+早期 CoreGraphics 全局鼠标事件实现会与用户争用系统鼠标，`computer.click` 已改为 `AXUIElementPerformAction(..., kAXPressAction)`，仍没有全局点击 fallback。独立 `computer.input` 使用窗口定向事件路线，见下节；两条路线都不调用鼠标位置设置、应用激活或 `AXRaise`，也不把失败转换成 CGHID 全局事件。独立窗口捕获不受其他应用遮挡影响，`ignoreGlobalClipSingleWindow` 保留部分移出屏幕的窗口完整表面。目标应用可能自行改变焦点，具体 App 的后台支持仍须实机验证；没有独立 OS 鼠标或虚拟光标叠层，发送动作的操作行只记录审计事实。
 
-重启 Electron 主进程后工具才会注册，仅刷新 renderer 不足。可以在 Agent 中提出“查看 OmniFlow 窗口并点击某个按钮”。首次 `computer.observe` 展示“共享应用窗口并允许操作”，明确应用、单个窗口、本次任务范围、截图发送到当前 AI 服务且保存在本机会话。默认当前 Agent 所属 OmniFlow 窗口，之后默认沿用本 Run 的已共享窗口；许可同时明确点击、文本输入、滚动，并把有限 operations 封存。旧无 operations 的共享 action 仅表示点击许可，不能静默扩权；也可按用户指定的应用名 / 窗口名精确匹配。多个匹配不能猜测，切换到其他窗口必须再次批准。同一应用的其他窗口、新建窗口或相同 PID 不自动扩大共享范围。完全访问和资料库目录授权不会省略首次共享确认。
+重启 Electron 主进程后工具才会注册，仅刷新 renderer 不足。可以在 Agent 中提出“查看 OmniFlow 窗口并点击某个按钮”。首次 `computer.observe` 展示“共享应用窗口并允许操作”，明确应用、单个窗口、本次任务范围、截图发送到当前 AI 服务且保存在本机会话。默认当前 Agent 所属 OmniFlow 窗口，之后默认沿用本 Run 的已共享窗口；许可封存 AX 的有限 `operations` 和独立后台输入 `inputOperations`。共享卡逐项说明点击、文本输入、滚动及实际新增的快捷键 / 右键 / 双击 / 拖拽许可。历史没有 operations 的 action 仅表示点击，历史没有 inputOperations 的 action 不授定向输入；旧许可不能静默扩权。也可按用户指定的应用名 / 窗口名精确匹配。多个匹配不能猜测，切换到其他窗口必须再次批准。同一应用的其他窗口、新建窗口或相同 PID 不自动扩大共享范围。完全访问和资料库目录授权不会省略首次共享确认。
 
 元数据清单只列当前 Space 中 on-screen、普通 layer-0 且进程身份可确认的窗口；包括被其他应用遮挡的后台窗口。最小化、隐藏或完全离开当前 Space 的窗口会明确不可用。macOS 14 以下拒绝独立窗口截图，不降级整屏、其他窗口或旧 CoreGraphics 截图接口。
 
@@ -27,6 +27,29 @@ macOS 还需屏幕录制与辅助功能权限。权限检查不会自动同意 O
 WebStorm 启动链在 2026-10-09 经用户明确允许后，已通过系统设置添加「录屏与系统录音」并按系统提示退出重开 WebStorm、重启开发版。Run `cc887f37-9a2c-4f65-96e0-cdb5bebb4b11` 首次成功获得 V2 `captureScope: window` 的 2048×1257 图像；在聊天附件共用的大图预览实看只有 OmniFlow，没有遮挡它的 IDE 或其他显示器内容。此前 WebStorm 辅助功能已开但录屏列表没有它的阶段记录保留，不能把那个阶段的拒绝误写为重启后仍不可捕获。
 
 单窗截图成功后发现 AX 扫描的 16 层上限过低。Run `1c6b57a3-00a1-40fb-ac48-3f5bd7cd99b6` 和单次诊断 G 的原生计数确认窗口匹配成功、没有 AX 错误，仅深度上限触发（108 节点、33 候选、最大子项 19）；当前把私有路径、扫描和 adapter 校验同步为 32 层，节点、子项、时间、文本和输出预算不变。系统日志仅记录计数、布尔及错误码，不记录窗口身份、位置或 AX 正文。旧坐标路径要求完整扫描；当前新增的 elementId 路径可使用部分扫描中已独立确认的稳定控件。
+
+## 后台定向输入（2026-10-12）
+
+`computer.input@1` 是独立内置 main Tool，不改写 `computer.click` 的 AX 单击行为，也不新增 renderer 键鼠 IPC。shared `window-input-contract.ts`、main runtime 与平台 `window-input.ts` adapter 分别负责有限动作归一化、既有 Run / 单窗许可与 sealed binding、原生事件及回执。共享 action 的 `inputOperations` 与 element operations 分开比较、批准和展示；首次授权或新增能力必须沿既有重新准备与审批流程，不从历史记录恢复许可。
+
+全窗 `both` 观察仅在前后 receiver readiness、精确窗口及私有 profile 一致，且能力已获批准时提供四种定向输入；全窗 `ax` 最多提供 shortcut，不虚构图像坐标。纯 screenshot 和 `focus` 局部观察不提供定向输入能力。结果公开 `inputReady / inputOperations / availableInputOperations / inputNotice`，实际执行只用当前 availableInputOperations；profile、进程身份及原生路由只封存于 main。观察仍绑定同 Run / owner / Session / library / AI destination，60 秒有效且每次只消费一个写动作。
+
+| operation | 规范字段 | 边界 |
+| --- | --- | --- |
+| `shortcut` | `shortcut:{key,modifiers}` | 无坐标；字母 a～z、数字 0～9 必须含 command 或 control；space、return、escape、tab、backspace、delete、四向 arrow、pageUp / pageDown、home / end 等具名键可无修饰键 |
+| `rightClick` | `point:{x,y}` | 本次整窗图片内的右键事件对 |
+| `doubleClick` | `point:{x,y}` | 本次整窗图片内的两次左键事件对 |
+| `drag` | `point / endPoint / durationMs` | 同一获准窗口内、起终点不同的单次左键直线拖拽，时长为 100～1000 毫秒整数 |
+
+修饰键仅 command / shift / option / control，最多四项并按固定顺序去重，不猜测键名、大小写或别名。裸字母 / 数字及仅 shift / option 的可打印输入拒绝，文字正文继续使用 `computer.setText` 的 main 私有输入审计，不能逐字符经公开快捷键记录绕过。四操作字段严格互斥，未知字段拒绝。point 是图片左上角起算的 0～2047 整数像素，main 再核对实际图片宽高，以冻结窗口几何映射到全局 points，包含 Retina、归一化比例与负窗口原点；坐标映射不读取系统指针、不跨窗口或跨应用拖放。原生诊断可只读采样物理指针，但不以它计算动作位置。
+
+原生路线在已验证 receiver profile 中以私有 `CGEventSetWindowLocation` 设置目标窗口局部位置，再由公开 `CGEventPostToPid` 每个事件只投递一次；不使用私有额外派发、应用置前、全局事件或失败补发。私有符号、当前软件版本、精确获准窗口、键盘接收窗口 / 控件、前台状态及用户键鼠状态无法确认时关闭这条能力。目标应用处于前台、用户按住修饰键或鼠标、receiver 漂移或目标出现未获准临时窗口时拒绝；普通物理打字只拦快捷键，避免与键盘输入交织。支持范围由实际 profile 白名单限定，不能因其他 App 也是 AppKit / Electron 而自动授予能力；系统更新及不同版本须单独验证。
+
+当前生产 receiver 仅 `textedit-415-25f84-v1`：必须是 `com.apple.TextEdit`、TextEdit 1.20 / build 415、系统 build 25F84（本轮 macOS 26.5.2）。实验 `appkit-fixture-v1` 只供固定独立原生夹具，不要求系统 build；它的成功不能扩大真实软件支持名单。菜单 / sheet / modal 等临时界面存在时 readiness 关闭；已发送右键打开新菜单后立即停止，保留 unknown，不在未获准菜单里继续点击或改用 Escape / 全局事件清理。
+
+prepared action 为独立 `computer.input` V1，仅含 public 目标身份、observationId 和所选动作字段。正式执行再次核对 sealed request、当前共享、窗口和 receiver，broker 以真实内置注册身份授予 commit settlement；`commit.begin` 在事件调用前记未知回执并消费观察。dispatched / committed 只表示事件序列及匹配释放事件已投递，不代表软件已经完成目标操作，后续必须 observe。unknown / commit_unknown 不重放，也不切换 AX 或全局输入；not-dispatched 仍要求新观察。取消先向 helper 发送 SIGTERM，最多等待 2 秒释放回执再 SIGKILL；动作结果与 `releaseState` 独立结算，confirmed 仅表示抬键 / 抬鼠标已投递。unconfirmed 会由 main 阻断本 Run 后续全部 `computer.input`，新观察、重新批准或换窗均不能恢复手势，已封存动作在执行时同样拒绝；观察和已声明的 AX 操作保留。Run 释放只清理 main 门禁，不证明系统已释放此前按键。broker 已结束的结算不能被迟到成功覆盖。
+
+最终原生源码的独立 TextEdit 验收已确认 Command + A 全选、双击选中 bravo、拖拽选中 alpha 到 delta。右键确实打开菜单，但新临时界面守卫随后返回 unknown，eventCount=2、releaseSent=true；这是已投递且菜单边界收口的证据，不能记为 dispatched / committed 成功，菜单内操作未开放。真实原生夹具另验证四动作及取消释放、焦点漂移拒绝。自动测试覆盖真实 builtin Tool → sealed registry capability → broker → runtime 提交接线、观察期限 / owner 释放及迟到结算；以上均不等于新工具的内置 Agent GUI 验收或任意软件兼容。既有 AX 文本 / 滚动成功也不替代本轮定向事件路线证据。
 
 ## 观察接口与本轮改进（2026-10-12）
 
@@ -48,9 +71,9 @@ TextEdit 长文本候选新增严格可见区域路线：仅已有 `native-text-
 
 main派生“向上/下/左/右滚动一页”与 `labelSource=native-scroll-button`，不是原生名称或全局唯一控件。both附同截图中的真实child screenshotBounds，重叠同操作目标不签发；AX-only仅完整稳定扫描且对应轴可操作父身份唯一、该operation页按钮唯一时提供匿名派生ID。实际scroll对该子控件执行恰好一次AXPress，仍沿原一次消费/未知结算；不在ScrollArea翻页unknown后自动切换此路线，也不开放箭头子控件。新增有限stage25～29与四个能力布尔仅用于拒绝诊断，不含正文/身份/坐标；真机结果另见下文与验证矩阵。
 
-本轮仍保留视觉模型门槛：AX-only减少不必要图像，但非视觉模型暂未开放电脑工具。锚点局部观察已通过下述WebStorm只读、计算器局部新ID点击与TextEdit局部输入/翻页/清空验证；没有可用锚点的区域、跨整个AX树的目标查找、上下文菜单、通用快捷键、任意像素/画布、右键/双击/拖拽与其他平台仍待实施。原生候选采用有界广度扫描，让浅层不同分支先进入预算，避免某个深文件树占满候选；child-index 私有路径不变。局部继续保留128候选、2048总节点/排队节点、32绝对层级、每节点64子项、3.2秒和12 KiB文本预算；query仅筛所选扫描结果，不能找回未扫描控件，也不修复应用AX getter错误。
+本轮仍保留视觉模型门槛：AX-only减少不必要图像，但非视觉模型暂未开放电脑工具。锚点局部观察已通过下述WebStorm只读、计算器局部新ID点击与TextEdit局部输入/翻页/清空验证；没有可用锚点的区域和跨整个AX树的目标查找仍受扫描边界限制。快捷键 / 右键 / 双击 / 同窗拖拽已由上节独立 computer.input 接入，局部观察不授这条新能力；任意软件 / 画布、跨窗拖放、未知菜单窗口与其他平台仍不推定支持。原生候选采用有界广度扫描，让浅层不同分支先进入预算，避免某个深文件树占满候选；child-index 私有路径不变。局部继续保留128候选、2048总节点/排队节点、32绝对层级、每节点64子项、3.2秒和12 KiB文本预算；query仅筛所选扫描结果，不能找回未扫描控件，也不修复应用AX getter错误。
 
-80分是本模块的工程目标：AX-only后台点击闭环、按需单窗图片、外部80行Unicode长文编辑闭环、至少一个外部真实滚动往返、多区域文件列表/工具栏控件定位，以及旧ID/取消/unknown不重放。AV / AW补上外部滚动及Finder往返，局部四轮再验证点击/输入/翻页后，可按本机macOS的轻量基础操作范围评约80分；分数是工程判断，不表示Codex全接口覆盖或任意应用兼容。复杂IDE的失效节点、其他App局部动作、通用快捷键和更多指针操作仍须后续验证或实现。后台 idle 绘制注册和内置交互长等待已在源码收口，但尚未新增 GUI 真机验收；签名包、其他平台和 compositor 最后一帧仍分别受原有边界约束。当前门禁与本轮实际结果由[验证矩阵](frontend-validation-matrix.md)记录。
+80分是本模块的工程目标：AX-only后台点击闭环、按需单窗图片、外部80行Unicode长文编辑闭环、至少一个外部真实滚动往返、多区域文件列表/工具栏控件定位，以及旧ID/取消/unknown不重放。AV / AW补上外部滚动及Finder往返，局部四轮再验证点击/输入/翻页后，可按本机macOS的轻量基础操作范围评约80分；分数是工程判断，不表示Codex全接口覆盖或任意应用兼容。本轮四种后台定向输入按明确 receiver profile 接入；复杂IDE的失效节点、其他App局部动作、更多版本 / 菜单及跨窗操作仍须分别验证，不因工具名存在而推定可用。后台 idle 绘制注册和内置交互长等待已在源码收口，但尚未新增 GUI 真机验收；签名包、其他平台和 compositor 最后一帧仍分别受原有边界约束。当前门禁与本轮实际结果由[验证矩阵](frontend-validation-matrix.md)记录。
 
 ### 本轮实际验收
 
@@ -192,7 +215,7 @@ AX 摘要只遍历匹配的获准窗口，不进入异 PID、嵌套其他 AXWind
 
 `computer.click({observationId,elementId})` 优先按本次观察的控件身份激活。elements 包含两次独立快照各自严格确认、指纹稳定且有可辨认标签的 AX 控件，每条显式声明有限 operations，click 仅接受其中含 press 的控件，最多 128 个；每条公开随机 elementId、role、label 和可选 description，不公开原生 identifier 或路径。空白 title 可回退非空白 description，仍保留原指纹精确值；匿名 AXButton 不签发语义 ID，不能按 AX 树或列表顺序猜测目标。即使其他控件读取失败或遍历有界截断，已确认控件仍可按 ID 直接复验；不能把未列出的控件视为不存在。摘要截断不删减这份独立候选列表。main 直接选择封存候选；AX-only 的 V3 按身份和实际 AXPress 复验，不产生坐标。both 的 V2 用候选中心作为原生复验点，public action / 回执保留派生 x/y 兼容展示核对。
 
-兼容 `computer.click({observationId,x,y,button?,clickCount?})`，使用窗口图片左上角为原点的整数像素坐标；elementId 与坐标必须二选一。`button` 只接受 `left`、`clickCount` 只接受 `1`；旧历史 action 继续可以解析右键/双击，不能据历史格式执行当前不支持的动作。main 将坐标转换到冻结窗口的全局 points，包含 Retina、归一化图像比例及负窗口原点。像素定位仍只选择 AX 候选，没有原生像素输入回退。
+兼容 `computer.click({observationId,x,y,button?,clickCount?})`，使用窗口图片左上角为原点的整数像素坐标；elementId 与坐标必须二选一。`button` 只接受 `left`、`clickCount` 只接受 `1`；旧历史 action 继续可以解析右键/双击，不能据历史格式扩大当前 computer.click 许可；新增右键 / 双击须使用独立 computer.input 的授权和执行链。main 将坐标转换到冻结窗口的全局 points，包含 Retina、归一化图像比例及负窗口原点。像素定位仍只选择 AX 候选，没有原生像素输入回退。
 
 ax模式两次独立扫描、both模式截图前后分别扫描冻结窗口的有界 AX 候选；仅窗口 ID、PID、进程启动时间、layer、几何和标题保持一致时保留两次均稳定的控件。`clickReady` 表示点击 ID 或坐标路径至少一项可用；`textReady / scrollReady` 独立表示有已签发 ID 的对应能力；`candidateScanComplete` 表示前后全窗口候选遍历均完整；局部只报告独立的 `scopeScanComplete`，不授坐标或全窗口唯一性。`coordinateClickReady` 还要求两次全窗口完整候选集合完全一致。完整稳定扫描中的匿名控件仍留在私有坐标命中列表，不能因 ID 列表过滤而错选重叠父控件。部分扫描或其他控件变化不会抹去已确认 ID，但 prepare 和正式执行都拒绝坐标点击。任一扫描失败或窗口不匹配时不签发操作能力；三种 readiness 均为 false 时仍只供查看，不能因点击不可用推定文本和滚动也不可用。捕获期间窗口身份 / 几何变化则拒绝该截图。其他应用的前台或 z-order 变化不改变单窗口授权。坐标路径先在所有可操作候选中选唯一包含该点的叶节点，再要求该节点具有 press；ID 路径直达已确认控件，不推断缺失的其他控件。窗口身份及控件路径/指纹只在 main 私有 observation 和 sealed binding 中持有。
 
@@ -208,7 +231,7 @@ Provider 的 observe / windows 单条结果预算提高为 40,000 estimated toke
 
 跨 Run 的执行事实中，只有可信内置 V2 `computer.observe` 使用同一专用投影，保留 scope / scopeScanComplete 与局部无坐标、无全窗完整性的语义；单项仍沿历史约 1,024 tokens 预算。范围损坏、缺少新范围必需的控件数组或预算不足时省略该条事实，继续保留更早的有效事实，不让旧记录阻断新 Run。历史 ID 不恢复操作许可。
 
-共享许可、冻结窗口和最新 observation 只在 main 持有，绑定 owner、backend、library、WebContents、Session、Run、AI destination 与能力快照。观察 / 点击准备动作使用严格 V2 单窗口契约，新增文本 / 滚动动作使用各自的 V1 单窗口契约，均封存进既有执行 capability；旧 observe / click V1 屏幕动作仅保留历史解析，不可授权或执行当前窗口版操作。renderer 仅展示 main public action，不从模型 input 拼授权目标，也不能直接调用 helper。
+共享许可、冻结窗口和最新 observation 只在 main 持有，绑定 owner、backend、library、WebContents、Session、Run、AI destination 与能力快照。观察与 both 点击使用严格 V2 单窗口契约，AX-only 点击使用 V3，文本 / 滚动 / 后台定向输入使用各自的 V1 单窗口契约，均封存进既有执行 capability；旧 observe / click V1 屏幕动作仅保留历史解析，不可授权或执行当前窗口版操作。renderer 仅展示 main public action，不从模型 input 拼授权目标，也不能直接调用 helper。
 
 所有观察/输入共用生产 runtime 的串行队列。窗口截图 helper 最多 15 秒、stdout 最多 12 MiB，返回有界 JSON/base64 后严格检查单窗身份、PNG 签名 / IHDR 尺寸、最长边 2048 与解码后 8 MiB 上限；取消会终止截图 helper，迟到结果不会导入附件。元数据 / AX helper 最多 5 秒；status/click 输出最多 4 KiB，windows/window-targets 输出最多 64 KiB。元数据最多 64 窗口 / 12 KiB 文本；单窗口 AX 扫描最多 128 候选、2048 节点、32 层路径、每节点 64 子项和 12 KiB 文本，公开 AX 窗口匹配最多读取 32 个窗口，扫描 deadline 3.2 秒。超预算明确 truncated，不能据部分候选猜测点击。只在获批的 window-targets 执行入口启用 OmniFlow 自身 Electron 可访问性支持，不在 import/status/windows/prepare 或单纯 capture 时启用，也不改第三方 App 的 AX 配置。停止取消尚未发送的操作，已经开始的 AX 动作等待原生回执结算，不因普通取消丢弃其结果。
 
@@ -226,11 +249,12 @@ OmniFlow 自身窗口被遮挡时，Electron 默认后台节流可能让控件�
 
 导入或绑定后取消/失败会回滚新绑定并删除草稿。截图与屏幕文字作为外部内容，不授予操作权限。后续 Run 不继承共享许可，恢复历史也不自动重新发送旧截图。
 
-连续的可信内置窗口观察 / 点击 / 文本输入 / 滚动合为一个操作折叠组，已有审批与错误仍保持可见，等待批准和 unknown 操作不混入普通组。Tool 记录展开后通过既有 owner/backend/library/session 绑定的附件预览接口显示真实截图缩略图；点击缩略图复用聊天图片大图预览，支持缩放和 Esc 关闭。折叠、隐藏工作区或切换身份后释放当前图片并拒绝迟到响应。可信 V2 单窗观察结果中的摘要以“AX”单独展开，截断时标注，正文使用有界滚动的纯文本 pre；收起或隐藏即释放正文。成功输入动作仅显示对应的一行“已发送点击 / 已发送文本输入 / 已发送滚动”，失败或 unknown 保留详情，不重复渲染成功回执正文；文本正文不进入展示。来源校验与受控展示契约见 [Agent UI](built-in-agent-ui-contract.md)。
+连续的可信内置窗口观察 / 点击 / 文本输入 / 滚动 / 定向输入合为一个操作折叠组，已有审批与错误仍保持可见，等待批准和 unknown 操作不混入普通组。Tool 记录展开后通过既有 owner/backend/library/session 绑定的附件预览接口显示真实截图缩略图；点击缩略图复用聊天图片大图预览，支持缩放和 Esc 关闭。折叠、隐藏工作区或切换身份后释放当前图片并拒绝迟到响应。可信 V2 单窗观察结果中的摘要以“AX”单独展开，截断时标注，正文使用有界滚动的纯文本 pre；收起或隐藏即释放正文。成功动作仅显示对应的一行“已发送点击 / 已发送文本输入 / 已发送滚动 / 已发送快捷键 / 已发送右键 / 已发送双击 / 已发送拖拽”，快捷键附规范键组合。computer.input 另严格核对完整 public action、可信内置来源、ToolRun operationId 与已确认释放回执；没有匹配回执时不显示成功派发文案。失败或 unknown 保留详情，不重复渲染成功回执正文；文本正文不进入展示。记录折叠不删除完整 ToolRun 审计，也不生成假鼠标或新的执行入口。来源校验与受控展示契约见 [Agent UI](built-in-agent-ui-contract.md)。
 
 ## 原生与构建
 
 - 平台 adapter：`electron/platform/computer-use/desktop-computer.ts`。`getAgentComputerWindows` 获取无像素的窗口元数据；`getAgentComputerWindowTarget` 只扫描绑定窗口；`captureAgentComputerWindow` 捕获该窗口。当前 Tool 不调用 `desktopCapturer.getSources`，因为它没有 source ID 过滤器，会为多个窗口刷新缩略图；不能先采集再在 JS 挑选，零尺寸也不作为严格无捕获保证。
+- 定向输入 adapter：`electron/platform/computer-use/window-input.ts`，只调用固定 `--window-input-check / --window-input`；原生实现为 `macos-window-input.swift`。检查只读、私有 profile 有限白名单；变更命令严格互斥、同窗点与有限事件数，stdin / stdout 均采用有界 JSON，没有任意脚本或全局输入参数。`tools/computer-use/input-fixture.swift` 与 `input-fixture-driver.mjs` 是真实独立 AppKit 验收夹具，不替代内置 Agent GUI 验收。
 - 原生 helper：同目录 `macos-click.swift` 承接窗口 / 捕获及共享基础，`macos-semantic.swift` 承接有限语义能力 / 输入，`main.swift` 固定分发命令。`--windows` 不调用 AX 或图像 API；`--window-targets` 接收严格单窗 JSON；`--window-capture` 用 `SCContentFilter(desktopIndependentWindow:)` 与 `SCScreenshotManager.captureImage`，只按冻结 window ID/PID/进程启动时间选择并复验窗口，拒绝 app-wide 或 display 过滤器。关闭光标、音频、窗口阴影和额外 child windows，保留完整窗口表面。`--status` / `--request-permission` / `--click` / `--set-text` / `--scroll` 使用固定 AX 契约，不执行任意 shell、不注入全局键鼠事件。
 - 原有 `--targets` 与 Display adapter 仅保留兼容 / 自动测试入口，不属于当前公开 Tool 的观察范围，不是窗口捕获失败后的 fallback。
 - `predev / prebuild` 调用 `tools/computer-use/prepare.mjs`，需要 macOS Xcode Command Line Tools，编译最低 macOS 11 的 arm64+x86_64 universal，按源码/script 哈希缓存。ScreenCaptureKit 自动弱链接且 capture 受 macOS 14 availability guard 保护；旧系统可运行 helper 的其他自检，不能执行新窗口截图。非 macOS 跳过。
@@ -334,6 +358,6 @@ Y2 Run `a7a9e88d-d9c9-495f-bbc8-93384c3b593d` completed，只有 windows 与两�
 
 W3 / Z 轮次始终使用开发版及 win（libraryId=3、本机 macOS MinIO），未新增系统权限、启动安装版或使用第一个资料库。夹具最终确认文本为空、两轴滚动条值为 0 后关闭。TextEdit 仅使用该轮创建的空测试文档：测试阶段未保存；清理时为保留空产物，通过 GUI 另存到 `/tmp/omniflow-computer-qa-bUwOTZ/omniflow-textedit-input-qa.rtf`（219 字节）并关闭，没有删除文档，也没有写入用户文档；旧 autosave 是否移除未验证。该轮结束时开发版停在 win 的 W3 历史任务，任务已折叠且无 active Run；后续补齐前已退出该开发进程与旧夹具。
 
-该轮已完成窗口发现 / 控件ID及标准AppKit、TextEdit文本编辑，page / step / fraction当时尚未通过。最新2026-10-12已补上AX-only、长文定位、TextEdit页子按钮往返、Finder按需截图及局部AX新ID点击/输入/翻页的后台闭环，外部step / fraction仍未验收，其他App / Electron / 网页编辑器不由这些结果推定兼容，状态见[本轮实际验收](#本轮实际验收)与[验证矩阵](frontend-validation-matrix.md)。交互长等待/取消和运行前 / idle 绘制的源码修复已完成，后续重点转为 GUI 复验、复杂应用失效节点以及按实际应用扩展快捷键 / 菜单；右键、双击和拖动尚未接入。稳定捕获会话与截图 / AX布局一致性继续按单应用验证；仅在明确未发送的过期场景重新观察，未知动作不重放。
+该轮已完成窗口发现 / 控件ID及标准AppKit、TextEdit文本编辑，page / step / fraction当时尚未通过。最新2026-10-12已补上AX-only、长文定位、TextEdit页子按钮往返、Finder按需截图及局部AX新ID点击/输入/翻页的后台闭环，外部step / fraction仍未验收，其他App / Electron / 网页编辑器不由这些结果推定兼容，状态见[本轮实际验收](#本轮实际验收)与[验证矩阵](frontend-validation-matrix.md)。交互长等待/取消和运行前 / idle 绘制的源码修复已完成；独立 computer.input 已接入快捷键、右键、双击和同窗拖拽，但兼容与实机证据须按本轮 receiver profile 单独记录。后续重点为 GUI 复验、复杂应用失效节点及更多应用 / 菜单验证。稳定捕获会话与截图 / AX布局一致性继续按单应用验证；仅在明确未发送的过期场景重新观察，未知动作不重放。
 
 调研证据与 Codex 的驱动边界见 [调研记录](agent-computer-use-research.md)。增加操作、平台或 AX 时继续复用主进程授权/生命周期，并扩展此契约和验证矩阵。

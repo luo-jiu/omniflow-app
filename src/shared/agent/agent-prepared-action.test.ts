@@ -14,6 +14,7 @@ import {
   normalizeAgentPreparedActionPublic,
 } from './agent-prepared-action';
 import { COMPUTER_ELEMENT_OPERATIONS } from '../computer-use/computer-use-contract';
+import { WINDOW_INPUT_OPERATIONS } from '../computer-use/window-input-contract';
 
 function renameAction(overrides: Record<string, unknown> = {}) {
   return { kind: 'plugin.rename', version: 1, libraryId: 3, operationId: '83fc584b-037d-4c82-8883-a609846ea0d4',
@@ -37,6 +38,77 @@ function computerWindowObserveAction(overrides: Record<string, unknown> = {}) {
   return { kind: 'computer.observe', version: 2, libraryId: 3,
     targetId: '237e3952-2a40-4c7b-b2f4-bec335a79cce', applicationLabel: 'OmniFlow', windowLabel: '测试资料库', ...overrides };
 }
+
+function computerInputAction(overrides: Record<string, unknown> = {}) {
+  return { ...computerWindowObserveAction(), kind: 'computer.input', version: 1,
+    observationId: '83fc584b-037d-4c82-8883-a609846ea0d4',
+    operation: 'shortcut', shortcut: { key: 'a', modifiers: ['command'] }, ...overrides };
+}
+
+describe('directed window input prepared actions', () => {
+  it('preserves a separate immutable input grant and does not extend historical element grants', () => {
+    const source = computerWindowObserveAction({ operations: ['press'], inputOperations: [...WINDOW_INPUT_OPERATIONS] });
+    expect(normalizeAgentPreparedActionPublic(source)).toEqual(source);
+    expect(equalAgentPreparedActionPublic(source, computerWindowObserveAction({ operations: ['press'] }))).toBe(false);
+    expect(equalAgentPreparedActionPublic(source, computerWindowObserveAction({ operations: ['press'], inputOperations: ['shortcut'] }))).toBe(false);
+    expect(normalizeAgentPreparedActionPublic(computerWindowObserveAction())).not.toHaveProperty('inputOperations');
+    for (const inputOperations of [undefined, [], null, ['press'], ['shortcut', 'shortcut']]) {
+      expect(() => normalizeAgentPreparedActionPublic(computerWindowObserveAction({ inputOperations }))).toThrow();
+    }
+    expect(() => normalizeAgentPreparedActionPublic(computerObserveAction({ inputOperations: ['shortcut'] }))).toThrow();
+    const getter = vi.fn(() => ['shortcut']);
+    expect(() => normalizeAgentPreparedActionPublic(Object.defineProperty(computerWindowObserveAction(), 'inputOperations',
+      { get: getter, enumerable: true }))).toThrow();
+    expect(getter).not.toHaveBeenCalled();
+  });
+
+  it('registers and compares every operation with its exact public fields', () => {
+    expect(AGENT_PREPARED_ACTION_PUBLIC_IDENTITIES).toContainEqual({ kind: 'computer.input', version: 1 });
+    const shortcut = computerInputAction();
+    expect(normalizeAgentPreparedActionPublic(shortcut)).toEqual(shortcut);
+    expect(equalAgentPreparedActionPublic(shortcut, computerInputAction({ shortcut: { key: 'b', modifiers: ['command'] } }))).toBe(false);
+    expect(equalAgentPreparedActionPublic(shortcut, computerInputAction({ shortcut: { key: 'a', modifiers: ['shift'] } }))).toBe(false);
+    for (const operation of ['rightClick', 'doubleClick', 'drag']) {
+      const source = { ...computerInputAction(), operation, point: { x: 0, y: 2047 },
+        ...(operation === 'drag' ? { endPoint: { x: 1, y: 2 }, durationMs: 100 } : {}) } as Record<string, unknown>;
+      delete source.shortcut;
+      expect(normalizeAgentPreparedActionPublic(source)).toEqual(source);
+      expect(equalAgentPreparedActionPublic(source, { ...source, point: { x: 1, y: 2047 } })).toBe(false);
+      if (operation === 'drag') {
+        expect(equalAgentPreparedActionPublic(source, { ...source, endPoint: { x: 2, y: 2 } })).toBe(false);
+        expect(equalAgentPreparedActionPublic(source, { ...source, durationMs: 1000 })).toBe(false);
+      }
+    }
+  });
+
+  it('rejects operation field mixing, native input routes and incomplete identities', () => {
+    for (const overrides of [{ point: { x: 0, y: 0 } }, { endPoint: { x: 0, y: 0 } }, { durationMs: 200 },
+      { pid: 1 }, { globalX: 0 }, { screenshotWidth: 100 }, { operation: 'click' }, { operation: 'Shortcut' },
+      { observationId: 'stale' }, { libraryId: 0 }, { targetId: 'window' }, { shortcut: { key: 'Enter', modifiers: [] } }]) {
+      expect(() => normalizeAgentPreparedActionPublic(computerInputAction(overrides))).toThrow();
+    }
+    for (const modifiers of [[], ['shift'], ['option'], ['shift', 'option']]) {
+      expect(() => normalizeAgentPreparedActionPublic(computerInputAction({ shortcut: { key: 'a', modifiers } }))).toThrow();
+    }
+    expect(normalizeAgentPreparedActionPublic(computerInputAction({ shortcut: { key: 'escape', modifiers: [] } }))).toMatchObject({
+      shortcut: { key: 'escape', modifiers: [] },
+    });
+    const source = computerInputAction();
+    for (const field of Object.keys(source)) {
+      const missing = { ...source } as Record<string, unknown>; delete missing[field];
+      expect(() => normalizeAgentPreparedActionPublic(missing)).toThrow();
+      const getter = vi.fn(() => Reflect.get(source, field));
+      expect(() => normalizeAgentPreparedActionPublic(Object.defineProperty({ ...source }, field, { get: getter, enumerable: true }))).toThrow();
+      expect(getter).not.toHaveBeenCalled();
+    }
+    const drag = { ...source, operation: 'drag', point: { x: 0, y: 0 }, endPoint: { x: 1, y: 1 }, durationMs: 100 } as Record<string, unknown>;
+    delete drag.shortcut;
+    for (const durationMs of [undefined, '100', 99, 1001, 100.5, NaN, Infinity]) {
+      expect(() => normalizeAgentPreparedActionPublic({ ...drag, durationMs })).toThrow();
+    }
+    expect(() => normalizeAgentPreparedActionPublic({ ...drag, endPoint: { x: 0, y: 0 } })).toThrow();
+  });
+});
 
 function computerWindowClickAction(overrides: Record<string, unknown> = {}) {
   return { ...computerWindowObserveAction(), kind: 'computer.click',

@@ -11,6 +11,16 @@ export {
   getAgentComputerParentActivity,
   requestAgentComputerClickPermission,
 } from './desktop-computer';
+export {
+  AgentComputerWindowInputError,
+  getAgentComputerWindowInputStatus,
+  inputAgentComputerWindow,
+} from './window-input';
+export type {
+  AgentComputerWindowInputStatus,
+  AgentComputerWindowInputRequest,
+  AgentComputerWindowInputReceipt,
+} from './window-input';
 export type {
   AgentComputerCandidate,
   AgentComputerRect,

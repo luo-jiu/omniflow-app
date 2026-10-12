@@ -8,7 +8,8 @@ export type AgentComputerProviderProjectionMode = 'computer-observe' | 'computer
 
 const OBSERVATION_FIELDS = ['captureScope', 'targetId', 'applicationLabel', 'windowLabel', 'imageId',
   'observationId', 'screenshotWidth', 'screenshotHeight', 'capturedAt', 'expiresInMs', 'clickReady',
-  'textReady', 'scrollReady', 'operations', 'coordinateClickReady', 'candidateScanComplete', 'clickMethod', 'observationSource', 'mode',
+  'textReady', 'scrollReady', 'operations', 'inputReady', 'inputOperations', 'availableInputOperations', 'inputNotice',
+  'coordinateClickReady', 'candidateScanComplete', 'clickMethod', 'observationSource', 'mode',
   'elementsScope', 'searchScope', 'totalMatched', 'offset', 'limit', 'hasMore', 'changeSummary', 'notice'] as const;
 
 function invalidScope(): Error { return new Error('应用窗口观察范围无效'); }
