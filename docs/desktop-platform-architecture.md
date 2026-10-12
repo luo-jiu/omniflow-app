@@ -1,5 +1,19 @@
 # 桌面平台适配架构
 
+2026-10-11：获准当前主窗口的第一方 Agent 控件另接轻量 main-owned transport。它使用可信窗口 contentBounds / zoom 将 renderer CSS bounds 映射为屏幕点，再由原 runtime 映射为同附件像素；只接受精确 mainFrame 的固定注册 / 完成消息。文本/滚动复用 React 草稿与聊天滚动 owner，不调用系统键鼠、焦点或任意脚本/CDP，已绑定动作失败不换 AX。外部应用保持原 macOS SCK / AX 平台路线，Windows/Linux、第三方 Electron 和网页不因此新增兼容性。实现边界与本轮验收见[电脑操作契约](agent-computer-use.md#omniflow-第一方后台控件桥2026-10-11)。
+
+第一方调试诊断另复用固定helper `--parent-activity`，无请求正文或PID参数，只读NSWorkspace当前前台与直接父PID是否相等，父PID前后不一致或查询失败时unknown。main-only adapter严格接收布尔字段，独立500ms / 512B上限；仅显式debug时在派发相邻两端调用，不增加renderer能力、权限或生产进程。Electron活动事件缓存和原生实时采样独立记录，不混作后台通过，诊断不能改变权威执行结果。
+
+2026-10-10：单窗口 Agent 增加纯元数据 `computer.windows` 搜索、Run 绑定短期引用与观察内 elementId 点击。原生候选将直接读取的 AXDescription 与已声明 AXIdentifier 纳入私有身份指纹，生产 AXPress 不读取非必要 AXSubrole；旧 subrole 解析仍保留；字段有界、严格存在性和值复验，不以文本 AXValue 绑定身份、不截短身份。main 返回人类标签和随机元素标识，原生 identifier / 路径仍私有；旧 helper 缺字段兼容。新增公共 AX 文字替换 / 插入和真实翻页 / 滚动条步进；本轮另接入独立 fraction 比例滚动 ABI，读取并封存滚动条数值范围以便严格复验，不采集文本正文。均不发送 CG 事件、全局键盘、拖动或前台激活。平台通过 computer-use/index.ts 单窗 facade 独立于 Agent，pure shared contract 单独维护。工具仍为 macOS 五项；非视觉模型只保留无图像发现。新增 ABI 的原生定向检查及最新全量 lint / test / build 通过，universal helper 已重建，AE 的限定 TextEdit 文本闭环通过、滚动未通过，契约及证据见 [应用窗口操作](agent-computer-use.md)。
+
+fraction 只在实际 AXScrollBar、明确 enabled、匹配 vertical / horizontal、Value / MinValue / MaxValue 成功读取为非 Boolean 的 finite 数值且范围有效、AXValue 确认可写时提供四向 Fraction operations；缺范围不填 0 / 1。每次只移动确认数值范围的 10% 并在边界截停，不能称一页、一步、像素或可视区域比例；旧 page / step 不变、不在失败后 fallback。私有 scrollState 三值参与候选前后稳定性与执行前复验，不公开给模型或 renderer、不写入诊断日志。AA2 实测因 Min / Max getter 不支持未提供 Fraction 候选，未派发，不计通过。
+
+TextEdit 诊断只记录固定 roleKind / 拒绝及 probe stage / AX 错误数值和能力布尔，每次扫描独立限 32 条，耗尽只停止日志、不改变候选或 truncated；prepare / final 的单目标读取仍可记录。AB 确认 Description 真实 getter 失败后新增预选 native-text-identifier-v1：仅 nonweb 原生 TextArea、text-only、有有效 textState、title 精确为空且 Identifier 已声明；真实 Identifier 必须成功有界 CFString、trim 非空，完整原值封存，失败不 fallback。private profile / descriptionDeclared 成对，prepare 固定路线，final 完整候选严格复验，不触 Description、不授 Press，原点击严格 getter 不变。唯一文本标签要求完整稳定扫描；AD 后已在源码另接入自身前后稳定、与已知其他文本区不重叠的通用标签 / 同附件像素边界，不宣称唯一、不放宽扫描判定或点击门槛，原生 Identifier / profile 不公开。日志包含 Identifier 能力四布尔及 generic 固定失败 stage，不含身份原值、动态角色名、窗口身份、坐标或正文。profile 版本源码门禁通过，AC 身份通过而未输入；新标签路线全量门禁与 AE 限定 TextEdit replace / insert / clear 真实闭环通过，保存 PNG / AX / 独立 CUA 一致；端点稳定不声明持续隔离，其他 App / Electron / 网页输入不推定兼容，证据由专题记录。该原生轮次尚未接入第一方桥；2026-10-11 当前实现见上文，不扩大平台或网页兼容声明。
+
+Agent 简单窗口操作由 `electron/platform/computer-use/` 承接。独立 Swift helper 只读 CG / NSRunningApplication 窗口元数据，macOS 14+ 使用 ScreenCaptureKit 的 `desktopIndependentWindow` 与 `SCScreenshotManager` 捕获获准的单个窗口；不使用 Electron 全窗口缩略图枚举、显示器捕获或屏幕裁剪。支持当前 Space 中被遮挡的后台窗口，最小化、隐藏或其他 Space 的目标不可用时明确拒绝。AX 只扫描冻结窗口的有界候选，按显式 operations 发送 AXPress、可写文本属性或真实滚动动作，不移动系统指针、不主动置前，不支持无 AX 动作的画布。`--window-targets` 另返回同一匹配窗口的 `axTree / axTreeTruncated` 纯文本摘要，独立限于 12 KiB UTF-8、节点/深度/时间预算和整体 64 KiB JSON 回执；摘要可截断，不暴露 native 身份或私有点击路径，也不改变候选点击授权。adapter 严格核对窗口身份、成对字段、Unicode、控制字符与字节预算；main 只使用匹配的截图后摘要，保持单窗许可和取消/释放边界。仅在 macOS 注册五种内置 Tool，其他平台保持不可用；构建、权限和固定 resource 路径见 [屏幕查看与点击](agent-computer-use.md)。开发版实际系统权限、截图/后台点击及同窗口 AX 信息一致性需分别实测，不能据 helper 自检推断应用或发行包已获授权；旧版全局点击记录与本次单窗口 AX 验收分别记录。
+
+主窗口继续使用 Electron 默认后台节流。可信 active Run 在发送started前为自有owner窗口取得main-owned绘制租约，覆盖运行 / 等待批准 / 等待回答；它不授截图或操作许可。已批准自有目标的正式观察另核对当前进程PID与精确CGWindowID取得目标租约。两入口共用一个WebContents引用计数管理器，临时setBackgroundThrottling(false)；取消同步释放Run引用，失败 / 结束 / 启动异常 / owner释放 / shutdown / 销毁安全清理。最后引用归零后250ms有界绘制收尾再恢复原值，新获取取消待恢复timer，销毁立即清理；不是最终帧确认，不延长执行或共享。该设置影响同窗绘制与Page Visibility，不置前、不改变第三方应用或全局窗口策略；后台批准卡与最终帧的新鲜度须单独验收。
+
 更新时间：2026-09-23
 
 适用范围：`omniflow-app` 的 macOS、Windows 和 Linux 宿主差异，包含主窗口配置、renderer 平台识别、标题栏安全区、平台专属系统能力及分平台构建验证。

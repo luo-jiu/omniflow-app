@@ -1,5 +1,7 @@
 # macOS 个人签名与发布
 
+2026-10-09 新增内置 Agent 点击 helper：`predev / prebuild` 通过系统 Swift 编译器构建 universal `omniflow-click`，mac 打包将其复制到 `Contents/Resources/computer-use/` 并列入 `mac.binaries`，沿用本文签名流程。代码接线和双架构编译已验证；本轮未签名/发布，安装包的录屏与辅助功能权限归属未验收，不能以开发终端自检替代。功能及 smoke 见 [屏幕查看与点击](agent-computer-use.md)。
+
 更新时间：2026-08-18
 
 适用范围：OmniFlow 个人长期使用的 macOS 自签名身份、bootstrap 安装、Tailscale 更新源、后续版本发布和证书恢复。

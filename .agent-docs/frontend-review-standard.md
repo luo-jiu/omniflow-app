@@ -1,6 +1,6 @@
 # OmniFlow App Frontend Review Standard
 
-更新时间：2026-09-30
+更新时间：2026-10-12
 
 适用范围：`omniflow-app` 前端、Electron renderer / preload / main、IPC、工作区交互和前端文档相关改动的代码评审。
 
@@ -61,6 +61,8 @@ views -> features -> components / hooks -> service / bridge -> backend or electr
 - `electron` 是否反向承担 renderer 业务编排
 - 外部文件后缀、类型或方法名用于索引权限白名单时，必须只匹配自有键或使用 Map；不得让 `constructor`、`__proto__` 等继承属性通过能力筛选。
 - embedded browser 页面属于未受信任内容；页面 console、DOM 全局变量或可伪造事件不能直接授权 main 执行下载、写盘、凭据读取等重操作，必须经过 isolated world、不可预测 nonce、可信事件和一次性 capability 校验
+- Tool 的私有输入投影不能依赖执行可见性：模型或环境过滤、不可用及 unknown-tool 拒绝路径仍按可信注册身份保护原名和 Provider 名称的私有正文，不得写入 SQLite、IPC 或续轮历史；隐私识别不能恢复被过滤的执行能力。
+- 原生 helper / IPC 的内容限额须包含完整序列化结构、路径与元数据开销；正文和条数均合法时仍可能超过总输出预算。允许部分结果的观察须在生产者侧有界截断并明确完整度，不能让接收端硬上限丢弃全部可用结果。
 
 ### 2.3 状态双源
 

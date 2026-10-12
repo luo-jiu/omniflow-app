@@ -1,5 +1,183 @@
 # 前端验证矩阵
 
+## Computer Use 阶段审查与提交（2026-10-12）
+
+- 本轮审查覆盖原生窗口身份 / 单窗捕获 / AX 写操作、Run 与 sealed binding / 取消结算、第一方控件桥、Provider / SQLite / IPC 投影，以及分组、AX 与图片预览。确认并修复两处问题：模型过滤后的文字工具拒绝路径仍持久化 / 续轮发送输入正文；合法候选的完整 JSON 超过 64 KiB 导致整次观察失败。修后独立复核未发现新增问题。
+- 隐私回归同时覆盖 `computer.setText` / `computer_setText` 被非视觉模型过滤后的 SQLite、IPC 和同 Run 续轮正文去除、prepare / execute 零调用，以及来源冒充 / 独立别名不升级权限。历史拒绝别名的 renderer 投影也去除正文与伪造动作，不新增内置来源标记；旧输入不进入新 Run 的历史事实或摘要，无需修改真实 SQLite。原生纯数据回归覆盖深路径、中文 / 转义、scope / 窗口元数据、严格输出边界和摘要叠加，超限仍返回完整候选前缀并标记截断。
+- 修后统一 `npm run lint` / `npm test` / `npm run build` 均 exit0：480 文件 / 5191 项通过，3 文件 / 7 项沿用跳过，测试开始 15:13:38、28.71 秒。专项 audit / orchestrator 162 项、renderer 36 项、原生纯策略 3 项及 arm64 / x86_64 完整 Swift typecheck 通过；独立 `tsc --noEmit` 通过。全量日志为 `/tmp/omniflow-stage-review-final-{lint,test,build}-20261012.log`。开发进程已停止，构建与 dev 串行。
+- 本地按原生模块（`ce084fe`）、Agent 执行 / UI（`e2b6b95`）及文档分批提交，不推送。本轮未新增 GUI 验证，之前本机开发版 Win / libraryId=3 的真实验收范围保留，不扩大为任意 App 或持续指针隔离。运行前 / 终态后的 idle 后台预览旧帧及既存 `interaction.request` 的通用 broker 超时继续待修；签名安装包、其他系统 / 架构真机、通用快捷键与拖拽仍未验收或未实现。
+
+## Agent owner Run 后台绘制（2026-10-12）
+
+- 为真实active Run在started前取得自有owner绘制租约，与获准自有共享目标共用一个WebContents引用计数manager；不新增renderer状态 / 续期IPC / 系统输入或共享许可。Run abort同步归还引用，终态 / 启动异常 / owner释放 / shutdown清理；销毁 / renderer crash清timer与监听，live crash恢复原值。最后引用归零后250ms有界绘制收尾再恢复原设置，新获取取消pending恢复并沿用原值，迟到回调不影响替代contents。它只提供绘制机会，不保证React终态或compositor最终帧ACK。
+- 专项lease / runtime / orchestrator共467项、定向lint与tsc通过，独立只读复核未发现新增问题。统一lint / test / build均exit0，480文件 / 5184项通过、3文件 / 7项沿用跳过，27.80秒；日志 `/tmp/omniflow-computer-owner-render-{lint,test,build}-20261012.log`，build与dev串行。全量后补充启动失败资源清理断言时，发现frozen broker不可spyOn；仅测试改用真实注册生命周期核对，最终orchestrator147项、该文件lint / tsc均通过，生产未变，未签名或发布。
+- 修后dev在发送任务之前仍存在旧帧与键盘焦点初始化问题，用户短暂点击开发窗口 / Agent输入框后才完成GUI提交；该阶段尚无active Run，不计入owner Run租约的覆盖。TEXT3 / SCROLL4启动后，正式首个共享批准卡、进度、等待核验卡与终态均自行更新，无再次人工刷新。SCROLL4结束后展开AX及点击缩略图，AX状态已更新为大图控件，但后台截图仍停留旧帧；idle已恢复默认节流，不计active Run回归，也不能称所有阶段绘制均解决。本轮未为idle预览新增租约。
+- SCROLL4末尾`interaction.request`出现可见等待卡，但未提交，36.012秒后被broker默认30秒执行超时及6秒取消收敛中断，Run随后completed。准确错误为“工具 interaction.request 执行超时”，不是交互自身30分钟TTL。只读定位确认工具未声明timeoutMs，requestInteraction闭包沿外层Run signal等待，未使用broker替换的tool signal；待独立修复host-only等待预算与取消传递。本轮不计交互提交通过。
+
+## Agent 局部 AX 观察（2026-10-12）
+
+- 按用户安排停止自有 dev，锁屏期间只写代码和运行自动检查；未调用 CUA、捕获屏幕、输入或触发系统权限，完成后不自动启动开发版。
+- `computer.observe.focus` 以最新有效的原生控件 ID 为锚点，读取自身或最多三级父区域；精确窗口 / Run / owner / TTL / 单次消费、完整原生指纹及父链复验保留，旧helper、越界、身份漂移或取消拒绝，不退回全窗。局部完整不升级全窗完整、匿名唯一标签或坐标权限，不混全窗第一方控件；both 图片仍为同一获准整窗。
+- 自动验证覆盖 focus schema、scope越权 / 过期 / 已消费 / Run释放 / 窗口变化、区域回执 / 候选前缀、锚点指纹 / secure / web父链、绝对路径 / 深度 / 时间预算、跨区域或模式的diff baseline、Provider全量及预算缩减下的范围信息、旧结果兼容和AX局部标签 / 展开生命周期。原生纯策略和mock仅验证契约，不能替代实际AX效果。
+- 最新统一 `npm run lint` / `npm test` / `npm run build` 均exit0，独立 `tsc --noEmit` 通过；480文件 / 5156项通过、3文件 / 7项沿用跳过，测试开始12:39:44、24.80秒。日志 `/tmp/omniflow-computer-focus-final-{lint,test,build}-20261012.log`；构建已重建arm64 / x86_64 universal helper，未启动dev、签名或发布。工具说明增长触及既有小上下文fixture边界，精简windows / observe重复表述后全文件与全量回归通过，没有增加预算或放宽断言。Provider历史观察沿约1024tokens单项预算保留范围，损坏/不足预算仅省略该条事实、不阻断当前Run。
+- 解锁后仍只用开发版及win / libraryId=3 / 本机macOS MinIO。WebStorm AX1 Run `5547e177-f1bd-4fb6-924f-6b11a8adf672` completed：windows + 4 observe，无写动作。全窗125控件 / 摘要截断；以 `agent.types.ts`（`src/shared/agent`）准确AXRow为锚点，focus自身得到同名AXRow / AXStaticText共2控件、233 UTF-8 bytes且摘要未截断，与独立CUA一致。上溯2级和1级各96控件、摘要仍截断，和全窗按label / role / operations比较新增0，不计找回漏扫或修复“结构”按钮。四次scopeScanComplete均false；局部candidateScanComplete / coordinateClickReady均false，新ID逐观察轮换。最后both保存的2048×1058原图实看仅含整WebStorm获准窗口，不是局部裁图或整显示器。证据 `run-focus-ax1.json` 位于 `/tmp/omniflow-computer80-evidence-20261012/`。
+- 计算器 CLICK2 Run `2a606291-4eed-4b54-8318-5c9871546d4b` completed：8工具，5次AX-only观察和2次V3点击；全窗边栏查询→focus自身→局部新ID点击→重新全窗→focus自身→局部新ID恢复→全窗确认。标签闭环“显示边栏→隐藏边栏→显示边栏”，无imageId，局部摘要均未截断，scopeScanComplete / candidateScanComplete / coordinateClickReady均false。两点击dispatched / committed、axError=0，均引用紧邻局部观察的新ID；目标前后后台、frontmostChanged=false，第1次pointerMoved=true、第2次false，只说明采样端点，不能归因驱动或称全程指针不变。独立CUA确认边栏关闭及原表达式 / 完整显示值保持。首个observe有正式ask / approved持久记录，记录不能识别批准人的具体点击来源。
+- 本轮首个共享等待批准和Run终态展示发生后台旧帧，用户点开发版窗口后刷新；现有获准目标绘制租约没有覆盖首个批准等待阶段。停止已完成Run的开发进程后补充owner Run绘制租约，后续统一门禁及输入 / 滚动与审批卡刷新验收另记。WebStorm失效getter仍保持未通过，局部扫描不保证能修复。通用快捷键、右键 / 双击 / 拖动未实现，也未增加系统键鼠fallback或可见假光标。
+
+- TextEdit TEXT3 Run `cc017160-07a7-4b1b-bbab-224bf5462c5b` completed：15工具、14成功；3次focus自身分别签发新正文ID，紧邻的两行Unicode替换、追加、80行替换均dispatched / committed、axError=0，无unknown、不走第一方桥。三写目标前后后台、frontmostChanged=false，pointerMoved依次false / false / true，末次不作归因。没有派发scroll。第15工具focus引用第13观察，而第14观察已经替代它，执行前以`observation_not_latest_or_wrong_window`拒绝；是旧ID安全拒绝，不是TTL或滚动驱动失败。10张图均253×46，保存图与独立CUA确认真实测试窗口被缩至一行高，没有合法页子按钮；验收者仅调整可丢弃窗口尺寸后继续新Run。
+- TextEdit SCROLL4 Run `3654ae0c-98ac-41c1-b337-a2bfd771f80a` completed：12工具，前11成功、最后交互超时。局部上溯1层观察→新ID下/page，局部自身观察→新ID上/page，局部正文自身观察→新ID空值replace，三写全dispatched / committed、axError=0、无unknown。7张675×441保存原图逐张实看仅含获准TextEdit整窗；首可见行01→30→01→空白，局部观察仍不裁图。三写目标前后后台，frontmostChanged / pointerMoved均false，仅证明采样端点。局部scopeScanComplete / candidateScanComplete / coordinateClickReady均false，清空后全窗扫描完整。独立CUA读空白与滚动值0，GUI保存并关闭临时文档，磁盘确认0字节；清空计内部Agent成功，保存/关闭仅验收清理。
+- 暗色UI实测：TEXT3成功连续observe / setText同组，旧ID失败卡独立；SCROLL4连续observe / scroll / setText同组，失败交互为边界。成功输入/滚动只显示操作行，无详情。局部详情有真实整窗缩略图，“AX · 局部 · 已截断”与“AX · 局部”分别对应摘要；展开说明控件自身/上溯1层与局部扫描不完整。TEXT3缩略图复用聊天大图、缩放按钮与Esc关闭/焦点回到缩略图通过；SCROLL4终态后的大图AX已出现但后台画面旧帧，视觉不另计通过。未覆盖亮色、窄布局或所有历史图片。
+- 证据位于 `/tmp/omniflow-computer80-evidence-20261012/`：`run-focus-text3-summary.json`、`native-semantic-focus-text3.json`、`text3-image-paths.json`，以及对应scroll4文件。原输入正文不写入工具参数审计；限定结果不推定WebStorm失效getter、外部step / fraction或任意App兼容。
+
+## Agent AX 优先与长文编辑（2026-10-12）
+
+- 只用开发版、win / libraryId=3、本机 macOS MinIO；通过 CUA 发任务并批准准确测试窗口，由内部 Agent 执行。没有扩大系统权限或要求目标窗口置前。
+- AX-only AQ `b4cbdf21-3361-4bad-b466-468aaa285af1` completed：10 个 ToolRun，3 次成功 mode=ax 观察、2 次 V3 语义点击、3 次窗口发现，另有 2 次旧 windowRef 因边栏改变窗口宽度被拒绝，均未派发。真实边栏关闭→显示→关闭、独立 CUA 核对恢复；该 Run 无截图附件。两次点击原生端点均 known / target 后台、frontmostChanged=false、pointerMoved=false；只证明端点。展开组后 V3 点击为无详情操作行；AX-only 详情仅 AX 与白名单控件，展开 AX 可读，没有截图缩略图。
+- TextEdit AR `9795bf48-b8d7-4507-b745-a2daf3d9c1f1` completed：6 工具、80 行中文 / emoji replaceText 成功；长文后 textReady=true，能继续定位可见文本区域。唯一 scrollDownPage 实际调用返回 axError=-25205，正确结算 unknown / commit_unknown；Agent 只再观察并停止，未重发。保存图像与独立 CUA 均仍显示文首，不能计滚动通过。文字调用前后目标后台、前台未变，指针端点有变化，不能归因于驱动或称该次指针未变；未知滚动端点均未变。
+- 独立文本 AS `67719a66-048b-49c8-a181-bc07ce0b2e0a` completed：8 工具、3 写全 completed，真实长文后两行中文 / emoji 短替换→按冻结选区插入→空值清空。四份保存原图与独立 CUA 一致，插入在第二行末尾；三写 axError=0、目标前后后台、前台和指针端点未变。AR / AS 的7张673×439保存原图逐张实看只含获准 TextEdit 窗口，未包含遮挡窗口或显示器。清空由内部 Agent 完成，验收者 CUA 保存，临时 txt 磁盘0字节。
+- AX-only / screenshot-only / both、观察内查询 / 分页与有限变化、V3 strict action、长文可见区域及 UI 可信展示已通过自动化。正式 orchestrator 测试覆盖真实 registry→共享审批→runtime→持久化→Provider：AX-only 无捕获 / 附件读写，screenshot-only 无 AX 扫描且实际附件送 Provider。原生能力与调用采用 fixture/mock，不能据此替代上述真机验证。
+- 本批源码门禁 lint / test / build 均 exit0；476 文件 / 4947 项通过，3 文件 / 7 项沿用跳过，universal helper 已编译。日志 `/tmp/omniflow-computer-ax-modes-{lint,test,build}-20261012.log`；白名单 Run 证据 `/tmp/omniflow-computer80-evidence-20261012/runs-aq-ar-as.json`。后续扫描优化的最新门禁与实机结果另记，未签名或发布。
+- 后续有界 BFS 与 debug-only 滚动条子控件诊断完成后，停止自有 dev，再执行最新 lint / test / build，均 exit0；477 文件 / 4948 项通过，3 文件 / 7 项沿用跳过，46.61秒。日志 `/tmp/omniflow-computer80-final-{lint,test,build}-20261012.log`，universal helper 重建后仅重启开发版。BFS 生产纯策略回归验证大分支饥饿、原路径解析及节点/候选/文本/层级/子项/deadline预算；诊断纯策略验证固定类别、Enabled缺失门控、跨进程/窗口、web/secure/循环/深度和8次额度。诊断不新增动作能力。
+- 最新 WebStorm AT `de4868dc-0a08-4272-aa8d-9c4b02d00489` completed：windows + AX-only query=结构 两工具，totalMatched=0、candidateScanComplete=false；未点击、未截图，独立 CUA 确认 IDE 状态没有改变。BFS 扫描304节点 / 128候选 / maxDepth7，仍有 Role / Actions getter 的 invalidUIElement=-25202；不以 BFS 回归通过推定 IDE 目标定位通过。
+- TextEdit AU `88eb4409-69c8-4d4b-847e-100def26fead` completed：6工具、长文replace / clear两写成功，三份673×439单窗原图确认初始空白→80行→空白，CUA核对并保存空文件；没有发送 scroll。两次长文扫描的子控件诊断一致：增页 childKind3 声明真实 AXPress，立即父为同PID、enabled=true的竖轴ScrollBar，父链回到精确获准Window，实际子矩形在window内且parent包含；父矩形超window。箭头及减页子矩形当时invalid。此证据仅用于后续窄页按钮路线，不证明滚动有效。日志与Run证据在 `/tmp/omniflow-computer80-evidence-20261012/`。
+- 新 `native-scroll-button-v1` 仅开放真实增页/减页子按钮对应方向的一次 Page operation，冻结父条轴向与真实父/子矩形，观察 / prepare / final 复验，不授press、不发送系统事件。三组纯Swift策略回归、双架构类型检查和TS/runtime定向699项通过，跨层复核未发现问题。统一最新 lint / test / build 均exit0，478文件 / 5035项通过、3文件 / 7项沿用跳过，26.66秒；universal helper已重建。日志 `/tmp/omniflow-computer80-page-final-{lint,test,build}-20261012.log`。全量门禁发现工具说明增长使两项小上下文预算回归提前超限，精简重复说明节省估算225 tokens后修复；未增预算或放宽断言。以下真机结果独立于源码门禁。
+- TextEdit AV `138cc46b-dcae-4515-a6c7-22d77c93b6d2` completed（11:39:05～11:40:22），10工具 / 4写全completed、dispatched / committed：空白→80行→只选同截图右侧竖条的native-scroll-button下/page→首可见行01变30→新观察上/page→恢复01→新正文ID清空。验收者逐张实看5张673×439保存原图，只含同一批准窗口。长文后三次观察均candidateScanComplete=false / axTreeTruncated=true，位置派生标签保留真实子矩形而不宣称唯一。4写原生axError0、端点known、target后台、frontmostChanged=false / pointerMoved=false；此窄页按钮路线的真实往返通过，旧ScrollArea unknown和外部step / fraction未通过事实保持。独立CUA读空、保存0字节并关闭临时文档；Tool input不保存text。证据 `run-av.json` / `semantic-input-av.log` 位于上节证据目录。
+- Finder AW `1bed1841-87b8-4898-b925-19b363226e8f` completed（11:44:26～11:45:44），6工具 / 2写全completed、dispatched / committed。新建合成目录窗口（40文件 / 3目录），首次AX-only query=视图返回4个准确AXRadioButton / press，无图片；V3点击列表→both保存图确认列头/文件列表→新ID V2点击图标→both保存图确认网格恢复。2张1259×649原图逐张实看只有获准窗口；三次观察partial / AX截断，准确控件可用，不扩大成全树完整或任意IDE兼容。2点击原生axError0、前后target后台、前台与指针端点不变；独立CUA确认图标值1 / 列表值0后关闭新建窗口。仅切换视图，没有打开或修改文件。证据 `run-aw.json` / `native-click-aw.log` 在同目录；没有扩大系统权限、置前目标或使用安装版。
+
+## Agent 第三方简单 / 复杂应用抽样（2026-10-11）
+
+- 只用开发版、win / libraryId=3、本机macOS MinIO；通过GUI让内部Agent执行5个Run / 16工具 / 3写，各Run已结束。用户正常使用Codex，不要求目标置前。本轮仅测试 / 文档，无源码修改，没有重复lint / test / build；沿用下一节最新原生诊断版本门禁。
+- 计算器AP `5e3c251a-1fec-4830-b2c1-54c0bf78a7e0`：边栏开 / 关2次点击均committed，3张原图与独立CUA确认往返恢复；该控件后台闭环通过。
+- TextEditAM `e789a881-b03c-4852-a9b6-b21198514bcc`：空临时txt替换80行中文 / emoji committed；4张原图与CUA确认写入。长文后文本候选bounds校验拒绝，textReady / scrollReady=false；未完成后续短替换、追加、清空或滚动。验收者CUA清空 / 关闭后临时文件0字节，清理不计内部Agent通过。
+- WebStormAO `f06902fb-3792-41ad-acf4-e5afc8ce30e5`：精确发现 / 单窗观察及主要AX界面对应；“结构”按钮无ID，未点击。127个press候选来自Row / StaticText，另1个TextArea声明文字能力；不能说全部无press，也不能据textReady推定输入通过。scrollReady=false，IDE未改。
+- ChromeAN / AN2：仅窗口发现，宽查询找到3窗但没有CUA当前W3C测试页标题；未observe或点击，原因未确定，浏览器控制尚未验证。测试标签关闭并恢复原标签；file协议的CUA策略拒绝不计OmniFlow失败。
+- AM文字与AP两次点击的原生端点均known / target后台、frontmostChanged=false、pointerMoved=false；8张window原图逐张实看只包含获准窗口。仅端点结论，不声明持续零干扰。外部AX滚动仍未通过。RunID、候选诊断和证据位置见[第三方抽样](agent-computer-use.md#第三方应用抽样2026-10-11)。
+
+## Agent 第一方后台文字与滚动（2026-10-11）
+
+- 最新AL Run `5a6ceebd-2534-40fc-80d5-b75a3877ee5d` completed（本地10:47:24～10:50:00）：19工具 / 9写全部completed、omniflow-control/dispatched/committed。9次原生实时两端known=true / active=false，指针端点均已知且未变；旧活动事件与window焦点仍true，因此不能单独据它们判断前台。10张2048×1058、同target的window原图逐张实看两行中文/emoji替换、末尾追加、清空及上下page/step/fraction三对真实移动与恢复，仅含获准OmniFlow窗口。限定第一方后台闭环通过；不证明全过程持续隔离、同控件并行编辑或其他软件兼容。
+- AL结束后独立CUA核对空草稿、任务结束、一个19条computer组；3文字 / 6滚动为无详情操作行，observe展开有缩略图及AX截断标签，缩略图打开聊天共用大图预览并实看同一单窗图像，最后关闭预览 / 收起过程。Tool input未保存text参数。证据副本 `/tmp/omniflow-first-party-native-background-qa-20261011/`、日志 `/tmp/omniflow-first-party-native-background-dev-20261011.log`；临时目录可清理，持久Run / 附件按RunID追查。
+- 当前源码接入主窗口固定“Agent 输入 / Agent 对话区域”，source=omniflow-control；沿原共享批准、sealed prepare、一次观察消费和结算，不增加通用桌面输入 IPC，不授第一方press或任意脚本。文本走唯一草稿revision CAS，滚动走已有scroll/follow owner，page=一可视高度、step=40 CSS像素、fraction=真实可滚动范围10%。
+- 最终源码门禁 `npm run lint` / `npm test` / `npm run build` 均exit0：475文件 / 4790项通过，3文件 / 7项沿用跳过，测试开始00:54:28、31.14秒。日志 `/tmp/omniflow-first-party-geometry-final-lint-20261011.log`、`/tmp/omniflow-first-party-geometry-final-test-20261011.log`、`/tmp/omniflow-first-party-geometry-build-20261011.log`；定向跨层review 215项通过、未发现问题。build与dev串行，保留原未提交改动。
+- 原生实时诊断版本门禁（10:44:53）：lint / test / build均exit0，475文件 / 4826项通过、3文件 / 7项沿用跳过，29.05秒；platform306项、bridge59项及只读跨层review通过。日志 `/tmp/omniflow-native-activity-lint-20261011.log`、`/tmp/omniflow-native-activity-test-20261011.log`、`/tmp/omniflow-native-activity-build-20261011.log`。build前停止dev，完成后仅重启开发Electron。
+- AF / AG：真实内部Agent各7工具，第一方输入replace两行中文/emoji、insert追加、replace空值均dispatched/committed；原图实看和独立CUA确认Composer变化与最终空值。window focused=true，不能计为后台通过。
+- AH / AI：有效引用被准备态Run guard、临时工具行几何变化依次拒绝，全部在dispatch前。修复复用active Run判定、可信initial preparing归组和31px稳定过程状态占位；不放宽geometry、权限、CAS或unknown分类。AI诊断真实extent增加35 CSSpx、top变化31 CSSpx，身份 / 正文revision未变。
+- AJ Run `e46975cf-5b58-4da5-b8e6-7f969342cca5` completed，13工具全部completed：上下page、上下step、上下fraction 6写，回执均omniflow-control/dispatched/committed。7张window原图逐图确认三种单位的真实移动与往返恢复；独立CUA核对完成、空草稿、一个13条computer组、成功滚动无详情、观察缩略图 / AX截断标签与共用大图预览。6写鼠标端点未变，应用前后均active=true，不计后台通过。
+- AK Run `6c1ae81e-5c83-45ad-a263-c2bdbb05b0d1` completed，19工具 / 9写全部completed、omniflow-control/dispatched/committed；10张2048×1058 window原图逐图确认三写文字与三对滚动，最终CUA为空草稿、任务完成。用户持续在Codex使用电脑且报告窗口覆盖，但9次事件投影active=true、window focused=true、pointerMoved=false，后台焦点证据未闭环，不能以缓存否定用户场景。
+- 为此新增debug-only原生实时端点：无输入固定 `--parent-activity` 读取NSWorkspace当前前台与getppid比较，只回known/active；500ms / 512B、失败unknown，不fallback事件缓存。pre等待后重新核对绑定，post用独立signal，失败不改变回执。遮挡 / window.isFocused仍不足以证明后台，端点也不证明持续零干扰。只用开发版、win（libraryId=3、本机macOS MinIO），仅空草稿合成文字且不提交；第一方滚动成功不代替外部AX page/step/fraction兼容性，后者仍未通过。
+
+## Agent 文字输入、滚动与内部模块（2026-10-10）
+
+- 已实现 `computer.setText` 的 replace / insert / 空值清空，以及 `computer.scroll` 的 up / down / left / right × page / step / fraction；新增 fraction ABI 的全量门禁通过，内置 Agent 验收未完成。仅操作观察内实际声明能力的原生 AX 控件；不使用全局键鼠、剪贴板、焦点设置或任意动作名。page 必须是真实翻页动作，step 必须是对应方向的滚动条增减动作，fraction 移动已确认 AX 数值范围的 10%，三者不互相冒充。
+- 独立内部模块由纯 shared computer-use contract、main 单窗 platform facade 和固定 Swift helper 组成；平台不导入 Agent 会话 / 权限 / UI。Agent adapter 继续独占 Run 许可、60 秒一次性观察、私有指纹、附件与提交结算，无桌面输入 IPC，也不增加独立服务或发布包。
+- 文字原文只参与 main 私有准备 / 执行 / seal；操作参数审计、SQLite、审批、renderer 事件及后续模型工具历史只含目标、模式与字符 / 字节计数。原始敏感检查保留；用户聊天和获准截图遵循既有规则，可能包含测试文字。普通工具的完整输入不受此投影影响。
+- 自动验证覆盖实际 orchestrator / SQLite 的 allow / ask 链、原文执行与公开投影、同长度不同原文 seal、旧点击许可不扩权、操作能力 / 选区 / 可选字段存在性漂移、过期 / 单次观察、取消结算、未知回执不误报成功、非点击子控件的坐标阻断，以及完整稳定扫描中唯一匿名同轴滚动条的签发。
+- AXEnabled 窄兼容修复冻结时的全量 `npm run lint` 与 `npm test` 通过：471 个文件 / 4419 项通过，3 个文件 / 7 项沿用跳过；该版本 `npm run build` exit 0，arm64+x86_64 universal helper 已重建，专项 228 项、runtime 138 项、Swift 双架构类型检查和独立 review 通过，临时 AppKit fixture 已编译。历史日志为 `/tmp/omniflow-computer-enabled-final-lint-20261010.log`、`/tmp/omniflow-computer-enabled-final-test-20261010.log`、`/tmp/omniflow-computer-enabled-final-build-20261010.log`，不代替下列 AX 写后未知分类修复的门禁。
+- AX 实际写调用后的未知分类修复冻结后，最终全量 `npm run lint` / `npm test` 均 exit 0：471 文件 / 4420 项通过，3 文件 / 7 项沿用跳过，测试开始 17:22:14、耗时 30.33 秒。最终 `npm run build` exit 0，arm64+x86_64 universal helper 已重建；专项 229 项、Swift 双架构类型检查及定向 ESLint 通过。最终日志为 `/tmp/omniflow-computer-unknown-final-lint-20261010.log`、`/tmp/omniflow-computer-unknown-final-test-20261010.log` 与 `/tmp/omniflow-computer-unknown-final-build-20261010.log`，滚动实测结果以 Z 为准，不能借用 X 的未知副作用作为通过证据。
+- 首轮真机 W2 `ae706994-bb65-4a1d-a6d4-a7124948dfcf` completed，但只执行 windows / observe / observe；两张保存原图均为 1000×632、window scope，仅包含测试 AppKit 窗口。标准 TextArea / ScrollArea 有实际文本 / 翻页能力，但 AXEnabled getter 不支持，旧统一 enabled=true 门槛使扫描 partial、elements=0、textReady/scrollReady=false；未发送任何写动作，不能计为输入 / 滚动通过。此前重复提问在共享批准前取消，同样无写动作。
+- W2 后加入私有 enabledState=enabled/absent：仅确认 getter 的 attributeUnsupported / noValue 且 nil，且原生 TextArea 有实际可写文本能力或 ScrollArea 声明真实 Page 动作时允许 absent，剔除 press；false、错误类型、成功 nil 及真实读取错误仍拒绝。state 的存在性 / 值在前后观察与正式 dispatch 严格复验，不能把缺失改为启用后继续用旧 ID。修后原生检查、专项回归与最终全量门禁通过；文字 W3 与滚动 Z 分别记录，不用 W2 代替修后真机验证。
+- W3 Run `d5aefeb5-95fa-4dc0-8ddf-4b0f8a5116c8`、Session `af23f334-401f-498b-9318-22043207165e` completed，windows 一次、observe 四次、setText 三次，共八工具全部 completed。四张保存原图均为 1000×632、window scope；实看初始 → 中文 / emoji / 两行 / TAB 替换 → 插入 → 清空，最后 CUA 同窗读为空。AX 保留 Unicode，夹具字体的 🪟 缺字 glyph 不计字符丢失。replace 的 scalar / bytes 为 14 / 27，insert 为 4 / 13，清空为 0 / 0；操作审计只含身份与 counts，无 text / textHash。textReady / scrollReady=true、clickReady=false，三次原生文本操作均目标后台、frontmostChanged=false、pointerMoved=false；只证明该夹具文字闭环和端点，不证明持续隔离或滚动成功。
+- W3 最新开发版历史展示实看：windows 单独卡，首个连续组为三个 observe + 两个成功输入，共五工具；成功输入仅一行“已发送文本输入”，没有详情按钮。模型中间消息形成正常边界，末次 clear + observe 另起组；参数拒绝在调用前，八个实际 ToolRun 均 completed，不能记为真实 write 失败。观察详情显示真实缩略图及“AX · 已截断”，缩略图复用聊天大图与缩放控制，Esc 关闭后焦点回缩略图；AX 纯文本展开可读 QA TextArea。最后收起外层任务释放详情，仅此历史任务路径通过，不宣称全页面视觉手验。
+- 滚动 X Run `2675158b-bf13-493d-84a9-93ceceaf72c2` cancelled。三次 Page 实际进入 AXUIElementPerformAction，却错误返回 not-dispatched / uncommitted；前三次观察垂直值均为 0。结束后 CUA 未发送滚动，仅只读到 vertical=0.06529651038321559，截图为 row009，不能证明回调错误无副作用。后续已将所有实际 AX 写调用后的非 success 返回统一为 unknown / commit_unknown，点击也复用；调用前的明确拒绝不变，本地日志新增数值 axError。之后验收者独立 CUA Scroll Up 将垂直值从 0.06529651038321559 恢复为 0，此恢复不计内置 Agent 通过，不重复发送未知请求。
+- 修后滚动 Z Run `79801ac5-4ad6-4682-8204-eb6924725f99` completed，五工具为 windows / observe / 恰好一次 down-page / observe / observe，scroll Tool failed 但 Run completed，没有重发。17:37:07.902 的原生 scrollDownPage 返回 axError=-25205（attributeUnsupported），正确结算 unknown / commit_unknown、nextAction=observe、retryAllowed=false。三张 1000×632 图像只有夹具；初始及后两次观察的两轴滚动条值均为 0，后两张保存原图为 row001，最终独立 CUA 后台 AX / 截图也为两轴 0、row001。原生目标前后后台、frontmostChanged=false、pointerMoved=false。不是过期 / 权限 / AX 截断造成的 prepare 拒绝；未知分类通过实测，实际滚动未生效，四向 page / step 均未通过真机验收。
+- 声明 action 不保证真实回调可用，调用后错误也不能据此保证无副作用。Z 阶段未实现 AX 滚动条 Value 写入；后续 fraction 补齐另立明确策略与量纲，不能冒充 page / step，当前状态见下列本轮补齐记录。
+- TextEdit Y Run `2458c376-a9eb-416f-a54b-03d34216efdf` completed，仅两次 application=TextEdit 的 windows 查询为空，没有输入。随后 query=未命名 已发现中文“文本编辑”目标；实际观察见 Y2，发现成功不等于输入成功。
+- TextEdit Y2 Run `a7a9e88d-d9c9-495f-bbc8-93384c3b593d` completed，仅 windows + 两次 observe 共三个工具；两张 603×505 截图均为正确的临时“文本编辑”窗口。没有文本 / 滚动候选，descriptionReadErrors=1、firstAXError=-25200，没有任何 write。仅发现与捕获通过，输入兼容未通过验收，不能据此次扫描推定所有 AX 输入不支持。
+- W3 / Z 轮次始终使用开发版 / win（libraryId=3、本机 macOS MinIO），未新增系统权限、操作安装版或第一个资料库。夹具最终确认文本为空、两轴滚动条为 0 后关闭。TextEdit 只使用该轮创建的空测试文档，准备提问时复制的测试文字已清空；测试阶段未保存，清理时通过 GUI 保留空产物另存到 `/tmp/omniflow-computer-qa-bUwOTZ/omniflow-textedit-input-qa.rtf`（219 字节）并关闭，未删除文档、未写入用户文档，旧 autosave 是否移除未验证。该轮结束时开发版停在 win W3 历史任务，任务已折叠且无 active Run；下一轮补齐前已退出该开发进程与旧夹具。
+- 本轮源代码已接入 unit=fraction 与 scrollUpFraction / scrollDownFraction / scrollLeftFraction / scrollRightFraction：实际 AXScrollBar、明确 enabled、匹配轴、Value / MinValue / MaxValue 三个非 Boolean 的 finite 数值与有效范围、AXValue 实际可写才可签发。缺 min / max 不默认 0 / 1；一次沿确认范围移动 10% 并在边界截停，没有自定义幅度。私有 scrollState 绑定 value / minValue / maxValue，观察前后 / prepare / native 派发前严格拒绝漂移；旧许可不授新 operations，也不在 page / step 失败后 fallback。内置 Agent 往返仍待收口，不使用旧 4420 项门禁代替本轮检查。
+- TextEdit 先加固定角色 / 拒绝阶段 / error / bool 诊断，AB 定位后另加预选严格文本身份 profile；first-party Electron 受控输入桥仍只列调研计划。新夹具为 `/tmp/omniflow-computer-qa-cyzUeg/Omniflow Computer QA.app`，GUI 已创建新空 TextEdit“未命名”用于观察。独立 CUA 设置夹具 vertical 0 → 0.1，内容到 row013 / row014 后恢复 0，只计对照，不计内置 Agent 通过。
+- fraction 原生冻结后，专项 253 项、Swift 双架构类型检查通过；TS 501 项及 UI 152 项定向回归此前通过。最新全量 lint / test / build 均 exit 0，471 文件 / 4464 项通过、3 文件 / 7 项沿用跳过，测试开始 22:32:27、耗时 48.30 秒；构建已重建 universal helper。日志为 `/tmp/omniflow-computer-fraction-lint-20261010.log`、`/tmp/omniflow-computer-fraction-test-20261010.log` 与 `/tmp/omniflow-computer-fraction-build-20261010.log`。固定角色诊断每次扫描独立限 32 条，仅限制日志，不改变 truncated 或能力；第一 probe 与最终拒绝分开，实际数值三值不进日志。新开发版已启动，真机结果另记。
+- 新 TextEdit 的独立 CUA setValue 对照成功写入合成中文 / emoji / 两行文字后清空，AX Unicode 完整，CUA TextArea / First Text View 标 settable；只说明该窗口有原生 setter，helper 拒绝阶段已由 AB 确认为 Description，不计内置 Agent 文字通过。系统自动保存出的 iCloud“未命名.rtf”在 AE 后经 GUI“移到”移动至本轮临时目录并关闭，最终清理另记，不能称另存副本。
+- AA 首轮误选标题“Window”，由验收者取消，未捕获、未执行。AA2 Run `f3c7e816-6f6f-4327-80cf-5af34a1f1979`、Session `3367c2e9-1037-4ef3-bd7b-07242829ef38` 正确选 QA，windows + observe 成功，imageId=`83b1b3a7-81fc-4811-bf81-c47c30bbf4b0`。AXBar 值 0、enabled=true，valueNumeric / valueSettable=true；实际 MinValue / MaxValue getter 为 -25205，未签发 Fraction 候选、没有 scroll 派发。发现与观察通过，fraction 未通过；外部缺范围仍不猜默认 0 / 1，本轮未取得通用范围保证。
+- TextEdit AB Run `f1b8ce4f-9616-48e2-8d94-fa6a03d53861` 属于上述 Session，observe 成功，imageId=`207398fb-c17c-411b-bb3a-646174ffdf07`。roleKind=1 / stage=17 / axError=-25200，descriptionDeclared=true；nativeContext、文本角色、Value / SelectedText settable 及 enabled confirmed-absence 等均通过，真实拒绝点为 Description 身份 getter，没有 TextEdit write。不能据此断言 setter 不存在，也不能把真实失败按字段缺失放行。
+- AB 后文本 profile 已冻结：private identityProfile=`native-text-identifier-v1` 与 descriptionDeclared 成对；仅非网页原生 TextArea / text-only / 有效 textState / title 精确空串 / AXIdentifier 已声明才在 Description getter 前预选。Identifier 必须 getter 成功、CFString、完整安全原值不超过 256 字节且 trim 非空，失败即拒绝、不 fallback，禁止 profile 携带 Description / press。prepare requiredProfile 与 final 完整候选复验封印路线及声明，Press 和默认 Description 规则不变。main 只有前后完整稳定集合中唯一可操作原生 TextArea 才派生 labelSource=unique-actionable-native-textarea；AD 后的通用图像边界标签另记，公开仍不露 Identifier / profile / 声明字段。
+- 文本 profile 平台专项 280 项、runtime 专项 173 项、Swift 双架构类型检查及独立 TS / native review 通过；该版本全量 lint / test / build 均 exit 0，471 文件 / 4506 项通过、3 文件 / 7 项沿用跳过，测试开始 22:49:16、耗时 49.88 秒，构建包含新 native universal prepare。日志为 `/tmp/omniflow-computer-text-profile-lint-20261010.log`、`/tmp/omniflow-computer-text-profile-test-20261010.log`、`/tmp/omniflow-computer-text-profile-build-20261010.log`；开发版日志 `/tmp/omniflow-computer-text-profile-dev-20261010.log`。诊断新增 identifierDeclared / identifierReadable / identifierNonEmpty / textIdentityProfile 四布尔，32 条上限不变。自动 gate 不提供实际编辑成功证据，fraction 仍未通过。
+- AC Run `38711990-fe91-4b23-820c-792b856dd743`、Session `3367c2e9-1037-4ef3-bd7b-07242829ef38`，imageId=`424e94d5-ec6c-408b-96dd-8b7df747e2e8`。目标原生文本 profile 两次 accepted=true，Identifier 声明 / 可读 / 非空均 true，Description 错误计数 0，真实证明此文本区支持 Identifier 身份路线；不计 setter 已执行或 Description 已读成功。
+- AC 整窗候选扫描 48 nodes / 18 candidates、maxDepth=3 / maxChildren=17，truncated=true、firstAXError=-25205；children / depth 限额均未触发，optional names / Description / Identifier 错误计数为 0。因全局完整性不足，main 未签发唯一文本 elementId，Agent 未发送 setText，编辑未通过；另一个 getter 门槛由后续 AD 定位，4506 项门禁不代替后续诊断及标签路线改动。
+- generic 固定诊断已接入 roleKind=0，仅明确 stage 与真实 non-success 才 log，正常无 operation / disabled 不占 32 条 cap；追加 role19 / position20 / size21 / childrenCopy22 / windowsCopy23，原 1～18 不变，不改变 gate。AD Run `1f56155d-a060-411b-8018-07611a04436a` 在 2026-10-10 23:02:11 出现 roleKind0 / stage13 enabled / -25205，导致整窗 partial；目标 TextArea identity accepted。AD observe imageId=`b220897d-f554-4305-a37c-9a3418cc956b`，candidateScanComplete=false、textReady=false；该图与 AC 分开，也不将 profile accepted 计为输入成功。
+- AD 后 native-text-screenshot-bounds 源码已冻结：该 text-only profile 自身前后指纹稳定、与前后所有已知其他可操作 TextArea 无重叠，才签发通用“原生文本区域”与同附件像素 screenshotBounds，供模型结合图像选择 elementId。部分扫描不宣称唯一、不推定未扫描控件不存在，已知重叠不发布；不授 press / 坐标点击、不改扫描完整性或 prepare / final 复验。runtime 定向 187 项与 ESLint 通过。
+- 图像边界路线最终全量 lint / test / build 均 exit 0：471 文件 / 4522 项通过、3 文件 / 7 项沿用跳过，测试开始 23:09:41、耗时 54.02 秒，构建正常完成。日志为 `/tmp/omniflow-computer-text-bounds-lint-20261010.log`、`/tmp/omniflow-computer-text-bounds-test-20261010.log`、`/tmp/omniflow-computer-text-bounds-build-20261010.log`；开发版日志 `/tmp/omniflow-computer-text-bounds-dev-20261010.log`。4506 项历史 gate 不代替此版本检查。
+- AE Run `cf5e6e65-6208-456c-b981-521e362e00ff` / Session `3367c2e9-1037-4ef3-bd7b-07242829ef38` completed，开发版 / win / libraryId=3，对“文本编辑 / 未命名”单窗批准一次。初图 `70efc3aa-897a-45b9-9d04-d24cae0c583b` scanComplete=false、textReady=true，AXTextArea 的通用标签“原生文本区域”、labelSource=native-text-screenshot-bounds、screenshotBounds={x:0,y:200,width:1172,height:764}；没有放宽整窗扫描或点击门槛。
+- AE replace 两行“QA 原生中文😀 / 第二行”后图 `9999549e-4114-42c0-ab67-89d0bcb05b86`，insert“＋插入🪟”后图 `827cb735-8085-48ef-a4f2-525451897f98`，replace 空值后图 `a2c7cbd2-6b3f-4f2f-b393-f438b36fd548`。三写均 dispatched / committed；验收者逐图检查，AX 摘要对应文字及清空，独立 CUA 在插入后读到完整两行和新增内容、最终确认空。原生 23:11:59.241 / 23:12:07.493 / 23:12:15.866 均 axError=0，frontmostKnown 前后 true、targetFrontmost 前后 false、frontmostChanged=false、pointerMoved=false。限定 TextEdit 文本区 replace / insert / clear 后台闭环通过，端点不证明持续或同窗口隔离，不宣布所有软件可用。
+- 夹具关闭前两轴滚动条均为 0，已通过 CUA 关闭且不再运行。AE 后 TextEdit 为空测试文档，GUI“文件 → 移到 → 其他”移动到 `/tmp/omniflow-computer-qa-cyzUeg/未命名.rtf`，确认文档 URL 为该临时位置后关闭；原 iCloud“未命名.rtf”路径已不存在。219 字节 RTF 只含格式头、没有正文，未删除文档、未写入用户文档；自动打开的文件面板已取消。开发版保持打开 win / libraryId=3 的最新 AE 终态。该原生批次 fraction 和四向 page / step 未通过，任意 Electron / 网页编辑器输入不推定兼容；2026-10-11 第一方桥的独立实现与验证见本文件首节。
+
+当前限定开发版 / win（libraryId=3、本机 macOS MinIO）的验收与待验项：
+
+| 用例 | 核对标准 | 当前结果 |
+| --- | --- | --- |
+| AppKit 文字替换 → 插入 → 清空 | 只选择“QA 文本输入区”的准确 ID；中文、emoji、多行在新截图与 CUA 同窗读取一致，最终为空；insert 仅在明确声明 insertText 时执行，否则记录不支持。每次动作后空参数 observe，禁止重用旧 ID。 | W3 限定夹具通过；🪟 字体缺字与 Unicode 保留分别记录。 |
+| fraction 垂直 / 水平往返 | 只用新观察明确声明的 Fraction operation；每次为冻结数值范围的 10%，截图 / AX / CUA 确认实际内容移动并恢复；数值漂移拒绝，缺范围不授权，失败不切换 page / step。 | AA2 的真实 Min / Max getter 不支持，未签发 Fraction 候选、未派发；CUA Value 对照不计内置 Agent 通过。 |
+| 垂直 / 水平 step 往返 | 只选准确命名的滚动条；实际行号 / LEFT、RIGHT 位置变化后恢复，不以 dispatched 单独判成功。 | 四向 step 均未通过真机验收。 |
+| page 往返 | 仅在观察明确声明对应 Page 能力时执行；未声明则记录不支持，不更换点击、键盘或滚轮路线。 | Z 一次 down/page 未生效；unknown 分类正确且没有重发，四向 page 均未通过真机验收。 |
+| TextEdit 外部兼容 | 仅本次临时空文档，按实际 operations 验证 replace / insert / 清空；不打开或保存用户文档；比较原图、AX、CUA 与实际结果。AXSelectedText 不保证可写，insert 缺席不能降级键盘、焦点或写选区。 | AE 限定 TextEdit 文本区通过 replace / insert / clear 闭环，整窗 partial 仍保持；空测试文档已移动临时目录并关闭，其他 App 不推定兼容。 |
+| 后台与展示 | 批准精确单窗后置前 WebStorm，核对动作前后前台 / 指针端点；检查连续操作合组、成功输入 / 滚动无详情、截图和 AX 预览，以及 SQLite 操作参数不含正文。端点证据不宣称持续隔离或同窗口状态隔离。 | W3 历史展示路径通过；AE 三次 TextEdit 写入后台端点稳定、保存图像与 AX / CUA 闭环通过。Z 滚动端点稳定，滚动成功展示未验收。 |
+
+## Agent 窗口发现、控件 ID 与可读身份（2026-10-10）
+
+- 新增 `computer.windows` 只读元数据搜索、Run 绑定 windowRef，以及 `observe → elementId click`。观察后旧引用、过期、一次性、切窗批准、身份复验与停止清理保持原链；公开列表不含 PID / 路径 / 原生 identifier。
+- Provider 观察/窗口结果使用独立 40k estimated tokens 预算；真实续轮覆盖 128 控件＋12 KiB 中文 AX 和 64 个最大窗口标签。低上下文按完整条目裁减，保持 UUID / 标签与点击能力字段，明确标记省略。没有模型隐藏全树，AX 摘要仍有界。
+- `candidateScanComplete`、`coordinateClickReady` 和 `clickReady` 分别表达扫描完整度、坐标门槛与任一路径可用。部分扫描保留两次严格确认的 ID；坐标要求完整且集合完全稳定，prepare / dispatch 均拦截。无可读标签不发 ID，完整私有坐标候选不受 ID 过滤影响，避免误选重叠父控件。
+- 实机仅开发版 / win（id=3、本机 macOS MinIO）、gpt-5.5 / medium、完全访问，未新增系统权限。O / P 主窗发现和观察成功，但 Subrole 读取错误造成点击被拒绝；Q 部分 ID 路径实际误点了计算器“删除”，后图确认并停止，明确不计通过。原表达式、完整显示值与隐藏边栏已经恢复，计算历史未新增或删除。具体 Run 与根因见[实施专题](agent-computer-use.md#窗口发现与控件-id-的本轮验证2026-10-10)。
+- Q 后修正主要 Description 的直接严格读取、非必要 Subrole 不采集、匿名角色不发 ID和冻结路径有界前缀；不吞真实失败、不降级全局鼠标。用户吃饭锁屏后暂停所有读屏/点击，仅完成非 GUI 工作；要求继续后恢复开发版验收，旧 N 访达坐标版结果不替代新版本。
+- 新只读 R 返回计算器 22 个准确命名的 ID，与 CUA 同窗标签一致。S 完成六工具语义闭环，三份已保存原图证实计算器边栏隐藏→显示→隐藏、原数值保持；展开时 AX 与候选均截断，坐标能力关闭，仍成功使用独立确认的隐藏边栏 ID。S 最后模型总结遭遇连接中断，Run failed，六工具均 completed；不得写成整体 Run completed 或重放动作。
+- 新语义 T `977929de-7b17-4780-832c-944e866f39ad` Run completed，访达六工具按 ID 完成图标→列表→图标。三图、AX 内容区和单选 value、最终 CUA 后台读取均一致；未改变文件。S / T 四次原生点击目标前后均在后台，前台与鼠标端点未变，只证明这些应用/操作的端点，不证明持续或同应用状态隔离。
+- T 实看连续三步共享一个折叠组、成功点击无详情、截图缩略图和 AX 截断标记、大图预览及 Esc 焦点恢复；模型中间说明保留消息边界另起组。图像均为获准单窗。详细 Run、范围与恢复见实施专题。
+- 广泛输入调研补充公开 AXShowMenu / AXConfirm、文字与滚动路线，以及定向像素、Unicode、快捷键、拖拽和浏览器适配的逐应用验证门槛；后续文字 / 滚动的实现及本轮验收状态见上节，其余输入路线仍未接入。源码与实施顺序见[研究](agent-computer-use-research.md#10-2026-10-10-更多后台输入能力的源码复核)。
+- 后续独立复核发现超长 title / 非法 AX 读值静默省略候选而未标部分扫描，可能漏掉重叠子项并错误开放坐标；已修复生产候选读取，真实缺失/非法/超预算标 partial，明确无 AXPress / Boolean false 正常跳过。实际 Swift 纯策略测试覆盖长标题、控制文本、非法类型、动作数组、enabled、几何和正常省略，未调用真实 AX。
+- 最新全量 `npm run lint`、`npm test`（470 文件 / 4162 项通过，3 文件 / 7 项沿用跳过）与 `npm run build` 通过；本轮构建前停止开发版，helper arm64+x86_64 universal 已重新生成，独立静态复核未发现剩余问题。构建后恢复开发版继续最新 helper 的实机复测，不签名打包或发布。
+- 最新 helper 的 U 再次按 ID 完成计算器边栏展开/恢复，三图与 CUA 确认原数值保持；旧 windowRef 因窗口宽度变化被拒绝后重新搜索观察，不补发点击。后续访达只查询未操作时上游 HTTP/2 失败，U Run failed。V `f7eaba03-f8d1-4788-8019-18538de05d49` 仅执行未开始的访达测试，六工具与 Run completed，三图/AX/CUA 再次确认图标→列表→图标。两应用扫描被保守标 partial、坐标关闭、ID可用；U / V 四次原生点击目标均后台，前台与指针端点不变。结束关闭专用测试窗、保留原下载窗口，开发版留在 win Agent 会话。
+
+## Agent 第三方窗口与后台控制调研（2026-10-10）
+
+- 沿用开发版、win（id=3、本机 macOS MinIO）、gpt-5.5 / medium、完全访问。内置 Agent 只调用窗口观察 / 点击；未启动安装版、操作第一个资料库、修改资料库内容或新增系统权限。
+- 计算器 L 首图和未截断 AX 摘要成功，AXPress 回执成功但后续旧标题选择失败；CUA 未确认边栏变化，不计业务通过。应用名唯一选择的 L2 因多个匹配窗口被拒绝，暴露公开窗口发现入口缺失。截图共享控件与边栏位置映射有疑点，根因未确认。
+- 访达 M 首图成功，但约 85 秒的模型等待超过 60 秒截图有效期，点击在 prepare 被拒绝，未发送输入。不能计为 AX 截断造成失败。
+- 干净会话 N `cd934d32-35fe-47e5-8cac-5835a14222d1` 完成五工具闭环。三份保存原图实看图标视图 → 列表视图 → 图标视图，仅测试访达窗口；AX 按钮 value 对应，虽然摘要截断但目标控件可读。两次点击目标前后在后台、前台和物理指针端点均未变；最终 CUA 未置前读取到相同视图状态。原图、时间与 Run 证据见 [实施专题](agent-computer-use.md#第三方应用验收2026-10-10)。
+- Codex 官方后台 / 画中画、公开源码的驱动边界，以及 Cua / AXorcist / Peekaboo / axcli / OpenDesign 候选调研见 [调研专题](agent-computer-use-research.md#9-2026-10-10-后台控制复核与下一步建议)。只读调研不等于集成这些库，不宣称任意应用、画布或其他控制操作已通过。
+- 本轮仅更新文档并进行上述实际开发版验收，未修改执行代码；未重复运行 lint / test / build，沿用上一轮门禁，未签名打包或发布。
+
+## Agent 内置屏幕查看与点击（2026-10-09）
+
+- 新增 macOS `computer.observe / computer.click`，首次共享确认和系统权限、图片自动进入现有视觉链、单次截图绑定 AX 控件激活、停止清理与输入回执。为避免争用用户鼠标，已去掉全局鼠标输入，不支持右键/双击或无 AX 动作控件。详细契约见 [屏幕查看与点击](agent-computer-use.md)。
+- 自动化覆盖严格动作、授权卡内容与防伪目标、非视觉模型过滤、Run/owner/AI隔离、Retina/负屏幕原点、截图过期/一次性、权限等待期间屏幕变更/撤销、取消回滚、原生协议和观察/输入超时。原生 helper 双架构编译与拒绝输入通过。
+- 早期全局鼠标版的全量 `npm run lint`、`npm test`、`npm run build` 通过：462 个测试文件 / 3670 项通过，3 个文件 / 7 项沿用跳过；diff 检查通过。包括真实图片水化进入下一 Provider turn、冒名注册不读取截图、仅截图会话删除清理，以及将捕获/存储耗时计入有效期；未签名打包或发布。这份旧版检查不代替后续 AX 修复的门禁。
+- 完整独立 Electron smoke 因录屏权限 `denied` 返回 blocked，在创建显示 fixture、截图、点击前停止；fixture-only 的本地渲染和颜色标记通过，只计渲染验证。未访问资料库或修改系统权限。
+- 内部 Agent 真实联调使用开发版、win（id=3）、gpt-5.5 / medium 和同一个测试会话。首次及完整重启后的重试均实际调用 `computer.observe`，共享审批为 `ask / approved`，随后因 OS 录屏拒绝停止，无截图成功或 `computer.click`。Electron 录屏和辅助功能已按用户批准开启；TCC 日志确认本次 CLI 开发启动链的录屏主体是主 ChatGPT/Codex 程序，仅授权 Electron 不足。Run 标识与环境处理见专题，不能把模型最终答复或已开启的系统开关计为点击通过。
+- 用户随后授权实际请求主体 ChatGPT/Codex 的录屏权限，开发 Electron 重启后的 Run `22e29c2d-6597-419f-aea5-ad05a987d120` 完成真实 `observe → click → observe`（三工具 completed，初次 ask/approved，点击 dispatched/committed），目录树折叠且出现“展开目录树”。仅证明早期全局鼠标版内部 Agent 闭环通过。
+- AX 修复自动测试覆盖截图前后窗口顺序/身份/进程启动时间/layer/几何稳定、AX 路径/角色/标题/几何漂移、遮挡窗/系统浮层不透传、候选重叠拒绝、后代选择、sealed 控件绑定和后台目标不随当前前台切换；已有 unknown 结算与一次性截图回归保留。
+- AX 修复及缩略图最终全量门禁通过：`npm run lint`、`npm test`（463 文件 / 3787 项通过，3 文件 / 7 项沿用跳过）、`npm run build` 与 diff 检查；Swift helper 已编译 arm64+x86_64 universal，platform 的 86 项 mock 覆盖 UTF-8 分包、固定目标严格校验、扫描预算、AX 启用边界、unknown 和超时。未签名打包或发布。
+- 上一阶段按用户要求暂停实机测试；本轮用户明确要求验证三项后恢复开发版 / win（id=3）验证。旧全局点击结果不作为新窗口 AX 路径通过的证据。
+- 本轮切为 V2 单窗口 action，prepare 只列窗口元数据，SCK 只捕获获准窗口；macOS 14+ 无显示器回退。新增窗口、进程及几何漂移、owner 默认目标、精确选择/多窗拒绝、切窗重新批准、仅单窗 AX 前后观察、图片绑定回滚与最终异步复验期间释放/过期覆盖。正式 Orchestrator 的 6 项测试经过首次批准重新准备、封存执行和图片水化，验证稳定 targetId、窗口变化替换审批及伪造 requested action 不能换窗。
+- 真实开发版首轮 prepare 找不到默认窗口，发现直接 npm/spawn 启动的 Electron 不一定有 `NSRunningApplication.launchDate`。改用公开 libproc 内核启动时间后单窗口选择及正式批准已进入执行；双架构编译、只读纯进程身份自检通过。测试 Session `d036338d-e27c-4dce-b9a4-f746f86b8938` 的 Run `eb28b912-14a5-4c64-b073-6f8d541311e0` 和 `4bba15f4-5541-477f-bed0-3f66982a58bb` 均实际 `ask / approved`，随后系统录屏拒绝，未调用 click、没有生成截图。
+- TCC 证据显示当前 WebStorm 启动链的负责主体为 `com.jetbrains.WebStorm`；只读系统设置确认 WebStorm 辅助功能已开启、录屏列表尚无 WebStorm。Electron / ChatGPT 既有录屏开关不能代替该启动链授权，不能把本轮截图拒绝写成单窗口/后台点击通过。用户的新增系统授权与后续实际窗口验证单独记录，不移除预检或退回全屏截取。
+- 本轮最终 `npm run lint`、全量 `npm test`（463 文件 / 3966 项通过，3 文件 / 7 项沿用跳过）、`npm run build` 和 diff 检查通过。platform 136 项、runtime 83 项及正式审批链回归已纳入全量；原生最终 libproc / SCK helper universal 编译通过。没有签名打包或发布，macOS 14.0/14.1 子窗口边界、发行包、其他平台和多显示器尚未实测。
+- 后续按用户批准添加 WebStorm 录屏权限、退出重开 IDE 和开发版后，Run D 实际单窗截图成功。窗口匹配成功但 AX 16 层预算截断导致 clickReady=false 的问题，由 F / G 原生无正文计数定位；当前候选扫描和路径校验统一为 32 层，不取消节点、时间、字节或不完整扫描拒绝点击的边界。
+- 增加同窗后置 `axTree / axTreeTruncated` 摘要，独立 12 KiB UTF-8、严格成对/Unicode/控制字符校验，不输出原生身份或私有路径。无权限、旧 helper、前置候选失败、窗口漂移、摘要截断、取消、释放、剩余 stdout 空间及安全输入值处理均有定向覆盖；摘要不参与点击授权。
+- 真实开发版 win（id=3、本机 MinIO）、gpt-5.5 / medium 的 Run H `dfa5e8c4-75bb-4bd5-a266-d6524a9566f7` 完成 V2 三工具闭环，首次 ask/approved、点击 AXPress dispatched/committed，两图 2048×1257 且同 targetId / window scope。审批后 Raise WebStorm 遮挡，新的点击后截图实见目录树已收起；两图大图预览仅含 OmniFlow。未使用其他 Tool 或修改资料库内容。
+- 用户新增 AX 一致性标准：CUA 与内置 Agent 的目标控件前后名称、角色和 value 均一致（折叠目录树/0 → 展开目录树/1），模式工具栏、返回/上传/回收站/设置以及 Outline→Row→Button/Image/Text 的语义层级也对应。CUA 的本地化角色和容器压缩不要求与原生文本编号/缩进相同。两份树均明确已截断，不能声称整棵 AX 完整性已通过；详细回执和残余边界见实施专题。
+- Run I `a7645840-a7d4-469d-a218-ee125834a02d` 的五步工具均完成；聚焦 WebStorm 后两次 AXPress 原生诊断均前台信息可用、目标前后都在后台、`frontmostChanged=false / pointerMoved=false`。但第三图保留收起旧帧，AX description/value 不同步，窗口置前后才恢复，故该轮恢复未通过。端点诊断不保证所有应用自身永不激活，也不能排除用户短暂移动再回到原点。
+- 对自有获准 owner 窗口增加临时后台渲染租约，不改全局默认或外部应用；仅正式观察的精确 PID/CGWindowID 匹配后获取，取消/失败/换目标/结束归还，同 WebContents 引用计数恢复原值。116 项 runtime/租约专项覆盖首次获取失败回滚、销毁、并发、重复/迟到释放和取消后的旧截图丢弃。实机恢复结果另记，不能用设置调用或工具 completed 代替新图核对。
+- 新增 3 项正式审批执行链回归，覆盖首次 observe 已完成、其 Tool signal 转发已解除后，stop / owner release / shutdown 仍从真实 Run abort 同步恢复租约；迟到截图不导入，已发送点击结算路径保留。最终全量 lint / test（465 文件 / 4049 项通过，3 文件 / 7 项沿用跳过）/ build 与 diff 检查通过；独立源码 review 无剩余实质 finding。
+- 修复后 Run J 的五工具与三份已保存窗口原图证实后台“展开→收起→恢复展开”，AX 名称/value 同步为“折叠/0→展开/1→折叠/0”。该轮第二次鼠标端点有变化，单独保留，不计作固定鼠标通过。Run K `69c6b466-a75d-4b47-8754-e6f8492e95f9` 经批准后实际聚焦 WebStorm 编辑器，五步再次完成；两次点击目标前后在后台、前台和鼠标端点均未变。第二、第三张存储原图在任何置前核验前已显示收起/恢复，只含 OmniFlow；结束后 CUA 在后台读到的主要 AX 名称、角色、value 和底栏控件对应。树明确截断，无法据此声称全文完整一致；回执、时间与范围见专题。
+
+## Agent 屏幕 Tool 展示（2026-10-09）
+
+- 本轮修正连续内置 `observe → click → observe` 的分组：不再被 resource-read / internal-operation 分类和第一次已批准的共享记录拆开。一个 computer-use 折叠组保留三个 ToolRun，pending、未知结果、插件及其他工具、不同 Run、commentary / assistant / user 均不跨越合并。
+- 缩略图点击复用聊天附件的大图预览，可缩放并经 Esc / 遮罩关闭；收起卡片或组、隐藏工作区、切换读取身份及卸载时关闭大图并释放截图。V2 窗口截图要求 window captureScope 与 targetId 匹配，保留 V1 历史显示器截图的原展示。
+- 成功 `computer.observe` 默认只显示状态行，展开时从已有、绑定当前 owner / backend / library / Session 的附件预览接口读取真实 PNG 缩略图；成功且身份与回执吻合的 `computer.click` 仅显示“已发送点击”一行。未知结果及失败保留详情，不把输入已发送当成目标界面成功。
+- 展示来源要求 main 的内置工具标记、严格 prepared action、同库屏幕身份和有效 UUID；同名插件、缺失来源、非法图片引用、屏幕不匹配、伪造尺寸和非 PNG URL 均不能生成图片预览。来源标记不承担读取权限，main 仍验证附件账号、后端、资料库及会话绑定。
+- 本轮定向验证 7 个文件、131 项测试通过，相关文件 ESLint 通过。覆盖新的单组与消息边界、V1/V2 来源校验、缩略图复用大图及大图的身份/隐藏释放、保留 DOM 的 Run 过程折叠，保留懒读取、卡片及保留 DOM 的工具组收起、各身份变化后的迟到响应隔离、缺失 owner / Session 拒绝读取、错误信息收口、成功点击单行和未知回执详情；这份记录不代替本轮最终全量 lint / test / build。
+- 新增可信 `computer-ax` 展示块，观察详情中截图缩略图和 AX 独立展示，AX 以原生 details 展开为最多 132px 高的滚动纯文本。4 文件 / 101 项 UI 专项通过，覆盖非法/插件/V1来源、UTF-8预算、父层折叠和工作区隐藏释放。真实 Run H 实看只有一个含三条工具的折叠组、点击无详情、两张缩略图共用聊天大图、AX有截断标记且能展开。亮色、极窄布局和全部大图缩放交互未逐项手验。
+- 本轮 macOS 开发版 / win（id=3）暗色实机已检查历史 Run `22e29c2d-6597-419f-aea5-ad05a987d120`：展开任务过程后只有一个电脑操作组，组内依次为“已查看屏幕 / 已发送点击 / 已查看屏幕”；点击没有详情开关。展开末次观察显示真实缩略图，点击进入聊天附件共用的大图预览（初始 68% 与缩放按钮），Esc 关闭后焦点回到原缩略图，收起任务过程后详情消失。此历史图片明确仍含旧显示器全屏，不会伪装成新的窗口截图。
+- 亮色、极窄窗口比例/滚动及手工跨 owner 身份释放尚未逐项 GUI 复验；身份/隐藏/折叠释放与迟到结果由自动测试覆盖。本轮单窗捕获与后台点击另按上节记录，不借用历史全局点击结果。
+- 最终 Run K 复验一个五工具组，三条观察有详情、两条成功点击无详情；末次观察同时显示真实窗口缩略图与可展开的“AX · 已截断”纯文本。缩略图打开聊天共用大图，放大 66%→76%、缩小回 66%、Esc 关闭与缩略图焦点恢复实测通过；最后收起任务过程。其他缩放、亮色和极窄布局未逐项手验。
+
+## Agent 输入框与会话目录弱化外框（2026-10-09）
+
+- Composer、会话目录卡片及收起气泡去掉常驻描边和阴影，保留主题背景、圆角及透明边框占位；尺寸、内部操作和键盘焦点样式保持原契约。
+- 在当前源码的临时副本中串行运行 lint、全量测试（460 个文件 / 3563 项通过，3 个文件 / 7 项跳过）和 build，全部通过；未覆盖工作目录里的 Electron / 插件产物。diff 检查通过。
+- 沿用用户不启动实际验证的要求，本轮未启动或重启应用，未访问资料库；亮暗主题与窄窗口实际观感待用户确认。
+
 ## 全项目存量改动审阅与分批提交（2026-10-09）
 
 - 按开发缓存 / 桌面背景、目录图标、文件树拖拽与新建 overlay、Agent 资源整理、库级标签、媒体播放及研究文档分别审阅和提交；前后端一起核对节点条件更新、标签分页与增量写入契约。既有验证记录按原日期保留，不代表本轮重新执行。

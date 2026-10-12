@@ -1,5 +1,27 @@
 # 内置 Agent UI 契约
 
+2026-10-12 后台绘制补充：main在active Run的started事件前取得自有owner窗口绘制租约，运行 / 等待批准 / 等待回答共用原Run生命周期；与获准自有共享目标使用同一个引用计数管理器。没有renderer新状态、绘制续期IPC或新增共享授权。最后引用释放后仅有250ms有界绘制收尾以处理已排队事件，不保证React终态提交或最后一帧已呈现；取消与owner释放不延长执行许可。首次批准卡旧帧及修后真机结果见验证矩阵。
+
+2026-10-12 局部 AX 观察补充：沿既有 `computer-ax` 块增加可选 scope / scopeScanComplete，无新增 ToolRun 或许可 owner。新局部结果只在 kind=element-ancestor、ancestorLevels整数0～3、scopeScanComplete为boolean、candidateScanComplete / coordinateClickReady均false时接受；window范围不得带ancestorLevels，旧无范围字段结果兼容原展示。范围私有路径和锚点指纹不进入块。预览标明「AX · 局部」及上溯层数，展开后的区域扫描完整性与AX文本截断分别说明，不把局部完整写成全窗口完整；截图缩略图和聊天大图仍是同一个获准整窗口。非法范围抑制AX/控件详情，不扩大有效窗口图片的授权。解锁后的TEXT3 / SCROLL4已验暗色局部标签、控件自身/上溯1层说明、真实整窗缩略图与连续观察/输入/滚动同组；TEXT3聊天共用大图、缩放/Esc和焦点恢复通过。亮色、窄布局与全部历史图未验；SCROLL4结束后idle大图AX已出现但截图旧帧，不计该阶段视觉通过。
+
+修后active Run的首次共享卡、等待核验卡和终态已自行刷新；运行前初始化与idle预览仍可能旧帧，不由运行期租约保证。SCROLL4等待卡未提交，`interaction.request`被通用broker默认30秒工具时限与6秒取消收敛中断，准确归类工具执行超时，不是交互自身TTL。交互长等待budget及tool signal传递尚待修复，不以卡片曾显示作为提交链验收通过。
+
+2026-10-12：窄原生页子按钮复用既有观察详情、`computer.scroll` 成功行与 computer-use 分组，不新增 UI 执行、授权或 Session / Run / ToolRun 状态源。匿名按钮的 `labelSource=native-scroll-button` 表示宿主派生的方向语义，不冒充原生控件名；AX-only 仅在完整稳定扫描确认同轴可操作父唯一、该方向页按钮唯一时提供 ID，both 提供实际 child screenshotBounds，多滚动区须结合同张图像辨认。private profile / parentBounds / orientation 不进入 UI；仅对应方向 Page 能力，不授 `computer.click`。统一源码门禁、TextEdit 长文页下翻/上翻恢复/清空，以及访达 AX-only V3 / both V2 视图切换的限定后台闭环已通过；保存单窗图像与独立 CUA 一致，操作采样端点的前台与指针未变。部分扫描/AX 截断仍如实标明，WebStorm 定位失败仍保留；完整范围与验收见[电脑操作契约](agent-computer-use.md#观察接口与本轮改进2026-10-12)。
+
+2026-10-11：可见 Agent 工作区显式注册“Agent 输入”和“Agent 对话区域”两个后台控件；注册 / 回执经独立 service / module，不新增 Session / Run / ToolRun 状态源。草稿复用 useAgentSession 的同步 ref + revision CAS，用户前台聚焦编辑、IME、恢复或 scope/session变化拒绝旧动作；不调用 focus/blur、选区setter或自动发送。聊天滚动复用 scrollRef/follow owner，程序移动暂停跟随并取消旧RAF，真实用户交互恢复原跟随判断。截图、AX和成功操作行保持既有展示协议；第一方控件独立标 source=omniflow-control，不冒充 AX 节点。范围与实机结论见[电脑操作契约](agent-computer-use.md#omniflow-第一方后台控件桥2026-10-11)。
+
+窗口发现显示普通只读工具结果，不加入已有 observe / click 操作折叠组。观察内 elementId 点击按模式区分：AX-only 使用无坐标 V3 `computer.click`，可信成功行核对本次窗口、观察与元素身份；both 使用 V2，public action 和回执保留派生 x/y。两者均不创建 UI 执行或授权状态源。缩略图、AX 和聊天大图预览继续复用现有入口；Provider 结果可能因模型上下文预算产生独立显式投影截断，不能由 UI 摘要推定模型看到了完整文本。具体结果协议见 [屏幕查看与点击](agent-computer-use.md)。
+
+屏幕工具沿用受控 ToolRun 展示。首次 V2 `computer.observe` 的共享卡只读 main 规范 action 的应用、窗口名称及 operations；新 action 按点击 / 文本输入 / 滚动说明许可，历史无 operations 只说明点击，解释仅此窗口图像和界面控件信息送当前 AI 并保存在会话、切换窗口需重新批准、停止或结束许可失效，以及系统权限要求；缺少或不匹配准备动作不能批准。renderer 不持有共享许可或点击 IPC，V1 仅保留历史显示，自动化与权限限制见 [屏幕查看与点击](agent-computer-use.md)。
+
+连续的内置 `computer.observe / computer.click / computer.setText / computer.scroll` 在同一 Run 内归为一个 `computer-use` 工具组，不再按读取和写入拆成三个折叠项。分组必须同时具备 main 重建的内置来源标记和规范 prepared action；首次观察已批准的共享记录可在执行后加入该组，pending 审批、交互、未知操作回执、取消/中断、插件或其他工具、不同 Run 以及 commentary / assistant / user 消息仍是边界。组只改变展示，保留每个 ToolRun 的顺序和审计，key 仍来自首个 ToolRun。
+
+成功 `computer.observe` 的 V2 窗口动作默认显示“已查看窗口”一行，V1 历史屏幕动作仍显示“已查看屏幕”；带图片的观察展开后显示真实截图缩略图，不重复状态说明。AX-only 不显示缩略图、不读取附件。图片只由本地 presenter 从 main 重建的 `toolMetadata.builtinComputerTool`、无插件来源的规范 prepared action、匹配的当前资料库与目标身份、有效 UUID 和截图尺寸生成固定 `attachment-image` 语义块；V2 还要求 `captureScope = window` 且 `targetId` 与准备动作一致，不能把显示器结果冒充窗口截图。该来源标记只服务展示，不是附件读取或执行授权。块中只携带 opaque 附件 ID 和 alt，不接收 Tool 或模型提供的图片 URL、宿主路径或编码正文。
+
+mode=both 的 V2 观察可同时带窗口截图和 `axTree / axTreeTruncated` 摘要。AX 预览复用相同的内置来源、动作、资料库、窗口范围、目标和 observationId 核对，额外要求非空纯文本、两字段类型正确、UTF-8 不超过 12 KiB，且不含非法控制字符、双向文本控制符或孤立代理；通过后才由本地 presenter 生成 `computer-ax` 块。空树、旧 helper 缺失字段或非法 AX 字段不显示 AX，不影响有效图片预览。带图观察卡展开后先显示缩略图，AX 单独以“AX”折叠项展示，摘要截断则标记“AX · 已截断”；展开为有界滚动的 `pre` 纯文本，不解释 HTML/Markdown、不生成元素编号操作，收起或隐藏工作区释放展开内容。AX-only观察（mode=ax / observationSource=ax）无图时也可显示经同窗身份核对的摘要与白名单控件详情，不读取附件；mode=screenshot只展示图片。不能据展示块扩张点击许可；与 CUA 同窗口 AX 信息的一致性及新增预览的实机状态由验证矩阵记录。
+
+截图仅在卡片、所在工具组及 Run 过程均展开且工作区可见时，经现有 `previewAgentAttachment` 读取 main 保存的归一化 PNG，必须携带准确的账号、后端、资料库与所属 Session；只接受接口返回的 PNG data URL，图片最大显示为 `280×136px`。缩略图为可键盘聚焦的预览按钮，点击直接复用用户聊天附件的 `AgentAttachmentPreview`，使用相同缩放、Esc / 遮罩关闭与焦点恢复行为。收起卡片、工具组或 Run 过程、隐藏工作区、切换 owner / backend / library / Session / ToolRun / image ID、以及卸载时释放当前图片并关闭大图；迟到响应不能写回新上下文，不建立全局图片缓存或新的 ToolRun 状态源。成功且身份及 `dispatched / committed` 回执匹配的 `computer.click` 仅显示“已发送点击”操作行，没有展开区或重复回执；V1 核对 displayId，V2 核对 targetId，V3进一步核对单窗/资料库/观察/elementId及一次回执且没有坐标字段，该文案不代表目标界面已确认改变，未知结果和失败仍保留可展开的安全详情且不提供盲重试。实机验收状态见验证矩阵。
+
 `node.configure` 沿用标准写操作确认与工具状态行，显示目标、内置类型和归档开关，不新增整理向导或执行状态源。提交后同步目录图标 / 展开规则，关闭该目录的旧预览并刷新已打开父归档；只在匹配账号、后端和资料库内生效。Skill 加载仍显示受控状态，不将完整领域说明正文注入 renderer。实现与试用边界见 [内部文件操作](agent-internal-file-actions.md#内置类型与归档组织)。
 
 W3 文件产物卡只展示 main 的 `plugin.file-output` action：新文件名、目标目录、provider、MIME、大小、摘要和插件来源；目标目录优先显示宿主已知名称，不能把模型自报目录当权威。正文与本机 artifact 路径不进入卡片，批准仍经原 prepare/审批链，完全访问也确认具体产物。真实 CSV→JSON 正常另存/打开已验证，范围见 [W3](plugin-system-w3-file-output.md)。
@@ -13,6 +35,12 @@ W3 文件产物卡只展示 main 的 `plugin.file-output` action：新文件名�
 启动后，已批准但提交尚未确认的改名显示 main 恢复的 interrupted/commit_unknown 和原操作 ID，提示先核对、勿直接重发。已保存 committed ToolRun 不降级；如果所属 Run 尚未完成就退出，提示查看已有成功回执继续未完成步骤、勿重复改名。同一 Run 含未知改名时采用更保守的核对提示。审批前中断仍按普通未执行中断展示；UI 不据此发起自动回执查询或恢复执行。
 
 AT1插件Tool的终态卡沿用受控details块显示宿主记录的插件/版本/工具/包指纹，input/result自报字段不能生成来源展示。插件活动单独呈现，不混入内置读取分组。无需新增执行状态owner；实际模型/界面联调边界见 [AT1](plugin-system-at1-agent-tools.md)。
+
+新增 setText / scroll 成功行必须由 main 重建的内置来源、规范 V1 action 与完整匹配的操作 / operationId / 目标 / 观察 / 元素 / 模式及长度或方向及单位、dispatched / committed / observe / retryAllowed=false 回执证明，才分别显示“已发送文本输入 / 已发送滚动”且隐藏详情。未知、失败与插件不据工具名冒充成功；输入正文不参与展示。操作仍沿单一 ToolRun owner，窗口图像预览沿既有入口。
+
+本轮规范滚动单位加入 fraction，四向 Fraction operations 与 page / step 分别校验；旧共享 action 的 operations 不静默扩展。fraction 是已确认 AX 数值范围的 10%，仍由 main prepared action 投影方向 / 单位，私有 scrollState 的 value / minValue / maxValue 不进入审批、历史参数或 UI；renderer 不提供自定义幅度或通用输入执行桥；固定第一方控件路线及其不同量纲见上文。完整匹配的成功回执继续只显示“已发送滚动”，表示已派发，界面移动必须由后续 observe 验证；unknown 保留安全详情并作为分组边界，不提供盲重试。新增 ABI 定向回归与全量 lint / test / build 通过；外部 AX fraction 尚未通过真机验收，第一方对话区往返和操作 / 缩略图展示的2026-10-11结果独立记录。既有 W3 文本展示验收不替代 fraction 验收，结果见 [验证矩阵](frontend-validation-matrix.md)。
+
+新增严格原生文本身份 profile 仅影响 main 私有候选绑定，renderer 不接收 Identifier、identityProfile、descriptionDeclared，也不将 AX 摘要转换为执行目标。唯一标签 unique-actionable-native-textarea 仍要求前后完整稳定集合中的唯一可操作原生 TextArea。AD 后已在源码接入 native-text-screenshot-bounds：仅自身前后稳定且与已知其他可操作文本区无重叠时，投影通用“原生文本区域”和同附件像素边界以便结合图像辨认，不宣称全窗唯一、不授点击，也不新增 UI 授权状态。非法身份或已知重叠不给该派生目标。仍只执行观察内声明的 replaceText / insertText，复用原文本成功行与预览；新路线全量门禁与 AE 限定 TextEdit 编辑闭环通过；不以它代替全页面展示或滚动验收，详细结果见 [验证矩阵](frontend-validation-matrix.md)。
 
 ## 本机会话组与归档（2026-09-13）
 
@@ -107,7 +135,7 @@ Agent 工作区内部有四种展示形态：
 
 ## 运行状态文字
 
-- 连续且符合分组条件的内部业务 Tool 按同 Run、同 groupKind 进入 ToolGroup，即使只有一条也使用同一结构。成功或失败的 resource-read 与其他内部操作当前分别成组；Shell、外部操作、待审批和待输入保留独立入口。失败不再断组，也不强制展开错误详情，包括执行前校验产生的 deny 和已审批后的执行失败；外层与单条详情均默认收起，手动展开后可检查原始错误。收起态摘要始终投影该组最后一条 Tool 的实时 summary 和图标；活跃 Tool 复用 AgentActivityText 扫光。收起时新增调用不增加组高度；展开态按内容自然增减，最大高度约156px，超过后内部滚动。外层摘要与内部最后记录共用同一份 ToolActivity，避免两套状态文案。
+- 连续且符合分组条件的内部业务 Tool 按同 Run、同 groupKind 进入 ToolGroup，即使只有一条也使用同一结构。成功或失败的 resource-read、其他内部操作以及内置 computer-use 当前分别成组；computer-use 可包含观察、点击、文本输入和滚动，并接纳已经批准的首次共享记录。Shell、外部操作、待审批和待输入保留独立入口。普通失败不再断组，也不强制展开错误详情，包括执行前校验产生的 deny 和已审批后的执行失败；未知点击结果仍独立。外层与单条详情均默认收起，手动展开后可检查原始错误。收起态摘要始终投影该组最后一条 Tool 的实时 summary 和图标；活跃 Tool 复用 AgentActivityText 扫光。收起时新增调用不增加组高度；展开态按内容自然增减，最大高度约156px，超过后内部滚动。外层摘要与内部最后记录共用同一份 ToolActivity，避免两套状态文案。
 
 - 工具摘要与内部行统一左侧3px留白、20px图标槽、7px图文间距及20px文字行高，展开清单不缩小图标槽或另加缩进。`AgentToolIcon` 统一使用 OutlineIcon 的16px图形与1.25px实际描边：书页代表读取、文件笔代表编辑、放大镜代表搜索、终端代表Shell；删除、移动和复制也保留对应的操作轮廓，不再用实心完成圆点替换。通用完成文案在状态和操作之间保留一个空格，如“已完成 移入回收站”。
 
@@ -210,7 +238,7 @@ main 事件 / Session 规范快照
 - 只有损坏或遗留的孤儿记录才允许按时间作全局降级排序。
 - Tool `ordinal` 是持久化审计顺序，UI 可以分组或折叠，但不能丢弃或自行重排执行事实。
 - Timeline item 和卡片的 React identity 必须使用稳定的 message ID、Run ID 或 ToolActivity ID。待确认、待输入和其他含本地草稿的卡片不得使用数组 index、status、revision 或折叠层级作为 key；进度和 revision 更新不能通过重挂载清空未提交内容。
-- Tool 分组读取 main 投影的 `kind / risk / groupKind / operationKind`，同 Run、连续、同 `groupKind` 的内部业务 Tool 可以合并；成功或进行中仍沿用 allow、无审批和交互记录的分组条件。失败 Tool 不因 allow/ask/deny 或已决审批记录断组，但任何 pending approval/interaction 仍不能隐藏。外部操作、未知 Tool、Shell、取消、中断、commentary 和不满足分组条件的审批/交互记录继续断组。分组 key 始终从首个 ToolRun ID 派生，错误详情保留在原 ToolActivity 中，折叠不修改执行或权限事实。
+- Tool 分组读取 main 投影的 `kind / risk / groupKind / operationKind`，同 Run、连续、同 `groupKind` 的内部业务 Tool 可以合并；普通 Tool 成功或进行中仍沿用 allow、无审批和交互记录的条件。内置电脑工具另由 `builtinComputerTool` 与规范 prepared action 投影为 computer-use，已批准的共享记录可入组。有限例外是 main 精确确认的内置来源初始 preparing（尚无 preparation、result、approval、interaction 或终态）：可提前给展示分类，让新工具保持在同一折叠组；这不生成 prepared action、批准或成功结果，待决审批 / 交互和未知回执仍独立。running / preparing 的过程状态行保留固定31px单行位置，无提示时仅隐藏内容，防止发起下一工具时自行改变聊天滚动几何。普通失败 Tool 不因 allow/ask/deny 或已决审批记录断组，但任何 pending approval/interaction 仍不能隐藏。外部操作、未知 Tool、Shell、取消、中断、未知电脑操作结果、commentary / assistant / user 和不满足条件的审批/交互记录继续断组。分组 key 始终从首个 ToolRun ID 派生，错误详情保留在原 ToolActivity 中，折叠不修改执行或权限事实。
 
 ## 5. 状态展示契约
 
@@ -254,7 +282,7 @@ Run 和 ToolActivity 当前共享八种状态 ID：
 ToolActivity 的定制 body 只能渲染 `AgentPresentationBlock` 声明的固定语义块；user 与过程消息按纯文本展示，completed final 使用下述受限 Markdown：
 
 ```text
-status / progress / approval / artifact / details
+status / progress / approval / artifact / attachment-image / details
 choice / form / notice
 ```
 
@@ -366,6 +394,8 @@ agent.interaction.submit
 - 内部优先是模型选择工具和目的地的默认偏好，不是本机禁令。Skill 也可以保留当前 Run 实际可用的宿主工具作为备选，UI 不隐藏这些能力或新增本机禁止开关。
 
 ## 10. 视觉与交互基线
+
+- Composer、会话目录卡片及其收起气泡通过主题背景色和圆角形成边界，不显示常驻外描边或阴影；透明边框保留原尺寸。按钮与目录拖动入口仍保留键盘焦点提示。
 
 - 索引摘要卡的标记入口使用统一 OutlineIcon 空心书签，点击选中仅使图标变紫罗兰，不增加背景、不展开标签输入框；再次点击取消。节点标记点与普通已标记节点同用紫罗兰，当前位置绿色仍优先；已有标签元数据保留兼容，取消时一并清除。
 
