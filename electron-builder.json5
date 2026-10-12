@@ -61,6 +61,14 @@
     }
   ],
   "mac": {
+    "extraResources": [
+      {
+        "from": "build/native/computer-use/darwin-${arch}",
+        "to": "computer-use",
+        "filter": ["omniflow-click"]
+      }
+    ],
+    "binaries": ["Contents/Resources/computer-use/omniflow-click"],
     "files": [
       {
         "from": "build/native/sqlite3/darwin-${arch}/build/Release",

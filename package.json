@@ -28,8 +28,8 @@
     "release:mac": "node tools/release-mac.mjs",
     "update:serve": "node tools/serve-update-feed.mjs",
     "preview": "vite preview",
-    "predev": "node tools/plugin-isolation/prepare-first-party.mjs",
-    "prebuild": "node tools/plugin-isolation/prepare-first-party.mjs"
+    "predev": "node tools/plugin-isolation/prepare-first-party.mjs && node tools/computer-use/prepare.mjs",
+    "prebuild": "node tools/plugin-isolation/prepare-first-party.mjs && node tools/computer-use/prepare.mjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.1",
