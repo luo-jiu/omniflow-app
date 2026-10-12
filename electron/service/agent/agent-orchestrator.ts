@@ -237,7 +237,8 @@ import {
   normalizeAgentAudioOutputFormat,
 } from './tools/media-extract-audio-tool';
 import { mediaInspectTool } from './tools/media-inspect-tool';
-import { interactionRequestTool } from './tools/interaction-request-tool';
+import { AGENT_INTERACTION_TIMEOUT_MS, AGENT_INTERACTION_SETTLEMENT_GRACE_MS,
+  INTERACTION_REQUEST_TOOL_REGISTRATION_ID, interactionRequestTool } from './tools/interaction-request-tool';
 import { memoryProposeTool } from './tools/memory-propose-tool';
 import {
   getAgentShellProviderSnapshotForRun,
@@ -275,7 +276,6 @@ const MAX_AGENT_SELECTED_NODE_IDS = 200;
 const MAX_AGENT_PROGRESS_MESSAGE_CHARACTERS = 2_000;
 const MAX_AGENT_ERROR_MESSAGE_CHARACTERS = 4_000;
 const TOOL_APPROVAL_TIMEOUT_MS = 10 * 60 * 1000;
-const TOOL_INTERACTION_TIMEOUT_MS = 30 * 60 * 1000;
 const AVAILABLE_PERCEPTION_BUDGET_PROBE: AgentPerceptionSnapshot = {
   collectedAt: '',
   selectedNodes: [],
@@ -1117,7 +1117,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
   const approvalTimeoutMs = Math.max(1, options.approvalTimeoutMs || TOOL_APPROVAL_TIMEOUT_MS);
   const interactionTimeoutMs = Math.max(
     1,
-    options.interactionTimeoutMs || TOOL_INTERACTION_TIMEOUT_MS,
+    options.interactionTimeoutMs || AGENT_INTERACTION_TIMEOUT_MS,
   );
   const toolBroker = options.toolBroker || createAgentToolBroker({ normalizePerception });
   const toolPrepareBroker = options.toolPrepareBroker || createAgentToolPrepareBroker();
@@ -1620,6 +1620,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     appContext: AgentAppContext;
     ownerScope: AgentOwnerScope;
     ownerWebContentsId: number;
+    onResolved: (activity: AgentToolActivitySnapshot) => void;
     sender: WebContents;
     signal: AbortSignal;
     store: AgentSessionStore;
@@ -1656,7 +1657,8 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
           undefined,
           now(),
         ).then((activity) => {
-          if (resolution === 'expired') {
+          input.onResolved(activity);
+          if (resolution === 'expired' && !input.signal.aborted) {
             return updateRunAndEmit(
               input.sender,
               input.store,
@@ -1701,6 +1703,8 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
               response,
               now(),
             );
+            input.onResolved(activity);
+            throwIfAborted(input.signal);
             await updateRunAndEmit(
               input.sender,
               input.store,
@@ -1712,6 +1716,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
                 updatedAt: now(),
               },
             );
+            throwIfAborted(input.signal);
             emitResolved(activity);
             resolve(response);
             return activity;
@@ -2136,6 +2141,10 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     const registeredTool = capabilitySnapshot.toolSnapshot.get(call.name);
     const computerTextAuditSource = resolveComputerTextAuditSource(call.name);
     const privateComputerText = isBuiltinComputerSetTextTool(computerTextAuditSource);
+    const mainExecutionTimeoutMs = tool?.name === interactionRequestTool.name
+      && tool.registrationId === INTERACTION_REQUEST_TOOL_REGISTRATION_ID && tool.executor === 'main'
+      && tool.kind === 'business' && tool.risk === 'write' && !tool.pluginSource && !tool.pluginOperation
+      ? interactionTimeoutMs + AGENT_INTERACTION_SETTLEMENT_GRACE_MS : tool?.timeoutMs;
     const preparationMode: AgentPreparedRuntime['preparationMode'] | 'none' = tool?.prepareMain
       ? 'main'
       : tool?.createRendererPrepareRequest && tool.finalizeRendererPreparation
@@ -2164,6 +2173,26 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       } catch { /* A refresh failure cannot erase an already committed result. */ }
     };
     let activity: AgentToolActivitySnapshot | undefined;
+    const completeActivity = async (result: AgentToolResult, cancelled = false): Promise<AgentToolActivitySnapshot> => {
+      const expired = activity?.interaction?.status === 'expired';
+      const status = cancelled && expired ? 'failed'
+        : cancelled || activity?.interaction?.status === 'cancelled' ? 'cancelled' : undefined;
+      const finalResult = cancelled && expired ? { message: '用户输入已超时', ok: false } : result;
+      try {
+        return await store.completeToolRun(toolRunId, finalResult, now(), status);
+      } catch (error) {
+        if (!activity?.interaction || result.ok) throw error;
+        // A resolution may be committed while its async reply is still pending.
+        // Recover only an unfinished receipt of this same terminal interaction.
+        const session = await store.getSession(sessionId, input.ownerScope, Number(input.appContext.libraryId));
+        const saved = session?.toolActivities.find(item => item.id === toolRunId && item.runId === runId
+          && item.interaction?.interactionId === activity?.interaction?.interactionId);
+        if (!saved || saved.result || !((saved.status === 'failed' && saved.interaction?.status === 'expired')
+          || (saved.status === 'cancelled' && saved.interaction?.status === 'cancelled'))) throw error;
+        return store.completeToolRun(toolRunId, saved.interaction.status === 'expired'
+          ? { message: '用户输入已超时', ok: false } : result, now(), saved.status);
+      }
+    };
     let progressWrites = Promise.resolve();
     const persistAndEmitProgress = (rawProgress: AgentToolProgress) => {
       const progress = normalizeToolProgress(privateComputerText ? { message: '正在输入文字' } : rawProgress);
@@ -2388,17 +2417,20 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         throwIfAborted(operationSignal);
         return saved;
       },
-      requestInteraction: async (rawRequest: AgentInteractionRequest) => {
+      requestInteraction: async (rawRequest: AgentInteractionRequest, operationSignal: AbortSignal) => {
+        throwIfAborted(operationSignal);
         if (!activity) throw new Error('Agent Tool 尚未建立运行记录');
         const request = normalizeAgentInteractionRequest(rawRequest);
         const interactionId = crypto.randomUUID();
         activity = await store.createToolInteraction(toolRunId, interactionId, request);
         try {
+          throwIfAborted(operationSignal);
           await updateRunAndEmit(sender, store, sessionId, runId, {
             currentStep: `等待用户输入 ${call.name}`,
             status: 'awaiting_interaction',
             updatedAt: now(),
           });
+          throwIfAborted(operationSignal);
         } catch (error) {
           activity = await store.resolveToolInteraction(
             interactionId,
@@ -2413,8 +2445,9 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
           appContext: input.appContext,
           ownerScope: input.ownerScope,
           ownerWebContentsId: sender.id,
+          onResolved: resolved => { activity = resolved; },
           sender,
-          signal,
+          signal: operationSignal,
           store,
         });
         emit(sender, {
@@ -2900,7 +2933,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
               };
           result = await toolBroker.executeMain(call.name, call.input, {
             ...mainExecutionContext,
-          }, tool.timeoutMs, runToolRegistry, tool.cancellationSettleTimeoutMs);
+          }, mainExecutionTimeoutMs, runToolRegistry, tool.cancellationSettleTimeoutMs);
         }
       } else if ((tool.executor || 'main') === 'renderer') {
         const execution = toolBroker.prepareRendererExecution({
@@ -2934,7 +2967,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
           call.name,
           call.input,
           mainExecutionContext,
-          tool.timeoutMs,
+          mainExecutionTimeoutMs,
           runToolRegistry,
           tool.cancellationSettleTimeoutMs,
         );
@@ -2942,11 +2975,9 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     } catch (error) {
       if (isAbortError(error, signal)) {
         await progressWrites;
-        activity = await store.completeToolRun(
-          toolRunId,
+        activity = await completeActivity(
           { message: 'Agent Tool 已取消', ok: false },
-          now(),
-          'cancelled',
+          true,
         );
         throw error;
       }
@@ -2962,7 +2993,8 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     result = normalizeAgentToolResult(privateComputerText ? projectAgentComputerTextResult(result,
       textAction?.kind === 'computer.setText' ? textAction : undefined) : result);
     await progressWrites;
-    activity = await store.completeToolRun(toolRunId, result, now());
+    activity = await completeActivity(result);
+    result = activity.result || result;
     await store.appendMessage(createMessage(
       sessionId,
       runId,

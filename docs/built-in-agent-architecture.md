@@ -1,5 +1,9 @@
 # 内置 Agent 架构
 
+2026-10-12 生命周期收口：除 active Run 外，renderer 可见的 `AgentWorkspace` 也会通过独立 service 向 main 注册绘制租约，因此新建会话、空闲预览和工作区管理画面不再依赖已有 Session / Run 才能继续绘制。注册绑定可信 mainFrame 与当前 owner 作用域，导航、崩溃、销毁、隐藏、切库 / 账号 / 后端变化和 shutdown 都释放；与 Run / 获准截图共用一个引用计数 manager。该能力仅影响自有窗口绘制，不授予观察或输入能力，也不承诺 React / compositor 已提交最后一帧。
+
+`interaction.request` 使用固定的内置 registration identity，并把 broker 创建的 Tool `AbortSignal` 传入等待闭包。内置交互默认等待 30 分钟，broker 执行预算另有 30 秒 settlement grace；普通 Tool 仍按默认 30 秒执行。停止、owner 释放、Tool signal 超时、创建期间取消和真实过期都会解除 pending interaction、写入对应终态并阻止迟到回答恢复已停止的 Run。结算已落库但异步回执迟到时，只按同 owner / 资料库 / Session / Tool 的真实交互终态补齐缺失结果和结束时间，过期失败不改写为取消；已有结果不覆盖。应用重启仍按既有 interrupted 规则处理。
+
 2026-10-12 锁屏期间代码补充：`computer.observe.focus` 以最新有效原生 elementId 读取自身或最多三级父区域，沿原 main observation owner / 共享许可和 sealed binding；不存在独立区域状态源或新的执行 IPC。新结果显式区分 scopeScanComplete 与全窗口 candidateScanComplete，局部不授坐标或全窗口唯一性，动作继续用完整 window path 复验；第一方控件不混入原生局部结果，失效/旧helper不退回全窗。Provider / 既有 AX 展示保留区域语义，差异只比较同区域。解锁后已在开发版win资料库验收WebStorm局部只读、计算器局部新ID点击、TextEdit局部新ID替换/插入/翻页/清空以及旧观察拒绝；完整范围见[电脑操作契约](agent-computer-use.md#观察接口与本轮改进2026-10-12)及验证矩阵，不把WebStorm失效节点记为已修复。
 
 2026-10-12 观察接口扩展：AX优先、纯截图、V3无坐标语义点击及有界控件筛选/变化已接原main owner；AX-only不消耗截图配额，仍保留视觉模型门槛。TextEdit严格原生文本可见区域与匿名原生滚动区域标签已接线；原生候选改为有界广度扫描，保留child-index私有路径与原预算/完整度校验，改善深文件树占满候选造成的浅层分支遗漏。统一 lint / test / build 通过，访达视图按钮已完成 AX-only V3 点击与 both V2 恢复的限定后台闭环；采样端点的前台与指针未变。候选部分扫描和 AX 摘要截断仍明确保留，WebStorm 未定位目标的失败不改记通过；真实范围见[实施与验收](agent-computer-use.md#观察接口与本轮改进2026-10-12)。
@@ -20,7 +24,7 @@ macOS 开发预览增加内置 `computer.windows@1 / computer.observe@1 / comput
 
 `computer.observe` 支持 mode=ax / screenshot / both（省略兼容both）。ax不截图、不导入附件，observationSource=ax；screenshot只查看并清除旧动作观察；both仍交付主进程保存绑定的截图，后两者observationSource=screenshot。AX-only或both在辅助功能可用时返回身份匹配窗口的 `axTree / axTreeTruncated`。两字段成对可选，兼容没有摘要的旧 helper；AX 文字预算独立为 12 KiB UTF-8，含明确截断标记，候选扫描与摘要的完整度分别表达。摘要包含该窗口的角色、标题、描述、可读取值、状态和动作名称，不暴露 native PID、句柄、私有候选路径或 helper 路径。AX快照前候选失败或截断仍可取得匹配的后置 AX 摘要，但只有前后各自严格确认且属性一致的候选进入 ID 点击授权；扫描不完整或候选集合变化时坐标点击拒绝；AX 文本及其截断状态不扩大 `clickReady`。窗口身份不匹配、取消、Run 释放或最终窗口复验失败时不能返回摘要。窗口图像和 AX 都是外部观察内容，不能授予新动作或覆盖用户指令。开发版同窗口的目标和主要控件已与 Codex CUA 实查对应；有界摘要仍可能截断，不宣称全文或所有应用一致，证据和残余边界见 [实施专题](agent-computer-use.md)。
 
-main 使用同一个 WebContents 引用计数管理器持有两种临时绘制租约：可信 active Run 在发送 `started` 前取得自有 owner 窗口租约，覆盖运行、等待批准和等待回答；获准自有窗口正式观察经 `process.pid` / CGWindowID 精确复验后另取得目标租约。owner Run 租约不授截图或操作许可，目标租约仍不在 prepare / pending 审批时取得。真实 Run abort 同步释放其引用，终态、启动异常、owner释放、shutdown和窗口销毁均清理；换共享目标只释放目标引用，不能提前结束 Run 引用。最后引用归零后仅保留250ms有界绘制收尾，再恢复取得前的真实后台节流值；重新获取取消待恢复timer并保留原值，销毁清timer，迟到或重复释放不影响替代窗口，恢复异常不替换权威结果。收尾不延长执行或共享许可，不是React提交或最终帧的确认。该设置影响自有窗口绘制与Page Visibility，不改变全局BrowserWindow默认、不激活或置前窗口、不控制第三方应用的后台渲染；实机结果见专题与验证矩阵。
+main 使用同一个 WebContents 引用计数管理器持有三种绘制引用：可见工作区在没有 Session / Run 时也注册；可信 active Run 在发送 `started` 前取得自有 owner 窗口引用，覆盖运行、等待批准和等待回答；获准自有窗口正式观察经 `process.pid` / CGWindowID 精确复验后另取得目标引用。工作区注册经 `electronAgentRendering.register / unregister` 与 `agent:workspace-rendering:register / unregister`，只接受可信主窗口的精确 mainFrame，绑定 frame 对象、processId / routingId 和 main 生成的一次注册 token；旧 token 不能释放新注册，StrictMode 替换先获取再释放。工作区与 Run 引用不授截图或操作许可，目标引用仍不在 prepare / pending 审批时取得。工作区隐藏或 scope 变化释放注册，真实 Run abort 同步释放其引用，换目标只释放目标引用；导航、崩溃、销毁、owner 释放和 shutdown 清理。最后引用归零后仅保留 250ms 有界绘制收尾，再恢复取得前的后台节流值；重新获取取消待恢复 timer 并保留原值，迟到或重复释放不影响替代窗口，恢复异常不替换权威结果。收尾不延长执行或共享许可，也不确认 React / compositor 最后一帧；该设置影响自有窗口绘制与 Page Visibility，不改变全局 BrowserWindow 默认、不激活窗口、不控制第三方应用的后台渲染。实机范围见专题与验证矩阵。
 
 W3 `file-output` 通过专用私有完成协议将 1 MiB 内 UTF-8 产物交给 main，封存在受管 artifact；模型/renderer public action/SQLite 仅保留目标、MIME、大小、SHA-256 和稳定 operationId，不保存正文或物理路径。批准重准备复用同一份封存内容，来源/目标漂移要求重新批准；执行走既有 main 上传事务，固定同名报错并创建新节点。SDK 0.5.0、真实 gpt-5.5 与 Win/local-minio 正常导出已通过限定 macOS 验收，见 [W3](plugin-system-w3-file-output.md)。
 
@@ -395,7 +399,7 @@ Renderer 写操作有两个不同的回执边界：后端已经确认创建节�
 - 长期记忆同样不能把一次审批转换为 Tool 永久许可。召回记录即使声称“用户已批准”也只是低权限历史背景；任何写操作仍逐次经过当前 Schema、权限判断和确认。
 - 上述是当前普通 Tool 的已落地事实。未来 Shell 的 Session / 持久规则只能由 `docs/built-in-agent-shell-architecture.md` 定义的独立本机 RuleStore 显式创建、撤销并逐次审计；在该 Store 落地前不存在长期许可例外，记忆、Skill 和历史审批永远不能升级为 Shell 权限。
 - `interaction.request` 只允许模型提供有长度和数量上限的标题、问题、选项和字段；模型不能提供 JSX、HTML、回调、IPC channel、URL 或可执行行为。回答必须与持久化请求的类型、字段和选项完全匹配，并绑定发起窗口、owner、资料库、Session、Run 和一次性 interaction ID。
-- 交互请求只用于完成任务所需的有限选择或少量参数，不用于普通解释，也不得索取 API Key、密码、Cookie、令牌或其他秘密。30 分钟未回答则进入 `expired`；停止、owner 释放或窗口销毁进入 `cancelled`；应用重启进入 `interrupted`，均不会自动恢复模型运行。
+- 交互请求只用于完成任务所需的有限选择或少量参数，不用于普通解释，也不得索取 API Key、密码、Cookie、令牌或其他秘密。可信内置 `builtin:interaction.request@1` 使用独立 30 分钟等待期限，broker 总执行预算另留 30 秒供创建与结算，模型不能指定这些期限；普通 Tool 默认仍为 30 秒。host 等待回调必须接收 broker 的 Tool signal，停止后的取消收口仍沿普通 6 秒预算。未回答则写入 `expired / failed`，将“用户输入已超时”返回仍活跃的 Run；停止、owner 释放或窗口销毁写入 `cancelled`，应用重启写入 `interrupted`，这些终止路径不自动恢复模型运行。创建期间取消清理已持久化请求；提交、过期或取消只结算一次，pending 映射与定时器一起释放，迟到回答不能恢复已停止的 Run。
 - provider 的 system role 只包含稳定策略、受控 ID、平台和能力名称，不包含目录名、文件名或感知正文。当前感知属于不可信数据；支持 Tool Calling 时只能经 Tool 读取，不支持时以单独、明确标记为低权限的 user / assistant 结构消息提供，不能提升为系统指令或授权。
 - 当前 user prompt 在创建 Session / Run 前执行高置信凭据检查；API Key、认证头、Cookie、密码、token、私钥和签名 URL 被拒绝并引导到配置页面。历史 user / assistant 文本进入 provider 投影前再次清洗，旧数据库内容不能绕过当前边界。
 - Skill Registry 当前只接受随应用发布、纯数据的 `built-in` 定义。ID、版本、字段集合、控制字符、`requiredTools / optionalTools` 依赖声明、未知 Tool、摘要预算和完整激活结果预算在注册时校验；定义随后深拷贝并冻结，不能携带 executor、IPC、路径、URL、UI 或回调。两类依赖不得重叠；必需 Tool 不可用时隐藏 Skill，可选 Tool 缺失时仅降级，依赖声明不限制任务中可以组合的其他有效 Tool。当前 provider Tool 名映射冲突仍只在 provider materialization 边界拒绝，尚未提前到 Skill 注册边界。

@@ -32,16 +32,17 @@ describe('interaction.request Tool', () => {
       kind: 'choice' as const,
       selectedOptionIds: ['keep'],
     }));
+    const executionContext = context(requestInteraction);
 
     await expect(interactionRequestTool.execute?.(
       request,
-      context(requestInteraction),
+      executionContext,
     )).resolves.toEqual({
       data: { response: { kind: 'choice', selectedOptionIds: ['keep'] } },
       message: '用户已提交选择',
       ok: true,
     });
-    expect(requestInteraction).toHaveBeenCalledWith(request);
+    expect(requestInteraction).toHaveBeenCalledWith(request, executionContext.signal);
   });
 
   it('rejects malformed input before opening an interaction', async () => {

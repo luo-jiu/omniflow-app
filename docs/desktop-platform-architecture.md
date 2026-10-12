@@ -1,5 +1,7 @@
 # 桌面平台适配架构
 
+2026-10-12：Agent 工作区可见期间新增独立 main-owned 绘制注册，覆盖没有 Session / Run 的新建会话、空闲预览和工作区管理界面。注册只接受可信主窗口的精确 mainFrame，导航、renderer 崩溃、窗口销毁、作用域切换和退出均自动释放，并与 active Run、获准窗口截图共用 WebContents 引用计数 manager。它只关闭自有窗口的后台绘制节流，不改变全局默认、不激活窗口、不触碰第三方应用，也不保证 compositor ACK；其他平台和发行包仍需分别验证。
+
 2026-10-11：获准当前主窗口的第一方 Agent 控件另接轻量 main-owned transport。它使用可信窗口 contentBounds / zoom 将 renderer CSS bounds 映射为屏幕点，再由原 runtime 映射为同附件像素；只接受精确 mainFrame 的固定注册 / 完成消息。文本/滚动复用 React 草稿与聊天滚动 owner，不调用系统键鼠、焦点或任意脚本/CDP，已绑定动作失败不换 AX。外部应用保持原 macOS SCK / AX 平台路线，Windows/Linux、第三方 Electron 和网页不因此新增兼容性。实现边界与本轮验收见[电脑操作契约](agent-computer-use.md#omniflow-第一方后台控件桥2026-10-11)。
 
 第一方调试诊断另复用固定helper `--parent-activity`，无请求正文或PID参数，只读NSWorkspace当前前台与直接父PID是否相等，父PID前后不一致或查询失败时unknown。main-only adapter严格接收布尔字段，独立500ms / 512B上限；仅显式debug时在派发相邻两端调用，不增加renderer能力、权限或生产进程。Electron活动事件缓存和原生实时采样独立记录，不混作后台通过，诊断不能改变权威执行结果。
@@ -12,7 +14,7 @@ TextEdit 诊断只记录固定 roleKind / 拒绝及 probe stage / AX 错误数�
 
 Agent 简单窗口操作由 `electron/platform/computer-use/` 承接。独立 Swift helper 只读 CG / NSRunningApplication 窗口元数据，macOS 14+ 使用 ScreenCaptureKit 的 `desktopIndependentWindow` 与 `SCScreenshotManager` 捕获获准的单个窗口；不使用 Electron 全窗口缩略图枚举、显示器捕获或屏幕裁剪。支持当前 Space 中被遮挡的后台窗口，最小化、隐藏或其他 Space 的目标不可用时明确拒绝。AX 只扫描冻结窗口的有界候选，按显式 operations 发送 AXPress、可写文本属性或真实滚动动作，不移动系统指针、不主动置前，不支持无 AX 动作的画布。`--window-targets` 另返回同一匹配窗口的 `axTree / axTreeTruncated` 纯文本摘要，独立限于 12 KiB UTF-8、节点/深度/时间预算和整体 64 KiB JSON 回执；摘要可截断，不暴露 native 身份或私有点击路径，也不改变候选点击授权。adapter 严格核对窗口身份、成对字段、Unicode、控制字符与字节预算；main 只使用匹配的截图后摘要，保持单窗许可和取消/释放边界。仅在 macOS 注册五种内置 Tool，其他平台保持不可用；构建、权限和固定 resource 路径见 [屏幕查看与点击](agent-computer-use.md)。开发版实际系统权限、截图/后台点击及同窗口 AX 信息一致性需分别实测，不能据 helper 自检推断应用或发行包已获授权；旧版全局点击记录与本次单窗口 AX 验收分别记录。
 
-主窗口继续使用 Electron 默认后台节流。可信 active Run 在发送started前为自有owner窗口取得main-owned绘制租约，覆盖运行 / 等待批准 / 等待回答；它不授截图或操作许可。已批准自有目标的正式观察另核对当前进程PID与精确CGWindowID取得目标租约。两入口共用一个WebContents引用计数管理器，临时setBackgroundThrottling(false)；取消同步释放Run引用，失败 / 结束 / 启动异常 / owner释放 / shutdown / 销毁安全清理。最后引用归零后250ms有界绘制收尾再恢复原值，新获取取消待恢复timer，销毁立即清理；不是最终帧确认，不延长执行或共享。该设置影响同窗绘制与Page Visibility，不置前、不改变第三方应用或全局窗口策略；后台批准卡与最终帧的新鲜度须单独验收。
+主窗口的默认后台节流保持 Electron 默认值；Agent 工作区可见时经可信 mainFrame 注册绘制引用，覆盖新建会话和 idle 预览。可信 active Run 在发送 started 前另取得自有 owner 引用，覆盖运行 / 等待批准 / 等待回答；已批准自有目标的正式观察再核对当前进程 PID 与精确 CGWindowID 取得目标引用。三个入口共用一个 WebContents 引用计数管理器，临时 `setBackgroundThrottling(false)`，不授截图或操作许可。工作区隐藏或 scope 变化释放注册，Run 取消同步释放其引用，失败 / 结束 / 启动异常 / owner 释放 / shutdown / 销毁清理；文档导航与 renderer crash 使工作区注册失效。最后引用归零后 250ms 有界绘制收尾再恢复原值，新获取取消待恢复 timer，销毁立即清理；不是最终帧确认，不延长执行或共享。该设置影响同窗绘制与 Page Visibility，不置前、不改变第三方应用或全局窗口策略；后台批准卡与最终帧的新鲜度须单独验收。
 
 更新时间：2026-09-23
 

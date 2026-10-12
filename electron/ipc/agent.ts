@@ -27,6 +27,7 @@ import type { AgentAttachmentImport, AgentAttachmentScope } from '../../src/shar
 import { agentShellSettingsStore } from '../service/agent/shell/agent-shell-settings-store';
 import { agentFileAuthorityBroker } from '../service/agent/agent-file-authority-broker';
 import { agentFirstPartyControls, configureAgentFirstPartyControls } from '../service/agent/computer/agent-first-party-controls';
+import { agentWorkspaceRendering, configureAgentWorkspaceRendering } from '../service/agent/computer/agent-workspace-rendering';
 import type { AgentShellLogPageRequestV1 } from '@/shared/agent/shell/agent-shell.types';
 import { assertMainWindowAgentSender } from './aiServiceAccess';
 
@@ -40,6 +41,7 @@ export function registerAgentIpc(
 ): void {
   const ownersWithCleanup = new Set<number>();
   configureAgentFirstPartyControls(options.getMainWindow);
+  configureAgentWorkspaceRendering(options.getMainWindow);
 
   function requireMainWindow(event: IpcMainInvokeEvent): WebContents {
     return assertMainWindowAgentSender(event, options.getMainWindow);
@@ -53,12 +55,21 @@ export function registerAgentIpc(
       agentOrchestrator.releaseOwner(sender.id);
       agentFileAuthorityBroker.releaseOwner(sender.id);
       agentFirstPartyControls.releaseOwner(sender.id);
+      agentWorkspaceRendering.releaseOwner(sender.id);
     });
   }
 
   ipcMain.handle('agent:computer-controls:register', (event, input: unknown) => {
     const sender = requireMainWindow(event);
     return agentFirstPartyControls.register(sender, event.senderFrame, input);
+  });
+  ipcMain.handle('agent:workspace-rendering:register', (event, input: unknown) => {
+    const sender = requireMainWindow(event);
+    return agentWorkspaceRendering.register(sender, event.senderFrame, input);
+  });
+  ipcMain.handle('agent:workspace-rendering:unregister', (event, input: unknown) => {
+    const sender = requireMainWindow(event);
+    return agentWorkspaceRendering.unregister(sender.id, event.senderFrame, input);
   });
   ipcMain.handle('agent:computer-controls:unregister', (event, input: unknown) => {
     const sender = requireMainWindow(event);
@@ -101,6 +112,7 @@ export function registerAgentIpc(
     agentOrchestrator.releaseOwner(sender.id);
     agentFileAuthorityBroker.releaseOwner(sender.id);
     agentFirstPartyControls.releaseOwner(sender.id);
+    agentWorkspaceRendering.releaseOwner(sender.id);
     return true;
   });
 

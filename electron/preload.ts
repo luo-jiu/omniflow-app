@@ -261,6 +261,13 @@ contextBridge.exposeInMainWorld('electronAIService', {
   complete: (input: AIServiceCompletionInput): Promise<string> => ipcRenderer.invoke('ai-service:complete', input),
 })
 
+contextBridge.exposeInMainWorld('electronAgentRendering', {
+  register: (input: import('../src/shared/computer-use/workspace-rendering-contract').WorkspaceRenderingRegistrationInput): Promise<import('../src/shared/computer-use/workspace-rendering-contract').WorkspaceRenderingRegistrationToken> =>
+    ipcRenderer.invoke('agent:workspace-rendering:register', input),
+  unregister: (token: import('../src/shared/computer-use/workspace-rendering-contract').WorkspaceRenderingRegistrationToken): Promise<boolean> =>
+    ipcRenderer.invoke('agent:workspace-rendering:unregister', token),
+});
+
 contextBridge.exposeInMainWorld('electronComputerControls', {
   register: (input: import('../src/shared/computer-use/first-party-control-contract').FirstPartyRegistrationInput): Promise<import('../src/shared/computer-use/first-party-control-contract').FirstPartyRegistrationToken> =>
     ipcRenderer.invoke('agent:computer-controls:register', input),

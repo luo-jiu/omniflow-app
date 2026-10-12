@@ -1,6 +1,10 @@
 import type { AgentTool } from '../agent-tool-registry';
 import { normalizeAgentInteractionRequest } from '../agent-interaction-model';
 
+export const AGENT_INTERACTION_TIMEOUT_MS = 30 * 60 * 1_000;
+export const AGENT_INTERACTION_SETTLEMENT_GRACE_MS = 30_000;
+export const INTERACTION_REQUEST_TOOL_REGISTRATION_ID = 'builtin:interaction.request@1';
+
 export const interactionRequestTool: AgentTool = {
   assess(input) {
     normalizeAgentInteractionRequest(input);
@@ -75,8 +79,11 @@ export const interactionRequestTool: AgentTool = {
     ],
     type: 'object',
   },
+  executor: 'main',
   name: 'interaction.request',
+  registrationId: INTERACTION_REQUEST_TOOL_REGISTRATION_ID,
   risk: 'write',
+  timeoutMs: AGENT_INTERACTION_TIMEOUT_MS + AGENT_INTERACTION_SETTLEMENT_GRACE_MS,
   validate(input) {
     try {
       normalizeAgentInteractionRequest(input);
@@ -93,7 +100,7 @@ export const interactionRequestTool: AgentTool = {
       return { message: '当前 Agent 运行时不支持交互请求', ok: false };
     }
     const request = normalizeAgentInteractionRequest(input);
-    const response = await context.requestInteraction(request);
+    const response = await context.requestInteraction(request, context.signal);
     return {
       data: { response },
       message: request.kind === 'choice' ? '用户已提交选择' : '用户已提交表单',

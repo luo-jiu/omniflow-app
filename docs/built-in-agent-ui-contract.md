@@ -1,10 +1,12 @@
 # 内置 Agent UI 契约
 
+2026-10-12 修复收口：可见 `AgentWorkspace` 现在在没有 Session、Run 或弹窗时也向 main 注册短期绘制租约；工作区隐藏、资料库 / 账号 / 后端切换、导航、崩溃、销毁和退出都会释放注册。它与 Run 和获准窗口截图共用同一个 WebContents 引用计数管理器，只调用 `setBackgroundThrottling(false)`，不新增截图、输入或共享权限。`interaction.request` 现在使用可信内置 registration identity 和 broker 提供的 Tool `AbortSignal`，拥有独立 30 分钟等待期限及 30 秒结算宽限；普通 Tool 仍保持 30 秒默认时限。取消、停止、owner 释放、创建竞态和实际过期都会收口持久化交互与 pending 映射。后续 GUI 尚未重新验收，compositor 最后一帧仍不作确认。
+
 2026-10-12 后台绘制补充：main在active Run的started事件前取得自有owner窗口绘制租约，运行 / 等待批准 / 等待回答共用原Run生命周期；与获准自有共享目标使用同一个引用计数管理器。没有renderer新状态、绘制续期IPC或新增共享授权。最后引用释放后仅有250ms有界绘制收尾以处理已排队事件，不保证React终态提交或最后一帧已呈现；取消与owner释放不延长执行许可。首次批准卡旧帧及修后真机结果见验证矩阵。
 
 2026-10-12 局部 AX 观察补充：沿既有 `computer-ax` 块增加可选 scope / scopeScanComplete，无新增 ToolRun 或许可 owner。新局部结果只在 kind=element-ancestor、ancestorLevels整数0～3、scopeScanComplete为boolean、candidateScanComplete / coordinateClickReady均false时接受；window范围不得带ancestorLevels，旧无范围字段结果兼容原展示。范围私有路径和锚点指纹不进入块。预览标明「AX · 局部」及上溯层数，展开后的区域扫描完整性与AX文本截断分别说明，不把局部完整写成全窗口完整；截图缩略图和聊天大图仍是同一个获准整窗口。非法范围抑制AX/控件详情，不扩大有效窗口图片的授权。解锁后的TEXT3 / SCROLL4已验暗色局部标签、控件自身/上溯1层说明、真实整窗缩略图与连续观察/输入/滚动同组；TEXT3聊天共用大图、缩放/Esc和焦点恢复通过。亮色、窄布局与全部历史图未验；SCROLL4结束后idle大图AX已出现但截图旧帧，不计该阶段视觉通过。
 
-修后active Run的首次共享卡、等待核验卡和终态已自行刷新；运行前初始化与idle预览仍可能旧帧，不由运行期租约保证。SCROLL4等待卡未提交，`interaction.request`被通用broker默认30秒工具时限与6秒取消收敛中断，准确归类工具执行超时，不是交互自身TTL。交互长等待budget及tool signal传递尚待修复，不以卡片曾显示作为提交链验收通过。
+历史记录中的 SCROLL4 仍保留当时的 30 秒超时结果；当前源码已为内置 `interaction.request` 提供独立等待 budget 和 Tool signal，不能把那次历史失败当作当前实现状态。运行前初始化与 idle 预览的 GUI 观感仍需单独实测，绘制租约不等同于 React 提交或 compositor 最后一帧确认。
 
 2026-10-12：窄原生页子按钮复用既有观察详情、`computer.scroll` 成功行与 computer-use 分组，不新增 UI 执行、授权或 Session / Run / ToolRun 状态源。匿名按钮的 `labelSource=native-scroll-button` 表示宿主派生的方向语义，不冒充原生控件名；AX-only 仅在完整稳定扫描确认同轴可操作父唯一、该方向页按钮唯一时提供 ID，both 提供实际 child screenshotBounds，多滚动区须结合同张图像辨认。private profile / parentBounds / orientation 不进入 UI；仅对应方向 Page 能力，不授 `computer.click`。统一源码门禁、TextEdit 长文页下翻/上翻恢复/清空，以及访达 AX-only V3 / both V2 视图切换的限定后台闭环已通过；保存单窗图像与独立 CUA 一致，操作采样端点的前台与指针未变。部分扫描/AX 截断仍如实标明，WebStorm 定位失败仍保留；完整范围与验收见[电脑操作契约](agent-computer-use.md#观察接口与本轮改进2026-10-12)。
 

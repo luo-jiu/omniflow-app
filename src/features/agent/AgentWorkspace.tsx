@@ -66,6 +66,7 @@ import { useAgentMemories } from './hooks/useAgentMemories';
 import { useAgentSession } from './hooks/useAgentSession';
 import { useAgentSessionResume } from './hooks/useAgentSessionResume';
 import { isAgentComputerRunCurrent, useAgentComputerControls } from './hooks/useAgentComputerControls';
+import { useAgentWorkspaceRendering } from './hooks/useAgentWorkspaceRendering';
 import { loadAgentSessionSelection, saveAgentSessionSelection } from './agent-session-selection';
 import {
   deleteAgentSession,
@@ -348,6 +349,7 @@ export default function AgentWorkspace({
   selectedTreeNode,
 }: AgentWorkspaceProps) {
   const workspaceActive = React.useContext(WorkspaceVisibilityContext);
+  useAgentWorkspaceRendering({ active: workspaceActive, ownerScope, libraryId });
   const [aiServices, setAIServices] = React.useState<AIServiceSnapshot | null>(null);
   const [models, setModels] = React.useState<string[]>([]);
   const [modelPreferences, setModelPreferences] = React.useState<AgentModelPreferences>(

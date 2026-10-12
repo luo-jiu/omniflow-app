@@ -30,7 +30,7 @@ interface RenderingLeaseDependencies {
   scheduleRestore?(restore: () => void, delayMs: number): () => void;
 }
 
-/** Run UI and approved captures share one bounded rendering policy per contents. */
+/** Visible Workspace, Run UI and approved captures share one rendering policy per contents. */
 export function createAgentRenderingLeaseManager(dependencies: RenderingLeaseDependencies) {
   const restoreDelayMs = dependencies.restoreDelayMs ?? 250;
   if (!Number.isSafeInteger(restoreDelayMs) || restoreDelayMs < 0 || restoreDelayMs > 1_000) {

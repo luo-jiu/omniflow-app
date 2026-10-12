@@ -269,6 +269,11 @@ interface Window {
     ) => Promise<string>;
   };
 
+  electronAgentRendering?: {
+    register: (input: import('@/shared/computer-use/workspace-rendering-contract').WorkspaceRenderingRegistrationInput) => Promise<import('@/shared/computer-use/workspace-rendering-contract').WorkspaceRenderingRegistrationToken>;
+    unregister: (token: import('@/shared/computer-use/workspace-rendering-contract').WorkspaceRenderingRegistrationToken) => Promise<boolean>;
+  };
+
   electronComputerControls?: {
     register: (input: import('@/shared/computer-use/first-party-control-contract').FirstPartyRegistrationInput) => Promise<import('@/shared/computer-use/first-party-control-contract').FirstPartyRegistrationToken>;
     unregister: (token: import('@/shared/computer-use/first-party-control-contract').FirstPartyRegistrationToken) => Promise<boolean>;

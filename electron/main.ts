@@ -27,6 +27,7 @@ import { registerAppUpdateIpcHandlers } from './service/appUpdateIpc'
 import { createAppGracefulShutdown } from './service/appGracefulShutdown'
 import { agentMediaArtifactStore } from './service/agent/agent-media-artifact-store'
 import { agentOrchestrator } from './service/agent/agent-orchestrator'
+import { agentWorkspaceRendering } from './service/agent/computer/agent-workspace-rendering'
 import { disposeAgentAttachmentDrafts } from './service/agent/agent-attachment-runtime'
 import {
   disposeAgentPersistenceRuntime,
@@ -426,6 +427,7 @@ function createWindow() {
 
 const appGracefulShutdown = createAppGracefulShutdown({
   cleanup: async () => {
+    agentWorkspaceRendering.shutdown()
     appUpdateService.dispose()
     await embeddedBrowserMainController.dispose()
     await defaultProcessingTaskRegistry.dispose()

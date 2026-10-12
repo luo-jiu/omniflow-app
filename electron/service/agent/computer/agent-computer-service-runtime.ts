@@ -3,19 +3,11 @@ import { captureAgentComputerWindow, clickAgentComputerPoint, getAgentComputerWi
   requestAgentComputerClickPermission, statusAgentComputerClick, setAgentComputerText, scrollAgentComputerControl } from '../../../platform/computer-use';
 import { getAgentAttachmentStore } from '../agent-attachment-runtime';
 import { createAgentComputerRuntime } from './agent-computer-runtime';
-import { createAgentRenderingLeaseManager } from './agent-computer-rendering-lease';
+import { agentRenderingLeases } from './agent-computer-rendering-service-runtime';
 import { agentFirstPartyControls } from './agent-first-party-controls';
 
-const renderingLeases = createAgentRenderingLeaseManager({
-  processId: process.pid,
-  ownerWindow: ownerWebContentsId => {
-    const sender = webContents.fromId(ownerWebContentsId);
-    return sender && BrowserWindow.fromWebContents(sender) || undefined;
-  },
-});
-
 /** Only main's validated Agent Run owner calls this; no renderer lease IPC. */
-export const keepAgentOwnerRendering = renderingLeases.keepOwnerRendering;
+export const keepAgentOwnerRendering = agentRenderingLeases.keepOwnerRendering;
 
 export const agentComputerRuntime = createAgentComputerRuntime({
   windows: getAgentComputerWindows,
@@ -34,7 +26,7 @@ export const agentComputerRuntime = createAgentComputerRuntime({
   clickStatus: statusAgentComputerClick,
   requestClickPermission: requestAgentComputerClickPermission,
   images: getAgentAttachmentStore,
-  keepWindowRendering: renderingLeases.keepApprovedWindowRendering,
+  keepWindowRendering: agentRenderingLeases.keepApprovedWindowRendering,
   firstPartyControls: agentFirstPartyControls,
 });
 

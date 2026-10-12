@@ -88,6 +88,7 @@ views -> features -> components / hooks -> service / bridge -> backend or electr
 - timer、event listener、upload task、browser tab、WebContentsView、session 是否回收
 - Electron main 持有的真实临时文件是否同时具备单文件/总量配额、TTL、导航或 tab 清理、正常退出清理和崩溃残留回收
 - 异步回调是否会把旧页面 / 旧 tab / 旧库结果写回当前界面
+- 等待用户回答的 Tool 必须有独立等待期限和收口预算，且 host 回调使用执行监督器提供的 Tool signal；不能捕获外层 Run signal 而漏掉工具超时取消。验证须覆盖超过普通工具时限、回答续轮、停止、创建期间取消与真实过期后的 pending 清理；交互终态已落库但回执迟到时，停止或超时不得覆盖真实结算，规范 Tool 仍须有 result 和 finishedAt，不能只检查 Run 状态。
 
 默认高风险：
 

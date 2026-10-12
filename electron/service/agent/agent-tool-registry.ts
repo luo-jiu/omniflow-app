@@ -159,7 +159,7 @@ export interface AgentToolExecutionContext {
   runCapabilitySnapshot?: AgentRunCapabilitySnapshot;
   /** Skill already active in this Run, if any. */
   activeSkillId?: string;
-  requestInteraction?: (request: AgentInteractionRequest) => Promise<AgentInteractionResponse>;
+  requestInteraction?: (request: AgentInteractionRequest, signal: AbortSignal) => Promise<AgentInteractionResponse>;
   saveMemoryProposal?: (
     proposal: AgentMemoryProposal,
     signal: AbortSignal,

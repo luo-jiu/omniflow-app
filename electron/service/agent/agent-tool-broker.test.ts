@@ -335,7 +335,7 @@ describe('Agent tool broker', () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
-  it('aborts a main-process tool when its execution timeout expires', async () => {
+  it.each([undefined, 20])('aborts a main-process tool when its %s execution timeout expires', async timeoutMs => {
     vi.useFakeTimers();
     try {
       let executionSignal: AbortSignal | undefined;
@@ -353,11 +353,11 @@ describe('Agent tool broker', () => {
         onProgress: vi.fn(),
         signal: new AbortController().signal,
       };
-      const running = broker.executeMain('media.inspect', {}, context, 20);
+      const running = broker.executeMain('media.inspect', {}, context, timeoutMs);
       const rejected = expect(running).rejects.toThrow('执行超时');
       await Promise.resolve();
 
-      await vi.advanceTimersByTimeAsync(20 + 6_000);
+      await vi.advanceTimersByTimeAsync((timeoutMs ?? 30_000) + 6_000);
 
       await rejected;
       expect(executionSignal?.aborted).toBe(true);

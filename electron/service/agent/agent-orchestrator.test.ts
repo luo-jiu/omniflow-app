@@ -47,6 +47,9 @@ vi.mock('./capabilities/agent-capability-runtime', () => ({
 }));
 
 import { createAgentOrchestrator } from './agent-orchestrator';
+import { createAgentToolBroker } from './agent-tool-broker';
+import { AGENT_INTERACTION_TIMEOUT_MS, AGENT_INTERACTION_SETTLEMENT_GRACE_MS,
+  interactionRequestTool } from './tools/interaction-request-tool';
 import { AgentAttachmentStore } from './agent-attachment-store';
 import type { AgentComputerSharedWindow } from '../../platform/computer-use';
 import { createAgentComputerRuntime, type AgentComputerRuntimeDependencies } from './computer/agent-computer-runtime';
@@ -5697,6 +5700,297 @@ describe('Agent orchestrator', () => {
         status: 'failed',
       })],
     });
+  });
+
+  function interactionWaitFixture(options: Parameters<typeof createAgentOrchestrator>[0] = {}) {
+    const webContents = sender();
+    const runSessionRegistry = createAIServiceRunSessionRegistry();
+    const endRun = vi.spyOn(runSessionRegistry, 'end');
+    const orchestrator = createOrchestrator({ ...options, runSessionRegistry });
+    mocks.streamAgentProviderTurn
+      .mockResolvedValueOnce({ content: '', toolCalls: [{ id: 'long-interaction', name: 'interaction.request', input: {
+        kind: 'choice', prompt: '请选择处理方式', options: [{ id: 'keep', label: '保留' }, { id: 'replace', label: '替换' }],
+      } }] })
+      .mockImplementationOnce(async (_connection, _input, onDelta) => {
+        onDelta('交互测试结束。'); return { content: '交互测试结束。', toolCalls: [] };
+      });
+    return { webContents, orchestrator, endRun };
+  }
+
+  async function interactionSubmissionFor(webContents: ReturnType<typeof sender>, started: { runId: string; sessionId: string }) {
+    let interactionId = '';
+    await vi.waitFor(() => {
+      interactionId = webContents.send.mock.calls.map(call => call[1])
+        .find(event => event?.type === 'tool-interaction-required' && event.runId === started.runId)?.interactionId || '';
+      expect(interactionId).not.toBe('');
+    });
+    return { interactionId, libraryId: 3, ownerScope: OWNER_SCOPE,
+      response: { kind: 'choice' as const, selectedOptionIds: ['keep'] }, ...started };
+  }
+
+  it.each([undefined, 45 * 60 * 1_000])('keeps a real interaction pending beyond the generic Tool timeout with host TTL %s and resumes after one late answer', async interactionTimeoutMs => {
+    vi.useFakeTimers();
+    const broker = createAgentToolBroker();
+    const executeMain = vi.spyOn(broker, 'executeMain');
+    const { webContents, orchestrator, endRun } = interactionWaitFixture({ toolBroker: broker, interactionTimeoutMs });
+    try {
+      const started = await orchestrator.start(webContents as never, request());
+      const submission = await interactionSubmissionFor(webContents, started);
+      await vi.advanceTimersByTimeAsync(interactionTimeoutMs === undefined ? 45_000 : AGENT_INTERACTION_TIMEOUT_MS + 60_000);
+      expect(mocks.streamAgentProviderTurn).toHaveBeenCalledOnce();
+      expect(await store.getSession(started.sessionId, OWNER_SCOPE, 3)).toMatchObject({
+        lastRunStatus: 'awaiting_interaction', toolActivities: [{
+          interaction: { status: 'pending' }, status: 'awaiting_interaction' }],
+      });
+      expect(executeMain.mock.calls[0][3]).toBe((interactionTimeoutMs ?? AGENT_INTERACTION_TIMEOUT_MS) + AGENT_INTERACTION_SETTLEMENT_GRACE_MS);
+      expect(JSON.stringify(mocks.streamAgentProviderTurn.mock.calls[0][1].tools
+        .find((tool: { name: string }) => tool.name === 'interaction.request').inputSchema)).not.toContain('timeoutMs');
+      await expect(orchestrator.submitInteraction(webContents.id, submission)).resolves.toMatchObject({ accepted: true });
+      await waitForCompletedFinal(webContents, '交互测试结束。', started);
+      await vi.waitFor(() => expect(endRun).toHaveBeenCalledOnce());
+      expect(await store.getSession(started.sessionId, OWNER_SCOPE, 3)).toMatchObject({
+        lastRunStatus: 'completed', toolActivities: [{
+          interaction: { status: 'submitted', response: submission.response }, status: 'completed' }],
+      });
+      expect(mocks.streamAgentProviderTurn.mock.calls[1][1].messages.at(-1).content).toContain('"selectedOptionIds":["keep"]');
+      await expect(orchestrator.submitInteraction(webContents.id, submission)).rejects.toThrow('不存在或已经失效');
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      orchestrator.releaseOwner(webContents.id); await vi.advanceTimersByTimeAsync(6_001);
+      await orchestrator.shutdown(0); vi.useRealTimers();
+    }
+  });
+
+  it.each(['stop', 'release-owner'] as const)('clears a long interaction and its timers on %s without another Provider turn', async reason => {
+    vi.useFakeTimers();
+    const { webContents, orchestrator, endRun } = interactionWaitFixture();
+    try {
+      const started = await orchestrator.start(webContents as never, request());
+      const submission = await interactionSubmissionFor(webContents, started);
+      await vi.advanceTimersByTimeAsync(45_000);
+      if (reason === 'stop') expect(orchestrator.stop(started.sessionId, webContents.id)).toBe(true);
+      else orchestrator.releaseOwner(webContents.id);
+      await vi.waitFor(() => expect(endRun).toHaveBeenCalledOnce());
+      expect(await store.getSession(started.sessionId, OWNER_SCOPE, 3)).toMatchObject({
+        lastRunStatus: 'cancelled', toolActivities: [{
+          interaction: { status: 'cancelled' }, status: 'cancelled' }],
+      });
+      expect(webContents.send.mock.calls.map(call => call[1])).toContainEqual(expect.objectContaining({
+        type: 'tool-interaction-resolved', interactionId: submission.interactionId,
+        activity: expect.objectContaining({ interaction: expect.objectContaining({ status: 'cancelled' }) }),
+      }));
+      await expect(orchestrator.submitInteraction(webContents.id, submission)).rejects.toThrow('不存在或已经失效');
+      expect(mocks.streamAgentProviderTurn).toHaveBeenCalledOnce();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      orchestrator.releaseOwner(webContents.id); await vi.advanceTimersByTimeAsync(6_001);
+      await orchestrator.shutdown(0); vi.useRealTimers();
+    }
+  });
+
+  it('expires the default thirty-minute interaction through its own TTL and releases its broker budget', async () => {
+    vi.useFakeTimers();
+    const { webContents, orchestrator, endRun } = interactionWaitFixture();
+    try {
+      const started = await orchestrator.start(webContents as never, request());
+      const submission = await interactionSubmissionFor(webContents, started);
+      await vi.advanceTimersByTimeAsync(29 * 60 * 1_000);
+      expect(mocks.streamAgentProviderTurn).toHaveBeenCalledOnce();
+      expect((await store.getSession(started.sessionId, OWNER_SCOPE, 3))?.toolActivities[0].interaction?.status).toBe('pending');
+      await vi.advanceTimersByTimeAsync(61_000);
+      await waitForCompletedFinal(webContents, '交互测试结束。', started);
+      await vi.waitFor(() => expect(endRun).toHaveBeenCalledOnce());
+      expect(await store.getSession(started.sessionId, OWNER_SCOPE, 3)).toMatchObject({
+        lastRunStatus: 'completed', toolActivities: [{
+          interaction: { status: 'expired' }, status: 'failed', result: { ok: false, message: '用户输入已超时' } }],
+      });
+      expect(mocks.streamAgentProviderTurn.mock.calls[1][1].messages.at(-1).content).toContain('用户输入已超时');
+      await expect(orchestrator.submitInteraction(webContents.id, submission)).rejects.toThrow('不存在或已经失效');
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      orchestrator.releaseOwner(webContents.id); await vi.advanceTimersByTimeAsync(6_001);
+      await orchestrator.shutdown(0); vi.useRealTimers();
+    }
+  });
+
+  it('settles the interaction when the broker execution signal expires while the Run signal remains active', async () => {
+    vi.useFakeTimers();
+    const broker = createAgentToolBroker();
+    const executeMain = broker.executeMain.bind(broker);
+    vi.spyOn(broker, 'executeMain').mockImplementation((name, input, context, _timeoutMs, registry, cancellationMs) =>
+      executeMain(name, input, context, 45_000, registry, cancellationMs));
+    const { webContents, orchestrator, endRun } = interactionWaitFixture({ toolBroker: broker });
+    try {
+      const started = await orchestrator.start(webContents as never, request());
+      const submission = await interactionSubmissionFor(webContents, started);
+      await vi.advanceTimersByTimeAsync(45_000);
+      await waitForCompletedFinal(webContents, '交互测试结束。', started);
+      await vi.waitFor(() => expect(endRun).toHaveBeenCalledOnce());
+      expect((await store.getSession(started.sessionId, OWNER_SCOPE, 3))?.toolActivities[0])
+        .toMatchObject({ interaction: { status: 'cancelled' }, status: 'cancelled', result: { message: '工具 interaction.request 执行超时' } });
+      const events = webContents.send.mock.calls.map(call => call[1]);
+      const completedToolIndex = events.findIndex(event => event?.type === 'tool-completed');
+      expect(completedToolIndex).toBeGreaterThanOrEqual(0);
+      expect(events.slice(completedToolIndex + 1)).toContainEqual(expect.objectContaining({
+        type: 'run-updated', run: expect.objectContaining({ status: 'running' }),
+      }));
+      await expect(orchestrator.submitInteraction(webContents.id, submission)).rejects.toThrow('不存在或已经失效');
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      orchestrator.releaseOwner(webContents.id); await vi.advanceTimersByTimeAsync(6_001);
+      await orchestrator.shutdown(0); vi.useRealTimers();
+    }
+  });
+
+  it('keeps an impostor interaction Tool on the ordinary thirty-second broker budget', async () => {
+    vi.useFakeTimers();
+    const registry = createAgentToolRegistry([{ ...interactionRequestTool,
+      registrationId: 'third-party:interaction@1', timeoutMs: undefined }]);
+    const snapshot = vi.spyOn(agentToolRegistry, 'createSnapshot').mockReturnValue(registry.createSnapshot());
+    const broker = createAgentToolBroker();
+    const executeMain = vi.spyOn(broker, 'executeMain');
+    const { webContents, orchestrator, endRun } = interactionWaitFixture({ toolBroker: broker });
+    try {
+      const started = await orchestrator.start(webContents as never, request());
+      const submission = await interactionSubmissionFor(webContents, started);
+      expect(executeMain.mock.calls[0][3]).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(30_000);
+      await waitForCompletedFinal(webContents, '交互测试结束。', started);
+      await vi.waitFor(() => expect(endRun).toHaveBeenCalledOnce());
+      expect((await store.getSession(started.sessionId, OWNER_SCOPE, 3))?.toolActivities[0])
+        .toMatchObject({ interaction: { status: 'cancelled' }, status: 'cancelled', result: { message: '工具 interaction.request 执行超时' } });
+      await expect(orchestrator.submitInteraction(webContents.id, submission)).rejects.toThrow('不存在或已经失效');
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      orchestrator.releaseOwner(webContents.id); await vi.advanceTimersByTimeAsync(6_001);
+      await orchestrator.shutdown(0); snapshot.mockRestore(); vi.useRealTimers();
+    }
+  });
+
+  it.each(['interaction-create', 'run-update'] as const)('cancels a persisted interaction when %s crosses a Run stop', async stage => {
+    vi.useFakeTimers();
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const entering = new Promise<void>(resolve => { entered = resolve; });
+    let interactionId = '';
+    const create = store.createToolInteraction.bind(store);
+    const createSpy = vi.spyOn(store, 'createToolInteraction').mockImplementation(async (...args) => {
+      interactionId = args[1];
+      if (stage === 'interaction-create') { entered(); await gate; }
+      return create(...args);
+    });
+    const update = store.updateRun.bind(store);
+    const updateSpy = vi.spyOn(store, 'updateRun').mockImplementation(async (...args) => {
+      const result = await update(...args);
+      if (stage === 'run-update' && args[1].status === 'awaiting_interaction') { entered(); await gate; }
+      return result;
+    });
+    const { webContents, orchestrator, endRun } = interactionWaitFixture();
+    try {
+      const started = await orchestrator.start(webContents as never, request());
+      await entering;
+      expect(orchestrator.stop(started.sessionId, webContents.id)).toBe(true);
+      release();
+      await vi.waitFor(() => expect(endRun).toHaveBeenCalledOnce());
+      expect(await store.getSession(started.sessionId, OWNER_SCOPE, 3)).toMatchObject({
+        lastRunStatus: 'cancelled', toolActivities: [{
+          interaction: { interactionId, status: 'cancelled' }, status: 'cancelled' }],
+      });
+      expect(webContents.send.mock.calls.map(call => call[1]).filter(event => event?.type === 'tool-interaction-required')).toEqual([]);
+      await expect(orchestrator.submitInteraction(webContents.id, { interactionId, libraryId: 3, ownerScope: OWNER_SCOPE,
+        response: { kind: 'choice', selectedOptionIds: ['keep'] }, ...started })).rejects.toThrow('不存在或已经失效');
+      expect(mocks.streamAgentProviderTurn).toHaveBeenCalledOnce();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      release(); orchestrator.releaseOwner(webContents.id); await vi.advanceTimersByTimeAsync(6_001);
+      await orchestrator.shutdown(0); createSpy.mockRestore(); updateSpy.mockRestore(); vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    ['submitted', true], ['expired', true], ['expired', false],
+  ] as const)('fully settles a stopped Run when %s persistence returns after the broker budget: %s', async (resolution, afterBrokerBudget) => {
+    vi.useFakeTimers();
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const entering = new Promise<void>(resolve => { entered = resolve; });
+    const resolveInteraction = store.resolveToolInteraction.bind(store);
+    const resolveSpy = vi.spyOn(store, 'resolveToolInteraction').mockImplementation(async (...args) => {
+      const result = await resolveInteraction(...args);
+      if (args[1] === resolution) { entered(); await gate; }
+      return result;
+    });
+    const { webContents, orchestrator, endRun } = interactionWaitFixture({ interactionTimeoutMs: 60_000 });
+    let submissionFailure: Promise<void> | undefined;
+    try {
+      const started = await orchestrator.start(webContents as never, request());
+      const submission = await interactionSubmissionFor(webContents, started);
+      if (resolution === 'submitted') {
+        submissionFailure = expect(orchestrator.submitInteraction(webContents.id, submission))
+          .rejects.toThrow('Agent 任务已取消');
+      } else await vi.advanceTimersByTimeAsync(60_000);
+      await entering;
+      expect(orchestrator.stop(started.sessionId, webContents.id)).toBe(true);
+      if (!afterBrokerBudget) release();
+      await vi.advanceTimersByTimeAsync(6_001);
+      await vi.waitFor(() => expect(endRun).toHaveBeenCalledOnce());
+      const beforeLateReturn = (await store.getSession(started.sessionId, OWNER_SCOPE, 3))!;
+      expect(beforeLateReturn.lastRunStatus).toBe('cancelled');
+      expect(beforeLateReturn.toolActivities[0]).toMatchObject({
+        interaction: { status: resolution }, status: resolution === 'expired' ? 'failed' : 'cancelled',
+        result: { ok: false, message: resolution === 'expired' ? '用户输入已超时' : 'Agent Tool 已取消' },
+        finishedAt: expect.any(String),
+      });
+      release();
+      if (submissionFailure) await submissionFailure;
+      await vi.advanceTimersByTimeAsync(0);
+      const afterLateReturn = (await store.getSession(started.sessionId, OWNER_SCOPE, 3))!;
+      expect(afterLateReturn.lastRunStatus).toBe('cancelled');
+      expect(afterLateReturn.toolActivities[0].interaction).toEqual(beforeLateReturn.toolActivities[0].interaction);
+      expect(afterLateReturn.toolActivities[0]).toEqual(beforeLateReturn.toolActivities[0]);
+      await expect(orchestrator.submitInteraction(webContents.id, submission)).rejects.toThrow('不存在或已经失效');
+      expect(mocks.streamAgentProviderTurn).toHaveBeenCalledOnce();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      release(); orchestrator.releaseOwner(webContents.id); await vi.advanceTimersByTimeAsync(6_001);
+      await orchestrator.shutdown(0); resolveSpy.mockRestore(); vi.useRealTimers();
+    }
+  });
+
+  it('settles a broker timeout from the persisted cancellation while its resolution reply is delayed', async () => {
+    vi.useFakeTimers();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const resolveInteraction = store.resolveToolInteraction.bind(store);
+    const resolveSpy = vi.spyOn(store, 'resolveToolInteraction').mockImplementation(async (...args) => {
+      const activity = await resolveInteraction(...args);
+      if (args[1] === 'cancelled') await gate;
+      return activity;
+    });
+    const broker = createAgentToolBroker();
+    const executeMain = broker.executeMain.bind(broker);
+    vi.spyOn(broker, 'executeMain').mockImplementation((name, input, context, _timeoutMs, registry, cancellationMs) =>
+      executeMain(name, input, context, 45_000, registry, cancellationMs));
+    const { webContents, orchestrator, endRun } = interactionWaitFixture({ toolBroker: broker });
+    try {
+      const started = await orchestrator.start(webContents as never, request());
+      const submission = await interactionSubmissionFor(webContents, started);
+      await vi.advanceTimersByTimeAsync(51_001);
+      await waitForCompletedFinal(webContents, '交互测试结束。', started);
+      await vi.waitFor(() => expect(endRun).toHaveBeenCalledOnce());
+      const before = (await store.getSession(started.sessionId, OWNER_SCOPE, 3))!.toolActivities[0];
+      expect(before).toMatchObject({ status: 'cancelled', interaction: { status: 'cancelled' },
+        result: { ok: false, message: '工具 interaction.request 执行超时' }, finishedAt: expect.any(String) });
+      release(); await vi.advanceTimersByTimeAsync(0);
+      expect((await store.getSession(started.sessionId, OWNER_SCOPE, 3))!.toolActivities[0]).toEqual(before);
+      await expect(orchestrator.submitInteraction(webContents.id, submission)).rejects.toThrow('不存在或已经失效');
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      release(); orchestrator.releaseOwner(webContents.id); await vi.advanceTimersByTimeAsync(6_001);
+      await orchestrator.shutdown(0); resolveSpy.mockRestore(); vi.useRealTimers();
+    }
   });
 
   it('persists a bounded interaction, authorizes one answer and resumes the model', async () => {

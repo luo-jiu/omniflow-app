@@ -1,11 +1,19 @@
 # 前端验证矩阵
 
+## 工作区绘制与交互等待修复（2026-10-12）
+
+- 本轮修复了两个源码问题：可见 `AgentWorkspace` 在没有 Session / Run 时注册 main-owned 绘制租约，并在隐藏、作用域变化、导航、崩溃、销毁和退出时释放；`interaction.request` 使用可信内置 registration identity、独立 30 分钟等待期限、30 秒 settlement grace 以及 broker Tool `AbortSignal`。普通 Tool 的 30 秒默认行为未改变。
+- 自动化覆盖工作区注册的可信 frame、替换、迟到 token、导航 / crash / destroy / shutdown、与 Run / 窗口截图引用计数共存，以及交互提交、过期、stop、owner release、创建竞态、broker 超时和冒充 Tool 身份。定向 8 个测试文件 295 项通过，TypeScript、相关 ESLint 和 `git diff --check` 通过。
+- 独立 review 发现并修复交互已过期落库、异步回执迟到期间停止的终态缺口：保留 `expired / failed`，按同 owner / 库 / Session / Tool 的持久化记录补齐 result / finishedAt，不覆盖已有结果或放宽 Store CAS。补充立即停止、超过 broker 6 秒取消预算及 broker 超时取消回执迟到断言；13 项交互定向与 `tsc --noEmit` 通过。工作区绘制专项独立 review 未发现问题，真实 React layout effect 采样确认 scope 切换顺序为旧注册清理 → owner release → 新注册。
+- 修后统一 `npm run lint` / `npm test` / `npm run build` 均 exit 0：485 个测试文件 / 5282 项通过，3 个文件 / 7 项沿用跳过，测试开始 16:35:48、耗时 27.26 秒。最终日志为 `/tmp/omniflow-workspace-interaction-final-lint-20261012.log`、`/tmp/omniflow-workspace-interaction-final-test-20261012.log` 和 `/tmp/omniflow-workspace-interaction-final-build-20261012.log`；独立复核未发现剩余问题。开发进程已停止，构建与 dev 串行；本轮仅本地提交，不推送或发布。
+- 本轮未新增 GUI 真机验收；运行前键盘焦点、idle 画面是否拿到 compositor 最后一帧、签名安装包、其他平台和发行环境仍不由自动化结论覆盖。此前 SCROLL4 的 30 秒超时作为历史记录保留，不代表修复后的内置交互行为。
+
 ## Computer Use 阶段审查与提交（2026-10-12）
 
 - 本轮审查覆盖原生窗口身份 / 单窗捕获 / AX 写操作、Run 与 sealed binding / 取消结算、第一方控件桥、Provider / SQLite / IPC 投影，以及分组、AX 与图片预览。确认并修复两处问题：模型过滤后的文字工具拒绝路径仍持久化 / 续轮发送输入正文；合法候选的完整 JSON 超过 64 KiB 导致整次观察失败。修后独立复核未发现新增问题。
 - 隐私回归同时覆盖 `computer.setText` / `computer_setText` 被非视觉模型过滤后的 SQLite、IPC 和同 Run 续轮正文去除、prepare / execute 零调用，以及来源冒充 / 独立别名不升级权限。历史拒绝别名的 renderer 投影也去除正文与伪造动作，不新增内置来源标记；旧输入不进入新 Run 的历史事实或摘要，无需修改真实 SQLite。原生纯数据回归覆盖深路径、中文 / 转义、scope / 窗口元数据、严格输出边界和摘要叠加，超限仍返回完整候选前缀并标记截断。
 - 修后统一 `npm run lint` / `npm test` / `npm run build` 均 exit0：480 文件 / 5191 项通过，3 文件 / 7 项沿用跳过，测试开始 15:13:38、28.71 秒。专项 audit / orchestrator 162 项、renderer 36 项、原生纯策略 3 项及 arm64 / x86_64 完整 Swift typecheck 通过；独立 `tsc --noEmit` 通过。全量日志为 `/tmp/omniflow-stage-review-final-{lint,test,build}-20261012.log`。开发进程已停止，构建与 dev 串行。
-- 本地按原生模块（`ce084fe`）、Agent 执行 / UI（`e2b6b95`）及文档分批提交，不推送。本轮未新增 GUI 验证，之前本机开发版 Win / libraryId=3 的真实验收范围保留，不扩大为任意 App 或持续指针隔离。运行前 / 终态后的 idle 后台预览旧帧及既存 `interaction.request` 的通用 broker 超时继续待修；签名安装包、其他系统 / 架构真机、通用快捷键与拖拽仍未验收或未实现。
+- 本地按原生模块（`ce084fe`）、Agent 执行 / UI（`e2b6b95`）及文档分批提交，不推送。该批未新增 GUI 验证，之前本机开发版 Win / libraryId=3 的真实验收范围保留，不扩大为任意 App 或持续指针隔离。当时留下的运行前 / idle 后台绘制及 `interaction.request` 通用超时，后续源码修复见本页“工作区绘制与交互等待修复”；签名安装包、其他系统 / 架构真机、通用快捷键与拖拽仍未验收或未实现。
 
 ## Agent owner Run 后台绘制（2026-10-12）
 
