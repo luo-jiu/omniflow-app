@@ -1,5 +1,14 @@
 # 前端验证矩阵
 
+## Agent 鼠标意图指示器（2026-10-12）
+
+- 按用户选择采用“贴在目标窗口上，随窗口遮挡”：main runtime 在正式已批准的 `computer.click` 与右键 / 双击 / 拖拽提交前显示紫色箭头、AI 操作标签或静态拖拽路径。图案不移动物理鼠标、不输入、不激活、不置顶；快捷键 / 文本 / 滚动不虚构指针位置。普通层 nonactivating NSPanel 透明注册后复验紧邻目标的 z 顺序，再绘制；目标 / 显示器 / 顺序漂移时关闭，不追踪过期冻结坐标。视觉租约仍由原 Run 共享 owner 持有，没有新 renderer 输入 IPC 或执行状态源。
+- adapter 新增 54 项回归，覆盖严格请求 / ready 回执、1 秒启动预算、3 秒总寿命、EOF / TERM 与 300 毫秒硬收尾、取消 / 迟到 ready / 超限 / EPIPE；runtime 新增 12 项回归，覆盖正式执行时机、AX-only 中心 / 冻结图片映射、350 毫秒预告及其后窗口 / owner / TTL / receiver 复验、取消 / Run 释放、视觉失败与 unknown 清理。原生纯协议专项额外通过；TS 三文件共 384 项及 native / build 接线独立只读 review 未发现可行动问题。
+- 原生幕后夹具在 macOS 26.5.2 / build25F84 验证 ordinary layer 0、目标上方相邻排序及面板非 key / main，采样前台没有变成 helper。ScreenCaptureKit 独立目标截图的 100×100 像素全部为目标背景，图案像素为 0；不把另窗面板混入模型图片。EOF 39ms、SIGTERM 4ms、额外输入 4ms、移窗 37ms、隐藏 130ms、ready 后约 2964ms 自灭，全部无残留；旧冻结窗口返回 shown=false。它们是采样结果，不证明连续零延迟、所有层级动画或全屏 / 其他 Space 兼容。
+- 图案 click / rightClick / doubleClick / drag 四张 PNG 已以实际 WindowIndicatorView 导出，点击及拖拽图经视觉检查。证据位于 `/tmp/omniflow-indicator-layer-ryBM9K/acceptance.json` 与 `plan-*.png`。成功实机证据对应窄窗标签避让后的实现；随后仅将父启动身份读取收敛为一次冻结，最终源码已重新编译并通过原生纯专项，但只读检查确认电脑已锁屏（`screenIsLocked=true`、foreground=loginwindow，见同目录 `lock-state.json`），故没有重跑该轮实机夹具。
+- 最终 `npm run lint` / `npm test` / `npm run build` 均 exit 0：491 文件 / 5516 项通过，3 文件 / 7 项沿用跳过，测试开始 23:16:43、耗时 30.56 秒。构建串行完成并重建 universal helper，日志为 `/tmp/omniflow-indicator-final-{lint,test,build}-20261012.log`。本轮恢复原本机 PostgreSQL / MinIO 容器并启动 API，无数据库结构变更，没有新增系统权限。
+- 开发版真实内部 Agent 的新 `computer.input` Tool GUI 流程尚未完成：电脑操作 inventory 超时，原生只读检查确认锁屏，未绕过锁屏或启动旧安装版。原生 TextEdit 四动作与图层夹具结果不能代替这一门禁。解锁后只用开发版、Win / libraryId=3 和本机 macOS MinIO，以本轮可丢弃 TextEdit 文档检验快捷键 / 双击 / 拖拽消费、最后右键 unknown 不重放、操作行分组 / 共享批准 / 缩略图 / 大图及图案遮挡；亮暗 / 窄窗、多显示器、签名包及 Windows / Linux 仍未验收。
+
 ## Agent 后台快捷键、右键、双击与拖拽（2026-10-12）
 
 - 新增独立 `computer.input@1` 四动作，沿原 main-only 单窗授权与一次性观察，不扩大旧 `computer.click` 或历史共享许可。自动化验证新审批 `inputOperations`、both / ax / screenshot / focus 能力交集、字母数字 Command / Control 要求、图片像素到 Retina / 负窗口原点的 points 映射、100～1000ms 不同起终点拖拽、sealed request、Run / owner / TTL 漂移，以及真实 builtin Tool → registry capability → broker → runtime 的提交结算。原生协议与 fake-child 测试验证首发前零投递、每种部分发送边界的唯一 up、同 PID 换窗 / 重启不释放到另一接收者、SIGTERM 退出宽限、坏回执及迟到成功不覆盖 unknown；它们不证明应用消费。

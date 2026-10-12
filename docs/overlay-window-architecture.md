@@ -1,10 +1,12 @@
 # Overlay 窗口架构与迁移规范
 
-更新时间：2026-10-08
+更新时间：2026-10-12
 
 适用范围：`omniflow-app` 的跨 renderer 浮层子系统(overlay BrowserWindow),及其承载的弹框 / 右键菜单 / 气泡等迁移流程。
 
 ---
+
+2026-10-12：Agent 操作外部获准窗口的鼠标意图图案由 main-only `window-indicator.ts` 与固定原生 helper 承接，不使用下面的交互 `overlay BrowserWindow`。它必须是普通层、nonactivating、点击穿透的视觉面板，紧邻目标窗口并随遮挡，不成为 main / key window；没有 overlay 请求、renderer 执行入口或新业务状态 owner。下面的交互弹框会接管鼠标且绑定自有主窗口，不适合直接用作外部应用指示器。生命周期、截图排除和冻结坐标的契约见[鼠标意图指示器](agent-computer-use.md#鼠标意图指示器2026-10-12)。
 
 ## 1. 背景与动机
 

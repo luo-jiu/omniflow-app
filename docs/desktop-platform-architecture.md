@@ -1,5 +1,7 @@
 # 桌面平台适配架构
 
+2026-10-12：新增 main-only 鼠标意图指示器，平台 adapter 为 `window-indicator.ts`，固定 helper 模式为 `--window-indicator`。只接收冻结单窗身份与有限 click / rightClick / doubleClick / drag points，没有输入、任意文本或 renderer IPC；由原 Agent runtime 持有视觉租约并在提交前复验。普通层 nonactivating NSPanel 透明注册后确认紧邻目标，再绘制箭头 / AI 标签 / 静态拖拽计划；不激活、不置顶、点击穿透、随目标遮挡。原窗 / 显示器 / 层级变化、EOF、取消和超时都关闭；3 秒总寿命与 300 毫秒硬收尾保持有界，独立目标 SCK 不含该面板。实现与真机范围见[鼠标意图指示器](agent-computer-use.md#鼠标意图指示器2026-10-12)。
+
 2026-10-12：新增独立 `computer.input@1` 的后台快捷键、右键、双击和同窗直线拖拽。纯输入契约位于 `src/shared/computer-use/window-input-contract.ts`，main 平台 adapter 为 `window-input.ts`，原生驱动为 `macos-window-input.swift`；平台模块不依赖 Agent Session / Run / UI。Agent runtime 持有独立 `inputOperations` 共享许可、观察能力、同张截图像素映射、sealed prepare 和 broker 提交结算，没有通用桌面输入 preload / IPC。旧 AXPress、文字与语义滚动路线不变。
 
 新驱动使用私有 source 创建 NSEvent / CGEvent，按批准窗口设置 global / local points 与窗口 hint，每条事件只发送一次公开 `CGEventPostToPid`；鼠标局部坐标依赖动态解析的私有 `CGEventSetWindowLocation`，缺符号在首发前拒绝，不采用全局 HID、激活、warp、MouseMoved primer 或双路投递。生产能力仅固定、实测的软件及系统版本 profile 开放，固定开发夹具另有不限定系统 build 的实验 profile，精确名单由电脑操作契约持有；目标必须后台且为该进程精确 focusedWindow，快捷键另复核非 secure focused element 的窗口父链。观察前后、prepare / final 及每次事件复验接收者；物理 modifier / 鼠标按住拒绝，快捷键额外拒绝任意物理键按住。普通打字不屏蔽后台指针动作；切换前台、目标窗漂移或取消停止后续动作。

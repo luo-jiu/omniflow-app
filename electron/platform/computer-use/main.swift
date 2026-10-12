@@ -16,6 +16,7 @@ do {
     case "--scroll": try scroll(readScrollRequest())
     case "--window-input-check": windowInputCheck(try readWindowRequest())
     case "--window-input": try windowInput(readWindowInputRequest())
+    case "--window-indicator": try windowIndicator()
     case "--request-permission":
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
         _ = AXIsProcessTrustedWithOptions(options)

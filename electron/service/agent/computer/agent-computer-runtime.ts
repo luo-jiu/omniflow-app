@@ -19,6 +19,7 @@ import { normalizeObservationFocus, type ComputerObservationFocus } from './agen
 import { WINDOW_INPUT_OPERATIONS, type WindowInputOperation } from '../../../../src/shared/computer-use/window-input-contract';
 import type { AgentComputerWindowInputStatus, AgentComputerWindowInputRequest, AgentComputerWindowInputReceipt } from '../../../platform/computer-use';
 import { createWindowInputRequest, windowInputNotice } from './agent-computer-window-input';
+import type { AgentComputerWindowIndicatorRequest, AgentComputerWindowIndicatorLease } from '../../../platform/computer-use/window-indicator';
 
 const OBSERVATION_TTL_MS = 60_000;
 const MAX_RUN_SCREENSHOTS = 32;
@@ -80,6 +81,7 @@ export interface AgentComputerRuntimeDependencies {
   scroll(input: { target: AgentComputerPoint['target']; operation: ComputerElementOperation }, signal: AbortSignal): Promise<void>;
   inputStatus?(window: AgentComputerSharedWindow, signal: AbortSignal): Promise<AgentComputerWindowInputStatus>;
   input?(request: AgentComputerWindowInputRequest, signal: AbortSignal): Promise<AgentComputerWindowInputReceipt>;
+  indicatePointer?(request: AgentComputerWindowIndicatorRequest, signal: AbortSignal): Promise<AgentComputerWindowIndicatorLease>;
   clickStatus(signal: AbortSignal): Promise<{ available: boolean }>;
   requestClickPermission(signal: AbortSignal): Promise<void>;
   images(): ImageStore;
@@ -266,6 +268,7 @@ export function createAgentComputerRuntime(dependencies: AgentComputerRuntimeDep
   const pendingTargets = new Map<string, { identity: string; window: string; targetId: string }>();
   // This revocation belongs to the Run, so replacing or reapproving its window cannot clear it.
   const inputBlockedRuns = new Set<string>();
+  const activeIndicators = new Map<RunShare, () => void>();
   const now = dependencies.now || Date.now;
   const discovery = createAgentComputerWindowDiscovery({ windows: dependencies.windows, now });
   let queue: Promise<unknown> = Promise.resolve();
@@ -289,7 +292,59 @@ export function createAgentComputerRuntime(dependencies: AgentComputerRuntimeDep
   }
   function deactivateShare(share: RunShare): void {
     share.active = false;
+    activeIndicators.get(share)?.();
     releaseShareRendering(share);
+  }
+  /** Visual intent only. It cannot authorize, dispatch, or settle an input. */
+  async function previewPointer(share: RunShare, request: AgentComputerWindowIndicatorRequest, signal: AbortSignal): Promise<() => void> {
+    if (!dependencies.indicatePointer) return () => undefined;
+    const controller = new AbortController();
+    let lease: AgentComputerWindowIndicatorLease | undefined;
+    let stopped = false;
+    const stop = () => {
+      if (stopped) return;
+      stopped = true;
+      signal.removeEventListener('abort', stop);
+      controller.abort();
+      try { lease?.dispose(); } catch { /* Visual cleanup cannot replace the input result. */ }
+      if (activeIndicators.get(share) === stop) activeIndicators.delete(share);
+    };
+    activeIndicators.get(share)?.();
+    activeIndicators.set(share, stop);
+    signal.addEventListener('abort', stop, { once: true });
+    if (signal.aborted || !share.active) stop();
+    try {
+      lease = await dependencies.indicatePointer(request, controller.signal);
+      if (stopped) lease.dispose();
+      else if (lease.shown) await new Promise<void>(resolve => {
+        const finish = () => { clearTimeout(timer); controller.signal.removeEventListener('abort', finish); resolve(); };
+        const timer = setTimeout(finish, 350);
+        controller.signal.addEventListener('abort', finish, { once: true });
+        if (controller.signal.aborted) finish();
+      });
+      signal.throwIfAborted();
+      if (!share.active) throw new Error('窗口共享已结束');
+      return stop;
+    } catch {
+      stop();
+      signal.throwIfAborted();
+      if (!share.active) throw new Error('窗口共享已结束');
+      return () => undefined;
+    }
+  }
+  async function withPointerPreview<T>(preparation: AgentToolMainPreparedExecution, observation: Observation,
+    request: AgentComputerWindowIndicatorRequest | undefined, signal: AbortSignal, dispatch: () => Promise<T>): Promise<T> {
+    if (!request || !dependencies.indicatePointer) return dispatch();
+    const share = shareFor(preparation.identity);
+    if (!share) throw new Error('窗口共享已结束');
+    const stop = await previewPointer(share, request, signal);
+    try {
+      // The preview is not an input. Recheck everything that can expire or move during it.
+      await boundWindow(preparation, signal);
+      signal.throwIfAborted();
+      if (observationFor(preparation.identity, observation.id) !== observation) throw new Error('窗口观察已变化，此次操作未发送');
+      return await dispatch();
+    } finally { stop(); }
   }
   function keepShareRendering(share: RunShare, window: AgentComputerSharedWindow, ownerWebContentsId: number, signal: AbortSignal): void {
     if (share.releaseRendering || !dependencies.keepWindowRendering) return;
@@ -784,16 +839,19 @@ export function createAgentComputerRuntime(dependencies: AgentComputerRuntimeDep
           ...(action.elementId ? { elementId: action.elementId } : {}), nextAction: 'observe',
           retryAllowed: false },
       });
-      commit.begin(receipt('unknown'));
-      observation.consumed = true;
-      let result: AgentToolResult;
-      try { await dependencies.click(point, signal); result = receipt('dispatched'); }
-      catch (error) {
-        result = receipt(error instanceof AgentComputerInputError && error.dispatchState === 'not-dispatched' ? 'not-dispatched' : 'unknown');
-        if (error instanceof Error) result.message = `${result.message}。${error.message}`;
-      }
-      commit.settle(result);
-      return result;
+      return withPointerPreview(preparation, observation,
+        { window: observation.window, operation: 'click', point: { x: point.x, y: point.y } }, signal, async () => {
+          commit.begin(receipt('unknown'));
+          observation.consumed = true;
+          let result: AgentToolResult;
+          try { await dependencies.click(point, signal); result = receipt('dispatched'); }
+          catch (error) {
+            result = receipt(error instanceof AgentComputerInputError && error.dispatchState === 'not-dispatched' ? 'not-dispatched' : 'unknown');
+            if (error instanceof Error) result.message = `${result.message}。${error.message}`;
+          }
+          commit.settle(result);
+          return result;
+        });
     });
   }
   type SemanticAction = AgentComputerSetTextPreparedActionPublicV1 | AgentComputerScrollPreparedActionPublicV1;
@@ -912,24 +970,36 @@ export function createAgentComputerRuntime(dependencies: AgentComputerRuntimeDep
           dispatchState: state, mutationCommitState: state === 'dispatched' ? 'committed' : state === 'not-dispatched' ? 'uncommitted' : 'commit_unknown',
           inputMethod: 'CGEventPostToPid', releaseState, ...(eventCount === undefined ? {} : { eventCount }), nextAction: 'observe', retryAllowed: false },
       });
-      commit.begin(receipt('unknown', 'unconfirmed'));
-      observation.consumed = true;
-      let result: AgentToolResult;
-      try {
-        const sent = await dependencies.input(request, signal);
-        result = receipt('dispatched', 'confirmed', sent.eventCount);
-      } catch (error) {
-        const state = error instanceof AgentComputerInputError && error.dispatchState === 'not-dispatched' ? 'not-dispatched' : 'unknown';
-        const releaseState = error instanceof AgentComputerWindowInputError ? error.releaseState : state === 'not-dispatched' ? 'not-required' : 'unconfirmed';
-        result = receipt(state, releaseState);
-        if (releaseState === 'unconfirmed') {
-          // releaseRun may have already disposed this share while the helper was finishing.
-          if (shares.get(preparation.identity.runId) === inputShare) inputBlockedRuns.add(preparation.identity.runId);
-          result.message += `；${UNCONFIRMED_INPUT_RELEASE_NOTICE}`;
+      return withPointerPreview(preparation, observation, request.operation === 'shortcut' ? undefined : {
+        window: observation.window, operation: request.operation, point: request.point!,
+        ...(request.endPoint ? { endPoint: request.endPoint } : {}),
+      }, signal, async () => {
+        if (request.operation !== 'shortcut' && dependencies.indicatePointer) {
+          const current = await dependencies.inputStatus!(observation.window, signal);
+          signal.throwIfAborted();
+          if (!current.ready || current.profile !== request.profile || !current.operations.includes(action.operation)) throw new Error(windowInputNotice(current));
+          await boundWindow(preparation, signal);
+          if (observationFor(preparation.identity, action.observationId) !== observation) throw new Error('窗口观察已变化，此次操作未发送');
         }
-      }
-      commit.settle(result);
-      return result;
+        commit.begin(receipt('unknown', 'unconfirmed'));
+        observation.consumed = true;
+        let result: AgentToolResult;
+        try {
+          const sent = await dependencies.input!(request, signal);
+          result = receipt('dispatched', 'confirmed', sent.eventCount);
+        } catch (error) {
+          const state = error instanceof AgentComputerInputError && error.dispatchState === 'not-dispatched' ? 'not-dispatched' : 'unknown';
+          const releaseState = error instanceof AgentComputerWindowInputError ? error.releaseState : state === 'not-dispatched' ? 'not-required' : 'unconfirmed';
+          result = receipt(state, releaseState);
+          if (releaseState === 'unconfirmed') {
+            // releaseRun may have already disposed this share while the helper was finishing.
+            if (shares.get(preparation.identity.runId) === inputShare) inputBlockedRuns.add(preparation.identity.runId);
+            result.message += `；${UNCONFIRMED_INPUT_RELEASE_NOTICE}`;
+          }
+        }
+        commit.settle(result);
+        return result;
+      });
     });
   }
   function releaseRun(runId: string): void {

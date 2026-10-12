@@ -10,7 +10,7 @@ if (process.platform !== 'darwin') {
 }
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const sourcePaths = ['macos-click.swift', 'macos-semantic.swift', 'macos-window-input.swift', 'main.swift']
+const sourcePaths = ['macos-click.swift', 'macos-semantic.swift', 'macos-window-input.swift', 'macos-window-indicator.swift', 'main.swift']
   .map(name => path.join(projectRoot, 'electron/platform/computer-use', name));
 const outputRoot = path.join(projectRoot, 'build/native/computer-use');
 const binaryName = 'omniflow-click';

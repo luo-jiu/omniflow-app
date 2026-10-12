@@ -1,8 +1,10 @@
 # 内置 Agent 架构
 
+2026-10-12 鼠标意图指示器：main 在正式点击及指针手势提交前，经已批准窗口和冻结坐标取得独立有界视觉租约；普通层 nonactivating NSPanel 紧邻目标上方并随遮挡，点击穿透、不能取得焦点。它不授输入、不创建 renderer 执行入口或新 Run owner；静态箭头 / 拖拽路径表示计划，350 毫秒预告后再复验窗口、owner、TTL 和能力。取消 / 共享替换 / Run 结束清理，迟到 ready 不复活；视觉失败不改原派发回执。模块与证据见[鼠标意图指示器](agent-computer-use.md#鼠标意图指示器2026-10-12)。
+
 2026-10-12 定向输入扩展：独立 `computer.input@1` 提供 shortcut / rightClick / doubleClick / drag，不改变既有 AX 单击、私有文本及滚动工具。共享 V2 action 新增独立 `inputOperations`，历史缺失字段不扩权；全窗 both 最多四动作，全窗 ax 仅 shortcut，纯截图与局部观察不授新输入。字母 / 数字快捷键必须含 command 或 control，文字正文继续走私有审计。输入 public action V1 与 private receiver profile / 同窗 points 分层封存，正式执行再核对同 Run / owner / 观察有效期与 sealed request，由真实内置注册身份取得 broker commit settlement，一次消费并保留 dispatched / unknown 回执。取消执行在 helper 的 2 秒释放宽限内收口，迟到成功不能覆盖已结束结算，unknown 不重放、不换路线。释放回执为 unconfirmed 时，原 main runtime 阻断本 Run 后续所有定向输入；新观察、重批、换窗或已封存动作不能绕过，观察及 AX 保留，Run 结束清理门禁。
 
-原生定向输入限定已验证 receiver profile：私有 `CGEventSetWindowLocation` 设置目标窗口位置，每个事件只经公开 `CGEventPostToPid` 投递一次，不设置系统指针或置前应用，没有全局事件 fallback、独立 OS 鼠标或假鼠标叠层。生产名单仅 TextEdit 1.20 / build 415 与系统 build 25F84 的 `textedit-415-25f84-v1`；原生源码验收已确认 Command + A、双击选词及同窗选区拖拽。右键打开新菜单后由临时界面守卫返回 unknown，菜单期间 readiness 关闭，不能记为成功提交或扩大窗口授权。实验原生夹具另验证四动作及取消 / 焦点漂移；内置 Agent GUI、其他 App / 软件版本 / 签名包仍须独立验收，既有 AX 通过不能替代新路线证据。模块仍是 shared contract → main computer runtime → platform adapter / helper，无新 Run、共享 owner 或 renderer 输入入口，详见[后台定向输入](agent-computer-use.md#后台定向输入2026-10-12)。
+原生定向输入限定已验证 receiver profile：私有 `CGEventSetWindowLocation` 设置目标窗口位置，每个事件只经公开 `CGEventPostToPid` 投递一次，不设置系统指针或置前应用，没有全局事件 fallback 或独立 OS 鼠标。生产名单仅 TextEdit 1.20 / build 415 与系统 build 25F84 的 `textedit-415-25f84-v1`；原生源码验收已确认 Command + A、双击选词及同窗选区拖拽。右键打开新菜单后由临时界面守卫返回 unknown，菜单期间 readiness 关闭，不能记为成功提交或扩大窗口授权。实验原生夹具另验证四动作及取消 / 焦点漂移；内置 Agent GUI、其他 App / 软件版本 / 签名包仍须独立验收，既有 AX 通过不能替代新路线证据。模块仍是 shared contract → main computer runtime → platform adapter / helper，无新 Run、共享 owner 或 renderer 输入入口，详见[后台定向输入](agent-computer-use.md#后台定向输入2026-10-12)。
 
 2026-10-12 生命周期收口：除 active Run 外，renderer 可见的 `AgentWorkspace` 也会通过独立 service 向 main 注册绘制租约，因此新建会话、空闲预览和工作区管理画面不再依赖已有 Session / Run 才能继续绘制。注册绑定可信 mainFrame 与当前 owner 作用域，导航、崩溃、销毁、隐藏、切库 / 账号 / 后端变化和 shutdown 都释放；与 Run / 获准截图共用一个引用计数 manager。该能力仅影响自有窗口绘制，不授予观察或输入能力，也不承诺 React / compositor 已提交最后一帧。
 

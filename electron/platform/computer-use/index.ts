@@ -21,6 +21,8 @@ export type {
   AgentComputerWindowInputRequest,
   AgentComputerWindowInputReceipt,
 } from './window-input';
+export { showAgentComputerWindowIndicator } from './window-indicator';
+export type { AgentComputerWindowIndicatorRequest, AgentComputerWindowIndicatorLease } from './window-indicator';
 export type {
   AgentComputerCandidate,
   AgentComputerRect,

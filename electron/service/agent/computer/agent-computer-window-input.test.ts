@@ -283,3 +283,116 @@ describe('Agent window input lifecycle', () => {
     }
   });
 });
+
+describe('Agent pointer intent indicator', () => {
+  it('previews the sealed screenshot coordinates only during execution and cleans after settlement', async () => {
+    const f = fixture(); const seen = await f.observe();
+    const dispose = vi.fn();
+    const show = vi.fn<NonNullable<AgentComputerRuntimeDependencies['indicatePointer']>>(async () => ({ shown: false, dispose }));
+    f.dependencies.indicatePointer = show;
+    const prepared = await f.prepare({ operation: 'drag', point: { x: 100, y: 200 }, endPoint: { x: 600, y: 400 }, durationMs: 100 }, seen.observationId);
+    expect(show).not.toHaveBeenCalled();
+    const result = await f.runtime.input(prepared, f.controller.signal, f.commit);
+    expect(show).toHaveBeenCalledWith({ window: f.window, operation: 'drag', point: { x: -749.75, y: 140.25 },
+      endPoint: { x: -499.75, y: 240.25 } }, expect.any(AbortSignal));
+    expect(show.mock.invocationCallOrder[0]).toBeLessThan(f.commit.begin.mock.invocationCallOrder[0]);
+    expect(f.commit.settle.mock.invocationCallOrder[0]).toBeLessThan(dispose.mock.invocationCallOrder[0]);
+    expect(dispose).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({ ok: true, data: { dispatchState: 'dispatched', releaseState: 'confirmed' } });
+    expect(JSON.stringify(result)).not.toMatch(/indicator|shown|profile|windowId/);
+  });
+  it('also indicates a validated AX-only click at the actual control center', async () => {
+    const f = fixture(); const dispose = vi.fn();
+    f.dependencies.targets = vi.fn(async window => ({ target: { ...window, candidates: [
+      { path: [0], role: 'AXButton', title: 'Fixture button', bounds: { x: -700, y: 100, width: 100, height: 40 } },
+    ] }, truncated: false }));
+    const show = vi.fn<NonNullable<AgentComputerRuntimeDependencies['indicatePointer']>>(async () => ({ shown: false, dispose }));
+    f.dependencies.indicatePointer = show;
+    const elements = (await f.runtime.observe(f.execution(await f.runtime.prepareObserve({ mode: 'ax' }, f.context())), f.controller.signal)).data as {
+      observationId: string; elements: Array<{ elementId: string }>;
+    };
+    const prepared = await f.runtime.prepareClick({ observationId: elements.observationId, elementId: elements.elements[0].elementId }, f.context());
+    await expect(f.runtime.click(f.execution(prepared), f.controller.signal, f.commit)).resolves.toMatchObject({ ok: true });
+    expect(show).toHaveBeenCalledWith({ window: f.window, operation: 'click', point: { x: -650, y: 120 } }, expect.any(AbortSignal));
+    expect(dispose).toHaveBeenCalledOnce();
+  });
+  it('does not invent a pointer location for a shortcut', async () => {
+    const f = fixture(); const seen = await f.observe('ax');
+    const show = vi.fn<NonNullable<AgentComputerRuntimeDependencies['indicatePointer']>>(async () => ({ shown: false, dispose: vi.fn() }));
+    f.dependencies.indicatePointer = show;
+    const prepared = await f.prepare({ operation: 'shortcut', shortcut: { key: 'a', modifiers: ['command'] } }, seen.observationId);
+    await expect(f.runtime.input(prepared, f.controller.signal, f.commit)).resolves.toMatchObject({ ok: true });
+    expect(show).not.toHaveBeenCalled();
+  });
+  it('keeps a visual helper failure separate from the authoritative input receipt', async () => {
+    const f = fixture(); const seen = await f.observe();
+    f.dependencies.indicatePointer = vi.fn(async () => { throw new Error('visual component unavailable'); });
+    const prepared = await f.prepare({ operation: 'doubleClick', point: { x: 10, y: 10 } }, seen.observationId);
+    await expect(f.runtime.input(prepared, f.controller.signal, f.commit)).resolves.toMatchObject({ ok: true,
+      data: { dispatchState: 'dispatched', releaseState: 'confirmed' } });
+    expect(f.input).toHaveBeenCalledOnce();
+  });
+  it.each(['cancelled', 'released', 'moved', 'expired', 'receiver changed'] as const)('never commits after %s while the preview starts', async change => {
+    const f = fixture(); const seen = await f.observe();
+    let entered!: () => void; const inPreview = new Promise<void>(resolve => { entered = resolve; });
+    let ready!: (lease: { shown: boolean; dispose(): void }) => void; const dispose = vi.fn();
+    let visualSignal!: AbortSignal;
+    f.dependencies.indicatePointer = vi.fn<NonNullable<AgentComputerRuntimeDependencies['indicatePointer']>>((_request, signal) => {
+      visualSignal = signal; entered(); return new Promise<{ shown: boolean; dispose(): void }>(resolve => { ready = resolve; });
+    });
+    const prepared = await f.prepare({ operation: 'rightClick', point: { x: 10, y: 10 } }, seen.observationId);
+    const running = f.runtime.input(prepared, f.controller.signal, f.commit);
+    const rejected = expect(running).rejects.toThrow();
+    await inPreview;
+    if (change === 'cancelled') f.controller.abort();
+    else if (change === 'released') f.runtime.releaseRun(f.owner.runId);
+    else if (change === 'moved') f.window.bounds.x += 20;
+    else if (change === 'expired') f.advance(60_001);
+    else f.inputStatus.mockResolvedValue({ ready: false, operations: [], reason: 'focused_window_mismatch' });
+    if (change === 'cancelled' || change === 'released') expect(visualSignal.aborted).toBe(true);
+    ready({ shown: false, dispose });
+    await rejected;
+    expect(dispose).toHaveBeenCalledOnce();
+    expect(f.input).not.toHaveBeenCalled(); expect(f.commit.begin).not.toHaveBeenCalled();
+  });
+  it('cleans the indicator when a real input reports unknown without changing its release state', async () => {
+    const f = fixture(); const seen = await f.observe(); const dispose = vi.fn();
+    f.dependencies.indicatePointer = vi.fn(async () => ({ shown: false, dispose }));
+    f.input.mockRejectedValueOnce(new AgentComputerWindowInputError('cancelled', 'unknown', 'unconfirmed'));
+    const prepared = await f.prepare({ operation: 'rightClick', point: { x: 10, y: 10 } }, seen.observationId);
+    await expect(f.runtime.input(prepared, f.controller.signal, f.commit)).resolves.toMatchObject({ ok: false,
+      data: { dispatchState: 'unknown', releaseState: 'unconfirmed' } });
+    expect(dispose).toHaveBeenCalledOnce();
+    expect((await f.observe()).availableInputOperations).toEqual([]);
+  });
+  it('gives a visible intention a bounded lead time before committing', async () => {
+    vi.useFakeTimers();
+    try {
+      const f = fixture(); const seen = await f.observe(); const dispose = vi.fn();
+      f.dependencies.indicatePointer = vi.fn(async () => ({ shown: true, dispose }));
+      const prepared = await f.prepare({ operation: 'doubleClick', point: { x: 10, y: 10 } }, seen.observationId);
+      const running = f.runtime.input(prepared, f.controller.signal, f.commit);
+      await vi.advanceTimersByTimeAsync(349);
+      expect(f.dependencies.indicatePointer).toHaveBeenCalledOnce();
+      expect(f.commit.begin).not.toHaveBeenCalled(); expect(f.input).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(running).resolves.toMatchObject({ ok: true });
+      expect(dispose).toHaveBeenCalledOnce();
+    } finally { vi.useRealTimers(); }
+  });
+  it('immediately removes a visible intention on Run release without sending the action', async () => {
+    vi.useFakeTimers();
+    try {
+      const f = fixture(); const seen = await f.observe(); const dispose = vi.fn();
+      f.dependencies.indicatePointer = vi.fn(async () => ({ shown: true, dispose }));
+      const prepared = await f.prepare({ operation: 'rightClick', point: { x: 10, y: 10 } }, seen.observationId);
+      const running = f.runtime.input(prepared, f.controller.signal, f.commit);
+      const rejected = expect(running).rejects.toThrow('窗口共享已结束');
+      await vi.advanceTimersByTimeAsync(10);
+      f.runtime.releaseRun(f.owner.runId);
+      expect(dispose).toHaveBeenCalledOnce();
+      await rejected;
+      expect(f.commit.begin).not.toHaveBeenCalled(); expect(f.input).not.toHaveBeenCalled();
+    } finally { vi.useRealTimers(); }
+  });
+});
