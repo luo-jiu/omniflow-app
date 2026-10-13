@@ -539,6 +539,130 @@ describe('Agent orchestrator', () => {
     };
   }
 
+  function hidePointerToolFixture(registrationId = 'builtin:computer.hidePointer@1', toolInput: Record<string, unknown> = {}) {
+    const platformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    let builtin: AgentTool;
+    try {
+      Object.defineProperty(process, 'platform', { configurable: true, value: 'darwin' });
+      builtin = getBuiltInAgentComputerTools().find(tool => tool.name === 'computer.hidePointer')!;
+    } finally { Object.defineProperty(process, 'platform', platformDescriptor); }
+    const execute = vi.fn<NonNullable<AgentTool['execute']>>((input, context) => builtin.execute!(input, context));
+    const registry = createAgentToolRegistry([
+      ...agentToolRegistry.list().filter(tool => tool.name !== builtin.name), { ...builtin, registrationId, execute },
+    ]);
+    const snapshotSpy = vi.spyOn(agentToolRegistry, 'createSnapshot').mockReturnValue(registry.createSnapshot());
+    const hide = vi.spyOn(agentComputerRuntime, 'hidePointerForRun').mockResolvedValue({ closeConfirmed: true });
+    mocks.streamAgentProviderTurn
+      .mockResolvedValueOnce({ content: '', toolCalls: [{ id: 'hide-current-pointer', name: builtin.name, input: toolInput }] })
+      .mockImplementationOnce(async (_connection, _input, onDelta) => {
+        onDelta('箭头工具验证完成。'); return { content: '箭头工具验证完成。', toolCalls: [] };
+      });
+    return { execute, hide, restore: () => { snapshotSpy.mockRestore(); hide.mockRestore(); } };
+  }
+
+  it.each(['ask', 'full-access'] as const)('binds pointer cleanup to the current Run without preparation or approval in %s', async permissionMode => {
+    const fixture = hidePointerToolFixture();
+    const webContents = sender();
+    const orchestrator = createOrchestrator({ contextBudget: { contextWindowTokens: 128_000 },
+      getModelMetadata: async () => ({ supportsImages: false }) });
+    try {
+      const started = await orchestrator.start(webContents as never, { ...request(), permissionMode, userPrompt: '隐藏不再需要的AI箭头' });
+      await waitForCompletedFinal(webContents, '箭头工具验证完成。', started);
+      expect(fixture.hide).toHaveBeenCalledOnce();
+      const [identity, signal] = fixture.hide.mock.calls[0];
+      const activity = (await store.getSession(started.sessionId, OWNER_SCOPE, 3))!.toolActivities[0];
+      expect(identity).toMatchObject({ runId: started.runId, sessionId: started.sessionId, libraryId: 3,
+        ownerScope: OWNER_SCOPE, ownerWebContentsId: webContents.id, callId: 'hide-current-pointer',
+        toolName: 'computer.hidePointer', toolRegistrationId: 'builtin:computer.hidePointer@1',
+        toolRunId: activity.id, toolInputHash: hashAgentToolInputForPreparation({}),
+        aiDestinationIdentity: expect.any(String), runCapabilityIdentity: expect.any(String), preparedActionId: expect.any(String) });
+      expect(Object.isFrozen(identity)).toBe(true);
+      expect(Object.isFrozen(identity.ownerScope)).toBe(true);
+      expect(signal).toBe(fixture.execute.mock.calls[0][1].signal);
+      expect(activity).toMatchObject({ status: 'completed', permissionBehavior: 'allow', call: { input: {} },
+        result: { ok: true, data: { closeConfirmed: true } } });
+      expect(activity.preparation).toBeUndefined();
+      expect(activity.approval).toBeUndefined();
+      expect(webContents.send.mock.calls.filter(call => call[1]?.type === 'tool-approval-required')).toHaveLength(0);
+      const continuation = mocks.streamAgentProviderTurn.mock.calls[1][1];
+      const resultMessage = continuation.messages.find((message: AgentProviderMessage) => message.role === 'tool' && message.name === 'computer.hidePointer');
+      expect(JSON.parse(resultMessage.content)).toMatchObject({ ok: true, data: { closeConfirmed: true } });
+      expect(resultMessage.content).not.toContain(identity.preparedActionId);
+      expect(resultMessage.content).not.toContain(identity.runCapabilityIdentity);
+    } finally { await orchestrator.shutdown(); fixture.restore(); }
+  });
+
+  it('denies pointer cleanup with a different registration and never injects its main closure', async () => {
+    const fixture = hidePointerToolFixture('builtin:computer.hidePointer@999');
+    const webContents = sender();
+    const orchestrator = createOrchestrator({ contextBudget: { contextWindowTokens: 128_000 } });
+    try {
+      const started = await orchestrator.start(webContents as never, { ...request(), permissionMode: 'full-access' });
+      await waitForCompletedFinal(webContents, '箭头工具验证完成。', started);
+      expect(fixture.hide).not.toHaveBeenCalled();
+      expect(fixture.execute).not.toHaveBeenCalled();
+      const activity = (await store.getSession(started.sessionId, OWNER_SCOPE, 3))!.toolActivities[0];
+      expect(activity).toMatchObject({ status: 'failed', permissionBehavior: 'deny', result: { ok: false, message: expect.stringContaining('受控能力') } });
+      expect(activity.preparation).toBeUndefined();
+    } finally { await orchestrator.shutdown(); fixture.restore(); }
+  });
+
+  it('rejects model-selected pointer owner or Run before calling the lifecycle runtime', async () => {
+    const fixture = hidePointerToolFixture(undefined, { runId: 'another-run', ownerWebContentsId: 999 });
+    const webContents = sender();
+    const orchestrator = createOrchestrator({ contextBudget: { contextWindowTokens: 128_000 } });
+    try {
+      const started = await orchestrator.start(webContents as never, request());
+      await waitForCompletedFinal(webContents, '箭头工具验证完成。', started);
+      expect(fixture.hide).not.toHaveBeenCalled();
+      expect(fixture.execute).not.toHaveBeenCalled();
+      const continuation = mocks.streamAgentProviderTurn.mock.calls[1][1];
+      const resultMessage = continuation.messages.find((message: AgentProviderMessage) => message.role === 'tool' && message.name === 'computer.hidePointer');
+      expect(JSON.parse(resultMessage.content)).toMatchObject({ ok: false });
+    } finally { await orchestrator.shutdown(); fixture.restore(); }
+  });
+
+  it.each(['unconfirmed-close', 'identity-denied'] as const)('reports failed pointer cleanup for %s without claiming it was hidden', async reason => {
+    const fixture = hidePointerToolFixture();
+    if (reason === 'unconfirmed-close') fixture.hide.mockResolvedValueOnce({ closeConfirmed: false });
+    else fixture.hide.mockRejectedValueOnce(new Error('鼠标图案不属于当前任务身份'));
+    const webContents = sender();
+    const orchestrator = createOrchestrator({ contextBudget: { contextWindowTokens: 128_000 } });
+    try {
+      const started = await orchestrator.start(webContents as never, request());
+      await waitForCompletedFinal(webContents, '箭头工具验证完成。', started);
+      const activity = (await store.getSession(started.sessionId, OWNER_SCOPE, 3))!.toolActivities[0];
+      expect(activity).toMatchObject({ status: 'failed', result: { ok: false } });
+      expect(activity.result?.message).not.toContain('已隐藏');
+      if (reason === 'unconfirmed-close') expect(activity.result).toMatchObject({ message: 'AI箭头关闭未确认', data: { closeConfirmed: false } });
+      else expect(activity.result?.message).toContain('不属于当前任务身份');
+    } finally { await orchestrator.shutdown(); fixture.restore(); }
+  });
+
+  it('aborts the supervised pointer cleanup signal and discards a late success after Run cancellation', async () => {
+    const fixture = hidePointerToolFixture();
+    let finishHide!: () => void;
+    fixture.hide.mockImplementationOnce(() => new Promise(resolve => { finishHide = () => resolve({ closeConfirmed: true }); }));
+    const webContents = sender();
+    const orchestrator = createOrchestrator({ contextBudget: { contextWindowTokens: 128_000 } });
+    try {
+      const started = await orchestrator.start(webContents as never, request());
+      await vi.waitFor(() => expect(fixture.hide).toHaveBeenCalledOnce());
+      const signal = fixture.hide.mock.calls[0][1];
+      expect(signal).toBe(fixture.execute.mock.calls[0][1].signal);
+      expect(orchestrator.stop(started.sessionId, webContents.id)).toBe(true);
+      expect(signal.aborted).toBe(true);
+      finishHide();
+      await vi.waitFor(() => expect(webContents.send.mock.calls.map(call => call[1])).toContainEqual(
+        expect.objectContaining({ type: 'cancelled', runId: started.runId, sessionId: started.sessionId })));
+      const session = (await store.getSession(started.sessionId, OWNER_SCOPE, 3))!;
+      expect(session.runs[0].status).toBe('cancelled');
+      expect(session.toolActivities[0]).toMatchObject({ status: 'cancelled', result: { ok: false } });
+      expect(mocks.streamAgentProviderTurn).toHaveBeenCalledOnce();
+      expect(webContents.send.mock.calls.some(call => call[1]?.type === 'completed')).toBe(false);
+    } finally { finishHide?.(); await orchestrator.shutdown(); fixture.restore(); }
+  });
+
   async function pendingWindowApproval(webContents: ReturnType<typeof sender>, index = 0): Promise<AgentToolApprovalSnapshot> {
     await vi.waitFor(() => expect(webContents.send.mock.calls.filter(call => call[1]?.type === 'tool-approval-required').length).toBeGreaterThan(index));
     return webContents.send.mock.calls.filter(call => call[1]?.type === 'tool-approval-required')[index][1].approval;
@@ -7481,7 +7605,8 @@ describe('Agent orchestrator', () => {
         return { content: '未知工具没有执行。', toolCalls: [] };
       });
     const webContents = sender();
-    const orchestrator = createOrchestrator({ contextBudget: { contextWindowTokens: 32_000 } });
+    // Keep this privacy check independent of growth in the built-in Tool catalog.
+    const orchestrator = createOrchestrator({ contextBudget: { contextWindowTokens: 128_000 } });
     const started = await orchestrator.start(webContents as never, request());
 
     await waitForCompletedFinal(webContents, '未知工具没有执行。');

@@ -10,8 +10,8 @@ import { isAgentRendererMutationTool } from '../../../src/shared/agent/agent-lib
 import { normalizeAgentNodeConfigFields } from '../../../src/shared/agent/agent-node-config';
 import { attachmentManifest } from '../../../src/shared/agent/agent-attachments';
 import { getAgentAttachmentStore, hydrateAgentAttachmentImages } from './agent-attachment-runtime';
-import { getBuiltInAgentComputerTools } from './tools/computer-tools';
-import { keepAgentOwnerRendering, releaseAgentComputerRun } from './computer/agent-computer-service-runtime';
+import { getBuiltInAgentComputerTools, isBuiltinComputerHidePointerTool } from './tools/computer-tools';
+import { agentComputerRuntime, keepAgentOwnerRendering, releaseAgentComputerRun } from './computer/agent-computer-service-runtime';
 import { operateAgentAttachment } from './documents/attachment-documents';
 import { runAgentDocument } from './documents/document-runner';
 import { createAgentContextUsageLedger, type AgentContextRequest } from './agent-context-usage-ledger';
@@ -2267,6 +2267,35 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
           signal: AbortSignal.any([signal, operationSignal]), operation: { operation: 'stage-library-node', nodeId, includeDownloadUrl: true } } };
     };
     const executionContext: AgentToolExecutionContext = {
+      ...(isBuiltinComputerHidePointerTool(tool) ? { hideComputerPointer: async (operationSignal: AbortSignal) => {
+        throwIfAborted(operationSignal);
+        const activeRun = activeRuns.get(sessionId);
+        if (!activeRun || activeRun.runId !== runId || activeRun.ownerWebContentsId !== sender.id || sender.isDestroyed()) {
+          throw new Error('AI箭头隐藏运行已结束');
+        }
+        const libraryId = Number(input.appContext.libraryId);
+        if (!Number.isSafeInteger(libraryId) || libraryId <= 0) throw new Error('AI箭头隐藏缺少有效的资料库身份');
+        const identity: AgentToolMainPreparationIdentity = Object.freeze({
+          aiDestinationIdentity: aiDestination.identity,
+          callId: call.id,
+          libraryId,
+          ownerScope: Object.freeze(normalizeAgentOwnerScope(input.ownerScope)),
+          ownerWebContentsId: sender.id,
+          // Lifecycle identity only; this does not create or authorize a prepared action.
+          preparedActionId: crypto.randomUUID(),
+          runCapabilityIdentity: capabilitySnapshot.identity,
+          runId,
+          sessionId,
+          toolInputHash: hashAgentToolInputForPreparation(call.input),
+          toolName: tool.name,
+          toolRegistrationId: tool.registrationId,
+          toolRunId,
+        });
+        const result = await agentComputerRuntime.hidePointerForRun(identity, operationSignal);
+        throwIfAborted(operationSignal);
+        return { ok: result.closeConfirmed, message: result.closeConfirmed ? '当前Run的AI箭头已隐藏' : 'AI箭头关闭未确认',
+          data: { closeConfirmed: result.closeConfirmed } };
+      } } satisfies Pick<AgentToolExecutionContext, 'hideComputerPointer'> : {}),
       executePluginFileOutput: async (source, pluginInput, preparation, commit, operationSignal) => {
         if (!options.executePluginFileOutput) throw new Error('插件文件产物执行能力未配置');
         return options.executePluginFileOutput(outputRequest(source, pluginInput, operationSignal), preparation, commit);

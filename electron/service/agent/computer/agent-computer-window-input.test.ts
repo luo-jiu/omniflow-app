@@ -401,11 +401,12 @@ describe('Agent pointer intent indicator', () => {
     expect(dispose).toHaveBeenCalledOnce();
     expect((await f.observe()).availableInputOperations).toEqual([]);
   });
-  it('gives a visible intention a bounded lead time before committing', async () => {
+  it('keeps a visible intention after the lead time and after input finishes', async () => {
     vi.useFakeTimers();
     try {
-      const f = fixture(); const seen = await f.observe(); const dispose = vi.fn();
-      f.dependencies.indicatePointer = vi.fn(async () => ({ shown: true, closed: Promise.resolve(true), dispose }));
+      const f = fixture(); const seen = await f.observe(); const visual = closingIndicator(true);
+      const dispose = visual.dispose;
+      f.dependencies.indicatePointer = vi.fn(async () => visual.lease);
       const prepared = await f.prepare({ operation: 'doubleClick', point: { x: 10, y: 10 } }, seen.observationId);
       const running = f.runtime.input(prepared, f.controller.signal, f.commit);
       await vi.advanceTimersByTimeAsync(899);
@@ -413,26 +414,32 @@ describe('Agent pointer intent indicator', () => {
       expect(f.commit.begin).not.toHaveBeenCalled(); expect(f.input).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(1);
       await expect(running).resolves.toMatchObject({ ok: true });
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(dispose).not.toHaveBeenCalled();
+      f.runtime.releaseRun(f.owner.runId); visual.close(true);
       expect(dispose).toHaveBeenCalledOnce();
     } finally { vi.useRealTimers(); }
   });
   it('immediately removes a visible intention on Run release without sending the action', async () => {
     vi.useFakeTimers();
     try {
-      const f = fixture(); const seen = await f.observe(); const dispose = vi.fn();
-      f.dependencies.indicatePointer = vi.fn(async () => ({ shown: true, closed: Promise.resolve(true), dispose }));
+      const f = fixture(); const seen = await f.observe(); const visual = closingIndicator(true);
+      const dispose = visual.dispose;
+      f.dependencies.indicatePointer = vi.fn(async () => visual.lease);
       const prepared = await f.prepare({ operation: 'rightClick', point: { x: 10, y: 10 } }, seen.observationId);
       const running = f.runtime.input(prepared, f.controller.signal, f.commit);
       const rejected = expect(running).rejects.toThrow('窗口共享已结束');
       await vi.advanceTimersByTimeAsync(10);
       f.runtime.releaseRun(f.owner.runId);
       expect(dispose).toHaveBeenCalledOnce();
+      visual.close(true);
       await rejected;
       expect(f.commit.begin).not.toHaveBeenCalled(); expect(f.input).not.toHaveBeenCalled();
     } finally { vi.useRealTimers(); }
   });
 
-  it.each([true, false])('waits for actual visual closure before any dispatch when shown=%s', async shown => {
+  it('waits for actual visual closure before dispatch when startup did not show a surface', async () => {
+    const shown = false;
     vi.useFakeTimers();
     try {
       const f = fixture(); const seen = await f.observe(); const visual = closingIndicator(shown);
@@ -455,6 +462,74 @@ describe('Agent pointer intent indicator', () => {
       expect(f.inputStatus.mock.calls.length).toBeGreaterThan(statusBeforeClosure);
       expect(visual.dispose.mock.invocationCallOrder[0]).toBeLessThan(f.commit.begin.mock.invocationCallOrder[0]);
       expect(f.input).toHaveBeenCalledOnce(); expect(visual.dispose).toHaveBeenCalledOnce();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('reuses one live surface across observations, shortcuts and later pointer intentions, and explicitly hides it', async () => {
+    vi.useFakeTimers();
+    try {
+      const f = fixture(); const first = await f.observe(); const visual = closingIndicator(true);
+      const update = vi.fn(async () => true); visual.lease.update = update;
+      f.dependencies.indicatePointer = vi.fn(async () => visual.lease);
+      const act = async (observationId: string, point: { x: number; y: number }) => {
+        const prepared = await f.prepare({ operation: 'doubleClick', point }, observationId);
+        const running = f.runtime.input(prepared, f.controller.signal, f.commit);
+        await vi.advanceTimersByTimeAsync(900); await running;
+      };
+      await act(first.observationId, { x: 10, y: 10 });
+      const after = await f.observe('ax');
+      const shortcut = await f.prepare({ operation: 'shortcut', shortcut: { key: 'arrowLeft', modifiers: [] } }, after.observationId);
+      await f.runtime.input(shortcut, f.controller.signal, f.commit);
+      expect(visual.dispose).not.toHaveBeenCalled(); expect(update).not.toHaveBeenCalled();
+      const next = await f.observe(); await act(next.observationId, { x: 40, y: 50 });
+      expect(f.dependencies.indicatePointer).toHaveBeenCalledOnce();
+      expect(update).toHaveBeenCalledWith(expect.objectContaining({ operation: 'doubleClick', point: { x: -779.75, y: 65.25 } }));
+      const other = await anotherRun(f);
+      await expect(f.runtime.hidePointerForRun(other.owner, other.controller.signal)).resolves.toEqual({ closeConfirmed: true });
+      expect(visual.dispose).not.toHaveBeenCalled();
+      await expect(f.runtime.hidePointerForRun({ ...f.owner, ownerWebContentsId: 18 }, f.controller.signal)).rejects.toThrow('不属于');
+      expect(visual.dispose).not.toHaveBeenCalled();
+      const hiding = f.runtime.hidePointerForRun(f.owner, f.controller.signal);
+      await visual.inClosing; visual.close(true);
+      await expect(hiding).resolves.toEqual({ closeConfirmed: true });
+      await expect(f.runtime.hidePointerForRun(f.owner, f.controller.signal)).resolves.toEqual({ closeConfirmed: true });
+      expect(visual.dispose).toHaveBeenCalledOnce();
+      expect(f.input).toHaveBeenCalledTimes(3);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('keeps the intended location after unknown input and closes it only when the Run releases', async () => {
+    vi.useFakeTimers();
+    try {
+      const f = fixture(); const seen = await f.observe(); const visual = closingIndicator(true);
+      f.dependencies.indicatePointer = vi.fn(async () => visual.lease);
+      f.input.mockRejectedValueOnce(new AgentComputerWindowInputError('transient', 'unknown', 'confirmed'));
+      const prepared = await f.prepare({ operation: 'rightClick', point: { x: 10, y: 10 } }, seen.observationId);
+      const running = f.runtime.input(prepared, f.controller.signal, f.commit);
+      await vi.advanceTimersByTimeAsync(900);
+      await expect(running).resolves.toMatchObject({ ok: false, data: { dispatchState: 'unknown' } });
+      expect(visual.dispose).not.toHaveBeenCalled();
+      f.runtime.releaseRun(f.owner.runId); visual.close(true);
+      expect(visual.dispose).toHaveBeenCalledOnce();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('waits for pending Run-release cleanup before admitting another pointer action', async () => {
+    vi.useFakeTimers();
+    try {
+      const f = fixture(); const seen = await f.observe(); const next = await anotherRun(f); const visual = closingIndicator(true);
+      f.dependencies.indicatePointer = vi.fn(async () => visual.lease);
+      const first = await f.prepare({ operation: 'doubleClick', point: { x: 10, y: 10 } }, seen.observationId);
+      const running = f.runtime.input(first, f.controller.signal, f.commit);
+      await vi.advanceTimersByTimeAsync(900); await running;
+      f.runtime.releaseRun(f.owner.runId);
+      const nextPrepared = await next.prepare({ operation: 'doubleClick', point: { x: 10, y: 10 } });
+      const nextRunning = f.runtime.input(nextPrepared, next.controller.signal, f.commit);
+      const rejected = expect(nextRunning).rejects.toThrow('重启应用');
+      await vi.advanceTimersByTimeAsync(50);
+      expect(f.input).toHaveBeenCalledOnce();
+      visual.close(false); await rejected;
+      await expect(f.runtime.hidePointerForRun(next.owner, next.controller.signal)).resolves.toEqual({ closeConfirmed: false });
     } finally { vi.useRealTimers(); }
   });
 
@@ -588,5 +663,100 @@ describe('Agent pointer intent indicator', () => {
     expect(f.dependencies.setText).toHaveBeenCalledOnce(); expect(f.dependencies.scroll).toHaveBeenCalledOnce();
     expect(f.dependencies.click).not.toHaveBeenCalled(); expect(f.input).toHaveBeenCalledOnce();
     expect(f.commit.begin).not.toHaveBeenCalled(); expect(f.commit.settle).not.toHaveBeenCalled();
+  });
+
+  it.each([true, false])('waits for the replaced window surface before reporting hide confirmation=%s in the same Run', async confirmed => {
+    vi.useFakeTimers();
+    try {
+      const f = fixture(); const first = await f.observe(); const visual = closingIndicator(true);
+      f.dependencies.indicatePointer = vi.fn(async () => visual.lease);
+      const prepared = await f.prepare({ operation: 'doubleClick', point: { x: 10, y: 10 } }, first.observationId);
+      const running = f.runtime.input(prepared, f.controller.signal, f.commit);
+      await vi.advanceTimersByTimeAsync(900); await running;
+      const replacement = { ...structuredClone(f.window), windowId: 25, title: 'QA2', windowLabel: 'QA2' };
+      f.dependencies.windows = vi.fn(async () => ({ windows: [structuredClone(f.window), replacement], truncated: false }));
+      const next = await f.runtime.prepareObserve({ application: 'QA', windowTitle: 'QA2', mode: 'both' }, f.context());
+      await f.runtime.observe(f.execution(next), f.controller.signal);
+      await visual.inClosing;
+      let hidden: boolean | undefined;
+      const hiding = f.runtime.hidePointerForRun(f.owner, f.controller.signal);
+      void hiding.then(result => { hidden = result.closeConfirmed; });
+      await vi.advanceTimersByTimeAsync(50);
+      expect(hidden).toBeUndefined();
+      expect(visual.dispose).toHaveBeenCalledOnce();
+      visual.close(confirmed);
+      await expect(hiding).resolves.toEqual({ closeConfirmed: confirmed });
+      expect(f.dependencies.indicatePointer).toHaveBeenCalledOnce();
+      expect(f.input).toHaveBeenCalledOnce();
+      f.runtime.releaseRun(f.owner.runId);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it.each(['pending', 'unconfirmed'] as const)('refuses first input when another Run closure becomes %s during the final receiver check', async closure => {
+    vi.useFakeTimers();
+    try {
+      const f = fixture(); const first = await f.observe(); const next = await anotherRun(f);
+      const oldVisual = closingIndicator(true); const nextVisual = closingIndicator(true);
+      f.dependencies.indicatePointer = vi.fn(async () => nextVisual.lease).mockResolvedValueOnce(oldVisual.lease);
+      const firstInput = await f.prepare({ operation: 'doubleClick', point: { x: 10, y: 10 } }, first.observationId);
+      const firstRunning = f.runtime.input(firstInput, f.controller.signal, f.commit);
+      await vi.advanceTimersByTimeAsync(900); await firstRunning;
+      const nextPrepared = await next.prepare({ operation: 'rightClick', point: { x: 10, y: 10 } });
+      const status = { ready: true, profile: 'appkit-fixture-v1', operations: [...WINDOW_INPUT_OPERATIONS] };
+      let entered!: () => void; const inFinalStatus = new Promise<void>(resolve => { entered = resolve; });
+      let reply!: (value: typeof status) => void;
+      f.inputStatus.mockResolvedValueOnce(status).mockImplementationOnce(() => {
+        entered(); return new Promise(resolve => { reply = resolve; });
+      });
+      const commit = { begin: vi.fn(), settle: vi.fn() };
+      const running = f.runtime.input(nextPrepared, next.controller.signal, commit);
+      const rejected = expect(running).rejects.toThrow(closure === 'pending' ? '仍在收起' : '重启应用');
+      await vi.advanceTimersByTimeAsync(900); await inFinalStatus;
+      f.runtime.releaseRun(f.owner.runId); await oldVisual.inClosing;
+      if (closure === 'unconfirmed') oldVisual.close(false);
+      reply(status); await rejected;
+      expect(commit.begin).not.toHaveBeenCalled(); expect(commit.settle).not.toHaveBeenCalled();
+      expect(f.input).toHaveBeenCalledOnce();
+      if (closure === 'pending') oldVisual.close(true);
+      f.runtime.releaseRun(next.owner.runId); nextVisual.close(true);
+      expect(nextVisual.dispose).toHaveBeenCalledOnce();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('refuses first AX click when another Run starts cleanup during the final window check', async () => {
+    vi.useFakeTimers();
+    try {
+      const f = fixture();
+      f.dependencies.targets = vi.fn(async window => ({ target: { ...window, candidates: [
+        { path: [0], role: 'AXButton', title: 'QA button', bounds: { x: -700, y: 100, width: 100, height: 40 }, operations: ['press'] },
+      ] }, truncated: false }));
+      const first = await f.observe(); const next = await anotherRun(f);
+      const oldVisual = closingIndicator(true); const nextVisual = closingIndicator(true);
+      f.dependencies.indicatePointer = vi.fn(async () => nextVisual.lease).mockResolvedValueOnce(oldVisual.lease);
+      const firstPrepared = await f.prepare({ operation: 'doubleClick', point: { x: 10, y: 10 } }, first.observationId);
+      const firstRunning = f.runtime.input(firstPrepared, f.controller.signal, f.commit);
+      await vi.advanceTimersByTimeAsync(900); await firstRunning;
+      const button = next.seen.elements.find(element => element.label === 'QA button')!;
+      const click = f.execution(await f.runtime.prepareClick({ observationId: next.seen.observationId,
+        elementId: button.elementId }, next.context), next.owner);
+      const snapshot = { windows: [structuredClone(f.window)], truncated: false };
+      let entered!: () => void; const inFinalWindow = new Promise<void>(resolve => { entered = resolve; });
+      let reply!: (value: typeof snapshot) => void;
+      f.dependencies.windows = vi.fn<AgentComputerRuntimeDependencies['windows']>(async () => snapshot)
+        .mockResolvedValueOnce(snapshot).mockResolvedValueOnce(snapshot).mockImplementationOnce(() => {
+          entered(); return new Promise(resolve => { reply = resolve; });
+        });
+      const commit = { begin: vi.fn(), settle: vi.fn() };
+      const running = f.runtime.click(click, next.controller.signal, commit);
+      const rejected = expect(running).rejects.toThrow('仍在收起');
+      await vi.advanceTimersByTimeAsync(900); await inFinalWindow;
+      f.runtime.releaseRun(f.owner.runId); await oldVisual.inClosing;
+      reply(snapshot); await nextVisual.inClosing;
+      nextVisual.close(true); await rejected;
+      expect(commit.begin).not.toHaveBeenCalled(); expect(commit.settle).not.toHaveBeenCalled();
+      expect(f.dependencies.click).not.toHaveBeenCalled();
+      oldVisual.close(true);
+      f.runtime.releaseRun(next.owner.runId); nextVisual.close(true);
+    } finally { vi.useRealTimers(); }
   });
 });

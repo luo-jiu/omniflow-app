@@ -126,6 +126,14 @@ describe('Client-owned Agent directory authorization', () => {
     expect(await guard.authorizeTool(call(name, { observationId: 'test', elementId: 'test' }), name)).toBe(false);
     expect(approve).not.toHaveBeenCalled();
   });
+  it.each(['ask', 'group', 'full-access'] as const)('does not request directory access for pointer cleanup in %s', async mode => {
+    const { guard, call, approve, read } = fixture(mode, 'read');
+    const cleanup = call('computer.hidePointer', {});
+    expect(await guard.authorizeTool(cleanup, 'hide-pointer')).toBe(false);
+    expect(await guard.canAutoApproveTool(cleanup, 'hide-pointer')).toBe(false);
+    expect(approve).not.toHaveBeenCalled();
+    expect(read).not.toHaveBeenCalled();
+  });
 
   it('preserves explicit full access and rejects unsolicited out-of-scope metadata', async () => {
     const full = fixture('full-access');

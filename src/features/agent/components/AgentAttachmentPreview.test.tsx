@@ -6,6 +6,10 @@ import AgentAttachmentPreview from './AgentAttachmentPreview';
 import { previewAgentAttachment } from '../services/agent.api';
 import { createAgentComputerPointerPreview } from '../agent-computer-pointer-preview';
 import type { AgentComputerPointerPlan } from '../agent-computer-pointer-plan';
+import { AppearanceViewContext } from '@/features/appearance/appearance.context';
+import { toThemeView } from '@/features/appearance/theme-view';
+import { createThemeSnapshot, createThemeState } from '@/features/appearance/theme-state';
+import { defaultSelection } from '@/features/appearance/appearance-storage';
 
 vi.mock('@douyinfe/semi-ui', () => ({ ImagePreview: () => null }));
 vi.mock('../services/agent.api', () => ({ previewAgentAttachment: vi.fn() }));
@@ -17,6 +21,27 @@ describe('Attachment image preview', () => {
     width: 673, height: 439, operation: 'click', point: { x: 9, y: 53 } };
   const attachment = { id: 'img', name: 'QA.png', kind: 'image' as const, sizeBytes: 1, mimeType: 'image/png', thumbnail: 'data:image/png;base64,small' };
   const scope = { ownerScope: { accountScope: 'user:7', backendScope: 'https://test.invalid' }, libraryId: 3 };
+  it('recomposes from the current theme and discards an older color completion', async () => {
+    vi.stubGlobal('document', { activeElement: null });
+    vi.mocked(previewAgentAttachment).mockResolvedValue('data:image/png;base64,original');
+    let finish!: (src: string) => void;
+    vi.mocked(createAgentComputerPointerPreview).mockReturnValueOnce(new Promise(resolve => { finish = resolve; }))
+      .mockResolvedValue('data:image/png;base64,new-color');
+    const view = toThemeView(createThemeSnapshot(createThemeState({ ownerEpoch: 'theme', accountScope: 'anonymous',
+      systemMode: 'light', selection: defaultSelection() }), () => undefined));
+    const render = (accent: string) => <AppearanceViewContext.Provider value={{ ...view, colors: { ...view.colors, 'accent.default': accent } }}>
+      <AgentAttachmentPreview attachment={attachment} scope={scope} sessionId="session" pointerPlan={pointerPlan} onClose={vi.fn()} />
+    </AppearanceViewContext.Provider>;
+    let renderer!: TestRenderer.ReactTestRenderer;
+    await act(async () => { renderer = TestRenderer.create(render('#345847')); });
+    const oldSignal = vi.mocked(createAgentComputerPointerPreview).mock.calls[0][2];
+    await act(async () => { renderer.update(render('#80b4ff')); });
+    expect(oldSignal.aborted).toBe(true);
+    expect(createAgentComputerPointerPreview).toHaveBeenLastCalledWith('data:image/png;base64,original', pointerPlan, expect.any(AbortSignal), '#80b4ff');
+    await act(async () => { finish('data:image/png;base64,old-color'); });
+    expect(renderer.root.findByType(ImagePreview).props.src).toEqual(['data:image/png;base64,new-color']);
+    act(() => renderer.unmount());
+  });
   it('uses a display-only composite in the existing viewer without changing the original attachment', async () => {
     vi.stubGlobal('document', { activeElement: null });
     vi.mocked(previewAgentAttachment).mockResolvedValue('data:image/png;base64,original');
@@ -25,7 +50,7 @@ describe('Attachment image preview', () => {
     await act(async () => { renderer = TestRenderer.create(<AgentAttachmentPreview attachment={attachment}
       scope={scope} sessionId="session" pointerPlan={pointerPlan} onClose={vi.fn()} />); });
     expect(renderer.root.findByType(ImagePreview).props.src).toEqual(['data:image/png;base64,marked']);
-    expect(createAgentComputerPointerPreview).toHaveBeenCalledWith('data:image/png;base64,original', pointerPlan, expect.any(AbortSignal));
+    expect(createAgentComputerPointerPreview).toHaveBeenCalledWith('data:image/png;base64,original', pointerPlan, expect.any(AbortSignal), '#5a9e7c');
     expect(attachment.thumbnail).toBe('data:image/png;base64,small');
     act(() => renderer.unmount());
   });

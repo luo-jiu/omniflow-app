@@ -31,4 +31,6 @@ export function registerAppearanceIpc(options: { getMainWindow: () => BrowserWin
     if (overlay && !overlay.isDestroyed()) overlay.webContents.send('appearance:changed', next);
     return true;
   });
+  // Main consumers read the same validated cache; no second theme owner or IPC.
+  return Object.freeze({ getAccentColor: (): string | undefined => snapshot?.colors['accent.default'] });
 }

@@ -361,10 +361,10 @@ func windowInputCharacters(_ key: String, shift: Bool) -> String {
 }
 
 func windowInputMouseEvent(_ type: NSEvent.EventType, point: WindowInputPoint, window: WindowIdentity,
-                           clickCount: Int, source: CGEventSource) throws -> CGEvent {
+                           clickCount: Int, eventNumber: Int16, source: CGEventSource) throws -> CGEvent {
     let local = NSPoint(x: point.x - window.bounds.x, y: window.bounds.height - (point.y - window.bounds.y))
     guard let native = NSEvent.mouseEvent(with: type, location: local, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
-          windowNumber: Int(window.windowId), context: nil, eventNumber: 0, clickCount: clickCount,
+          windowNumber: Int(window.windowId), context: nil, eventNumber: Int(eventNumber), clickCount: clickCount,
           pressure: type == .leftMouseUp || type == .rightMouseUp ? 0 : 1), let event = native.cgEvent?.copy() else { throw invalidRequest() }
     event.setSource(source)
     event.location = point.cg
@@ -413,24 +413,34 @@ func prepareWindowInputEvents(_ request: WindowInputRequest, source: CGEventSour
         guard let point = request.point else { throw invalidRequest() }
         let right = request.operation == .rightClick
         let count = right ? 1 : 2
+        // Helpers are short-lived, so a process-local counter restarting at zero
+        // would always reuse press identities. The real AppKit/CG field narrows
+        // to signed Int16, even through CGEventSetIntegerValueField. Randomize
+        // a positive representable start with room for both double-click
+        // presses; each matching up keeps its down's kCGMouseEventNumber.
+        // Random starts reduce cross-helper reuse; they do not promise global
+        // uniqueness across the finite field or physical input sources.
+        let firstEventNumber = Int16.random(in: 1..<Int16.max)
         for click in 1...count {
-            let down = try windowInputMouseEvent(right ? .rightMouseDown : .leftMouseDown, point: point, window: request.window, clickCount: click, source: source)
-            let up = try windowInputMouseEvent(right ? .rightMouseUp : .leftMouseUp, point: point, window: request.window, clickCount: click, source: source)
+            let eventNumber = firstEventNumber + Int16(click - 1)
+            let down = try windowInputMouseEvent(right ? .rightMouseDown : .leftMouseDown, point: point, window: request.window, clickCount: click, eventNumber: eventNumber, source: source)
+            let up = try windowInputMouseEvent(right ? .rightMouseUp : .leftMouseUp, point: point, window: request.window, clickCount: click, eventNumber: eventNumber, source: source)
             result.append(WindowInputEvent(event: down, delayBeforeMs: click == 1 ? 0 : 60, release: up, completesRelease: false))
             result.append(WindowInputEvent(event: up, delayBeforeMs: 15, release: nil, completesRelease: true))
         }
     case .drag:
         guard let point = request.point, let endPoint = request.endPoint, let duration = request.durationMs else { throw invalidRequest() }
-        let down = try windowInputMouseEvent(.leftMouseDown, point: point, window: request.window, clickCount: 1, source: source)
-        let up = try windowInputMouseEvent(.leftMouseUp, point: endPoint, window: request.window, clickCount: 1, source: source)
-        let startUp = try windowInputMouseEvent(.leftMouseUp, point: point, window: request.window, clickCount: 1, source: source)
+        let eventNumber = Int16.random(in: 1...Int16.max)
+        let down = try windowInputMouseEvent(.leftMouseDown, point: point, window: request.window, clickCount: 1, eventNumber: eventNumber, source: source)
+        let up = try windowInputMouseEvent(.leftMouseUp, point: endPoint, window: request.window, clickCount: 1, eventNumber: eventNumber, source: source)
+        let startUp = try windowInputMouseEvent(.leftMouseUp, point: point, window: request.window, clickCount: 1, eventNumber: eventNumber, source: source)
         result.append(WindowInputEvent(event: down, delayBeforeMs: 0, release: startUp, completesRelease: false))
         let steps = min(32, max(8, duration / 32))
         for step in 1...steps {
             let fraction = Double(step) / Double(steps)
             let current = WindowInputPoint(x: point.x + (endPoint.x - point.x) * fraction, y: point.y + (endPoint.y - point.y) * fraction)
-            let event = try windowInputMouseEvent(.leftMouseDragged, point: current, window: request.window, clickCount: 1, source: source)
-            let currentUp = try windowInputMouseEvent(.leftMouseUp, point: current, window: request.window, clickCount: 1, source: source)
+            let event = try windowInputMouseEvent(.leftMouseDragged, point: current, window: request.window, clickCount: 1, eventNumber: eventNumber, source: source)
+            let currentUp = try windowInputMouseEvent(.leftMouseUp, point: current, window: request.window, clickCount: 1, eventNumber: eventNumber, source: source)
             result.append(WindowInputEvent(event: event, delayBeforeMs: duration * step / steps - duration * (step - 1) / steps,
                                           release: currentUp, completesRelease: false))
         }
@@ -489,7 +499,7 @@ func windowInput(_ request: WindowInputRequest) throws {
             return true
         }, post: { $0.postToPid(request.window.pid) })
     } catch let error as WindowInputExecutionError {
-        windowInputLogger.notice("operation=\(request.operation.rawValue, privacy: .public) interrupted=true posted=true releaseSent=\(error.releaseSent, privacy: .public)")
+        windowInputLogger.notice("operation=\(request.operation.rawValue, privacy: .public) interrupted=true code=\(error.code, privacy: .public) eventCount=\(error.eventCount, privacy: .public) posted=true releaseSent=\(error.releaseSent, privacy: .public)")
         throw error
     }
     let frontmostAfter = NSWorkspace.shared.frontmostApplication?.processIdentifier

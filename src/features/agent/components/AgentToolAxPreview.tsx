@@ -31,7 +31,7 @@ const AxPreview = styled.details`
     overflow: auto;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
-    font-family: var(--app-font-mono, monospace);
+    font-family: monospace;
     font-size: 12px;
     line-height: 18px;
   }

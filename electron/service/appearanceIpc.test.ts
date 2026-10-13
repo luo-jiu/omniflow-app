@@ -14,11 +14,11 @@ function setup() {
   const main = { webContents: contents(), isDestroyed: () => false };
   const overlay = { webContents: contents(), isDestroyed: () => false };
   const foreign = contents();
-  registerAppearanceIpc({ getMainWindow: () => main as never, getOverlayWindow: () => overlay as never });
+  const appearance = registerAppearanceIpc({ getMainWindow: () => main as never, getOverlayWindow: () => overlay as never });
   const event = (sender: typeof main.webContents) => ({ sender, senderFrame: sender.mainFrame });
   const call = (name: string, sender = main.webContents, value?: unknown) => mocks.handlers.get(name)!(event(sender), value);
   const view = toThemeView(createThemeSnapshot(createThemeState({ ownerEpoch: 'epoch-a', accountScope: 'anonymous', systemMode: 'light', selection: defaultSelection() }), () => undefined));
-  return { main, overlay, foreign, event, call, view };
+  return { main, overlay, foreign, event, call, view, appearance };
 }
 describe('appearance transport trust and lifecycle', () => {
   it('requires a main-frame owner claim and rejects foreign publishers/readers', () => {
@@ -43,5 +43,26 @@ describe('appearance transport trust and lifecycle', () => {
     s.call('appearance:claim', s.main.webContents, 'epoch-b');
     expect(s.call('appearance:publish', s.main.webContents, { ...s.view, revision: 100 })).toBe(false);
     expect(s.call('appearance:publish', s.main.webContents, { ...s.view, ownerEpoch: 'epoch-b' })).toBe(true);
+  });
+  it('projects only the current validated accent and clears it with its owner', () => {
+    const s = setup();
+    expect(s.appearance.getAccentColor()).toBeUndefined();
+    s.call('appearance:claim', s.main.webContents, 'epoch-a');
+    s.call('appearance:publish', s.main.webContents, s.view);
+    expect(s.appearance.getAccentColor()).toBe(s.view.colors['accent.default']);
+    const next = { ...s.view, revision: 1, colors: { ...s.view.colors, 'accent.default': 'rgb(10, 120, 200)' } };
+    expect(s.call('appearance:publish', s.foreign, next)).toBe(false);
+    expect(s.appearance.getAccentColor()).toBe(s.view.colors['accent.default']);
+    expect(s.call('appearance:publish', s.main.webContents, next)).toBe(true);
+    expect(s.appearance.getAccentColor()).toBe('rgb(10, 120, 200)');
+    expect(s.call('appearance:publish', s.main.webContents, { ...next, revision: 2, colors: { ...next.colors, 'accent.default': 'url(x)' } })).toBe(false);
+    expect(s.appearance.getAccentColor()).toBe('rgb(10, 120, 200)');
+    s.main.webContents.emit('did-start-navigation', {}, 'file:///new', false, true);
+    expect(s.appearance.getAccentColor()).toBeUndefined();
+    s.call('appearance:claim', s.main.webContents, 'epoch-b');
+    s.call('appearance:publish', s.main.webContents, { ...s.view, ownerEpoch: 'epoch-b' });
+    expect(s.appearance.getAccentColor()).toBe(s.view.colors['accent.default']);
+    s.main.webContents.emit('destroyed');
+    expect(s.appearance.getAccentColor()).toBeUndefined();
   });
 });

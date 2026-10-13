@@ -59,7 +59,7 @@ function expectDetached(child: HelperProcess) {
   expect(child.listeners('error')[0]).toBe(child.stderr.listeners('error')[0]);
 }
 
-describe('bounded visual window indicator adapter', () => {
+describe('Run-owned persistent visual window indicator adapter', () => {
   it('writes one fixed request line and keeps stdin alive until the returned lease closes', async () => {
     const { child, pending } = setup();
     expect(mocks.spawn).toHaveBeenCalledOnce();
@@ -77,6 +77,7 @@ describe('bounded visual window indicator adapter', () => {
     await Promise.resolve(); expect(closed).toBeUndefined();
     expect(child.stdin.end).not.toHaveBeenCalled();
     lease.dispose(); lease.dispose();
+    expect(lease.shown).toBe(false);
     expect(child.stdin.end).toHaveBeenCalledOnce();
     expect(child.kill.mock.calls).toEqual([['SIGTERM']]);
     await Promise.resolve(); expect(closed).toBeUndefined();
@@ -95,6 +96,31 @@ describe('bounded visual window indicator adapter', () => {
     expect((await pending).shown).toBe(true);
     child.emit('close', 0);
     expectDetached(child);
+  });
+
+  it.each(['click', 'rightClick', 'doubleClick', 'drag'] as const)('forwards only a canonical visual accent for %s', async operation => {
+    const input = { ...request, operation, accentColor: '#5A9E7C',
+      ...(operation === 'drag' ? { endPoint: { x: -600, y: 550 } } : {}) };
+    const { child, pending } = setup(undefined, input);
+    expect(JSON.parse(child.stdin.write.mock.calls[0][0])).toEqual({ ...input, accentColor: '#5a9e7c' });
+    child.reply(); (await pending).dispose(); child.emit('close', 0); expectDetached(child);
+  });
+
+  it.each([undefined, null, true, 123456, {}, '#fff', '5a9e7c', '#12345678', '#12345g',
+    ' #123456', '#123456\n', 'red', 'rgb(1,2,3)', 'var(--primary-color)', '#１２３４５６'])('declines an invalid visual accent before spawning (%j)', async accentColor => {
+    const lease = await showAgentComputerWindowIndicator({ ...request, accentColor } as AgentComputerWindowIndicatorRequest, new AbortController().signal);
+    expect(lease.shown).toBe(false); await expect(lease.closed).resolves.toBe(true);
+    expect(mocks.spawn).not.toHaveBeenCalled();
+  });
+
+  it('ACKs a visual color update within the same frozen window without a new helper', async () => {
+    const { child, pending } = setup(undefined, { ...request, accentColor: '#5a9e7c' });
+    child.reply(); const lease = await pending;
+    const updating = lease.update!({ ...request, accentColor: '#AABBCC' });
+    expect(child.stdin.write).toHaveBeenLastCalledWith(`${JSON.stringify({ ...request, accentColor: '#aabbcc' })}\n`);
+    child.reply(); await expect(updating).resolves.toBe(true);
+    expect(mocks.spawn).toHaveBeenCalledOnce(); expect(lease.shown).toBe(true);
+    lease.dispose(); child.emit('close', 0); await expect(lease.closed).resolves.toBe(true); expectDetached(child);
   });
 
   it('rebuilds the exact identity and strips public discovery labels without forwarding private fields', async () => {
@@ -129,6 +155,8 @@ describe('bounded visual window indicator adapter', () => {
     const input = { ...request }; Object.defineProperty(input, 'point', { enumerable: true, get: read });
     expect((await showAgentComputerWindowIndicator(input, new AbortController().signal)).shown).toBe(false);
     expect((await showAgentComputerWindowIndicator({ ...request, [Symbol('input')]: true }, new AbortController().signal)).shown).toBe(false);
+    const colorInput = { ...request }; Object.defineProperty(colorInput, 'accentColor', { enumerable: true, get: read });
+    expect((await showAgentComputerWindowIndicator(colorInput, new AbortController().signal)).shown).toBe(false);
     expect(read).not.toHaveBeenCalled(); expect(mocks.spawn).not.toHaveBeenCalled();
   });
 
@@ -186,18 +214,217 @@ describe('bounded visual window indicator adapter', () => {
     expectDetached(child);
   });
 
-  it('caps the entire lease lifetime at three seconds from spawn, including startup', async () => {
+  it('remains shown beyond three seconds and sends heartbeats until explicit disposal', async () => {
     const { child, pending } = setup();
     await vi.advanceTimersByTimeAsync(900); child.reply();
     const lease = await pending;
-    await vi.advanceTimersByTimeAsync(2_099); expect(child.kill).not.toHaveBeenCalled();
-    await vi.advanceTimersByTimeAsync(1); expect(child.kill.mock.calls).toEqual([['SIGTERM']]);
-    lease.dispose(); await vi.advanceTimersByTimeAsync(600); lease.dispose();
-    expect(child.kill.mock.calls).toEqual([['SIGTERM'], ['SIGKILL']]);
+    let closed: boolean | undefined;
+    void lease.closed.then(value => { closed = value; });
+    await vi.advanceTimersByTimeAsync(6_500);
+    expect(lease.shown).toBe(true);
+    expect(closed).toBeUndefined();
+    expect(child.kill).not.toHaveBeenCalled();
+    expect(child.stdin.write.mock.calls.map(([line]) => line)).toEqual([`${JSON.stringify(request)}\n`, ...Array<string>(6).fill('\n')]);
+    lease.dispose();
+    expect(lease.shown).toBe(false);
+    const writesAtDisposal = child.stdin.write.mock.calls.length;
+    child.emit('close', 0);
+    await vi.advanceTimersByTimeAsync(5_000); lease.dispose();
+    expect(child.stdin.write).toHaveBeenCalledTimes(writesAtDisposal);
+    expect(child.kill.mock.calls).toEqual([['SIGTERM']]);
     expect(child.stdin.end).toHaveBeenCalledOnce();
     expect(child.stdout.destroy).toHaveBeenCalledOnce();
-    await expect(lease.closed).resolves.toBe(false);
+    await expect(lease.closed).resolves.toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
     expectDetached(child);
+  });
+
+  it.each(['click', 'rightClick', 'doubleClick', 'drag'] as const)('updates the same live surface to a %s arrow only after a native ACK', async operation => {
+    const { child, pending } = setup(); child.reply();
+    const lease = await pending;
+    const next: AgentComputerWindowIndicatorRequest = { ...request, operation, point: { x: -700, y: 600 },
+      ...(operation === 'drag' ? { endPoint: { x: -600, y: 650 } } : {}) };
+    const updating = lease.update!(next);
+    let accepted: boolean | undefined;
+    void updating.then(value => { accepted = value; });
+    await vi.advanceTimersByTimeAsync(999);
+    expect(accepted).toBeUndefined();
+    expect(child.stdin.write).toHaveBeenLastCalledWith(`${JSON.stringify(next)}\n`);
+    child.reply();
+    await expect(updating).resolves.toBe(true);
+    expect(lease.shown).toBe(true);
+    expect(mocks.spawn).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(child.stdin.write).toHaveBeenLastCalledWith('\n');
+    expect(child.kill).not.toHaveBeenCalled();
+    lease.dispose(); child.emit('close', 0);
+    await expect(lease.closed).resolves.toBe(true); expectDetached(child);
+  });
+
+  it('rejects a concurrent update without replacing or cancelling the pending native ACK', async () => {
+    const { child, pending } = setup(); child.reply(); const lease = await pending;
+    const next = { ...request, point: { x: -700, y: 600 } };
+    const first = lease.update!(next);
+    await expect(lease.update!({ ...request, point: { x: -600, y: 600 } })).resolves.toBe(false);
+    expect(child.stdin.write).toHaveBeenCalledTimes(2);
+    expect(lease.shown).toBe(true); expect(child.kill).not.toHaveBeenCalled();
+    child.reply(); await expect(first).resolves.toBe(true);
+    const following = lease.update!({ ...request, point: { x: -600, y: 600 } });
+    child.reply(); await expect(following).resolves.toBe(true);
+    lease.dispose(); child.emit('close', 0); expectDetached(child);
+  });
+
+  it('accepts the same window identity with reordered bounds and strips discovery labels on update', async () => {
+    const { child, pending } = setup(); child.reply(); const lease = await pending;
+    const next = { ...request, point: { x: -700, y: 600 }, window: { ...window,
+      applicationLabel: 'TextEdit', windowLabel: 'Fixture',
+      bounds: { height: window.bounds.height, width: window.bounds.width, y: window.bounds.y, x: window.bounds.x } } };
+    const updating = lease.update!(next);
+    expect(JSON.parse(child.stdin.write.mock.calls[1][0])).toEqual({ ...request, point: next.point });
+    child.reply(); await expect(updating).resolves.toBe(true);
+    expect(lease.shown).toBe(true); expect(child.kill).not.toHaveBeenCalled();
+    lease.dispose(); child.emit('close', 0); expectDetached(child);
+  });
+
+  it.each(['windowId', 'pid', 'processStartedAt', 'title', 'bounds'] as const)('refuses an update to a changed frozen %s and retains exit confirmation', async field => {
+    const { child, pending } = setup(); child.reply(); const lease = await pending;
+    const changed = { ...window, bounds: { ...window.bounds } };
+    if (field === 'windowId') changed.windowId += 1;
+    if (field === 'pid') changed.pid += 1;
+    if (field === 'processStartedAt') changed.processStartedAt += 1;
+    if (field === 'title') changed.title = 'Another document';
+    if (field === 'bounds') changed.bounds.x -= 1;
+    await expect(lease.update!({ ...request, window: changed })).resolves.toBe(false);
+    expect(lease.shown).toBe(false);
+    expect(child.stdin.write).toHaveBeenCalledOnce();
+    expect(child.kill.mock.calls).toEqual([['SIGTERM']]);
+    let closed: boolean | undefined; void lease.closed.then(value => { closed = value; });
+    await Promise.resolve(); expect(closed).toBeUndefined();
+    child.emit('close', 0); await expect(lease.closed).resolves.toBe(true);
+    await expect(lease.update!(request)).resolves.toBe(false);
+    expectDetached(child);
+  });
+
+  it.each([
+    { ...request, operation: 'shortcut' }, { ...request, label: 'visible text' },
+    { ...request, point: { x: Infinity, y: 500 } }, { ...request, point: { x: 0, y: 500 } },
+    { ...request, operation: 'drag' }, { ...request, endPoint: { x: -700, y: 600 } },
+    { ...request, accentColor: 'var(--primary-color)' }, { ...request, accentColor: '#123456\n' },
+  ])('closes instead of forwarding an illegal update (%j)', async input => {
+    const { child, pending } = setup(); child.reply(); const lease = await pending;
+    await expect(lease.update!(input as AgentComputerWindowIndicatorRequest)).resolves.toBe(false);
+    expect(child.stdin.write).toHaveBeenCalledOnce(); expect(lease.shown).toBe(false);
+    child.emit('exit', 0); await expect(lease.closed).resolves.toBe(true); expectDetached(child);
+  });
+
+  it('does not evaluate getters in an update request', async () => {
+    const { child, pending } = setup(); child.reply(); const lease = await pending;
+    const read = vi.fn(() => request.point);
+    const input = { ...request }; Object.defineProperty(input, 'point', { enumerable: true, get: read });
+    await expect(lease.update!(input)).resolves.toBe(false);
+    expect(read).not.toHaveBeenCalled(); expect(child.stdin.write).toHaveBeenCalledOnce();
+    child.emit('close', 0); expectDetached(child);
+  });
+
+  it('times out an unacknowledged update and ignores a late ACK without reviving its lease', async () => {
+    const { child, pending } = setup(); child.reply(); const lease = await pending;
+    const updating = lease.update!({ ...request, point: { x: -700, y: 600 } });
+    let accepted: boolean | undefined; void updating.then(value => { accepted = value; });
+    await vi.advanceTimersByTimeAsync(999);
+    expect(accepted).toBeUndefined(); expect(lease.shown).toBe(true);
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(updating).resolves.toBe(false); expect(lease.shown).toBe(false);
+    child.reply();
+    await expect(lease.update!(request)).resolves.toBe(false);
+    expect(child.kill.mock.calls).toEqual([['SIGTERM']]);
+    await vi.advanceTimersByTimeAsync(600);
+    await expect(lease.closed).resolves.toBe(false);
+    child.emit('close', 0); child.reply();
+    await expect(lease.closed).resolves.toBe(false);
+    expect(lease.shown).toBe(false); expectDetached(child);
+  });
+
+  it.each(['abort', 'dispose', 'exit', 'close'] as const)('settles a pending update on %s while keeping closure evidence separate', async ending => {
+    const controller = new AbortController(); const { child, pending } = setup(controller.signal);
+    child.reply(); const lease = await pending;
+    const updating = lease.update!({ ...request, point: { x: -700, y: 600 } });
+    let closed: boolean | undefined; void lease.closed.then(value => { closed = value; });
+    if (ending === 'abort') controller.abort();
+    else if (ending === 'dispose') lease.dispose();
+    else child.emit(ending, 0);
+    await expect(updating).resolves.toBe(false);
+    expect(lease.shown).toBe(false);
+    if (ending === 'abort' || ending === 'dispose') {
+      expect(closed).toBeUndefined();
+      expect(child.kill.mock.calls).toEqual([['SIGTERM']]);
+      child.emit('close', 0);
+    } else expect(child.kill).not.toHaveBeenCalled();
+    await expect(lease.closed).resolves.toBe(true);
+    child.reply(); await vi.advanceTimersByTimeAsync(5_000);
+    expect(vi.getTimerCount()).toBe(0); expectDetached(child);
+  });
+
+  it.each([511, 512])('applies the %i-byte ACK budget to each update, including split lines', async length => {
+    const { child, pending } = setup(); child.reply(); const lease = await pending;
+    const updating = lease.update!({ ...request, point: { x: -700, y: 600 } });
+    const line = Buffer.from('{"ok":true,"shown":true}\n');
+    const bytes = Buffer.concat([Buffer.alloc(length - line.length, 32), line]);
+    child.stdout.emit('data', bytes.subarray(0, 300));
+    child.stdout.emit('data', bytes.subarray(300));
+    await expect(updating).resolves.toBe(length === 511);
+    expect(lease.shown).toBe(length === 511);
+    lease.dispose(); child.emit('close', 0); expectDetached(child);
+  });
+
+  it('accepts repeated ACKed updates and heartbeats without a cumulative output lifetime limit', async () => {
+    const { child, pending } = setup(); child.reply(); const lease = await pending;
+    for (let index = 0; index < 50; index += 1) {
+      const updating = lease.update!({ ...request, point: { x: -700 + index, y: 600 } });
+      child.stdout.emit('data', Buffer.from('{"ok":true,'));
+      child.stdout.emit('data', Buffer.from('"shown":true}\n'));
+      await expect(updating).resolves.toBe(true);
+      await vi.advanceTimersByTimeAsync(100);
+    }
+    expect(lease.shown).toBe(true); expect(child.kill).not.toHaveBeenCalled();
+    expect(mocks.spawn).toHaveBeenCalledOnce();
+    expect(child.stdin.write.mock.calls.filter(([line]) => line === '\n')).toHaveLength(5);
+    expect(child.stdin.write.mock.calls.filter(([line]) => line !== '\n')).toHaveLength(51);
+    lease.dispose(); child.emit('close', 0); expectDetached(child);
+  });
+
+  it.each([{ ok: true, shown: false }, { ok: false, shown: true }, { ok: true, shown: true, extra: true }])('settles refused or invalid update ACKs (%j) without hanging', async receipt => {
+    const { child, pending } = setup(); child.reply(); const lease = await pending;
+    const updating = lease.update!({ ...request, point: { x: -700, y: 600 } });
+    child.reply(receipt);
+    await expect(updating).resolves.toBe(false); expect(lease.shown).toBe(false);
+    child.emit('close', 0); await expect(lease.closed).resolves.toBe(true); expectDetached(child);
+  });
+
+  it.each(['startup', 'heartbeat', 'update'] as const)('closes on %s input backpressure without mistaking TERM for closure', async stage => {
+    const child = new HelperProcess(); mocks.spawn.mockReturnValueOnce(child);
+    if (stage === 'startup') child.stdin.write.mockReturnValueOnce(false);
+    const pending = showAgentComputerWindowIndicator(request, new AbortController().signal);
+    if (stage !== 'startup') child.reply();
+    const lease = await pending;
+    if (stage === 'heartbeat') {
+      child.stdin.write.mockReturnValueOnce(false); await vi.advanceTimersByTimeAsync(1_000);
+    } else if (stage === 'update') {
+      child.stdin.write.mockReturnValueOnce(false);
+      await expect(lease.update!({ ...request, point: { x: -700, y: 600 } })).resolves.toBe(false);
+    }
+    expect(lease.shown).toBe(false); expect(child.kill.mock.calls).toEqual([['SIGTERM']]);
+    let closed: boolean | undefined; void lease.closed.then(value => { closed = value; });
+    await Promise.resolve(); expect(closed).toBeUndefined();
+    child.reply(); child.emit('close', 0);
+    await expect(lease.closed).resolves.toBe(true);
+    await vi.advanceTimersByTimeAsync(5_000); expect(vi.getTimerCount()).toBe(0); expectDetached(child);
+  });
+
+  it.each(['\n', '{"ok":true,"shown":true}\n', '{"ok":'])('closes on unsolicited stdout with no outstanding native request (%j)', async bytes => {
+    const { child, pending } = setup(); child.reply(); const lease = await pending;
+    child.stdout.emit('data', Buffer.from(bytes));
+    expect(lease.shown).toBe(false); expect(child.kill.mock.calls).toEqual([['SIGTERM']]);
+    child.emit('close', 0); await expect(lease.closed).resolves.toBe(true); expectDetached(child);
   });
 
   it('stops excessive post-ready output and drains the pipes without extending its lifetime', async () => {

@@ -5,7 +5,6 @@ import type { AgentOwnerScope } from '@/shared/agent/agent.types';
 import { AGENT_ATTACHMENT_MAX_BYTES } from '@/shared/agent/agent-attachments';
 import { previewAgentAttachment } from '../services/agent.api';
 import AgentAttachmentPreview from './AgentAttachmentPreview';
-import AgentComputerPointerOverlay from './AgentComputerPointerOverlay';
 import type { AgentComputerPointerPlan } from '../agent-computer-pointer-plan';
 
 const ObservationPreview = styled.div`
@@ -103,7 +102,6 @@ export default function AgentToolObservationPreview({ alt, attachmentId, library
             setImage(current => current.key === requestKey ? { key: requestKey, failed: true } : current);
             setPreviewKey(current => current === requestKey ? null : current);
           }} />
-          {currentPlan ? <AgentComputerPointerOverlay plan={currentPlan} /> : null}
         </button>
       ) : !request || currentImage?.failed ? (
         <p>截图暂不可用</p>

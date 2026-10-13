@@ -8,6 +8,8 @@ import type { AgentAttachment, AgentAttachmentScope } from '@/shared/agent/agent
 import { previewAgentAttachment } from '../services/agent.api';
 import type { AgentComputerPointerPlan } from '../agent-computer-pointer-plan';
 import { createAgentComputerPointerPreview } from '../agent-computer-pointer-preview';
+import { AppearanceViewContext } from '@/features/appearance/appearance.context';
+import { resolveComputerPointerAccent } from '@/shared/computer-use/pointer-appearance';
 
 const ZoomControls = styled.div`
   display: flex; align-items: center; gap: 12px; padding: 8px;
@@ -27,11 +29,13 @@ export default function AgentAttachmentPreview({ attachment, scope, sessionId, o
   pointerPlan?: AgentComputerPointerPlan;
 }) {
   const workspaceActive = React.useContext(WorkspaceVisibilityContext);
+  const appearance = React.useContext(AppearanceViewContext);
   const visibleRef = React.useRef(workspaceActive);
   visibleRef.current = workspaceActive;
   const planKey = pointerPlan?.attachmentId === attachment.id ? JSON.stringify(pointerPlan) : '';
+  const accentColor = planKey ? resolveComputerPointerAccent(appearance?.colors['accent.default']) : undefined;
   const requestKey = JSON.stringify([attachment.id, attachment.thumbnail, scope.libraryId, scope.ownerScope.accountScope,
-    scope.ownerScope.backendScope, sessionId, planKey, workspaceActive]);
+    scope.ownerScope.backendScope, sessionId, planKey, planKey ? accentColor : null, workspaceActive]);
   const [image, setImage] = React.useState<{ key: string; src: string }>({ key: '', src: '' });
   const src = image.key === requestKey ? image.src : attachment.thumbnail || '';
   const [error, setError] = React.useState('');
@@ -47,13 +51,13 @@ export default function AgentAttachmentPreview({ attachment, scope, sessionId, o
       setImage({ key: requestKey, src: url });
       if (planKey) {
         const plan = JSON.parse(planKey) as AgentComputerPointerPlan;
-        const marked = await createAgentComputerPointerPreview(url, plan, controller.signal).catch(() => url);
+        const marked = await createAgentComputerPointerPreview(url, plan, controller.signal, accentColor).catch(() => url);
         if (active) setImage({ key: requestKey, src: marked });
       }
     }).catch(() => { if (active) setError('清晰图片暂不可用，仅显示缩略图'); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; controller.abort(); };
-  }, [attachment.id, attachment.thumbnail, libraryId, ownerScope, sessionId, planKey, requestKey, workspaceActive]);
+  }, [attachment.id, attachment.thumbnail, libraryId, ownerScope, sessionId, planKey, requestKey, workspaceActive, accentColor]);
   React.useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
     return () => { if (visibleRef.current && previous?.isConnected) previous.focus(); };

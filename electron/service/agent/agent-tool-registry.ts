@@ -122,6 +122,8 @@ export interface AgentMainCommitSettlement {
 
 export interface AgentToolExecutionContext {
   readonly commitSettlement?: AgentMainCommitSettlement;
+  /** Main-owned current-Run cleanup; Tool input never selects a Run, owner, or window. */
+  readonly hideComputerPointer?: (signal: AbortSignal) => Promise<AgentToolResult>;
   executePluginFileOutput?: (
     source: AgentPluginToolSource, input: unknown, preparation: AgentToolMainPreparedExecution,
     commit: AgentMainCommitSettlement, signal: AbortSignal,

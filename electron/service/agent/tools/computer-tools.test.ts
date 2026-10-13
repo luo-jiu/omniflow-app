@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createAgentToolRegistry } from '../agent-tool-registry';
-import { getBuiltInAgentComputerTools } from './computer-tools';
+import { createAgentToolRegistry, type AgentToolExecutionContext } from '../agent-tool-registry';
+import { getBuiltInAgentComputerTools, isBuiltinComputerHidePointerTool } from './computer-tools';
 
 vi.mock('../computer/agent-computer-service-runtime', () => ({ agentComputerRuntime: {} }));
 
@@ -16,8 +16,44 @@ const elementId = '43b39553-9a74-4ba1-a976-1a6738397275';
 
 describe('built-in computer input contracts', () => {
   it('registers discovery and control only on macOS', () => {
-    expect(snapshot().list().map(tool => tool.name)).toEqual(['computer.windows', 'computer.observe', 'computer.click', 'computer.setText', 'computer.scroll', 'computer.input']);
+    expect(snapshot().list().map(tool => tool.name)).toEqual(['computer.windows', 'computer.observe', 'computer.click', 'computer.setText', 'computer.scroll', 'computer.input', 'computer.hidePointer']);
     expect(snapshot('win32').list()).toEqual([]);
+  });
+  it('only accepts empty pointer cleanup input and requires the current-Run main closure', async () => {
+    const tools = snapshot();
+    const tool = tools.get('computer.hidePointer')!;
+    expect(tools.validateInput(tool.name, {}).ok).toBe(true);
+    for (const input of [null, [], '', { runId: observationId }, { windowRef: elementId }, { ownerWebContentsId: 77 }, { all: true }]) {
+      expect(tools.validateInput(tool.name, input).ok).toBe(false);
+    }
+    const signal = new AbortController().signal;
+    const context: AgentToolExecutionContext = {
+      appContext: { libraryId: 3, platform: 'darwin', selectedNodeIds: [] }, onProgress: vi.fn(), signal,
+    };
+    expect(await tool.assess!({}, context)).toMatchObject({ behavior: 'deny', risk: 'read' });
+    expect(await tool.execute!({}, context)).toMatchObject({ ok: false });
+    const result = { ok: false, message: 'AI箭头关闭未确认', data: { closeConfirmed: false } };
+    const hideComputerPointer = vi.fn(async () => result);
+    const controlled = { ...context, hideComputerPointer };
+    expect(await tool.assess!({}, controlled)).toEqual({ behavior: 'allow', risk: 'read' });
+    expect(await tool.execute!({}, controlled)).toBe(result);
+    expect(hideComputerPointer).toHaveBeenCalledOnce();
+    expect(hideComputerPointer).toHaveBeenCalledWith(signal);
+    expect(tool.prepareMain).toBeUndefined();
+  });
+  it('recognizes only the exact builtin main read lifecycle implementation', () => {
+    const tool = snapshot().get('computer.hidePointer')!;
+    expect(isBuiltinComputerHidePointerTool(tool)).toBe(true);
+    for (const changed of [
+      { name: 'computer.observe' }, { registrationId: 'builtin:computer.hidePointer@999' },
+      { executor: 'renderer' as const }, { kind: 'control' as const }, { risk: 'write' as const },
+      { pluginOperation: 'rename' as const }, { execute: undefined },
+      { createRendererRequest: () => ({}) }, { createRendererPrepareRequest: () => ({}) },
+      { prepareMain: () => { throw new Error('unused'); } },
+      { finalizeRendererPreparation: () => { throw new Error('unused'); } }, { preparedRisk: 'dynamic' as const },
+      { pluginSource: { pluginId: 'test', pluginVersion: '1.0.0', packageFingerprint: 'a'.repeat(64), toolId: tool.name, registrationId: tool.registrationId } },
+    ]) expect(isBuiltinComputerHidePointerTool({ ...tool, ...changed })).toBe(false);
+    expect(isBuiltinComputerHidePointerTool()).toBe(false);
   });
   it('accepts either element identity or coordinates and rejects ambiguous or partial input', () => {
     const tools = snapshot();

@@ -1,4 +1,4 @@
-import type { AgentTool, AgentToolMainPreparationResult } from '../agent-tool-registry';
+import type { AgentTool, AgentToolMainPreparationResult, AgentToolSnapshot } from '../agent-tool-registry';
 import type { AgentPreparedActionPublic } from '../../../../src/shared/agent/agent.types';
 import { agentComputerRuntime } from '../computer/agent-computer-service-runtime';
 import { equalAgentPreparedActionPublic } from '../../../../src/shared/agent/agent-prepared-action';
@@ -16,6 +16,14 @@ function checkRequestedAction(prepared: AgentToolMainPreparationResult, requeste
     throw new Error('屏幕操作不支持更改已准备的目标，请重新查看屏幕');
   }
   return prepared;
+}
+
+export function isBuiltinComputerHidePointerTool(tool?: AgentToolSnapshot | null): tool is AgentToolSnapshot {
+  return !!tool && tool.name === 'computer.hidePointer' && tool.registrationId === 'builtin:computer.hidePointer@1'
+    && tool.executor === 'main' && tool.kind === 'business' && tool.risk === 'read'
+    && !tool.pluginSource && !tool.pluginOperation && typeof tool.execute === 'function'
+    && !tool.prepareMain && !tool.preparedRisk && !tool.createRendererRequest
+    && !tool.createRendererPrepareRequest && !tool.finalizeRendererPreparation;
 }
 
 export function getBuiltInAgentComputerTools(): AgentTool[] {
@@ -66,7 +74,7 @@ export function getBuiltInAgentComputerTools(): AgentTool[] {
   }, {
     name: 'computer.click', registrationId: 'builtin:computer.click@1', executor: 'main', risk: 'write', timeoutMs: 10_000,
     cancellationSettleTimeoutMs: 6_000,
-    description: '后台AXPress左键单击，不移鼠标/置前。observationId+准确elementId优先；both可x/y截图整数像素，ax仅ID，定位互斥。60s/一次/后observe核对；过期未发送须新ID，已发送/unknown不重放。无画布/无AX动作点击；右键/双击用computer.input。dispatched仅发送。',
+    description: '后台AXPress左键单击，不移鼠标/置前。observationId+准确elementId优先；both可x/y截图整数像素，ax仅ID，定位互斥。60s/一次/后observe核对；过期未发送须新ID，已发送/unknown不重放。无画布/无AX动作点击；右键/双击用computer.input。dispatched仅发送。AI箭头持续保留，确实不再需要时调用computer.hidePointer，Run结束自动清理。',
     inputSchema: { type: 'object', additionalProperties: false,
       properties: { observationId: { type: 'string', pattern: '^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$' },
         elementId: { type: 'string', pattern: '^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$' },
@@ -111,7 +119,7 @@ export function getBuiltInAgentComputerTools(): AgentTool[] {
   }, {
     name: 'computer.input', registrationId: 'builtin:computer.input@1', executor: 'main', risk: 'write', timeoutMs: 10_000,
     cancellationSettleTimeoutMs: 6_000,
-    description: '按availableInputOperations向获准后台窗输入；拒未验证版本/目标App前台/按住modifier或鼠标；快捷键还拒物理打字。无置前/移指针/全局事件。shortcut=key/modifiers，字母数字须command或control；rightClick/doubleClick=同张both图point；drag=不同point/endPoint+100..1000ms同窗。ax仅shortcut，screenshot/局部无能力。observationId:60s/一次/后observe；dispatched仅投递。unknown/释放未确认不重放/换路线；右键新菜单停并unknown，菜单选择未开放。',
+    description: '按availableInputOperations向获准后台窗输入；拒未验证版本/目标App前台/按住modifier或鼠标；快捷键还拒物理打字。无置前/移指针/全局事件。shortcut=key/modifiers，字母数字须command或control；rightClick/doubleClick=同张both图point；drag=不同point/endPoint+100..1000ms同窗。ax仅shortcut，screenshot/局部无能力。observationId:60s/一次/后observe；dispatched仅投递。unknown/释放未确认不重放/换路线；右键新菜单停并unknown，菜单选择未开放。点按/拖动的AI箭头持续保留，确实不再需要时调用computer.hidePointer，Run结束自动清理。',
     inputSchema: { type: 'object', additionalProperties: false, properties: {
       observationId: elementIdentitySchema.observationId,
       operation: { enum: ['shortcut', 'rightClick', 'doubleClick', 'drag'] },
@@ -139,6 +147,18 @@ export function getBuiltInAgentComputerTools(): AgentTool[] {
     execute: async (_input, context) => {
       if (!context.preparation) throw new Error('后台输入缺少已批准的准备动作');
       return agentComputerRuntime.input(context.preparation, context.signal, context.commitSettlement);
+    },
+  }, {
+    name: 'computer.hidePointer', registrationId: 'builtin:computer.hidePointer@1', executor: 'main', kind: 'business',
+    risk: 'read', timeoutMs: 10_000,
+    description: '隐藏当前Run获准窗口上的AI箭头；点按/拖动后的箭头持续保留，确实不再需要时调用。只接受{}，不选择Run/窗口、不取消共享或输入能力、不读取屏幕；没有箭头时可重复调用。Run结束自动清理；closeConfirmed=false表示关闭未确认，不得声称已隐藏。',
+    inputSchema: { type: 'object', additionalProperties: false, properties: {} },
+    assess: (_input, context) => context.hideComputerPointer
+      ? { behavior: 'allow', risk: 'read' }
+      : { behavior: 'deny', risk: 'read', message: 'AI箭头隐藏缺少当前Run的受控能力' },
+    execute: async (_input, context) => {
+      if (!context.hideComputerPointer) return { ok: false, message: 'AI箭头隐藏缺少当前Run的受控能力' };
+      return context.hideComputerPointer(context.signal);
     },
   }];
 }

@@ -1,13 +1,14 @@
 import { AGENT_ATTACHMENT_MAX_BYTES } from '@/shared/agent/agent-attachments';
 import type { AgentComputerPointerPlan } from './agent-computer-pointer-plan';
 import { agentComputerPointerPlanLabel } from './agent-computer-pointer-plan';
-import { POINTER_PATH, POINTER_PURPLE, pointerPlanGeometry } from './agent-computer-pointer-geometry';
+import { COMPUTER_POINTER_PATH, computerPointerPalette } from '@/shared/computer-use/pointer-appearance';
+import { pointerPlanGeometry } from './agent-computer-pointer-geometry';
 
 const MAX_SOURCE_LENGTH = Math.ceil(AGENT_ATTACHMENT_MAX_BYTES / 3) * 4 + 64;
 const PNG = /^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/u;
 
-/** Temporary renderer pixels only. Neither the original attachment nor model input changes. */
-export function createAgentComputerPointerPreview(source: string, plan: AgentComputerPointerPlan, signal: AbortSignal): Promise<string> {
+/** Display-only SVG: original PNG plus a vector pointer, never persisted or sent to the model. */
+export function createAgentComputerPointerPreview(source: string, plan: AgentComputerPointerPlan, signal: AbortSignal, accentColor?: string): Promise<string> {
   const inside = (point: { x: number; y: number }) => Number.isSafeInteger(point.x) && Number.isSafeInteger(point.y)
     && point.x >= 0 && point.x < plan.width && point.y >= 0 && point.y < plan.height;
   if (signal.aborted || source.length > MAX_SOURCE_LENGTH || !PNG.test(source)
@@ -35,35 +36,23 @@ export function createAgentComputerPointerPreview(source: string, plan: AgentCom
     image.onload = () => {
       if (settled) return;
       if (signal.aborted || image.naturalWidth !== plan.width || image.naturalHeight !== plan.height) { finish(); return; }
-      let canvas: HTMLCanvasElement | undefined;
       try {
-        canvas = document.createElement('canvas');
-        canvas.width = plan.width; canvas.height = plan.height;
-        const context = canvas.getContext('2d');
-        if (!context) { finish(); return; }
-        context.drawImage(image, 0, 0);
-        const { scale, x, y, labelWidth, labelHeight } = pointerPlanGeometry(plan);
-        if (plan.endPoint) {
-          context.setLineDash([7 * scale, 5 * scale]);
-          context.beginPath(); context.moveTo(plan.point.x, plan.point.y); context.lineTo(plan.endPoint.x, plan.endPoint.y);
-          context.strokeStyle = 'white'; context.lineWidth = 5 * scale; context.stroke();
-          context.strokeStyle = POINTER_PURPLE; context.lineWidth = 2.5 * scale; context.stroke();
-          context.setLineDash([]);
-          context.beginPath(); context.arc(plan.endPoint.x, plan.endPoint.y, 7 * scale, 0, Math.PI * 2);
-          context.fillStyle = POINTER_PURPLE; context.fill(); context.strokeStyle = 'white'; context.lineWidth = 2 * scale; context.stroke();
-        }
-        context.save(); context.translate(plan.point.x, plan.point.y); context.scale(scale, scale);
-        const arrow = new Path2D(POINTER_PATH);
-        context.fillStyle = POINTER_PURPLE; context.strokeStyle = 'white'; context.lineWidth = 1.8; context.lineJoin = 'round';
-        context.fill(arrow); context.stroke(arrow); context.restore();
-        context.beginPath(); context.roundRect(x, y, labelWidth, labelHeight, 5 * scale);
-        context.fillStyle = POINTER_PURPLE; context.fill(); context.strokeStyle = 'white'; context.lineWidth = scale; context.stroke();
-        context.fillStyle = 'white'; context.font = `600 ${12 * scale}px system-ui, sans-serif`;
-        context.fillText(agentComputerPointerPlanLabel(plan), x + 7 * scale, y + 15 * scale, labelWidth - 14 * scale);
-        const result = canvas.toDataURL('image/png');
-        finish(result.length <= MAX_SOURCE_LENGTH && PNG.test(result) ? result : undefined);
+        const { scale, xDirection, yDirection } = pointerPlanGeometry(plan);
+        const palette = computerPointerPalette(accentColor);
+        // Every interpolated value is a validated number, finite palette value, static label/path,
+        // or bounded PNG base64. Never accept arbitrary SVG, URLs, markup or uploaded SVG content.
+        const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${plan.width}" height="${plan.height}" viewBox="0 0 ${plan.width} ${plan.height}">
+<title>${agentComputerPointerPlanLabel(plan)}</title>
+<image width="${plan.width}" height="${plan.height}" href="${source}"/>
+<defs><filter id="glow" filterUnits="userSpaceOnUse" x="-7" y="-7" width="35" height="35" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="2"/></filter></defs>
+<g transform="translate(${plan.point.x} ${plan.point.y}) scale(${scale * xDirection} ${scale * yDirection})" stroke-linejoin="round">
+<path d="${COMPUTER_POINTER_PATH}" fill="none" stroke="${palette.accent}" stroke-width="2" stroke-opacity="0.5" filter="url(#glow)"/>
+<path d="${COMPUTER_POINTER_PATH}" fill="${palette.fill}" stroke="${palette.accent}" stroke-width="2.6"/>
+<path d="${COMPUTER_POINTER_PATH}" fill="none" stroke="${palette.edge}" stroke-width="1.3"/>
+</g></svg>`;
+        // Semi changes image width/height for zoom, so the path is rasterized at the displayed size.
+        finish(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`);
       } catch { finish(); }
-      finally { if (canvas) { canvas.width = 0; canvas.height = 0; } }
     };
     image.src = source;
   });

@@ -28,6 +28,7 @@ import { createAppGracefulShutdown } from './service/appGracefulShutdown'
 import { agentMediaArtifactStore } from './service/agent/agent-media-artifact-store'
 import { agentOrchestrator } from './service/agent/agent-orchestrator'
 import { agentWorkspaceRendering } from './service/agent/computer/agent-workspace-rendering'
+import { configureAgentComputerAppearance } from './service/agent/computer/agent-computer-service-runtime'
 import { disposeAgentAttachmentDrafts } from './service/agent/agent-attachment-runtime'
 import {
   disposeAgentPersistenceRuntime,
@@ -525,7 +526,8 @@ app.whenReady().then(async () => {
     getMainWindow: () => mainWindow,
   })
   embeddedBrowserMainController.registerIpcHandlers()
-  registerAppearanceIpc({ getMainWindow: () => mainWindow, getOverlayWindow: () => overlayWindowController.getWindow() })
+  const appearance = registerAppearanceIpc({ getMainWindow: () => mainWindow, getOverlayWindow: () => overlayWindowController.getWindow() })
+  configureAgentComputerAppearance(appearance.getAccentColor)
   registerOverlayWindowIpcHandlers(overlayWindowController)
   registerSystemVideoWindowIpcHandlers(systemVideoWindowController)
   registerAppUpdateIpcHandlers(ipcMain, appUpdateService)

@@ -12,8 +12,10 @@ describe.skipIf(process.platform !== 'darwin')('native directed window-input pro
       const harness = path.join(directory, 'main.swift');
       await writeFile(harness, String.raw`
 import Foundation
+import AppKit
+import CoreGraphics
 var checks = 0
-func check(_ value: Bool) { checks += 1; guard value else { fatalError("Directed-input check \(checks) failed") } }
+func check(_ value: Bool, _ detail: String = "") { checks += 1; guard value else { fatalError("Directed-input check \(checks) failed: \(detail)") } }
 check(windowInputReceiverProfile(bundleIdentifier: "com.omniflow.window-input-qa", buildVersion: "1", shortVersion: "1.0") == "appkit-fixture-v1")
 for bundle in [nil, "com.apple.TextEdit", "com.google.Chrome", "com.electron.Electron", "com.omniflow.window-input-qa\n"] as [String?] {
     check(windowInputReceiverProfile(bundleIdentifier: bundle, buildVersion: "1", shortVersion: "1.0") == nil)
@@ -71,6 +73,70 @@ check((try? parseWindowInputRequest(input("drag", extra: ["point": ["x": 0, "y":
 check((try? parseWindowInputRequest(input("shortcut", extra: ["shortcut": ["key": "a", "modifiers": [], "extra": 1]]))) == nil)
 check((try? parseWindowInputRequest(input("shortcut", extra: ["shortcut": ["key": "a", "modifiers": ["command"]], "point": ["x": 0, "y": 100]]))) == nil)
 check((try? parseWindowInputRequest(Data("{\"operation\":\"drag\",\"operation\":\"shortcut\"}".utf8))) == nil)
+
+// Construct and round-trip real event objects without posting, opening a
+// window or creating NSApplication. This verifies the AppKit/CG bridge retains
+// representable positive Int16 press identities, not merely a pure model.
+let source = CGEventSource(stateID: .privateState)!
+let point = WindowInputPoint(x: -99, y: 41)
+func pressNumber(_ event: CGEvent) -> Int64 {
+    let number = event.getIntegerValueField(.mouseEventNumber)
+    check(number > 0 && number <= Int64(Int16.max), "CG number \(number), event type \(event.type.rawValue)")
+    check(NSEvent(cgEvent: event)?.eventNumber == Int(number), "CG number \(number), AppKit number \(String(describing: NSEvent(cgEvent: event)?.eventNumber)), event type \(event.type.rawValue)")
+    return number
+}
+for number in [Int16(1), Int16(16384), Int16.max] {
+    for type in [NSEvent.EventType.leftMouseDown, .leftMouseDragged, .leftMouseUp] {
+        let event = try windowInputMouseEvent(type, point: point, window: window,
+            clickCount: 1, eventNumber: number, source: source)
+        check(pressNumber(event) == Int64(number))
+    }
+}
+func preparedMouseEvents(_ operation: String, extra: [String: Any]) throws -> [WindowInputEvent] {
+    try prepareWindowInputEvents(parseWindowInputRequest(input(operation, extra: extra)), source: source)
+}
+let rightEvents = try preparedMouseEvents("rightClick", extra: ["point": ["x": -99, "y": 41]])
+check(rightEvents.count == 2)
+check(pressNumber(rightEvents[0].event) == pressNumber(rightEvents[1].event))
+check(pressNumber(rightEvents[0].release!) == pressNumber(rightEvents[0].event))
+let doubleEvents = try preparedMouseEvents("doubleClick", extra: ["point": ["x": -99, "y": 41]])
+check(doubleEvents.count == 4)
+let firstPress = pressNumber(doubleEvents[0].event), secondPress = pressNumber(doubleEvents[2].event)
+check(secondPress == firstPress + 1)
+for index in [0, 2] {
+    check(pressNumber(doubleEvents[index + 1].event) == pressNumber(doubleEvents[index].event))
+    check(pressNumber(doubleEvents[index].release!) == pressNumber(doubleEvents[index].event))
+    check(doubleEvents[index].event.getIntegerValueField(.mouseEventClickState) == Int64(index / 2 + 1))
+}
+for duration in [100, 300, 1000] {
+    let events = try preparedMouseEvents("drag", extra: ["point": ["x": -99, "y": 41],
+        "endPoint": ["x": 0, "y": 100], "durationMs": duration])
+    let number = pressNumber(events[0].event)
+    check(events[0].event.type == .leftMouseDown && events.last!.event.type == .leftMouseUp)
+    for step in events {
+        check(pressNumber(step.event) == number)
+        if let release = step.release { check(pressNumber(release) == number) }
+    }
+    // Interrupt every native construction boundary. The captured callback is
+    // deliberately read-only: it records objects instead of sending input.
+    let directed = events.map { DirectedInputStep(event: $0.event, delayBeforeMs: $0.delayBeforeMs,
+        release: $0.release, completesRelease: $0.completesRelease) }
+    for boundary in 1..<events.count {
+        var validation = 0
+        var captured: [CGEvent] = []
+        do {
+            _ = try runDirectedInputSequence(directed, wait: { _ in }, validate: {
+                validation += 1
+                if validation == boundary + 1 { throw windowInputError("cancelled") }
+            }, canRelease: { true }, post: { captured.append($0) })
+            fatalError("Native pairing cancellation must reject")
+        } catch let error as WindowInputExecutionError {
+            check(error.releaseSent && captured.filter { $0.type == .leftMouseUp }.count == 1)
+            check(captured.allSatisfy { pressNumber($0) == number })
+            check(captured.last!.type == .leftMouseUp)
+        }
+    }
+}
 
 let down = DirectedInputStep(event: "down", delayBeforeMs: 0, release: "up", completesRelease: false)
 let drag = DirectedInputStep<String>(event: "dragged", delayBeforeMs: 10, release: nil, completesRelease: false)

@@ -8,6 +8,8 @@ export interface AgentComputerWindowIndicatorRequest {
   /** Global screen points within the frozen window; never the system pointer. */
   point: WindowInputPoint;
   endPoint?: WindowInputPoint;
+  /** Main-owned visual color only. Omission uses the native #5a9e7c fallback. */
+  accentColor?: string;
 }
 
 export interface AgentComputerWindowIndicatorLease {
@@ -15,6 +17,8 @@ export interface AgentComputerWindowIndicatorLease {
   shown: boolean;
   /** True only after actual process exit/close, or when no child was spawned. Never rejects. */
   closed: Promise<boolean>;
+  /** Updates the same native surface; false requires confirmed cleanup before input. */
+  update?(request: AgentComputerWindowIndicatorRequest): Promise<boolean>;
   dispose(): void;
 }
 
@@ -73,7 +77,7 @@ function windowIdentity(value: unknown): AgentComputerWindowIdentity {
   return {
     windowId: integer(source.windowId, 0xffffffff), pid: integer(source.pid, 0x7fffffff),
     processStartedAt: integer(source.processStartedAt, Number.MAX_SAFE_INTEGER), layer: 0,
-    bounds: bounds as unknown as AgentComputerWindowIdentity['bounds'],
+    bounds: { x: Number(bounds.x), y: Number(bounds.y), width: Number(bounds.width), height: Number(bounds.height) },
     ...('title' in source ? { title: label(source.title, true) } : {}),
   };
 }
@@ -89,21 +93,27 @@ function point(value: unknown, window: AgentComputerWindowIdentity): WindowInput
 }
 
 function request(input: unknown): AgentComputerWindowIndicatorRequest {
-  const source = fields(input, ['window', 'operation', 'point'], ['endPoint']);
+  const source = fields(input, ['window', 'operation', 'point'], ['endPoint', 'accentColor']);
   const window = windowIdentity(source.window);
   const start = point(source.point, window);
+  let appearance: Pick<AgentComputerWindowIndicatorRequest, 'accentColor'> = {};
+  if ('accentColor' in source) {
+    if (typeof source.accentColor !== 'string' || source.accentColor.length !== 7
+      || !/^#[0-9a-fA-F]{6}$/u.test(source.accentColor)) throw new Error('invalid visual color');
+    appearance = { accentColor: source.accentColor.toLowerCase() };
+  }
   if (source.operation === 'drag') {
-    fields(input, ['window', 'operation', 'point', 'endPoint']);
+    fields(input, ['window', 'operation', 'point', 'endPoint'], ['accentColor']);
     const end = point(source.endPoint, window);
     if (start.x === end.x && start.y === end.y) throw new Error('equal drag endpoints');
-    return { window, operation: 'drag', point: start, endPoint: end };
+    return { window, operation: 'drag', point: start, endPoint: end, ...appearance };
   }
-  fields(input, ['window', 'operation', 'point']);
+  fields(input, ['window', 'operation', 'point'], ['accentColor']);
   if (source.operation !== 'click' && source.operation !== 'rightClick' && source.operation !== 'doubleClick') throw new Error('invalid operation');
-  return { window, operation: source.operation, point: start };
+  return { window, operation: source.operation, point: start, ...appearance };
 }
 
-/** Main-only, bounded visual intent. Its absence never changes the actual action receipt. */
+/** Main-only visual lease, kept alive by its Run owner. No absolute display timeout. */
 export async function showAgentComputerWindowIndicator(input: AgentComputerWindowIndicatorRequest,
   signal: AbortSignal): Promise<AgentComputerWindowIndicatorLease> {
   signal.throwIfAborted();
@@ -118,26 +128,34 @@ export async function showAgentComputerWindowIndicator(input: AgentComputerWindo
     let stopping = false;
     let finished = false;
     let detached = false;
-    let size = 0;
+    let pendingUpdate: ((shown: boolean) => void) | undefined;
+    let updateTimer: ReturnType<typeof setTimeout> | undefined;
+    let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
     let output = Buffer.alloc(0);
     let killTimer: ReturnType<typeof setTimeout> | undefined;
     let exitTimer: ReturnType<typeof setTimeout> | undefined;
     let confirmClosed!: (confirmed: boolean) => void;
     const closed = new Promise<boolean>(resolveClosed => { confirmClosed = resolveClosed; });
     const startupTimer = setTimeout(() => stop(), 1_000);
-    const lifeTimer = setTimeout(() => stop(), 3_000);
-    startupTimer.unref(); lifeTimer.unref();
+    startupTimer.unref();
 
     const settle = (shown = false) => {
       if (settled) return;
       settled = true;
       clearTimeout(startupTimer);
-      resolve({ shown, closed, dispose: stop });
+      if (shown) {
+        heartbeatTimer = setInterval(() => {
+          if (stopping || finished) return;
+          try { if (!child.stdin!.write('\n')) stop(); } catch { stop(); }
+        }, 1_000);
+        heartbeatTimer.unref();
+      }
+      resolve({ get shown() { return shown && !stopping && !finished; }, closed, update, dispose: stop });
     };
     const detach = () => {
       if (detached) return;
       detached = true;
-      clearTimeout(startupTimer); clearTimeout(lifeTimer); clearTimeout(killTimer); clearTimeout(exitTimer);
+      clearTimeout(startupTimer); clearInterval(heartbeatTimer); clearTimeout(updateTimer); clearTimeout(killTimer); clearTimeout(exitTimer);
       signal.removeEventListener('abort', cancel);
       for (const emitter of [child, child.stdin!, child.stdout!, child.stderr!]) emitter.on('error', ignoreTerminatedError);
       child.removeListener('error', failed);
@@ -154,6 +172,7 @@ export async function showAgentComputerWindowIndicator(input: AgentComputerWindo
       if (finished) return;
       finished = true;
       settle();
+      pendingUpdate?.(false); pendingUpdate = undefined;
       output = Buffer.alloc(0);
       detach();
       child.stdin!.destroy(); child.stdout!.destroy(); child.stderr!.destroy();
@@ -169,7 +188,8 @@ export async function showAgentComputerWindowIndicator(input: AgentComputerWindo
     const stop = () => {
       if (stopping || finished) return;
       stopping = true;
-      clearTimeout(startupTimer); clearTimeout(lifeTimer);
+      clearTimeout(startupTimer); clearInterval(heartbeatTimer); clearTimeout(updateTimer);
+      pendingUpdate?.(false); pendingUpdate = undefined;
       signal.removeEventListener('abort', cancel);
       output = Buffer.alloc(0);
       settle();
@@ -178,16 +198,27 @@ export async function showAgentComputerWindowIndicator(input: AgentComputerWindo
       try { child.stdin!.end(); } catch { /* TERM remains available. */ }
       if (!finished) try { child.kill('SIGTERM'); } catch { /* Hard stop remains bounded. */ }
     };
+    const update = async (input: AgentComputerWindowIndicatorRequest): Promise<boolean> => {
+      if (!settled || stopping || finished || pendingUpdate) return false;
+      let next: AgentComputerWindowIndicatorRequest;
+      try {
+        next = request(input);
+        if (JSON.stringify(next.window) !== JSON.stringify(normalized.window)) throw new Error('changed window');
+      } catch { stop(); return false; }
+      return new Promise<boolean>(resolveUpdate => {
+        pendingUpdate = resolveUpdate;
+        updateTimer = setTimeout(stop, 1_000); updateTimer.unref();
+        try { if (!child.stdin!.write(`${JSON.stringify(next)}\n`)) stop(); } catch { stop(); }
+      });
+    };
     const cancel = () => stop();
-    const failed = () => { if (signal.aborted) cancel(); else stop(); };
+    const failed = () => stop();
     const onExit = () => finish(true);
     const onClose = () => finish(true);
     const onData = (bytes: Buffer) => {
       if (stopping || finished) return;
-      size += bytes.length;
-      if (size > 512) { stop(); return; }
-      // Only the first newline-delimited status is accepted; chatter is invalid.
-      if (settled) { if (bytes.some(byte => ![9, 10, 13, 32].includes(byte))) stop(); return; }
+      // One bounded ACK per request. Heartbeats never generate output.
+      if (settled && !pendingUpdate || output.length + bytes.length >= 512) { stop(); return; }
       output = Buffer.concat([output, bytes]);
       const newline = output.indexOf(10);
       if (newline < 0) return;
@@ -197,9 +228,13 @@ export async function showAgentComputerWindowIndicator(input: AgentComputerWindo
         const receipt = fields(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(output.subarray(0, newline))), ['ok', 'shown']);
         if (receipt.ok !== true || typeof receipt.shown !== 'boolean') throw new Error('invalid ready');
         output = Buffer.alloc(0);
-        if (signal.aborted) { cancel(); return; }
-        if (!receipt.shown) { stop(); return; }
-        settle(true);
+        if (signal.aborted || !receipt.shown) { stop(); return; }
+        if (!settled) settle(true);
+        else {
+          clearTimeout(updateTimer);
+          const resolveUpdate = pendingUpdate; pendingUpdate = undefined;
+          resolveUpdate?.(true);
+        }
       } catch { stop(); }
     };
 
@@ -208,7 +243,7 @@ export async function showAgentComputerWindowIndicator(input: AgentComputerWindo
     child.stdout!.on('data', onData); child.stderr!.resume();
     signal.addEventListener('abort', cancel, { once: true });
     if (signal.aborted) { cancel(); return; }
-    try { child.stdin!.write(`${JSON.stringify(normalized)}\n`); } catch { failed(); }
+    try { if (!child.stdin!.write(`${JSON.stringify(normalized)}\n`)) stop(); } catch { failed(); }
   });
   if (signal.aborted) {
     lease.dispose();

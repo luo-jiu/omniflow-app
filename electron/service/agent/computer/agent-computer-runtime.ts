@@ -270,7 +270,14 @@ export function createAgentComputerRuntime(dependencies: AgentComputerRuntimeDep
   const pendingTargets = new Map<string, { identity: string; window: string; targetId: string }>();
   // This revocation belongs to the Run, so replacing or reapproving its window cannot clear it.
   const inputBlockedRuns = new Set<string>();
-  const activeIndicators = new Map<RunShare, () => void>();
+  interface PointerLease {
+    request: AgentComputerWindowIndicatorRequest;
+    lease?: AgentComputerWindowIndicatorLease;
+    stop(): void;
+    closed: Promise<boolean>;
+  }
+  const activeIndicators = new Map<RunShare, PointerLease>();
+  const closingIndicators = new Set<Promise<boolean>>();
   // A possibly remaining native surface belongs to this main runtime, not a
   // Run. New observations, permissions, Run release and late exit cannot clear it.
   let unconfirmedIndicatorExit = false;
@@ -300,61 +307,108 @@ export function createAgentComputerRuntime(dependencies: AgentComputerRuntimeDep
   }
   function deactivateShare(share: RunShare): void {
     share.active = false;
-    activeIndicators.get(share)?.();
+    activeIndicators.get(share)?.stop();
     releaseShareRendering(share);
   }
-  /** Visual intent only. It cannot authorize, dispatch, or settle an input. */
+  async function awaitIndicatorClosures(): Promise<void> {
+    await Promise.all(closingIndicators);
+    requireConfirmedIndicatorExit();
+  }
+  async function closePointer(share: RunShare): Promise<boolean> {
+    const active = activeIndicators.get(share);
+    if (!active) return !unconfirmedIndicatorExit;
+    active.stop();
+    return await active.closed;
+  }
+  /** Visual intent only, owned by the share rather than an individual Tool. */
   async function previewPointer(share: RunShare, request: AgentComputerWindowIndicatorRequest, signal: AbortSignal): Promise<() => void> {
     if (!dependencies.indicatePointer) return () => undefined;
-    const controller = new AbortController();
-    let lease: AgentComputerWindowIndicatorLease | undefined;
-    let closureConfirmed = false;
-    let stopped = false;
-    const stop = () => {
-      if (stopped) return;
-      stopped = true;
-      signal.removeEventListener('abort', stop);
-      controller.abort();
-      try { lease?.dispose(); } catch { /* Visual cleanup cannot replace the input result. */ }
-      if (activeIndicators.get(share) === stop) activeIndicators.delete(share);
-    };
-    activeIndicators.get(share)?.();
-    activeIndicators.set(share, stop);
-    signal.addEventListener('abort', stop, { once: true });
-    if (signal.aborted || !share.active) stop();
-    try {
-      lease = await dependencies.indicatePointer(request, controller.signal);
-      if (stopped) lease.dispose();
-      else if (lease.shown) await new Promise<void>(resolve => {
-        const finish = () => { clearTimeout(timer); controller.signal.removeEventListener('abort', finish); resolve(); };
-        const timer = setTimeout(finish, POINTER_PREVIEW_MS);
-        controller.signal.addEventListener('abort', finish, { once: true });
-        if (controller.signal.aborted) finish();
-      });
-      // A click-through native panel can still affect AppKit drag tracking.
-      // End the visual first and await real exit; TERM/KILL requests alone
-      // cannot prove that its surface has left the WindowServer.
-      stop();
-      closureConfirmed = await lease.closed;
-      if (!closureConfirmed) {
-        unconfirmedIndicatorExit = true;
-        throw new AgentComputerWindowIndicatorCloseError();
-      }
-      signal.throwIfAborted();
-      if (!share.active) throw new Error('窗口共享已结束');
-      return stop;
-    } catch (error) {
-      // The adapter throws its exact abort reason only after confirmed cleanup
-      // (or before spawning). Every other unknown lifecycle stays blocked.
-      if (error instanceof AgentComputerWindowIndicatorCloseError
-        || (!closureConfirmed && !(controller.signal.aborted && error === controller.signal.reason))) {
-        unconfirmedIndicatorExit = true;
-      }
-      stop();
-      signal.throwIfAborted();
-      if (!share.active) throw new Error('窗口共享已结束');
-      throw error;
+    await awaitIndicatorClosures();
+    signal.throwIfAborted();
+    let active = activeIndicators.get(share);
+    if (active && (windowKey(active.request.window) !== windowKey(request.window) || !active.lease?.update)) {
+      if (!await closePointer(share)) throw new AgentComputerWindowIndicatorCloseError();
+      active = undefined;
     }
+    if (!share.active) throw new Error('窗口共享已结束');
+    if (!active) {
+      const controller = new AbortController();
+      let resolveClosed!: (confirmed: boolean) => void;
+      const closed = new Promise<boolean>(resolve => { resolveClosed = resolve; });
+      let stopped = false;
+      const created: PointerLease = { request, closed, stop: () => {
+        if (stopped) return;
+        stopped = true;
+        closingIndicators.add(closed);
+        controller.abort();
+        try { created.lease?.dispose(); } catch { /* Actual closed receipt is authoritative. */ }
+      } };
+      activeIndicators.set(share, created);
+      // This handler is installed before native startup so Run release and
+      // late readiness cannot orphan a surface or escape the serial barrier.
+      void closed.then(confirmed => {
+        if (!confirmed) unconfirmedIndicatorExit = true;
+        closingIndicators.delete(closed);
+        if (activeIndicators.get(share) === created) activeIndicators.delete(share);
+      });
+      const abortStartup = () => created.stop();
+      signal.addEventListener('abort', abortStartup, { once: true });
+      if (signal.aborted || !share.active) created.stop();
+      try {
+        created.lease = await dependencies.indicatePointer(request, controller.signal);
+        void created.lease.closed.then(resolveClosed, () => resolveClosed(false));
+        if (stopped || !created.lease.shown) {
+          const stoppedBeforeReady = stopped;
+          created.stop();
+          // stop() can precede startup readiness; dispose the late lease too.
+          if (stoppedBeforeReady) created.lease.dispose();
+          if (!await closed) throw new AgentComputerWindowIndicatorCloseError();
+        }
+        signal.throwIfAborted();
+        if (!share.active) throw new Error('窗口共享已结束');
+      } catch (error) {
+        created.stop();
+        if (!created.lease) resolveClosed(controller.signal.aborted && error === controller.signal.reason);
+        await closed;
+        signal.throwIfAborted();
+        if (!share.active) throw new Error('窗口共享已结束');
+        throw error;
+      } finally { signal.removeEventListener('abort', abortStartup); }
+      active = created;
+    } else {
+      const abortUpdate = () => active!.stop();
+      signal.addEventListener('abort', abortUpdate, { once: true });
+      try {
+        if (signal.aborted) active.stop();
+        const shown = await active.lease!.update!(request);
+        if (!shown) {
+          active.stop();
+          if (!await active.closed) throw new AgentComputerWindowIndicatorCloseError();
+        }
+        active.request = request;
+        signal.throwIfAborted();
+        if (!share.active) throw new Error('窗口共享已结束');
+      } catch (error) {
+        active.stop();
+        await active.closed;
+        throw error;
+      } finally { signal.removeEventListener('abort', abortUpdate); }
+    }
+    const pointer = active;
+    const abortAction = () => pointer.stop();
+    signal.addEventListener('abort', abortAction, { once: true });
+    if (signal.aborted || !share.active) pointer.stop();
+    if (pointer.lease?.shown) await new Promise<void>(resolve => {
+      const finish = () => { clearTimeout(timer); signal.removeEventListener('abort', finish); resolve(); };
+      const timer = setTimeout(finish, POINTER_PREVIEW_MS);
+      signal.addEventListener('abort', finish, { once: true });
+      // A Run release also ends the visual and this lead-in promptly.
+      void pointer.closed.then(finish);
+      if (signal.aborted || !share.active) finish();
+    });
+    // The action signal is temporary. The persistent lease keeps its separate
+    // Run-owned controller until explicit hide, replacement or Run release.
+    return () => signal.removeEventListener('abort', abortAction);
   }
   async function withPointerPreview<T>(preparation: AgentToolMainPreparedExecution, observation: Observation,
     request: AgentComputerWindowIndicatorRequest | undefined, signal: AbortSignal, dispatch: () => Promise<T>): Promise<T> {
@@ -362,15 +416,33 @@ export function createAgentComputerRuntime(dependencies: AgentComputerRuntimeDep
     if (!request || !dependencies.indicatePointer) return dispatch();
     const share = shareFor(preparation.identity);
     if (!share) throw new Error('窗口共享已结束');
-    const stop = await previewPointer(share, request, signal);
+    const detach = await previewPointer(share, request, signal);
+    let dispatchStarted = false;
     try {
-      // The preview is not an input. Recheck everything that can expire or move during it.
+      if (!share.active) throw new Error('窗口共享已结束');
       await boundWindow(preparation, signal);
       signal.throwIfAborted();
       if (observationFor(preparation.identity, observation.id) !== observation) throw new Error('窗口观察已变化，此次操作未发送');
       requireConfirmedIndicatorExit();
+      if (closingIndicators.size) throw new Error('上一鼠标图案仍在收起，请重新观察后再操作');
+      dispatchStarted = true;
       return await dispatch();
-    } finally { stop(); }
+    } finally {
+      detach();
+      if (!dispatchStarted || signal.aborted) await closePointer(share);
+    }
+  }
+  async function hidePointerForRun(identity: AgentToolMainPreparationIdentity, signal: AbortSignal): Promise<{ closeConfirmed: boolean }> {
+    return serial(signal, async () => {
+      const existing = shares.get(identity.runId);
+      if (existing && existing.identity !== identityKey(identity)) throw new Error('鼠标图案不属于当前任务身份');
+      // A replaced/released share may still own a native surface while its
+      // exit is pending. Never report hidden before these closures settle.
+      await Promise.all(closingIndicators);
+      const closeConfirmed = existing ? await closePointer(existing) : !unconfirmedIndicatorExit;
+      signal.throwIfAborted();
+      return { closeConfirmed };
+    });
   }
   function keepShareRendering(share: RunShare, window: AgentComputerSharedWindow, ownerWebContentsId: number, signal: AbortSignal): void {
     if (share.releaseRendering || !dependencies.keepWindowRendering) return;
@@ -1013,6 +1085,10 @@ export function createAgentComputerRuntime(dependencies: AgentComputerRuntimeDep
           await boundWindow(preparation, signal);
           if (observationFor(preparation.identity, action.observationId) !== observation) throw new Error('窗口观察已变化，此次操作未发送');
         }
+        if (request.operation !== 'shortcut') {
+          requireConfirmedIndicatorExit();
+          if (closingIndicators.size) throw new Error('上一鼠标图案仍在收起，请重新观察后再操作');
+        }
         commit.begin(receipt('unknown', 'unconfirmed'));
         observation.consumed = true;
         let result: AgentToolResult;
@@ -1042,5 +1118,5 @@ export function createAgentComputerRuntime(dependencies: AgentComputerRuntimeDep
     inputBlockedRuns.delete(runId);
     discovery.releaseRun(runId);
   }
-  return { prepareWindows, windows, prepareObserve, prepareClick, prepareSetText, prepareScroll, prepareInput, observe, click, setText, scroll, input, releaseRun };
+  return { prepareWindows, windows, prepareObserve, prepareClick, prepareSetText, prepareScroll, prepareInput, observe, click, setText, scroll, input, hidePointerForRun, releaseRun };
 }

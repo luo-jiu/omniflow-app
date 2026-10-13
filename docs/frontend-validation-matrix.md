@@ -1,5 +1,34 @@
 # 前端验证矩阵
 
+## Agent 原图缩略图、矢量大图与 0.75 尺寸（2026-10-13）
+
+- 当前缩略图仅显示原 PNG，无 SVG 覆盖或单独放大；共用大图才显示由可信前置观察计划派生的指针。createAgentComputerPointerPreview 生成有界内部 SVG data URL，以一个原 PNG `<image>` 加三个固定 `<path>` 绘制柔光 / 主体 / 亮边，不接受任意 SVG、URL 或 markup；解码尺寸等于可信计划且至多 2048×2048，原附件预算、3 秒 deadline、AbortSignal、accent requestKey、主题取消与作用域清理保留。原附件 / 模型图不改，Semi 沿 width / height 缩放，保留控件、Esc 与焦点恢复。
+- 大图指针按 0.75 绘制、原图尺寸下约 16px；原生箭身、两层描边和 blur 同比 0.75、可见箭身约 16pt。原整数 35×35 / 小数至多 36×36 安全表面、精确尖端、四向镜像、完整原窗包含、输入路线与持久 Run 租约保留。目标捕获继续使用 desktopIndependentWindow、showsCursor=false，另一 helper NSPanel 不自然采入，不改显示器捕获。
+- 上一轮“主题色圆角箭头与柔光”的样式检查漏看实际比例及放大锯齿，其“样式通过”不覆盖本轮原图缩略图、矢量大图或 0.75 比例。下列该阶段及 R / H3 / 更早记录保持原样，drag 未通过限制不变。
+- 专项自动化 3 文件 / 54 项通过，日志 `/tmp/omniflow-pointer-vector-focused-20261013.log`。最终全量 lint / test / theme:audit / build 均 exit0，test 495 文件 / 5724 项通过，3 文件 / 7 项沿用跳过，日志 `/tmp/omniflow-pointer-vector-{lint,test,theme-audit,build}-20261013.log`；dev 停止后串行构建并已重启，日志 `/tmp/omniflow-pointer-vector-dev-20261013.log`。没有发布。
+- 生产原生专项 119 项、arm64 / x86_64 typecheck 与生产 Swift 离屏 24 PNG 已通过，日志 `/tmp/omniflow-pointer-small-native-*`、`/tmp/omniflow-pointer-small-{arm64,x86_64}-typecheck-20261013.log`，样张 `/tmp/omniflow-pointer-small-native-preview-20261013/`；离屏证据不包含系统窗口、真实输入或系统捕获。
+- CUA 在真实开发版、非首个 Win / libraryId=3 的旧 R 首个观察详情确认缩略图无图案；共用大图 233% 与 293% 实看原 PNG 三行 QA 内容及更小、清晰的紫色矢量箭头，Esc 后焦点回截图按钮。没有新 Run 或真实 TextEdit 输入；此限定 GUI 通过不扩写为外部窗口层级 / 生命周期、原生静止改色或 drag 消费已验。
+
+## Agent 主题色圆角箭头与柔光（2026-10-13）
+
+- 当前样式为无尾杆 rounded-kite，accent.default 的 18% 填充、2.6 主描边、45% 白混色 1.3 亮边与 50% 柔光（native / Canvas blur 4）；无可见标签、背景或拖拽轨迹。原生整数表面 35×35 / 小数至多 36×36，包含完整柔光；四向镜像、精确尖端和完整原窗包含守卫保留。
+- main 从原 appearanceIpc 可信缓存 getter 在启动 / lease.update 采色；renderer 从原 AppearanceViewContext 读取同 token，共享有限色值 → hex 投影，缺失 / 非法 / 完全透明回退 #5a9e7c。没有订阅、新主题 owner、模型 action 色值或新增颜色执行 IPC；静止原生图案不保证即时换色。Canvas requestKey 含 accent，换主题取消旧合成，原图不改。
+- 全量 lint / test / theme:audit / build 均 exit0：495 文件 / 5724 项通过，3 文件 / 7 项沿用跳过；最后统一 Canvas 与 native 绘制顺序后，另有 preview 14 项与局部 lint 通过，最终 build 包含该调整。日志 `/tmp/omniflow-pointer-glow-{lint,test,theme-audit,build}-20261013.log`，构建前停止 dev、随后已重启；没有发布。
+- 实际 React 组件的四色亮暗样张已实看圆角轮廓、淡色填充和柔光，证据 `/tmp/omniflow-pointer-glow-preview/styles.png`。生产 Swift WindowIndicatorView.draw 离屏导出 24 张 PNG（两色 × 四镜像 × 1 / 2 / 4x），非零 alpha 均在 guard surface 内、四角透明；明暗接触图已实看，证据同目录 `native-light-contact.png` / `native-dark-contact.png` 与 `raster-report.json`。离屏检查未创建系统窗口、没有真实输入或系统捕获。
+- CUA 在真实开发版、非首个 Win / libraryId=3 的旧 R 历史中展开过程及首个 both 详情，缩略图实看主题紫色圆角柔光箭头；共用大图 233% 同样显示新样式，Esc 关闭后焦点回原缩略图，原图仍为三行 QA 内容。没有新 Run、TextEdit 操作或新增权限。
+- 本轮通过范围为 renderer 样式预览与原生离屏绘制；没有重验新样式的外部窗口层级、生命周期或静止原生改色。下列 R、H3 及更早验收保持原样，drag 未通过的限制保留。
+
+## Agent 纯箭头持久租约与主动隐藏（2026-10-13）
+
+- 当前契约为精确尖端的纯紫白箭头、nonactivating NSPanel、有界自身 AppKit 泵及 main 心跳持久 Run 租约。已知同窗 orderChanged 才可透明撤下、复验并重排同一面板，150ms / 滚动一秒 4 次上限；未知身份 / 元数据、前台漂移或超限关闭。hidePointer 仅收当前 Run 视觉，保留共享、观察及输入权限边界；跨 Run pending 清理与未知关闭门禁保留，详见[鼠标意图指示器](agent-computer-use.md#鼠标意图指示器2026-10-12)。
+- 最终 R `d88da41d-aeef-40ee-8d48-8f773ba3c1dd` 只使用开发版、非首个 Win / libraryId=3、本机 macOS MinIO 和自有 TextEdit QA 文档，receiver 仍为 TextEdit415 / macOS25F84。10 工具 completed、5 张独立目标图；三次双击各 4 事件 dispatched / committed / release confirmed，终态后约 68 / 49 / 140ms 开始独立 AX 采样，确认 bravo(43,5)→charlie(49,7)→bravo(43,5)，确认真实消费。
+- R 同 helper53434 / panel3085 跨前两次双击更新，表面元数据 x=376→416，存活 20.579s；hidePointer 19ms 返回 closeConfirmed=true，原生 cancelled 及 OS 缺席均确认。第三次动作新建 helper53498 / panel3094，持续 10.608s，Run 结束后 5.816ms 原生退出且 OS 确认缺席。两张自有面板 PNG 实看只有纯箭头；权威汇总 `/tmp/omniflow-order-repair-52441-8f113c4_/final-readonly-aggregate-52441-R.json`。
+- R 六次 order_changed 恢复全部成功，耗时 8.238～8.522ms；安全排序样本 630/634 与 321/323，六次失序均在目标下方后恢复，不能记为 100% 安全排序。helper 前台样本为 0，三次输入诊断均目标后台、前台 / 物理指针端点未变；整段有用户活动、指针变化与前台切换，不归因或扩写为全过程零干扰。
+- H3 `d84cbcaf-951a-44f4-9b1a-dcb81f505760` 已实看 observe / input / observe 同组、drag 紧凑行；前置缩略图 / 共用大图为纯箭头，大图 233%→223%、Esc 与焦点回缩略图通过，后图无继承。两份 673×439 原 PNG 的 SHA-256 未改，证据 `/tmp/omniflow-persistent-H3-preview-verification.json`。该展示验收不证明原生 drag 消费。
+- drag 未通过：中间 NSPanel 版本 M `a875b9cf-f634-4078-8719-461bf92517cc` 视觉与 11 事件共存但 AX 为 42,0，N / N2 无视觉对照仍为 42,0 / 43,0，不能只归因持久视觉或宣称视觉无影响。O2 `aee37158-9441-4091-ad5e-212418c01c3f` 精确尖端 + 非零配对编号的 11 事件已投递及释放，8.9s 后 AX 仍为 43,0、无后续输入；编号修复未证明消费，最终层序恢复版本未重验 drag。早期 P 虽三次双击 AX 成功，图案输入中退出并重建，不计持久生命周期通过；R 才覆盖最终修复后的同窗复用 / hide / Run 收口。
+- 全量 lint 通过；全量测试 493 文件 / 5682 项通过、3 文件 / 7 项沿用跳过；编号修复后的原生相关 3 文件 / 98 项与 ESLint 通过；其后最终层序恢复另补 1 个原生协议专项、双架构 typecheck 与局部 ESLint 通过。层序修复后串行最终 build exit0，日志 `/tmp/omniflow-persistent-final-test-20261013.log`、`/tmp/omniflow-persistent-final2-{lint,native-tests}-20261013.log`、`/tmp/omniflow-persistent-R-final-build-20261013.log`。未发布或推送。
+- 取消 / 换窗 / 失联 / EOF / 父退出及跨 Run 未知门禁仍以源码与自动验证为据，本轮 GUI 只验正常 Run 收口；亮暗 / 窄窗、多显示器 / Space / 全屏、签名包及其他 receiver 未验。下列 C / C5 / E 历史保持原样，只证明当时输入前关闭图案的隔离方案。
+
 ## Agent 完全访问与两处鼠标提示（2026-10-13）
 
 - 完全访问现在自动授权六个可信内置电脑工具的规范已准备动作，包括首次 `observe/read` 与切换窗口；沿用 frozen registry identity、main prepare / seal、单窗能力、TTL、receiver、OS 权限及提交结算。ask / group、deny、插件冒充、缺准备动作及旧整屏 action 不扩大权限。直接修正会话模式，没有新增 dev 放权变量。原生图案预告延长为 900ms，仍等待视觉进程实际退出再复验 / 输入。

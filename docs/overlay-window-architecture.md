@@ -6,7 +6,7 @@
 
 ---
 
-2026-10-13：Agent 操作外部获准窗口的鼠标意图图案由 main-only `window-indicator.ts` 与固定原生 helper 承接，不使用下面的交互 `overlay BrowserWindow`。它必须是普通层、nonactivating、点击穿透的视觉面板，排在目标窗口上方并随遮挡；夹层仅允许有效且与完整图案表面完全不相交的窗口，不成为 main / key window。900ms 预告后等待面板进程实际退出才允许正式指针动作，不能用点击穿透配置推定后台事件消费无干扰；没有 overlay 请求、renderer 执行入口或新业务状态 owner。下面的交互弹框会接管鼠标且绑定自有主窗口，不适合直接用作外部应用指示器。生命周期、截图排除和冻结坐标的契约见[鼠标意图指示器](agent-computer-use.md#鼠标意图指示器2026-10-12)。
+2026-10-13 当前契约：外部获准窗口上的无尾杆主题色圆角箭头与柔光由 main-only `window-indicator.ts` / 固定原生 helper 承接，不使用交互 `overlay BrowserWindow`。helper 采用 `.accessory`、borderless `NSPanel(.nonactivatingPanel)`、普通 `.normal` / layer 0、no-key / main 和点击穿透；不调用 `finishLaunching()`，以有界自身 AppKit 事件泵维持窗口。透明注册后复验位于目标上方，夹层须元数据完整且与整个表面无交集，再绘制并随遮挡。已知同窗 `orderChanged` 仅可清空绘制并 orderOut、复验后重排同一面板，150ms / 滚动一秒 4 次上限；身份、元数据、前台或非普通夹层异常及超限均关闭。原 main runtime 持有当前 Run 的视觉租约，1 秒心跳、2.5 秒失联关闭，同窗更新须透明复验与严格 ACK。900ms lead-in 后保留窗口，仍按原授权复验目标、owner、最新观察和能力再输入。`computer.hidePointer` 只收视觉，保留共享和观察，不放权其他动作；结束 / 取消 / 换窗 / 目标或不可恢复层级失效均有界清理，跨 Run pending 退出和未知关闭门禁仍不可绕过，迟到 exit 不解除门禁。原生箭身 / 描边 / blur 同比 0.75、可见箭身约 16pt，原整数 35×35 / 小数至多 36×36 安全表面、精确尖端、四向镜像及完整原窗包含保留。没有可见标签或拖拽轨迹；独立目标截图继续使用 desktopIndependentWindow 与 showsCursor=false，另一 helper 的 NSPanel 不自然采入，本轮不改显示器捕获。不新增 overlay 请求、renderer 执行入口或业务 owner。main 只在启动 / update 从既有可信外观缓存读取 accent.default，不走交互 overlay 订阅或新增主题 owner；静止图案不保证即时改色。聊天缩略图仅显示原 PNG，大图才使用有界内部 SVG（原 PNG image 加三个固定路径）显示 0.75、约 16px 的可信计划指针，不接受任意 SVG；Semi width / height 缩放、控件、Esc 与焦点恢复保留。上一轮圆角样式漏验比例与放大锯齿，不作为本轮通过证据，本轮范围见矩阵；外部窗口层级 / 生命周期未新验；历史 R 保留，drag 未通过。下述交互弹框接管鼠标、绑定自有主窗口，不适用于外部指示器；完整生命周期与冻结目标约束见[鼠标意图指示器](agent-computer-use.md#鼠标意图指示器2026-10-12)。
 
 ## 1. 背景与动机
 

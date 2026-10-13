@@ -2,13 +2,13 @@
 
 更新时间：2026-10-13
 
-适用范围：macOS 内置 Agent 的 `computer.windows@1` / `computer.observe@1` / `computer.click@1` / `computer.setText@1` / `computer.scroll@1` / `computer.input@1`、Electron main 和原生窗口捕获 / AX 语义及后台定向输入 helper。
+适用范围：macOS 内置 Agent 的 `computer.windows@1` / `computer.observe@1` / `computer.click@1` / `computer.setText@1` / `computer.scroll@1` / `computer.input@1` / `computer.hidePointer@1`、Electron main 和原生窗口捕获 / AX 语义及后台定向输入 helper。
 
 ## 当前能力
 
 已接入 macOS 开发预览。Agent 观察本次任务获准的一个应用窗口，优先读取 AX、按需截图，按准确标签和本次观察内的控件 ID 执行已声明的点击、文本替换 / 插入或滚动，再次观察同一窗口确认结果。点击通过 macOS `AXPress` 激活控件，外部应用的文本与滚动各走对应的公共 AX 属性或动作；当前 OmniFlow 主窗口的两个注册控件另走固定第一方 owner 桥。截图使用 macOS 14+ 的 ScreenCaptureKit 独立窗口过滤器，不采集整屏后裁剪，也不收集其他窗口的缩略图。复用已有 Tool Registry、main prepare、授权卡、ToolRun、附件与视觉 Provider 链，不增加桌面输入 IPC 或新的 Agent 框架。
 
-需要选择支持图片的模型。非视觉模型隐藏 observe / click / setText / scroll / input，但可查询无图像的窗口元数据；Windows / Linux 不注册工具。`computer.click` 仍只激活有可访问性动作的左键单击控件；`computer.setText / scroll` 沿用已确认的原生文本和滚动路线。外部 AX 已接入显式 fraction 比例滚动策略，尚无内置 Agent 成功验收结果；第一方对话区的独立实现与往返结果见下文。独立 `computer.input` 已接入规范快捷键、右键、双击和同窗直线拖拽，仅对已批准且当前观察明确提供能力的 receiver 运行，不推定任意软件或画布兼容；连续录像、通用网页输入仍不可用。观察支持 mode=ax / screenshot / both，省略模式兼容原截图加 AX；工具建议先读 AX，需要视觉辨认时再取图。优先使用观察内 elementId；AX-only 使用无坐标的 V3 语义点击，both 保持 V2 截图坐标兼容。AX 路径、原生 identifier 及进程身份仍只用于 main 内的目标绑定。
+需要选择支持图片的模型。非视觉模型隐藏 observe / click / setText / scroll / input，但可查询无图像的窗口元数据及调用不读取屏幕的 hidePointer；Windows / Linux 不注册工具。`computer.click` 仍只激活有可访问性动作的左键单击控件；`computer.setText / scroll` 沿用已确认的原生文本和滚动路线。外部 AX 已接入显式 fraction 比例滚动策略，尚无内置 Agent 成功验收结果；第一方对话区的独立实现与往返结果见下文。独立 `computer.input` 已接入规范快捷键、右键、双击和同窗直线拖拽，仅对已批准且当前观察明确提供能力的 receiver 运行，不推定任意软件或画布兼容；连续录像、通用网页输入仍不可用。观察支持 mode=ax / screenshot / both，省略模式兼容原截图加 AX；工具建议先读 AX，需要视觉辨认时再取图。优先使用观察内 elementId；AX-only 使用无坐标的 V3 语义点击，both 保持 V2 截图坐标兼容。AX 路径、原生 identifier 及进程身份仍只用于 main 内的目标绑定。
 
 可用性结论：已验收的 OmniFlow 控件、计算器边栏和访达视图按钮可完成后台查看、点击、重新观察的简单闭环；标准 AppKit 夹具与 macOS TextEdit 测试文档的文本替换、插入和清空也已完成真实闭环，TextEdit 长文后仍可定位正文。2026-10-12 AV 的原生页子按钮下翻 / 上翻恢复已通过真实后台验收；旧 AXScrollArea Page 路线曾返回 unknown，外部 step / fraction 仍未通过，不因新路线成功而改写旧结果。AW 在 Finder 合成文件目录完成 AX-only 定位、列表切换、按需截图及图标恢复；WebStorm 部分控件因实际 AX getter 失效没有可用 ID。第一方 Agent 输入的替换 / 追加 / 清空及对话区上下 page / step / fraction 的独立后台结果见 AL。AX 摘要截断不要求将整个方案判为不可用，但模型没有隐藏完整树；AX 和 Provider 投影均有预算。复杂页面、任意第三方软件与 Electron / 网页编辑器的文本操作仍须分别验证。
 
@@ -30,15 +30,23 @@ WebStorm 启动链在 2026-10-09 经用户明确允许后，已通过系统设�
 
 ## 鼠标意图指示器（2026-10-12）
 
-已在正式 `computer.click` 与 `computer.input` 的 rightClick / doubleClick / drag 执行中接入 main-only 视觉指示器。仅使用本次已批准、sealed action 复验通过的原窗与全局 points；AX-only 点击用实际控件中心，同图像指针手势沿原像素映射。快捷键没有真实指针位置，因此不虚构鼠标位置；文本 / 滚动及未批准操作也不显示这类图案。图案为带白色轮廓的紫色箭头与固定「AI」动作标签，拖拽以静态虚线和终点圆圈表示计划，不模拟真实鼠标或虚构投递进度。
+2026-10-13 当前图案改为无尾杆圆角箭头（rounded-kite），保留持久 Run 视觉租约及正式 `computer.click` / `computer.input` 的 rightClick / doubleClick / drag 接线。只使用本次已批准、sealed action 复验通过的原窗与全局 points；AX-only 点击用实际控件中心，图像指针手势沿原像素映射。箭头尖端精确落在冻结动作点，四向镜像仅调整箭身；完整柔光表面放不下时拒绝显示，不偏移尖端。轮廓、淡色填充和泛光使用当前 `accent.default`：填充 alpha 0.18，主描边基准 2.6，混入 45% 白色的亮边基准 1.3，柔光 alpha 0.5。本轮将原生箭身、两层描边和 blur 同比缩为 0.75，可见箭身约 16pt，native blur 为 4×0.75；聊天大图矢量指针同样为 0.75，原图尺寸下约 16px。没有可见「AI」标签、背景、拖拽轨迹或终点圆圈，不模拟真实鼠标或虚构投递进度。快捷键、文本和滚动不创建或更新位置，既有箭头可继续保留。上一轮圆角样式检查漏看实际比例和大图放大锯齿，原“样式通过”不作为本轮 0.75 比例与矢量预览的验证证据；本轮状态见验证矩阵。历史 R 及更早证据保留，drag 未通过，不因样式或编号配对扩大能力。
 
-平台的 `window-indicator.ts` 与固定 Swift helper `--window-indicator` 独立于 renderer；无新输入 IPC、授权字段或 Run 状态源。它使用点击穿透、不能成为 key / main window 的 nonactivating NSPanel，普通 layer 0 排在获准目标上方；目标被前台窗口覆盖时图案也被覆盖，不使用 floating / topmost、激活、raise 或全 Space 跟随。先用全透明内容注册窗口并复验 CG z 顺序，再绘制有色内容；无法证明目标 / panel 身份、几何或安全顺序时隐藏。内容及标签裁切在原窗内，额外窗口图像不进入模型的独立目标截图。
+平台的 `window-indicator.ts` 与固定 Swift helper `--window-indicator` 独立于 renderer；无新输入 IPC、授权字段或 Run 状态源。helper 使用 `.accessory` 应用策略和 borderless `NSPanel(.nonactivatingPanel)`，普通 `.normal` / layer 0 排在获准目标上方；窗口不能成为 key / main window、点击穿透且不激活，不调用 `finishLaunching()`。helper 以有界自身 AppKit 事件泵处理 `nextEvent` / `sendEvent` / `updateWindows`：每次受取消、单调时限和 64 事件上限约束，注册 / 更新切片 5ms、租约切片至多 25ms。这里的 `sendEvent` 仅处理 helper 自身队列，不向目标应用投递输入。目标被前台窗口覆盖时图案也被覆盖，不使用 floating / topmost、raise 或全 Space 跟随。先用全透明内容注册窗口并复验 CG z 顺序，再绘制有色箭头；无法证明目标 / panel 身份、几何或安全顺序时隐藏。完整柔光表面须位于原窗内：可见箭头虽缩为 0.75，原安全表面仍在未镜像时相对尖端预留 -7～+28，整数表面 35×35，含小数坐标时至多 36×36；四向镜像后仍完整包含才绘制。捕获继续使用 `desktopIndependentWindow` 与 `showsCursor=false`，另一 helper 的 NSPanel 不会自然合入目标单窗图；本轮没有显示器捕获，不通过改捕获范围获得桌面图案。
 
-2026-10-13 实机发现 TextEdit 标题栏的 66×20 小窗口会夹在目标与面板之间，旧严格相邻检查因此隐藏图案。当前仍要求普通层、目标上方与冻结身份；只允许完整元数据、有效普通层且与整个图案表面完全无交集的夹层。任何正面积交集、非法几何、透明度 / 可见性未知或重复夹层身份都隐藏，不能因为同 PID 而放行；标题附件移入图案区域也会在既有循环中关闭。图案上方的实际遮挡窗口继续遮住图案。
+主题色只作展示投影：main 从原 `appearanceIpc` 已校验缓存的只读 getter 取得 `accent.default`，在 helper 启动和每次 lease.update 时采色；renderer 从 `AppearanceViewContext` 读取同 token。共享纯函数将有限合法主题颜色转为不透明 hex，缺失、非法或完全透明时回退 `#5a9e7c`。没有主题订阅、新 owner、模型 action 色值或新增颜色 / 输入 IPC；静止的原生箭头不保证随主题立即改色，下一次位置更新或新建时读取最新缓存。
 
-helper 启动预算 1 秒、总寿命 3 秒；stdin EOF、取消、原窗移动 / 最小化 / 隐藏 / 销毁、进程启动身份变化、显示器布局变化或层级失效均关闭。每 25 毫秒复验，不把短采样描述为连续零延迟保证。图案安排显示后，main 留 900 毫秒预告，随后关闭视觉租约并等待真实进程退出，再复验同 Run / owner / 观察期限、冻结窗口与接收能力，最后才消费观察并提交动作。图案只表示执行前的计划，不与后台指针事件并行存在；`ignoresMouseEvents` 不能替代实际应用消费验收。
+2026-10-13 实机发现 TextEdit 标题栏的 66×20 小窗口会夹在目标与面板之间，旧严格相邻检查因此隐藏图案。可见状态仍要求普通层、目标上方、冻结身份及与完整箭头表面无交集的夹层，同 PID 不豁免。仅当目标、面板身份和几何均未变，跨越窗口元数据完整且均为普通层时，已知 `orderChanged` 才可恢复：先清空绘制并 `orderOut`，复验目标 / 父进程 / 显示器 / no-key / main 及已知稳定前台，再将同一面板相对冻结目标重排；至少一次至多 5ms 的自身 AppKit 泵后复验安全层序，确认后才重新绘制。常驻循环与待处理更新入口共享恢复预算：每次最多 150ms、滚动一秒最多 4 次，不递归恢复或延长期限。身份、几何或元数据未知、前台漂移、未主动撤下时面板缺失、非普通夹层、超时或超预算均关闭，不新建 helper、激活目标或越过未知遮挡。图案上方的实际遮挡窗口仍继续遮住图案；日志只记录固定事件 / 原因码。
 
-视觉租约必须提供 `closed: Promise<boolean>`，与 `shown` 独立：true 只表示确知未启动子进程或收到真实 exit / close，false 表示在有界收口后仍未确认，Promise 不拒绝。已启动 helper 即使未显示、ready 非法或启动超时，也须保留实际关闭确认。TERM 后等 300 毫秒，再 KILL 后最多等 300 毫秒；请求终止不等于退出。ready 前取消也须保留有界关闭等待，不能提前放开原串行输入队列。关闭未确认或视觉启动抛出无法确定是否已创建窗口的异常时，本次动作在 commit / 观察消费前拒绝；原 main runtime 同时暂停后续指针图案 / 指针动作，换 Run、新观察、重批及已封存动作均不能绕过，需重启主进程恢复。文本、语义滚动和无图案快捷键保留。确知没有子进程或已正常关闭则保留原输入路线。取消、共享替换和 Run 释放清理视觉租约，迟到 ready / exit 不复活执行或清除此门禁。不以显示或清理回执判断输入成功，也不改变真实输入的 dispatch / release 回执。源码、自动化与真机证据分别见验证矩阵。
+helper 启动预算 1 秒；旧 3 秒总寿命改为 main 每 1 秒发送的心跳维持 Run 租约，helper 在 2.5 秒未收到输入后关闭。stdin EOF、取消、父进程退出或身份变化、原窗移动 / 最小化 / 隐藏 / 销毁、目标进程启动身份变化、显示器布局变化或不可恢复层级失效均关闭。每 25 毫秒复验，不把短采样描述为连续零延迟保证。同窗下一次指针动作经严格更新协议复用原租约：先隐藏旧表面、透明重新排序和复验，再绘制并返回有界 update ACK；冻结窗口不匹配、更新失败或 ACK 超时走关闭确认，不能把心跳当显示回执。main 保留 900 毫秒 lead-in，之后不关闭视觉窗口，仍复验同 Run / owner / 最新观察期限、冻结窗口与接收能力，最后才消费观察并提交。正常动作返回后箭头持续保留到显式隐藏或 Run 清理；持久窗口与真实指针事件会共存，`.accessory` / `NSPanel` / `ignoresMouseEvents` 及层序检查只能作为实现前提，历史 R 的限定验收见下文；此前圆角样式阶段仅补 renderer GUI 样式与原生离屏绘制，未新验外部窗口层级 / 生命周期；本轮比例与预览改动的验证单列于矩阵，输入前后采样仍不等于持续零干扰。
+
+视觉租约必须提供 `closed: Promise<boolean>`，与 `shown` 独立：true 只表示确知未启动子进程或收到真实 exit / close，false 表示在有界收口后仍未确认，Promise 不拒绝。已启动 helper 即使未显示、ready 非法或启动超时，也须保留实际关闭确认。TERM 后等 300 毫秒，再 KILL 后最多等 300 毫秒；请求终止不等于退出。ready 前取消、换窗、Run 结束 / 取消及目标失效的关闭均有界等待；待关闭的旧租约进入 main 的 pending 集合，跨 Run 的下一次指针动作也须先等这些清理完成，不能提前放开原串行输入队列。关闭未确认或视觉启动抛出无法确定是否已创建窗口的异常时，本次动作在 commit / 观察消费前拒绝；原 main runtime 同时暂停后续指针图案 / 指针动作，换 Run、新观察、重批及已封存动作均不能绕过，需重启主进程恢复。文本、语义滚动和无图案快捷键保留。确知没有子进程或已正常关闭则保留原输入路线；正常仍存活的已确认视觉租约不要求输入前退出。迟到 ready / exit 不复活执行或清除此门禁。不以显示或清理回执判断输入成功，也不改变真实输入的 dispatch / release 回执。源码、自动化与真机证据分别见验证矩阵。
+
+`computer.hidePointer@1` 是 main / business / read 工具，只接受 `{}`，由 orchestrator 仅为精确可信内置注册注入当前 Run 的 cleanup closure，并使用 broker 的 Tool signal。Run / Session / owner / 资料库 / AI 目的地 / capability 身份由 main 构造，模型不能指定 Run、窗口或 owner；不新增 prepared action、授权卡、执行 IPC 或 commit settlement。它仅收起当前 Run 的视觉，不停止窗口共享、不废弃观察、不改变 TTL / 一次消费 / 输入能力，也不放行其他操作或清除未知关闭门禁。没有视觉租约且没有未知门禁时可幂等返回成功；已释放 / 换窗租约仍 pending 时先等待清理，身份不匹配拒绝且不得清理其他 Run。`closeConfirmed=false` 返回失败“关闭未确认”，不得声称已隐藏。AI 确实不再需要箭头时主动调用，任务结束、取消或换窗由 runtime 自动清理。
+
+以下 R 保留主题色圆角样式改动前的验收，不作为新样式验证。
+
+2026-10-13 R 的同一 helper / panel 跨前两次双击更新并存活 20.579s；hidePointer 确认关闭且 OS 实际消失，第三次动作新建面板保留 10.608s，Run 结束后退出。六次已知层序变化均在约 8ms 恢复，曾采到短暂目标下方排序，不能记为全过程安全排序或零干扰。三次双击的独立 AX 选区闭环通过；M / 无视觉对照 / O2 的 drag 未实际选中，不能只归因持久视觉，最终层序恢复版本未重验 drag。详细证据与门禁见[验证矩阵](frontend-validation-matrix.md#agent-纯箭头持久租约与主动隐藏2026-10-13)。
 
 正式隔离版本的 2026-10-13 C5 已由内置 Agent 完成 ArrowLeft 折叠、新观察、300ms 校准坐标拖拽与再次观察；内部单窗 PNG 和独立 CUA AX 均确认选中 `alpha bravo charlie delta `（末尾一个空格），正文未变。B2 恰好一次双击后，内部图像与独立 CUA AX 确认选中 `bravo`，正文未变；较晚独立截图不计选区像素通过。D2 仅一次右键返回 unknown / commit_unknown 与 confirmed 释放，后观察关闭输入能力，未重放或选菜单；独立 CUA 立即看见真实菜单 AX 与像素，内部单窗图不含另窗菜单。
 
@@ -46,7 +54,9 @@ helper 启动预算 1 秒、总寿命 3 秒；stdin EOF、取消、原窗移动 
 
 聊天预览另显示只用于阅读的「AI 计划」标记：Timeline 从同 Session / Run / library、可信内置来源、规范 prepared action 中派生计划，并以精确 targetId / observationId 关联到动作之前的那张单窗观察图。V2 点击与定向右键 / 双击 / 拖拽使用封存图像坐标；AX-only V3 点击、快捷键、文本和滚动不虚构图像位置。待确认、失败或 unknown 均不能将计划标为已执行，后续新观察图不继承旧标记。
 
-缩略图以 SVG 叠加可辨认的箭头 / 拖拽路径；点击后仍复用用户聊天图片的大图预览，仅在 renderer 内有界临时合成显示计划。原 PNG、会话附件、存库内容及送模型的图片不变，原生面板也不会被独立目标截图采入。目标被遮挡时桌面图案依用户偏好隐藏，聊天中的计划仍可检查；图案显示和预览标记都不替代真实输入回执或实际效果复验。关闭、隐藏、切作用域或迟到异步响应均释放显示合成，失败回退原图。2026-10-13 E 已在完全访问下无批准卡完成真实后台双击、前后观察与独立 AX 选区核对；窗口面板紫白箭头像素、聊天缩略图 / 大图、缩放 / Esc 及后图无旧标记均通过，原附件哈希未改。具体范围见[验证矩阵](frontend-validation-matrix.md#agent-完全访问与两处鼠标提示2026-10-13)。
+缩略图只显示未经修改的原 PNG，不叠加指针、不单独放大。点击后复用用户聊天图片的大图预览，仅在该大图中叠加可信 AI 计划的主题色圆角箭头与柔光。`createAgentComputerPointerPreview` 不再生成 Canvas PNG，而是在 renderer 内生成有界内部 SVG data URL：一个 `<image>` 嵌入原 PNG，三个固定 `<path>` 绘制柔光、主体和亮边；只插入已校验的数字、有限主题色、静态路径 / 描述及有界 PNG base64，不接受任意 SVG、URL 或上传 markup。指针按 0.75 绘制，原图尺寸下约 16px；Semi 沿既有 width / height 改变显示尺寸，使路径在显示尺寸栅格化，缩放控件、Esc / 遮罩关闭和焦点恢复沿用共用预览。无可见标签、背景、拖拽轨迹或终点圆圈，SVG title 保留 accessible AI 计划与操作语义，不宣称输入成功。解码尺寸须与可信计划一致，最大 2048×2048，PNG 仍受原附件预算限制，合成有 3 秒 deadline 和 AbortSignal。原 PNG、会话附件、存库内容及送模型的图片不变；捕获仍为独立目标窗口且关闭系统光标，另一 helper 的 NSPanel 不自然包含其中。目标被遮挡时桌面图案依用户偏好隐藏，大图中的计划仍可检查；图案显示和预览标记都不替代真实输入回执或实际效果复验。大图 requestKey 包含 accent，主题变化取消旧合成；关闭、隐藏、切作用域或迟到异步响应均释放显示合成，失败回退原图。hidePointer 只控制原生 Run 租约，不删除历史观察图上的计划。
+
+2026-10-13 E 已在完全访问下无批准卡完成真实后台双击、前后观察与独立 AX 选区核对；窗口面板紫白箭头像素、聊天缩略图 / 大图、缩放 / Esc 及后图无旧标记均通过，原附件哈希未改。具体范围见[验证矩阵](frontend-validation-matrix.md#agent-完全访问与两处鼠标提示2026-10-13)。
 
 ## 后台定向输入（2026-10-12）
 
@@ -65,11 +75,13 @@ helper 启动预算 1 秒、总寿命 3 秒；stdin EOF、取消、原窗移动 
 
 原生路线在已验证 receiver profile 中以私有 `CGEventSetWindowLocation` 设置目标窗口局部位置，再由公开 `CGEventPostToPid` 每个事件只投递一次；不使用私有额外派发、应用置前、全局事件或失败补发。私有符号、当前软件版本、精确获准窗口、键盘接收窗口 / 控件、前台状态及用户键鼠状态无法确认时关闭这条能力。目标应用处于前台、用户按住修饰键或鼠标、receiver 漂移或目标出现未获准临时窗口时拒绝；普通物理打字只拦快捷键，避免与键盘输入交织。支持范围由实际 profile 白名单限定，不能因其他 App 也是 AppKit / Electron 而自动授予能力；系统更新及不同版本须单独验证。
 
+鼠标按压使用非零编号，同次 down、dragged、up 及取消清理 up 保持匹配；双击的两次按压编号分别不同。每个 helper 随机选取起始编号以减少重复，不承诺跨进程全局唯一。编号配对不改变 receiver 守卫、单次 `CGEventPostToPid` 路线或派发 / 释放回执语义，也不能据此宣称目标已消费拖拽。
+
 当前生产 receiver 仅 `textedit-415-25f84-v1`：必须是 `com.apple.TextEdit`、TextEdit 1.20 / build 415、系统 build 25F84（本轮 macOS 26.5.2）。实验 `appkit-fixture-v1` 只供固定独立原生夹具，不要求系统 build；它的成功不能扩大真实软件支持名单。菜单 / sheet / modal 等临时界面存在时 readiness 关闭；已发送右键打开新菜单后立即停止，保留 unknown，不在未获准菜单里继续点击或改用 Escape / 全局事件清理。
 
 prepared action 为独立 `computer.input` V1，仅含 public 目标身份、observationId 和所选动作字段。正式执行再次核对 sealed request、当前共享、窗口和 receiver，broker 以真实内置注册身份授予 commit settlement；`commit.begin` 在事件调用前记未知回执并消费观察。dispatched / committed 只表示事件序列及匹配释放事件已投递，不代表软件已经完成目标操作，后续必须 observe。unknown / commit_unknown 不重放，也不切换 AX 或全局输入；not-dispatched 仍要求新观察。取消先向 helper 发送 SIGTERM，最多等待 2 秒释放回执再 SIGKILL；动作结果与 `releaseState` 独立结算，confirmed 仅表示抬键 / 抬鼠标已投递。unconfirmed 会由 main 阻断本 Run 后续全部 `computer.input`，新观察、重新批准或换窗均不能恢复手势，已封存动作在执行时同样拒绝；观察和已声明的 AX 操作保留。Run 释放只清理 main 门禁，不证明系统已释放此前按键。broker 已结束的结算不能被迟到成功覆盖。
 
-最终原生源码的独立 TextEdit 验收已确认 Command + A 全选、双击选中 bravo、拖拽选中 alpha 到 delta。右键确实打开菜单，但新临时界面守卫随后返回 unknown，eventCount=2、releaseSent=true；这是已投递且菜单边界收口的证据，不能记为 dispatched / committed 成功，菜单内操作未开放。真实原生夹具另验证四动作及取消释放、焦点漂移拒绝。自动测试覆盖真实 builtin Tool → sealed registry capability → broker → runtime 提交接线、观察期限 / owner 释放及迟到结算；以上均不等于新工具的内置 Agent GUI 验收或任意软件兼容。既有 AX 文本 / 滚动成功也不替代本轮定向事件路线证据。
+2026-10-12 原生源码的独立 TextEdit 验收已确认 Command + A 全选、双击选中 bravo、拖拽选中 alpha 到 delta。右键确实打开菜单，但新临时界面守卫随后返回 unknown，eventCount=2、releaseSent=true；这是已投递且菜单边界收口的证据，不能记为 dispatched / committed 成功，菜单内操作未开放。真实原生夹具另验证四动作及取消释放、焦点漂移拒绝。自动测试覆盖真实 builtin Tool → sealed registry capability → broker → runtime 提交接线、观察期限 / owner 释放及迟到结算；以上均不等于新工具的内置 Agent GUI 验收或任意软件兼容。既有 AX 文本 / 滚动成功也不替代本轮定向事件路线证据。
 
 ## 观察接口与本轮改进（2026-10-12）
 
@@ -275,7 +287,7 @@ OmniFlow 自身窗口被遮挡时，Electron 默认后台节流可能让控件�
 
 - 平台 adapter：`electron/platform/computer-use/desktop-computer.ts`。`getAgentComputerWindows` 获取无像素的窗口元数据；`getAgentComputerWindowTarget` 只扫描绑定窗口；`captureAgentComputerWindow` 捕获该窗口。当前 Tool 不调用 `desktopCapturer.getSources`，因为它没有 source ID 过滤器，会为多个窗口刷新缩略图；不能先采集再在 JS 挑选，零尺寸也不作为严格无捕获保证。
 - 定向输入 adapter：`electron/platform/computer-use/window-input.ts`，只调用固定 `--window-input-check / --window-input`；原生实现为 `macos-window-input.swift`。检查只读、私有 profile 有限白名单；变更命令严格互斥、同窗点与有限事件数，stdin / stdout 均采用有界 JSON，没有任意脚本或全局输入参数。`tools/computer-use/input-fixture.swift` 与 `input-fixture-driver.mjs` 是真实独立 AppKit 验收夹具，不替代内置 Agent GUI 验收。
-- 原生 helper：同目录 `macos-click.swift` 承接窗口 / 捕获及共享基础，`macos-semantic.swift` 承接有限语义能力 / 输入，`main.swift` 固定分发命令。`--windows` 不调用 AX 或图像 API；`--window-targets` 接收严格单窗 JSON；`--window-capture` 用 `SCContentFilter(desktopIndependentWindow:)` 与 `SCScreenshotManager.captureImage`，只按冻结 window ID/PID/进程启动时间选择并复验窗口，拒绝 app-wide 或 display 过滤器。关闭光标、音频、窗口阴影和额外 child windows，保留完整窗口表面。`--status` / `--request-permission` / `--click` / `--set-text` / `--scroll` 使用固定 AX 契约，不执行任意 shell、不注入全局键鼠事件。
+- 原生 helper：同目录 `macos-click.swift` 承接窗口 / 捕获及共享基础，`macos-semantic.swift` 承接有限语义能力 / 输入，`main.swift` 固定分发命令。`--windows` 不调用 AX 或图像 API；`--window-targets` 接收严格单窗 JSON；`--window-capture` 用 `SCContentFilter(desktopIndependentWindow:)` 与 `SCScreenshotManager.captureImage`，只按冻结 window ID/PID/进程启动时间选择并复验窗口，拒绝 app-wide 或 display 过滤器。设置 `showsCursor=false`，关闭音频、窗口阴影和额外 child windows，保留完整窗口表面；独立于目标的另一 helper NSPanel 不自然采入，本轮不改为显示器捕获。`--status` / `--request-permission` / `--click` / `--set-text` / `--scroll` 使用固定 AX 契约，不执行任意 shell、不注入全局键鼠事件。
 - 原有 `--targets` 与 Display adapter 仅保留兼容 / 自动测试入口，不属于当前公开 Tool 的观察范围，不是窗口捕获失败后的 fallback。
 - `predev / prebuild` 调用 `tools/computer-use/prepare.mjs`，需要 macOS Xcode Command Line Tools，编译最低 macOS 11 的 arm64+x86_64 universal，按源码/script 哈希缓存。ScreenCaptureKit 自动弱链接且 capture 受 macOS 14 availability guard 保护；旧系统可运行 helper 的其他自检，不能执行新窗口截图。非 macOS 跳过。
 - 开发路径为 `build/native/computer-use/darwin-<arch>/omniflow-click`；mac 打包资源路径为 `Resources/computer-use/omniflow-click`，通过 `mac.extraResources` 和 `mac.binaries` 接入现有签名流程。未执行本次签名或发布。
