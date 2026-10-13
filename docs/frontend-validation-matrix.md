@@ -1,5 +1,25 @@
 # 前端验证矩阵
 
+## Agent 电脑工具自主选择指引（2026-10-13）
+
+- 原 prompt assembler 新增按实际 capabilities 的电脑工具选择投影，description 补使用意图；模型依任务选择，文件 / CLI 等价优先，当前 GUI / 未保存内容 / 明确指定 UI 时主动调用。外部首次 observe 显式 windowRef，AX 优先、必要 both、screenshot 只读；语义动作优先，input 仅必要且有能力并选最小动作，动作后观察、后台无高亮先核对 AX、证据不足只读后停止、unknown 不重放、拒绝不 Shell 绕过、界面阶段结束 hide。原 runtime 权限、observe 默认 both、可见性、tool_choice 和模型保留，非视觉及无工具 fallback 不暗示 GUI 能力。
+- 本轮 Codex CLI 参考版本 `1a69ad3237fc485273ccfa9731239fdf789b43e4`，已核对 auto tool choice、tools / instructions 注入、模型调用派发及 MCP instructions → namespace description；没有在仓库找到具体 CUA 实现，不宣称复制完整鼠标策略。来源和当前边界见[电脑工具选择](agent-computer-use.md#agent-何时主动使用电脑工具2026-10-13)。
+- 新增 6 项接线测试覆盖完整能力、只读观察、无电脑工具、实际 model-filter 后的非视觉能力、无工具 fallback，以及 Provider 实际请求承接 system prompt / description 且没有强制 tool_choice。选区反馈补齐前的接线门禁 lint / test / build 均 exit0，test 496 文件 / 5730 项通过，3 文件 / 7 项沿用跳过，日志 `/tmp/omniflow-computer-routing-{lint,test,build}-20261013.log`；dev 已重启。随后补最小动作 / 后台高亮提示及选区反馈，最终版本门禁见下文；没有发布。
+- 有限真实 gpt-5.5 评估使用开发版、非首个 Win / libraryId=3，新 Session `1c180193-7bc3-4b62-ad86-a7fe970d4408`；下表只说明初版前三项及修复后回归的实际选择与限定结果，历史指针和输入验收不代替本轮选择评估。第四项选区任务保留为自主结束失败；未保存内容、其他 AX 不足场景、unknown 不重放和拒绝不绕过等未据此记为全部已验。
+
+| 自然任务 | 实际模型选择与限定结果 |
+| --- | --- |
+| 计算 17×23 | Run `6af5451f-c79e-4338-8ef1-157871ff6a68` 直接回答 391，没有 Tool 调用。 |
+| 读取明确本机测试文件 | Run `c122161d-0bdb-4e07-98fe-5d6a3e3ff560` 自主调用 shell.run 两次：第一次 host cwd=/tmp 因不是普通目录而拒绝，省略 cwd 后经精确命令批准成功、exit0，读到 direct-file-20261013；没有 computer.*。 |
+| 查看文本编辑 QA 窗口当前内容 | Run `bc5e3cc5-e1c9-4e74-828d-90f1e603e955` completed；3 次 windows 查找从英文名空结果转到本地文本编辑名 / 标题，再 1 次显式 windowRef + mode=ax 观察经批准的正确 QA 窗口；验收者独立 CUA AX 核对三行内容与内部回答一致。 |
+| 修复后自然要求选中第二行 delta，不改正文、不保存 | Run `13efe4a0-a5ca-4836-ade9-096636ec7f80` completed，58.26s（含批准等待）；精确 4 个 Tool：windows → 显式 windowRef 的 observe both（ask / approved）→ 仅一次 input doubleClick(166,52) → 无 selector 沿共享窗口的 observe ax。前置 AXTextArea 为 charlie / [49,7]，后置为 delta / [57,5]，两次 selectedTextTruncated=false；整树 truncated=true 不妨碍当次完整选区证据，但不表示完整窗口已读完。模型正常自主结束，无 click / drag / shell 或重放；验收者独立 CUA 确认选中 delta、正文未变，没有人工停止。 |
+
+第四个自然选区任务 Run `e5df1b43-1da4-4e47-aaed-3d38c6444d18` 的独立 CUA AX 已确认实际选中 charlie，但内置 Agent 因截图没有明显选区而继续尝试动作，约 1m45s 后由验收者停止，终态 cancelled；精确 9 个 Tool 为 windows → both → drag → both → doubleClick → both → click 准备前失败 → reverse drag → both，3 次真实 input 均 dispatched / committed / release confirmed、无 unknown，仍计自主结束失败，不计端到端通过。最终 charlie 选区不分别证明两次 drag 的消费，历史 drag 未通过限制保留。诊断确认其四次 Tool result 没有任何 selection 字段：原 AX 摘要只有 title / description / value / actions，内部 TextState 的 range 未向模型投影，不是 UI 截断。当前已补最小动作和语义核验提示，原生 axTree 补只读 selectedRangeUTF16 / 有界 selectedText，不改动作 schema 或权限；修复后仅上述第五个自然单词选择回归通过，不扩大为全部电脑任务或拖拽成功。
+
+- 选区摘要保留零基 UTF-16 `[起始偏移,长度]`，非空读取前后 range 与文字 UTF-16 长度均核对；range 变化不返回该次选区字段。内容至多 200 标量 / 256 UTF-8，引用与前缀截断明确；超过 4096 UTF-16 不读文字，零长只 range，不可读 / 类型长度不符 / 危险字符 omitted，不伪造空串。非 Web / 非 secure 分类及祖先安全上下文、scope 的 region.nativeContext、原 AXTreeBudget 与总预算保留。生产函数的 Swift harness 定向 3 文件 / 3 项通过，覆盖引用 / 空白 / Unicode UTF-16、缺失 / 失效 / 截断、范围变化及预算，另有 secure TextArea 祖先 scope 专项通过，日志 `/tmp/omniflow-selection-summary-focused-20261013.log`；纯 harness 不读取或改变真实应用。最终 selection 版本 lint / test / build 均 exit0，test 497 文件 / 5731 项通过，3 文件 / 7 项沿用跳过（32.9s），日志 `/tmp/omniflow-computer-routing-selection-{lint,test,build}-20261013.log`；独立 review 未发现问题，dev 已重启，日志 `/tmp/omniflow-computer-routing-selection-dev-20261013.log`。自然单词选择回归仅覆盖上述第五个 Run。开发版启动后，后台页面仍需验收者以 super+r 刷新这一既有边界，本轮未修复，也不计模型自主操作；dev 保持运行，测试会话留在非首个 Win 资料库。上述验收完成时未提交或发布。
+
+五个 Run / 19 个 Tool 的白名单只读审计证据为 `/tmp/omniflow-computer-routing-gui-20261013.json`，SQLite 使用 mode=ro / query_only，仅记录限定会话状态、工具选择与有限选区证据，不导出原始 prompt / message / AX 正文或凭据。审计本身不触发 GUI 或模型；GUI / AX 独立效果核对由验收者完成。
+
 ## Agent 原图缩略图、矢量大图与 0.75 尺寸（2026-10-13）
 
 - 当前缩略图仅显示原 PNG，无 SVG 覆盖或单独放大；共用大图才显示由可信前置观察计划派生的指针。createAgentComputerPointerPreview 生成有界内部 SVG data URL，以一个原 PNG `<image>` 加三个固定 `<path>` 绘制柔光 / 主体 / 亮边，不接受任意 SVG、URL 或 markup；解码尺寸等于可信计划且至多 2048×2048，原附件预算、3 秒 deadline、AbortSignal、accent requestKey、主题取消与作用域清理保留。原附件 / 模型图不改，Semi 沿 width / height 缩放，保留控件、Esc 与焦点恢复。

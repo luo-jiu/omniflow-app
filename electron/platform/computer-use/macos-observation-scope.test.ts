@@ -98,6 +98,7 @@ for index in 1...4 {
                      ObservationScopeNodeIdentity(pid: 123, role: kAXWindowRole),
                      ObservationScopeNodeIdentity(pid: 123, role: kAXApplicationRole),
                      ObservationScopeNodeIdentity(pid: 123, role: "AXSecureTextArea"),
+                     ObservationScopeNodeIdentity(pid: 123, role: kAXTextAreaRole, secureTextField: true),
                      ObservationScopeNodeIdentity(pid: 123, role: kAXTextFieldRole, secureTextField: true),
                      ObservationScopeNodeIdentity(pid: 123, role: ""),
                      ObservationScopeNodeIdentity(pid: 123, role: "AXGroup\n"),

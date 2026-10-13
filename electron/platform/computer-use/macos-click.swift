@@ -1049,6 +1049,35 @@ final class AXTreeBudget {
         return quoted
     }
 
+    // Selection text preserves whitespace and uses the same per-field byte and
+    // scalar limits as other AX fields. Never silently present a prefix as the
+    // complete selected text, or allow invisible direction/control overrides.
+    func selectedTextFields(_ text: String) -> [String] {
+        var value = ""
+        var count = 0
+        var shortened = false
+        for scalar in text.unicodeScalars {
+            guard ready() else { return [] }
+            let code = scalar.value
+            if (code < 32 && code != 9 && code != 10 && code != 13) || (code >= 127 && code <= 159)
+                || (code >= 0x202a && code <= 0x202e) || (code >= 0x2066 && code <= 0x2069) {
+                truncated = true
+                return ["selectedTextOmitted=true"]
+            }
+            let piece = String(scalar)
+            guard count < 200, value.utf8.count + piece.utf8.count <= 256 else { shortened = true; break }
+            value += piece
+            count += 1
+        }
+        guard let data = try? JSONSerialization.data(withJSONObject: value, options: [.fragmentsAllowed]),
+              let quoted = String(data: data, encoding: .utf8) else {
+            truncated = true
+            return ["selectedTextOmitted=true"]
+        }
+        if shortened { truncated = true }
+        return ["selectedText=" + quoted, "selectedTextTruncated=" + (shortened ? "true" : "false")]
+    }
+
     func append(_ line: String) {
         let part = line + "\n"
         let encoded = Self.encodedSize(part)
@@ -1062,6 +1091,61 @@ final class AXTreeBudget {
     }
 
     var text: String { parts.joined() + (truncated ? marker : "") }
+}
+
+// This ancestry flag only gates the new selection summary. It does not widen
+// the existing readable tree, private candidates or any execution capability.
+func treeSelectionContext(_ parent: Bool, role: String, root: Bool, budget: AXTreeBudget,
+                          readSubrole: () -> (AXError, CFTypeRef?)) -> Bool {
+    guard nativeTextContext(parent, role: role, root: root) else { return false }
+    guard role == kAXTextAreaRole || role == kAXTextFieldRole else { return true }
+    guard budget.ready() else { return false }
+    let (error, raw) = readSubrole()
+    budget.note(error)
+    // Unsupported/noValue only confirms absence when the reply is also nil.
+    guard !([AXError.attributeUnsupported, .noValue].contains(error) && raw != nil),
+          let state = semanticSubrole(error, raw) else { budget.truncated = true; return false }
+    return nativeTextRole(role, subrole: state.subrole)
+}
+
+func treeSelectedTextFields(budget: AXTreeBudget,
+                            read: (String) -> (AXError, CFTypeRef?)) -> [String] {
+    func selection() -> TextSelection? {
+        guard budget.ready() else { return nil }
+        let (error, raw) = read(kAXSelectedTextRangeAttribute)
+        budget.note(error)
+        if error == .attributeUnsupported || error == .noValue {
+            if raw != nil { budget.truncated = true }
+            return nil
+        }
+        guard error == .success, let raw = raw, let value = decodedTextSelection(raw) else {
+            budget.truncated = true; return nil
+        }
+        return value
+    }
+    guard let before = selection(), budget.ready() else { return [] }
+    let range = "selectedRangeUTF16=[\(before.location),\(before.length)]"
+    if before.length == 0 { return [range] }
+    // Do not fetch a potentially unbounded AXSelectedText. A large or missing
+    // selection is not an empty selection and does not justify another action.
+    guard before.length <= 4096 else {
+        budget.truncated = true
+        return [range, "selectedTextOmitted=true"]
+    }
+    let (error, raw) = read(kAXSelectedTextAttribute)
+    budget.note(error)
+    guard let after = selection(), after == before, budget.ready() else {
+        budget.truncated = true; return []
+    }
+    if error == .attributeUnsupported || error == .noValue {
+        if raw != nil { budget.truncated = true }
+        return [range, "selectedTextOmitted=true"]
+    }
+    guard error == .success, let text = raw as? String,
+          text.utf16.prefix(4097).count == before.length else {
+        budget.truncated = true; return [range, "selectedTextOmitted=true"]
+    }
+    return [range] + budget.selectedTextFields(text)
 }
 
 func treeAttribute(_ element: AXUIElement, _ name: String, budget: AXTreeBudget) -> CFTypeRef? {
@@ -1091,7 +1175,7 @@ func treeChildren(_ element: AXUIElement, budget: AXTreeBudget) -> [AXUIElement]
 }
 
 func scanAXTree(_ element: AXUIElement, depth: Int, window: WindowIdentity, budget: AXTreeBudget,
-                pathDepth: Int? = nil, scoped: Bool = false) {
+                pathDepth: Int? = nil, scoped: Bool = false, nativeContext: Bool = true) {
     guard budget.ready(), budget.nodes < 2048 else { budget.truncated = true; return }
     budget.nodes += 1
     var pid: pid_t = 0
@@ -1106,6 +1190,9 @@ func scanAXTree(_ element: AXUIElement, depth: Int, window: WindowIdentity, budg
         // descendant's ancestry. Full-window legacy summary behavior is unchanged.
         let subrole = rawRole == kAXTextFieldRole ? treeAttribute(element, kAXSubroleAttribute, budget: budget) as? String : nil
         guard safeScopedObservationRole(rawRole, textFieldSubrole: subrole) else { budget.truncated = true; return }
+    }
+    let selectionContext = treeSelectionContext(nativeContext, role: rawRole, root: depth == 0, budget: budget) {
+        axAttribute(element, kAXSubroleAttribute)
     }
     var fields = [budget.field(rawRole)]
     for (attribute, label) in [(kAXTitleAttribute, "title"), (kAXDescriptionAttribute, "description")] {
@@ -1125,6 +1212,9 @@ func scanAXTree(_ element: AXUIElement, depth: Int, window: WindowIdentity, budg
         else if CFGetTypeID(value) == CFBooleanGetTypeID() { fields.append("value=" + (CFEqual(value, kCFBooleanTrue) ? "true" : "false")) }
         else if let number = value as? NSNumber { fields.append("value=" + budget.quoted(number.stringValue)) }
     }
+    if selectionContext, rawRole == kAXTextAreaRole || rawRole == kAXTextFieldRole {
+        fields += treeSelectedTextFields(budget: budget) { axAttribute(element, $0) }
+    }
     if budget.ready() {
         var actions: CFArray?
         let error = AXUIElementCopyActionNames(element, &actions)
@@ -1142,7 +1232,8 @@ func scanAXTree(_ element: AXUIElement, depth: Int, window: WindowIdentity, budg
     if absoluteDepth >= maximumAXPathDepth { if !children.isEmpty { budget.truncated = true }; return }
     for child in children {
         if !budget.ready() { break }
-        scanAXTree(child, depth: depth + 1, window: window, budget: budget, pathDepth: absoluteDepth + 1, scoped: scoped)
+        scanAXTree(child, depth: depth + 1, window: window, budget: budget, pathDepth: absoluteDepth + 1,
+                   scoped: scoped, nativeContext: selectionContext)
     }
 }
 
@@ -1260,6 +1351,11 @@ func nativeObservationScope(_ root: AXUIElement, scope: ObservationScope, window
                 // Unknown text-field classification cannot prove its descendant
                 // values safe for local summarization. No whole-window fallback.
                 guard secureTextField || safeScopedObservationRole(role, textFieldSubrole: subrole) else { return nil }
+            } else if role == kAXTextAreaRole {
+                let (error, raw) = axAttribute(node, kAXSubroleAttribute, budget: budget)
+                guard !([AXError.attributeUnsupported, .noValue].contains(error) && raw != nil),
+                      let state = semanticSubrole(error, raw, budget: budget) else { budget.truncated = true; return nil }
+                secureTextField = state.subrole?.contains("Secure") ?? false
             }
             return ObservationScopeNodeIdentity(pid: pid, role: role, secureTextField: secureTextField)
         }, readParent: { node in
@@ -1297,6 +1393,7 @@ func windowTargets(_ request: WindowRequest) throws {
     let windows = try cgWindows()
     var matchedWindow: AXUIElement?
     var scopePath: [Int]?
+    var summaryNativeContext = true
     if !ambiguousCGWindow(window, windows: windows), let element = axWindow(window, budget: budget) {
         axWindowMatched = true
         if let scope = request.scope {
@@ -1307,6 +1404,7 @@ func windowTargets(_ request: WindowRequest) throws {
                            nativeContext: region.nativeContext, root: element, scoped: true)
             matchedWindow = region.element
             scopePath = region.path
+            summaryNativeContext = region.nativeContext
         } else {
             scanCandidates(element, path: [], window: window, budget: budget, result: &candidates)
             matchedWindow = element
@@ -1321,7 +1419,8 @@ func windowTargets(_ request: WindowRequest) throws {
     let tree = AXTreeBudget(scanDeadline: budget.deadline,
                             maximumEncodedBytes: maximumAXObservationOutputBytes - 1 - size)
     if let element = matchedWindow {
-        scanAXTree(element, depth: 0, window: window, budget: tree, pathDepth: scopePath?.count ?? 0, scoped: request.scope != nil)
+        scanAXTree(element, depth: 0, window: window, budget: tree, pathDepth: scopePath?.count ?? 0,
+                   scoped: request.scope != nil, nativeContext: summaryNativeContext)
     }
     else { tree.truncated = true }
     receipt["axTree"] = tree.text

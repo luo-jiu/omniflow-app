@@ -294,6 +294,17 @@ func semanticSelection(_ error: AXError, _ raw: CFTypeRef?, budget: ScanBudget? 
     return selection
 }
 
+// Decodes an already-read AX value; it does not read or change an application.
+func decodedTextSelection(_ raw: CFTypeRef) -> TextSelection? {
+    guard CFGetTypeID(raw) == AXValueGetTypeID() else { return nil }
+    let value = raw as! AXValue
+    guard AXValueGetType(value) == .cfRange else { return nil }
+    var range = CFRange(location: 0, length: 0)
+    guard AXValueGetValue(value, .cfRange, &range) else { return nil }
+    let selection = TextSelection(location: range.location, length: range.length)
+    return selection.valid ? selection : nil
+}
+
 func semanticOrientation(_ error: AXError, _ raw: CFTypeRef?, budget: ScanBudget? = nil) -> ScrollOrientation? {
     if let budget = budget, !budget.ready() { return nil }
     if error == .attributeUnsupported || error == .noValue { return nil }
@@ -619,14 +630,7 @@ func nativeSettable(_ element: AXUIElement, _ attribute: String, budget: ScanBud
 func nativeSelection(_ element: AXUIElement, budget: ScanBudget? = nil,
                      diagnostic: NativeCandidateDiagnostic? = nil) -> TextSelection? {
     let (error, value) = axAttribute(element, kAXSelectedTextRangeAttribute, budget: budget)
-    let selection = semanticSelection(error, value, budget: budget) { raw in
-        guard CFGetTypeID(raw) == AXValueGetTypeID() else { return nil }
-        let value = raw as! AXValue
-        guard AXValueGetType(value) == .cfRange else { return nil }
-        var range = CFRange(location: 0, length: 0)
-        guard AXValueGetValue(value, .cfRange, &range) else { return nil }
-        return TextSelection(location: range.location, length: range.length)
-    }
+    let selection = semanticSelection(error, value, budget: budget, decode: decodedTextSelection)
     if selection == nil { diagnostic?.probeFailure(.selection, error: error) }
     return selection
 }

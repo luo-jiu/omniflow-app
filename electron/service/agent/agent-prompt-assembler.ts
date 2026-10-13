@@ -6,6 +6,7 @@ import type {
 import type { AgentSkillSummaryV1 } from './skills/agent-skill.types';
 import { sanitizeAgentSensitiveValue } from './agent-sensitive-data';
 import { toAgentProviderToolName } from './agent-provider-tool-name';
+import { agentComputerRoutingPrompt } from './computer/agent-computer-prompt';
 
 const providerToolName = toAgentProviderToolName;
 
@@ -211,7 +212,7 @@ export function buildAgentSystemPrompt(
   const catalogBudgetNotice = omittedSkillCount > 0
     ? `Skill 摘要目录因上下文预算省略了 ${Math.floor(omittedSkillCount)} 个条目；未展示的 Skill 在本 Run 中不可激活。`
     : '';
-  return `${AGENT_POLICY_PROMPT}${agentFileRoutingPrompt(capabilities)}\n\n当前安全上下文：\n${JSON.stringify(promptContext(context, capabilities))}\n\n${skillCatalog}${catalogBudgetNotice ? `\n${catalogBudgetNotice}` : ''}\n\n${perceptionScope}${agentModelAdapterPrompt(modelAdapter)}`;
+  return `${AGENT_POLICY_PROMPT}${agentFileRoutingPrompt(capabilities)}${agentComputerRoutingPrompt(capabilities)}\n\n当前安全上下文：\n${JSON.stringify(promptContext(context, capabilities))}\n\n${skillCatalog}${catalogBudgetNotice ? `\n${catalogBudgetNotice}` : ''}\n\n${perceptionScope}${agentModelAdapterPrompt(modelAdapter)}`;
 }
 
 export function buildAgentFallbackSystemPrompt(
