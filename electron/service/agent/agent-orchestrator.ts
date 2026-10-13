@@ -203,6 +203,7 @@ import {
   type AgentToolMainPreparationResult,
   type AgentToolPermissionDecision,
   type AgentToolPreparationResult,
+  type AgentToolSnapshot,
 } from './agent-tool-registry';
 import {
   createAgentAiDestinationSnapshot,
@@ -881,6 +882,7 @@ interface CreatePreparedRuntimeOptions {
   computerText?: boolean;
   pluginOperation?: 'rename' | 'file-output';
   permissionMode?: AgentRunCapabilitySnapshot['shellPermissionMode'];
+  permissionTool?: AgentToolSnapshot;
   identity?: AgentToolMainPreparationIdentity;
   preparedActionId?: string;
   sealMain?: (input: {
@@ -941,7 +943,7 @@ function createPreparedRuntime(
   ));
   const approvalSemantics = Object.freeze({
     action,
-    behavior: resolveAgentRunPermissionDecision(expectedToolName, result.decision, options.permissionMode, action).behavior,
+    behavior: resolveAgentRunPermissionDecision(expectedToolName, result.decision, options.permissionMode, action, options.permissionTool).behavior,
     preview,
     risk: result.decision.risk,
   });
@@ -2688,6 +2690,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
                     computerText: privateComputerText,
                     pluginOperation: tool.pluginOperation,
                     permissionMode: tool.pluginOperation ? 'ask' : await accessGuard?.canAutoApproveTool(call, toolRunId, result.publicAction) ? 'full-access' : capabilitySnapshot.shellPermissionMode,
+                    permissionTool: tool,
                     identity: preparationIdentity,
                     sealMain: sealInput => capabilitySnapshot.sealMainPreparedExecution(
                       call.name,
@@ -2799,7 +2802,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       }
     }
     if (preparationMode === 'none') {
-      decision = resolveAgentRunPermissionDecision(call.name, decision, capabilitySnapshot.shellPermissionMode);
+      decision = resolveAgentRunPermissionDecision(call.name, decision, capabilitySnapshot.shellPermissionMode, undefined, tool || undefined);
       if (scopeMayAutoApprove && decision.behavior === 'ask' && decision.risk === 'write') decision = { behavior: 'allow', risk: 'write' };
     }
     if (decision.behavior === 'ask') {

@@ -1,6 +1,6 @@
 # 桌面平台适配架构
 
-2026-10-13：新增 main-only 鼠标意图指示器，平台 adapter 为 `window-indicator.ts`，固定 helper 模式为 `--window-indicator`。只接收冻结单窗身份与有限 click / rightClick / doubleClick / drag points，没有输入、任意文本或 renderer IPC；由原 Agent runtime 持有视觉租约并在提交前复验。普通层 nonactivating NSPanel 透明注册后确认位于目标上方，且所有夹层元数据有效、与完整面板表面完全不相交，再绘制箭头 / AI 标签 / 静态拖拽计划；不激活、不置顶、点击穿透、随目标遮挡。350ms 预告后关闭并等待真实进程退出，再复验并派发，视觉面板不与后台指针事件并存；未确认关闭时首发前拒绝。原窗 / 显示器 / 层级变化、EOF、取消和超时都关闭；3 秒总寿命、TERM 300ms 后 KILL 及额外 300ms 退出确认保持有界，不能把终止请求当退出。独立目标 SCK 不含该面板。实现与真机范围见[鼠标意图指示器](agent-computer-use.md#鼠标意图指示器2026-10-12)。
+2026-10-13：新增 main-only 鼠标意图指示器，平台 adapter 为 `window-indicator.ts`，固定 helper 模式为 `--window-indicator`。只接收冻结单窗身份与有限 click / rightClick / doubleClick / drag points，没有输入、任意文本或 renderer IPC；由原 Agent runtime 持有视觉租约并在提交前复验。普通层 nonactivating NSPanel 透明注册后确认位于目标上方，且所有夹层元数据有效、与完整面板表面完全不相交，再绘制箭头 / AI 标签 / 静态拖拽计划；不激活、不置顶、点击穿透、随目标遮挡。900ms 预告后关闭并等待真实进程退出，再复验并派发，视觉面板不与后台指针事件并存；未确认关闭时首发前拒绝。原窗 / 显示器 / 层级变化、EOF、取消和超时都关闭；3 秒总寿命、TERM 300ms 后 KILL 及额外 300ms 退出确认保持有界，不能把终止请求当退出。独立目标 SCK 不含该面板。实现与真机范围见[鼠标意图指示器](agent-computer-use.md#鼠标意图指示器2026-10-12)。
 
 2026-10-12：新增独立 `computer.input@1` 的后台快捷键、右键、双击和同窗直线拖拽。纯输入契约位于 `src/shared/computer-use/window-input-contract.ts`，main 平台 adapter 为 `window-input.ts`，原生驱动为 `macos-window-input.swift`；平台模块不依赖 Agent Session / Run / UI。Agent runtime 持有独立 `inputOperations` 共享许可、观察能力、同张截图像素映射、sealed prepare 和 broker 提交结算，没有通用桌面输入 preload / IPC。旧 AXPress、文字与语义滚动路线不变。
 

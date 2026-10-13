@@ -85,7 +85,7 @@ function computerObservationScope(data: Record<string, unknown>): Pick<Extract<A
   return { scope: { kind, ancestorLevels: levels }, scopeScanComplete: completeDescriptor.value };
 }
 
-function builtInComputerAction(activity: AgentToolActivitySnapshot, libraryId?: number) {
+export function builtInComputerAction(activity: AgentToolActivitySnapshot, libraryId?: number) {
   const operation = activity.toolMetadata?.builtinComputerTool;
   if (!operation || activity.pluginSource || activity.toolMetadata?.kind !== 'business'
     || activity.call.name !== `computer.${operation}`) return null;

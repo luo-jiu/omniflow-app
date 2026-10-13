@@ -5,11 +5,14 @@ import type { AgentOwnerScope } from '@/shared/agent/agent.types';
 import { AGENT_ATTACHMENT_MAX_BYTES } from '@/shared/agent/agent-attachments';
 import { previewAgentAttachment } from '../services/agent.api';
 import AgentAttachmentPreview from './AgentAttachmentPreview';
+import AgentComputerPointerOverlay from './AgentComputerPointerOverlay';
+import type { AgentComputerPointerPlan } from '../agent-computer-pointer-plan';
 
 const ObservationPreview = styled.div`
   min-width: 0;
   button {
-    display: block;
+    display: inline-block;
+    position: relative;
     max-width: 100%;
     padding: 0;
     border: 0;
@@ -48,9 +51,10 @@ interface AgentToolObservationPreviewProps {
   ownerScope: AgentOwnerScope | null;
   sessionId: string;
   toolRunId: string;
+  pointerPlan?: AgentComputerPointerPlan;
 }
 
-export default function AgentToolObservationPreview({ alt, attachmentId, libraryId, ownerScope, sessionId, toolRunId }: AgentToolObservationPreviewProps) {
+export default function AgentToolObservationPreview({ alt, attachmentId, libraryId, ownerScope, sessionId, toolRunId, pointerPlan }: AgentToolObservationPreviewProps) {
   const workspaceActive = React.useContext(WorkspaceVisibilityContext);
   const accountScope = ownerScope?.accountScope;
   const backendScope = ownerScope?.backendScope;
@@ -61,7 +65,7 @@ export default function AgentToolObservationPreview({ alt, attachmentId, library
       : null
   ), [accountScope, attachmentId, backendScope, libraryId, sessionId, toolRunId]);
   const requestKey = JSON.stringify([accountScope, backendScope, libraryId, sessionId, toolRunId, attachmentId, workspaceActive]);
-  const [image, setImage] = React.useState<{ key: string; src?: string; failed?: boolean }>({ key: '' });
+  const [image, setImage] = React.useState<{ key: string; src?: string; failed?: boolean; width?: number; height?: number }>({ key: '' });
   const [previewKey, setPreviewKey] = React.useState<string | null>(null);
 
   React.useEffect(() => {
@@ -86,14 +90,20 @@ export default function AgentToolObservationPreview({ alt, attachmentId, library
 
   if (!workspaceActive) return null;
   const currentImage = image.key === requestKey ? image : undefined;
+  const currentPlan = pointerPlan?.attachmentId === attachmentId && pointerPlan.observationToolRunId === toolRunId
+    && pointerPlan.width === currentImage?.width && pointerPlan.height === currentImage?.height ? pointerPlan : undefined;
   return (
     <><ObservationPreview>
       {currentImage?.src ? (
         <button type="button" aria-label={`预览 ${alt}`} onClick={() => setPreviewKey(requestKey)}>
-          <img alt={alt} src={currentImage.src} onError={() => {
-            setImage({ key: requestKey, failed: true });
-            setPreviewKey(null);
+          <img alt={alt} src={currentImage.src} onLoad={(event: React.SyntheticEvent<HTMLImageElement>) => {
+            const { naturalWidth: width, naturalHeight: height } = event.currentTarget;
+            setImage(current => current.key === requestKey ? { ...current, width, height } : current);
+          }} onError={() => {
+            setImage(current => current.key === requestKey ? { key: requestKey, failed: true } : current);
+            setPreviewKey(current => current === requestKey ? null : current);
           }} />
+          {currentPlan ? <AgentComputerPointerOverlay plan={currentPlan} /> : null}
         </button>
       ) : !request || currentImage?.failed ? (
         <p>截图暂不可用</p>
@@ -106,6 +116,7 @@ export default function AgentToolObservationPreview({ alt, attachmentId, library
           sizeBytes: (currentImage.src.length - 'data:image/png;base64,'.length) * 3 / 4
             - (currentImage.src.endsWith('==') ? 2 : currentImage.src.endsWith('=') ? 1 : 0),
           thumbnail: currentImage.src }}
+        pointerPlan={currentPlan}
         scope={{ libraryId: request.libraryId, ownerScope: request.ownerScope }} sessionId={request.sessionId}
         onClose={() => setPreviewKey(null)} />
     ) : null}</>

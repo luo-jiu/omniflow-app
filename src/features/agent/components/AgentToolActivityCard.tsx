@@ -24,6 +24,7 @@ import AgentInteractionBlock from './AgentInteractionBlock';
 import AgentActivityText from './AgentActivityText';
 import AgentDisclosureChevron from './AgentDisclosureChevron';
 import AgentToolObservationPreview from './AgentToolObservationPreview';
+import type { AgentComputerPointerPlan } from '../agent-computer-pointer-plan';
 import AgentToolAxPreview from './AgentToolAxPreview';
 import { readAgentShellLogPage } from '../services/agent.api';
 
@@ -543,6 +544,7 @@ function renderBlock(
     ownerScope: AgentOwnerScope | null;
     sessionId: string;
     toolRunId: string;
+    pointerPlan?: AgentComputerPointerPlan;
   },
 ) {
   if (block.type === 'computer-ax') {
@@ -562,6 +564,7 @@ function renderBlock(
       ownerScope={imageContext.ownerScope}
       sessionId={imageContext.sessionId}
       toolRunId={imageContext.toolRunId}
+      pointerPlan={imageContext.pointerPlan}
     />;
   }
   if (block.type === 'choice' || block.type === 'form') {
@@ -659,6 +662,7 @@ function renderBlock(
 }
 
 interface AgentToolActivityCardProps {
+  pointerPlan?: AgentComputerPointerPlan;
   detailsVisible?: boolean;
   receiptBusy?: boolean;
   activity: AgentToolActivitySnapshot;
@@ -869,6 +873,7 @@ function AgentShellActivity({ activity, libraryId, onExpand, ownerScope }: Agent
 }
 
 export default function AgentToolActivityCard({
+  pointerPlan,
   detailsVisible = true,
   receiptBusy = false,
   activity,
@@ -983,7 +988,7 @@ export default function AgentToolActivityCard({
                 interactionBusy,
                 onAction,
                 receiptBusy,
-                { libraryId, open: showBody && detailsVisible, ownerScope, sessionId: activity.sessionId, toolRunId: activity.id },
+                { libraryId, open: showBody && detailsVisible, ownerScope, sessionId: activity.sessionId, toolRunId: activity.id, pointerPlan },
               ))}
             </div>
           </div>

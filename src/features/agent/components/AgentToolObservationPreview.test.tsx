@@ -4,6 +4,9 @@ import { WorkspaceVisibilityContext } from '@/components/ui/workspace-visibility
 import { previewAgentAttachment } from '../services/agent.api';
 import AgentToolObservationPreview from './AgentToolObservationPreview';
 import AgentAttachmentPreview from './AgentAttachmentPreview';
+import AgentComputerPointerOverlay from './AgentComputerPointerOverlay';
+import { pointerPlanGeometry } from '../agent-computer-pointer-geometry';
+import type { AgentComputerPointerPlan } from '../agent-computer-pointer-plan';
 
 vi.mock('../services/agent.api', () => ({ previewAgentAttachment: vi.fn() }));
 vi.mock('./AgentAttachmentPreview', () => ({ default: () => null }));
@@ -36,6 +39,52 @@ afterEach(() => {
 });
 
 describe('managed Tool observation preview', () => {
+  it('ignores a stale image error after switching owner and loading current bytes', async () => {
+    preview.mockResolvedValue('data:image/png;base64,YQ==');
+    const renderer = render();
+    await act(async () => {});
+    const oldError = renderer.root.findByType('img').props.onError;
+    const next = { ...props, ownerScope: { ...props.ownerScope, accountScope: 'other-owner' } };
+    preview.mockResolvedValue('data:image/png;base64,Yg==');
+    await act(async () => { renderer.update(<AgentToolObservationPreview {...next} />); });
+    act(() => oldError());
+    expect(renderer.root.findByType('img').props.src).toBe('data:image/png;base64,Yg==');
+  });
+  const pointerPlan: AgentComputerPointerPlan = { attachmentId: props.attachmentId,
+    observationToolRunId: props.toolRunId, actionToolRunId: 'action', operation: 'drag',
+    width: 673, height: 439, point: { x: 9, y: 53 }, endPoint: { x: 181, y: 53 } };
+  it('overlays a visible plan on the original thumbnail and forwards intent to the same shared preview', async () => {
+    preview.mockResolvedValue('data:image/png;base64,YQ==');
+    const renderer = render(<AgentToolObservationPreview {...props} pointerPlan={pointerPlan} />);
+    await act(async () => {});
+    expect(renderer.root.findAllByType(AgentComputerPointerOverlay)).toHaveLength(0);
+    act(() => renderer.root.findByType('img').props.onLoad({ currentTarget: { naturalWidth: 673, naturalHeight: 439 } }));
+    const overlay = renderer.root.findByType(AgentComputerPointerOverlay);
+    expect(overlay.props.plan).toEqual(pointerPlan);
+    const svg = renderer.root.findByType('svg');
+    expect(svg.props).toMatchObject({ viewBox: '0 0 673 439', 'aria-hidden': 'true' });
+    expect(svg.props.style.pointerEvents).toBe('none');
+    expect(renderer.root.findByType('text').children.join('')).toBe('AI · 拖拽计划');
+    // The 439px screenshot is capped at 136px in the thumbnail; the arrow remains about 36px tall.
+    expect(31 * pointerPlanGeometry(pointerPlan, true).scale * 136 / 439).toBeGreaterThan(26);
+    expect(renderer.root.findByType('img').props.src).toBe('data:image/png;base64,YQ==');
+    act(() => renderer.root.findByType('button').props.onClick());
+    const full = renderer.root.findByType(AgentAttachmentPreview);
+    expect(full.props.pointerPlan).toEqual(pointerPlan);
+    expect(full.props.attachment.thumbnail).toBe('data:image/png;base64,YQ==');
+  });
+  it.each(['width', 'height', 'attachment', 'ToolRun'] as const)('keeps the original image unmarked on a %s mismatch', async boundary => {
+    preview.mockResolvedValue('data:image/png;base64,YQ==');
+    const plan = { ...pointerPlan };
+    if (boundary === 'attachment') plan.attachmentId = 'other';
+    if (boundary === 'ToolRun') plan.observationToolRunId = 'other';
+    const renderer = render(<AgentToolObservationPreview {...props} pointerPlan={plan} />);
+    await act(async () => {});
+    act(() => renderer.root.findByType('img').props.onLoad({ currentTarget: {
+      naturalWidth: boundary === 'width' ? 674 : 673, naturalHeight: boundary === 'height' ? 440 : 439,
+    } }));
+    expect(renderer.root.findAllByType(AgentComputerPointerOverlay)).toHaveLength(0);
+  });
   it('reads the session-bound managed PNG using the exact owner and library', async () => {
     preview.mockResolvedValue('data:image/png;base64,YQ==');
     const renderer = render();

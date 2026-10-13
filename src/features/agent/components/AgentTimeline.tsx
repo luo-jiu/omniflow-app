@@ -28,6 +28,7 @@ import { serializeAgentOwnerScope } from '@/shared/agent/agent-owner-scope';
 import { useAgentProcessExpansion } from '../hooks/useAgentProcessExpansion';
 import type { AgentTimelineItem } from '../agent-timeline';
 import AgentRunElapsed from './AgentRunElapsed';
+import { buildAgentComputerPointerPlans } from '../agent-computer-pointer-plan';
 
 const Timeline = styled.div`
   display: flex;
@@ -223,6 +224,7 @@ export default function AgentTimeline({
     [messages, runs, toolActivities],
   );
   const continuation = React.useMemo(() => buildAgentRunContinuationGroups(runs), [runs]);
+  const pointerPlans = React.useMemo(() => buildAgentComputerPointerPlans(toolActivities, libraryId), [toolActivities, libraryId]);
   const items = React.useMemo(
     () => {
       const resumedIds = new Set(runs.filter(run => run.resumesRunId).map(run => run.id));
@@ -287,6 +289,7 @@ export default function AgentTimeline({
               detailsVisible={detailsVisible}
               receiptBusyIds={receiptBusyIds}
               activities={item.activities}
+              pointerPlans={pointerPlans}
               approvalBusyIds={approvalBusyIds}
               interactionBusyIds={interactionBusyIds}
               key={item.key}
@@ -304,6 +307,7 @@ export default function AgentTimeline({
               detailsVisible={detailsVisible}
               receiptBusy={receiptBusyIds?.has(item.activity.id)}
               activity={item.activity}
+              pointerPlan={pointerPlans.get(item.activity.id)}
               approvalBusy={Boolean(
                 item.activity.approval
                 && approvalBusyIds.has(item.activity.approval.approvalId)

@@ -6,6 +6,8 @@ import styled from 'styled-components';
 import { getAppPopupContainer } from '@/utils/popup-container';
 import type { AgentAttachment, AgentAttachmentScope } from '@/shared/agent/agent-attachments';
 import { previewAgentAttachment } from '../services/agent.api';
+import type { AgentComputerPointerPlan } from '../agent-computer-pointer-plan';
+import { createAgentComputerPointerPreview } from '../agent-computer-pointer-preview';
 
 const ZoomControls = styled.div`
   display: flex; align-items: center; gap: 12px; padding: 8px;
@@ -17,28 +19,41 @@ const ZoomControls = styled.div`
   span { min-width: 48px; text-align: center; color: inherit; font-size: 12px; font-variant-numeric: tabular-nums; }
 `;
 
-export default function AgentAttachmentPreview({ attachment, scope, sessionId, onClose }: {
+export default function AgentAttachmentPreview({ attachment, scope, sessionId, onClose, pointerPlan }: {
   attachment: AgentAttachment;
   scope: AgentAttachmentScope;
   sessionId?: string;
   onClose: () => void;
+  pointerPlan?: AgentComputerPointerPlan;
 }) {
   const workspaceActive = React.useContext(WorkspaceVisibilityContext);
   const visibleRef = React.useRef(workspaceActive);
   visibleRef.current = workspaceActive;
-  const [src, setSrc] = React.useState(attachment.thumbnail || '');
+  const planKey = pointerPlan?.attachmentId === attachment.id ? JSON.stringify(pointerPlan) : '';
+  const requestKey = JSON.stringify([attachment.id, attachment.thumbnail, scope.libraryId, scope.ownerScope.accountScope,
+    scope.ownerScope.backendScope, sessionId, planKey, workspaceActive]);
+  const [image, setImage] = React.useState<{ key: string; src: string }>({ key: '', src: '' });
+  const src = image.key === requestKey ? image.src : attachment.thumbnail || '';
   const [error, setError] = React.useState('');
   const [loading, setLoading] = React.useState(true);
   const { libraryId, ownerScope } = scope;
   React.useEffect(() => {
     let active = true;
-    setSrc(attachment.thumbnail || ''); setError(''); setLoading(true);
-    void previewAgentAttachment({ id: attachment.id, libraryId, ownerScope, sessionId }).then(url => {
-      if (active) setSrc(url);
+    const controller = new AbortController();
+    setImage({ key: requestKey, src: attachment.thumbnail || '' }); setError(''); setLoading(true);
+    if (!workspaceActive) return () => { active = false; controller.abort(); };
+    void previewAgentAttachment({ id: attachment.id, libraryId, ownerScope, sessionId }).then(async url => {
+      if (!active) return;
+      setImage({ key: requestKey, src: url });
+      if (planKey) {
+        const plan = JSON.parse(planKey) as AgentComputerPointerPlan;
+        const marked = await createAgentComputerPointerPreview(url, plan, controller.signal).catch(() => url);
+        if (active) setImage({ key: requestKey, src: marked });
+      }
     }).catch(() => { if (active) setError('清晰图片暂不可用，仅显示缩略图'); })
       .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
-  }, [attachment.id, attachment.thumbnail, libraryId, ownerScope, sessionId]);
+    return () => { active = false; controller.abort(); };
+  }, [attachment.id, attachment.thumbnail, libraryId, ownerScope, sessionId, planKey, requestKey, workspaceActive]);
   React.useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
     return () => { if (visibleRef.current && previous?.isConnected) previous.focus(); };

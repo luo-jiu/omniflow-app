@@ -62,6 +62,7 @@ import type { AgentProviderMessage } from './agent-provider-model';
 import {
   estimateAgentProviderTurnTokens,
   estimateAgentTextTokens,
+  resolveAgentContextBudget,
 } from './agent-context-projection';
 import { buildAgentSystemPrompt } from './agent-prompt-assembler';
 import { createAgentPlanControlTool } from './agent-plan-model';
@@ -313,14 +314,17 @@ describe('Agent orchestrator', () => {
     return { prepareMain, execute, toolInput, restore: () => snapshotSpy.mockRestore() };
   }
 
-  it.each(['allow', 'ask'] as const)('keeps builtin setText body private through %s preparation, execution, SQLite, IPC and provider continuation', async behavior => {
+  it.each([
+    ['allow', 'ask'], ['ask', 'ask'], ['allow', 'full-access'], ['ask', 'full-access'],
+  ] as const)('keeps builtin setText body private through %s preparation in %s, execution, SQLite, IPC and provider continuation', async (behavior, permissionMode) => {
     const fixture = computerTextFixture(behavior);
     const webContents = sender();
     const orchestrator = createOrchestrator({ contextBudget: { contextWindowTokens: 128_000 },
       getModelMetadata: async () => ({ supportsImages: true }) });
     try {
-      const started = await orchestrator.start(webContents as never, { ...request(), userPrompt: '验证文字输入工具' });
-      if (behavior === 'ask') {
+      const started = await orchestrator.start(webContents as never, { ...request(), permissionMode, userPrompt: '验证文字输入工具' });
+      const asksForApproval = behavior === 'ask' && permissionMode !== 'full-access';
+      if (asksForApproval) {
         const approval = await pendingWindowApproval(webContents);
         expect(JSON.stringify(approval)).not.toContain(fixture.toolInput.text);
         expect(approval.call.input).toEqual({ observationId: fixture.toolInput.observationId, elementId: fixture.toolInput.elementId,
@@ -329,7 +333,8 @@ describe('Agent orchestrator', () => {
         await expect(approveWindow(orchestrator, webContents, approval)).resolves.toMatchObject({ approved: true });
       }
       await waitForCompletedFinal(webContents, '文字工具验证完成。', started);
-      expect(fixture.prepareMain).toHaveBeenCalledTimes(behavior === 'ask' ? 2 : 1);
+      expect(webContents.send.mock.calls.filter(call => call[1]?.type === 'tool-approval-required')).toHaveLength(asksForApproval ? 1 : 0);
+      expect(fixture.prepareMain).toHaveBeenCalledTimes(asksForApproval ? 2 : 1);
       for (const [input] of fixture.prepareMain.mock.calls) expect(input).toEqual(fixture.toolInput);
       expect(fixture.execute).toHaveBeenCalledOnce();
       const session = (await store.getSession(started.sessionId, OWNER_SCOPE, 3))!;
@@ -741,6 +746,39 @@ describe('Agent orchestrator', () => {
       expect(session.toolActivities[0].approval?.status).toBe('approved');
       expect(fixture.prepareObserve.mock.calls[1][1].preparationIdentity.preparedActionId)
         .not.toBe(fixture.prepareObserve.mock.calls[0][1].preparationIdentity.preparedActionId);
+    } finally { await orchestrator.shutdown(); fixture.restore(); }
+  });
+
+  it('automatically seals the first real built-in window share in full-access and reuses its exact target', async () => {
+    const fixture = preparedComputerWindowFixture();
+    const webContents = sender();
+    const orchestrator = createOrchestrator({ contextBudget: { contextWindowTokens: 128_000 },
+      getModelMetadata: async () => ({ supportsImages: true }) });
+    try {
+      const started = await orchestrator.start(webContents as never, { ...request(), permissionMode: 'full-access',
+        userPrompt: '完全访问下查看当前应用窗口两次' });
+      await waitForCompletedFinal(webContents, '窗口核对完成。', started);
+      expect(webContents.send.mock.calls.filter(call => call[1]?.type === 'tool-approval-required')).toHaveLength(0);
+      expect(fixture.prepareObserve).toHaveBeenCalledTimes(2);
+      expect((await fixture.prepareObserve.mock.results[0].value).decision).toMatchObject({ behavior: 'ask', risk: 'read' });
+      expect((await fixture.prepareObserve.mock.results[1].value).decision).toMatchObject({ behavior: 'allow', risk: 'read' });
+      expect(fixture.capture).toHaveBeenCalledTimes(2);
+      expect(fixture.keepWindowRendering).toHaveBeenCalledOnce();
+      expect(fixture.renderingRelease).toHaveBeenCalledOnce();
+      const session = (await store.getSession(started.sessionId, OWNER_SCOPE, 3))!;
+      expect(session.toolActivities).toHaveLength(2);
+      const first = session.toolActivities[0].preparation!;
+      expect(first.action).toMatchObject({ kind: 'computer.observe', version: 2, applicationLabel: 'Electron', windowLabel: 'OmniFlow QA' });
+      const targetId = Reflect.get(first.action, 'targetId');
+      for (const activity of session.toolActivities) {
+        expect(activity.status).toBe('completed');
+        expect(activity.permissionBehavior).toBe('allow');
+        expect(activity.preparation?.action).toMatchObject({ targetId, version: 2 });
+        expect(activity.preparation?.snapshotHash).toBeTruthy();
+        expect(activity.result).toMatchObject({ ok: true, data: { targetId, captureScope: 'window', clickReady: true } });
+      }
+      const expectedWindow = fixture.getWindow();
+      for (const [window] of fixture.capture.mock.calls) expect(window).toMatchObject(expectedWindow);
     } finally { await orchestrator.shutdown(); fixture.restore(); }
   });
 
@@ -6347,14 +6385,31 @@ describe('Agent orchestrator', () => {
   });
 
   it('stops before a second provider turn when Tool loop messages exceed the window', async () => {
+    const currentRequest = request();
+    const registeredTools = agentToolRegistry.list();
+    const tools = [createAgentPlanControlTool(registeredTools.filter(tool => tool.kind === 'business').map(tool => tool.name)), ...registeredTools];
+    const catalog = skillPromptCatalog();
+    const systemPrompt = buildAgentSystemPrompt(currentRequest.appContext, currentRequest.perception,
+      registeredTools.map(tool => tool.name), catalog.summaries, catalog.omittedSkillCount);
+    const firstTurnTokens = estimateAgentProviderTurnTokens({ messages: [{ content: currentRequest.userPrompt, role: 'user' }], systemPrompt, tools });
+    const defaults = resolveAgentContextBudget(undefined);
+    // Leave the first turn room independently of catalog wording, while the oversized reply still exceeds it.
+    const contextBudget = { ...defaults, contextWindowTokens: firstTurnTokens
+      + defaults.outputReserveTokens + defaults.toolLoopReserveTokens + 4_000 };
+    const providerRequestLimit = contextBudget.contextWindowTokens - contextBudget.outputReserveTokens;
+    const overflowReply = { content: 'x'.repeat(60_000),
+      toolCalls: [{ id: 'call-overflow', input: {}, name: 'file.list' }] };
     const executeMain = vi.fn(async () => ({ message: '不应执行', ok: true }));
-    mocks.streamAgentProviderTurn.mockResolvedValueOnce({
-      content: 'x'.repeat(60_000),
-      toolCalls: [{ id: 'call-overflow', input: {}, name: 'file.list' }],
+    mocks.streamAgentProviderTurn.mockImplementationOnce(async (_connection, input) => {
+      expect(estimateAgentProviderTurnTokens(input)).toBeLessThan(providerRequestLimit);
+      expect(estimateAgentProviderTurnTokens({ ...input,
+        messages: [...input.messages, { role: 'assistant', ...overflowReply }],
+      })).toBeGreaterThan(providerRequestLimit);
+      return overflowReply;
     });
     const webContents = sender();
     const orchestrator = createAgentOrchestrator({
-      contextBudget: { contextWindowTokens: 28_000 },
+      contextBudget,
       getRuntimeProfile: () => ({
         apiKey: 'test-key',
         baseUrl: 'https://ai.example.com/v1',
@@ -6365,7 +6420,7 @@ describe('Agent orchestrator', () => {
       toolBroker: { executeMain } as never,
     });
 
-    const started = await orchestrator.start(webContents as never, request());
+    const started = await orchestrator.start(webContents as never, currentRequest);
     await vi.waitFor(() => {
       expect(webContents.send).toHaveBeenCalledWith('agent:chat:event', expect.objectContaining({
         message: expect.stringContaining('本轮未执行工具'),

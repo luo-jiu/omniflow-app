@@ -2,9 +2,9 @@
 
 2026-10-12 定向输入：新增可信内置 `computer.input` 展示分类，仍消费规范 ToolActivity / prepared action / result，不新增 UI 执行状态或键鼠 IPC。首次共享卡在 AX 的 operations 之外显示独立 inputOperations，逐项说明快捷键 / 右键 / 双击 / 拖拽；旧无字段 action 不增加许可。单次 computer.input 审批仅展示 main public action 的应用 / 窗口及规范键组合或同张图像中的坐标、拖拽终点和时长，未知字段、裸字母 / 数字快捷键、动作或资料库不匹配时不能批准；不从 call.input 或模型自报 preview 拼内容。发送后必须重新观察，不将后台事件投递表述为应用已完成。
 
-成功 computer.input 只显示“已发送快捷键 / 已发送右键 / 已发送双击 / 已发送拖拽”紧凑操作行，快捷键附规范组合；仅 main 重建的 builtin 来源、无插件来源、完整 prepared action、当前资料库和 ToolRun operationId、dispatched / committed、CGEventPostToPid 方法及 confirmed 释放回执均匹配时成立。confirmed 只表示释放事件已投递。四动作与连续观察 / AX 点击 / 文本 / 滚动共用 computer-use 分组，待批准、交互、未知回执、取消 / 中断和来源不符继续保留边界，失败详情依旧可检查。TextEdit 新事件路线的原生验收已确认快捷键、双击、拖拽；右键打开菜单后返回 unknown，不能显示“已发送右键”成功行，菜单内输入未开放。分组不删除 ToolRun 审计；main 新增鼠标意图图案，不是独立 OS 光标，UI 操作记录不证明持续零干扰。单窗图像仍只走原截图缩略图与聊天大图预览。自动化已覆盖四动作行、审批拒绝和分组边界；新工具的内置 Agent GUI、亮暗主题与窄窗视觉验收状态由验证矩阵持有，原生 TextEdit / fixture 结果不替代 UI 验收，精确版本支持见[后台定向输入](agent-computer-use.md#后台定向输入2026-10-12)。
+成功 computer.input 只显示“已发送快捷键 / 已发送右键 / 已发送双击 / 已发送拖拽”紧凑操作行，快捷键附规范组合；仅 main 重建的 builtin 来源、无插件来源、完整 prepared action、当前资料库和 ToolRun operationId、dispatched / committed、CGEventPostToPid 方法及 confirmed 释放回执均匹配时成立。confirmed 只表示释放事件已投递。四动作与连续观察 / AX 点击 / 文本 / 滚动共用 computer-use 分组，待批准、交互、未知回执、取消 / 中断和来源不符继续保留边界，失败详情依旧可检查。TextEdit 新事件路线的原生验收已确认快捷键、双击、拖拽；右键打开菜单后返回 unknown，不能显示“已发送右键”成功行，菜单内输入未开放。分组不删除 ToolRun 审计；main 新增鼠标意图图案，不是独立 OS 光标，UI 操作记录不证明持续零干扰。单窗原图沿用原附件；聊天缩略图和共用大图可叠加明确标为 AI 计划的阅读提示。自动化已覆盖四动作行、审批拒绝和分组边界；新工具的内置 Agent GUI、亮暗主题与窄窗视觉验收状态由验证矩阵持有，原生 TextEdit / fixture 结果不替代 UI 验收，精确版本支持见[后台定向输入](agent-computer-use.md#后台定向输入2026-10-12)。
 
-2026-10-13 鼠标意图图案：由原 main runtime 在获准指针动作正式执行前持有有界视觉租约，只绘制冻结目标位置和静态拖拽计划；不从 renderer 调用输入，也不复制 Session / Run / ToolRun 状态。普通层 nonactivating NSPanel 在目标上方、覆盖图案区域的窗口下方；夹层只能与整个图案表面完全无交集，否则隐藏，不能仅凭同 PID 豁免。点击穿透、不能取得焦点，不画到原窗之外；快捷键不虚构指针位置。350 毫秒预告后先关闭图案并等待真实退出，再核对窗口、owner、观察和能力，图案不与正式指针事件并存；关闭未确认在首发前拒绝。未知、取消、结束、共享替换与窗口变化收口，迟到回执不复活执行。显示或关闭成功不代表真实输入成功，操作行和大图预览继续只消费原可信输入回执。具体实现与验收见[鼠标意图指示器](agent-computer-use.md#鼠标意图指示器2026-10-12)。
+2026-10-13 鼠标意图图案：由原 main runtime 在获准指针动作正式执行前持有有界视觉租约，只绘制冻结目标位置和静态拖拽计划；不从 renderer 调用输入，也不复制 Session / Run / ToolRun 状态。普通层 nonactivating NSPanel 在目标上方、覆盖图案区域的窗口下方；夹层只能与整个图案表面完全无交集，否则隐藏，不能仅凭同 PID 豁免。点击穿透、不能取得焦点，不画到原窗之外；快捷键不虚构指针位置。900 毫秒预告后先关闭图案并等待真实退出，再核对窗口、owner、观察和能力，图案不与正式指针事件并存；关闭未确认在首发前拒绝。未知、取消、结束、共享替换与窗口变化收口，迟到回执不复活执行。显示或关闭成功不代表真实输入成功，操作行继续只消费原可信输入回执；大图上的 AI 计划仅由可信 prepared action 派生，不代表发送或成功。具体实现与验收见[鼠标意图指示器](agent-computer-use.md#鼠标意图指示器2026-10-12)。
 
 2026-10-13 正式 GUI 中，B2 的 observe / input / observe 同组，成功双击为紧凑无详情行；D2 的未知右键保留独立失败详情“后台输入结果未知，请重新观察，勿重复操作”，前后 observe 分为边界，不能冒充成功行。独立 CUA 实看 D2 菜单，内置单窗图仍只有原文档，不包含另窗菜单；菜单清理由验收者完成，不计 Agent 能力。限定 Run、图像与回执结果见验证矩阵。
 
@@ -22,13 +22,17 @@
 
 窗口发现显示普通只读工具结果，不加入已有 observe / click 操作折叠组。观察内 elementId 点击按模式区分：AX-only 使用无坐标 V3 `computer.click`，可信成功行核对本次窗口、观察与元素身份；both 使用 V2，public action 和回执保留派生 x/y。两者均不创建 UI 执行或授权状态源。缩略图、AX 和聊天大图预览继续复用现有入口；Provider 结果可能因模型上下文预算产生独立显式投影截断，不能由 UI 摘要推定模型看到了完整文本。具体结果协议见 [屏幕查看与点击](agent-computer-use.md)。
 
-屏幕工具沿用受控 ToolRun 展示。首次 V2 `computer.observe` 的共享卡只读 main 规范 action 的应用、窗口名称、operations 和独立 inputOperations；按实际 action 说明点击 / 文本输入 / 滚动及快捷键 / 右键 / 双击 / 拖拽许可，历史无 operations 只说明点击、无 inputOperations 不授定向输入。卡片解释仅此窗口图像和界面控件信息送当前 AI 并保存在会话、切换窗口需重新批准、停止或结束许可失效，以及系统权限和发送后实际观察核对要求；缺少或不匹配准备动作不能批准。renderer 不持有共享许可或输入执行 IPC，V1 屏幕 action 仅保留历史显示，自动化与权限限制见 [应用窗口操作](agent-computer-use.md)。
+屏幕工具沿用受控 ToolRun 展示。询问访问 / 组内自动下，首次 V2 `computer.observe` 的共享卡只读 main 规范 action 的应用、窗口名称、operations 和独立 inputOperations；按实际 action 说明点击 / 文本输入 / 滚动及快捷键 / 右键 / 双击 / 拖拽许可，历史无 operations 只说明点击、无 inputOperations 不授定向输入。卡片解释仅此窗口图像和界面控件信息送当前 AI 并保存在会话、切换窗口需重新授权、停止或结束许可失效，以及系统权限和发送后实际观察核对要求；缺少或不匹配准备动作不能批准。renderer 不持有共享许可或输入执行 IPC，V1 屏幕 action 仅保留历史显示，自动化与权限限制见 [应用窗口操作](agent-computer-use.md)。
+
+显式完全访问对六个可信内置 computer 工具的规范已准备动作自动授权，包括首次共享和切换窗口，不展示人工批准卡；仍保留 main 注册 / frozen snapshot 身份、prepare / seal、单窗能力和提交结算。询问访问 / 组内自动维持共享卡，插件或仅名称匹配不取得该规则。
 
 连续的内置 `computer.observe / computer.click / computer.setText / computer.scroll / computer.input` 在同一 Run 内归为一个 `computer-use` 工具组，不按读取和写入分别折叠。分组必须同时具备 main 重建的内置来源标记和规范 prepared action；首次观察已批准的共享记录可在执行后加入该组，pending 审批、交互、未知操作回执、取消/中断、插件或其他工具、不同 Run 以及 commentary / assistant / user 消息仍是边界。组只改变展示，保留每个 ToolRun 的顺序和审计，key 仍来自首个 ToolRun。
 
 成功 `computer.observe` 的 V2 窗口动作默认显示“已查看窗口”一行，V1 历史屏幕动作仍显示“已查看屏幕”；带图片的观察展开后显示真实截图缩略图，不重复状态说明。AX-only 不显示缩略图、不读取附件。图片只由本地 presenter 从 main 重建的 `toolMetadata.builtinComputerTool`、无插件来源的规范 prepared action、匹配的当前资料库与目标身份、有效 UUID 和截图尺寸生成固定 `attachment-image` 语义块；V2 还要求 `captureScope = window` 且 `targetId` 与准备动作一致，不能把显示器结果冒充窗口截图。该来源标记只服务展示，不是附件读取或执行授权。块中只携带 opaque 附件 ID 和 alt，不接收 Tool 或模型提供的图片 URL、宿主路径或编码正文。
 
 mode=both 的 V2 观察可同时带窗口截图和 `axTree / axTreeTruncated` 摘要。AX 预览复用相同的内置来源、动作、资料库、窗口范围、目标和 observationId 核对，额外要求非空纯文本、两字段类型正确、UTF-8 不超过 12 KiB，且不含非法控制字符、双向文本控制符或孤立代理；通过后才由本地 presenter 生成 `computer-ax` 块。空树、旧 helper 缺失字段或非法 AX 字段不显示 AX，不影响有效图片预览。带图观察卡展开后先显示缩略图，AX 单独以“AX”折叠项展示，摘要截断则标记“AX · 已截断”；展开为有界滚动的 `pre` 纯文本，不解释 HTML/Markdown、不生成元素编号操作，收起或隐藏工作区释放展开内容。AX-only观察（mode=ax / observationSource=ax）无图时也可显示经同窗身份核对的摘要与白名单控件详情，不读取附件；mode=screenshot只展示图片。不能据展示块扩张点击许可；与 CUA 同窗口 AX 信息的一致性及新增预览的实机状态由验证矩阵记录。
+
+AI 计划由 Timeline 对规范 ToolActivity 一次派生，要求同 Session / Run / library、可信 builtin 无插件来源及完整 prepared action，并与动作之前观察的 targetId / observationId 精确匹配。V2 点击和指针输入叠加箭头 / 拖拽路径，AX-only V3 与无坐标操作不虚构标记；后续图不继承，unknown 跨组仍可关联前置原图。缩略图 SVG 与大图 renderer 临时 canvas 只用于显示，原附件、模型图与持久化图片不改。合成须验证解码尺寸等于规范图尺寸、限制像素预算；失败回原图、关闭 / 隐藏 / 切作用域 / 迟到回调不得带回旧计划。计划文字不表述执行成功，普通用户附件未传计划时沿用原行为。
 
 截图仅在卡片、所在工具组及 Run 过程均展开且工作区可见时，经现有 `previewAgentAttachment` 读取 main 保存的归一化 PNG，必须携带准确的账号、后端、资料库与所属 Session；只接受接口返回的 PNG data URL，图片最大显示为 `280×136px`。缩略图为可键盘聚焦的预览按钮，点击直接复用用户聊天附件的 `AgentAttachmentPreview`，使用相同缩放、Esc / 遮罩关闭与焦点恢复行为。收起卡片、工具组或 Run 过程、隐藏工作区、切换 owner / backend / library / Session / ToolRun / image ID、以及卸载时释放当前图片并关闭大图；迟到响应不能写回新上下文，不建立全局图片缓存或新的 ToolRun 状态源。成功且身份及 `dispatched / committed` 回执匹配的 `computer.click` 仅显示“已发送点击”操作行，没有展开区或重复回执；V1 核对 displayId，V2 核对 targetId，V3进一步核对单窗/资料库/观察/elementId及一次回执且没有坐标字段，该文案不代表目标界面已确认改变，未知结果和失败仍保留可展开的安全详情且不提供盲重试。实机验收状态见验证矩阵。
 

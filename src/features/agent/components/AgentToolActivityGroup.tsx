@@ -14,6 +14,7 @@ import AgentDisclosureChevron from './AgentDisclosureChevron';
 import AgentActivityText from './AgentActivityText';
 import { buildAgentToolSummary } from '../agent-tool-presentation';
 import AgentToolIcon from './AgentToolIcon';
+import type { AgentComputerPointerPlan } from '../agent-computer-pointer-plan';
 
 const ActivityGroup = styled.section`
   --agent-tool-record-color: color-mix(
@@ -179,6 +180,7 @@ const ActivityGroup = styled.section`
 `;
 
 interface AgentToolActivityGroupProps {
+  pointerPlans?: ReadonlyMap<string, AgentComputerPointerPlan>;
   activities: AgentToolActivitySnapshot[];
   approvalBusyIds: Set<string>;
   detailsVisible?: boolean;
@@ -206,6 +208,7 @@ function activityCard(
       detailsVisible={detailsVisible}
       receiptBusy={props.receiptBusyIds?.has(activity.id)}
       activity={activity}
+      pointerPlan={props.pointerPlans?.get(activity.id)}
       approvalBusy={Boolean(
         activity.approval && props.approvalBusyIds.has(activity.approval.approvalId)
       )}

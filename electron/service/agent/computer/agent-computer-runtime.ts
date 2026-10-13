@@ -23,6 +23,7 @@ import { AgentComputerWindowIndicatorCloseError, UNCONFIRMED_WINDOW_INDICATOR_CL
   type AgentComputerWindowIndicatorRequest, type AgentComputerWindowIndicatorLease } from '../../../platform/computer-use/window-indicator';
 
 const OBSERVATION_TTL_MS = 60_000;
+const POINTER_PREVIEW_MS = 900;
 const MAX_RUN_SCREENSHOTS = 32;
 const MAX_RUN_SCREENSHOT_BYTES = 64 * 1024 * 1024;
 const MAX_RUN_OBSERVATIONS = 256;
@@ -326,7 +327,7 @@ export function createAgentComputerRuntime(dependencies: AgentComputerRuntimeDep
       if (stopped) lease.dispose();
       else if (lease.shown) await new Promise<void>(resolve => {
         const finish = () => { clearTimeout(timer); controller.signal.removeEventListener('abort', finish); resolve(); };
-        const timer = setTimeout(finish, 350);
+        const timer = setTimeout(finish, POINTER_PREVIEW_MS);
         controller.signal.addEventListener('abort', finish, { once: true });
         if (controller.signal.aborted) finish();
       });

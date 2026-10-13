@@ -1,5 +1,15 @@
 # 前端验证矩阵
 
+## Agent 完全访问与两处鼠标提示（2026-10-13）
+
+- 完全访问现在自动授权六个可信内置电脑工具的规范已准备动作，包括首次 `observe/read` 与切换窗口；沿用 frozen registry identity、main prepare / seal、单窗能力、TTL、receiver、OS 权限及提交结算。ask / group、deny、插件冒充、缺准备动作及旧整屏 action 不扩大权限。直接修正会话模式，没有新增 dev 放权变量。原生图案预告延长为 900ms，仍等待视觉进程实际退出再复验 / 输入。
+- renderer 从可信 ToolRun 的规范 action 派生前置图上的「AI 计划」：同 Session / Run / library、target / observation 精确匹配；V2 点击及右键 / 双击 / 拖拽有坐标时显示，AX-only V3、快捷键等不猜位置。缩略图 SVG 与共用大图临时 canvas 不改原 PNG、附件或模型输入；隐藏、切作用域、卸载、迟到与异常均有界清理。
+- 真实 E Run `d14366fb-5e86-4392-b5d1-fb230bb13e2e` 在开发版 Win / libraryId=3、本机 macOS MinIO、gpt-5.5 / medium 与原 QA Session `8d93fc2e-9ac7-4987-9e6a-bf06133aa8b8` 中，通过 UI 选择完全访问并从 Composer 提交。24s 完成 `windows → observe both → 一次 doubleClick(70,53) → observe both`；四工具均 completed、permissionBehavior=allow、approval_status=null，没有共享卡或额外交互确认。两图均精确 TextEdit QA 单窗、673×439；双击为4事件、dispatched / committed / confirmed，独立 CUA AX selectedText=`bravo`，三行正文未变。
+- 实看 observe / input / observe 同组，双击为紧凑操作行。前置缩略图和聊天共用大图均显示紫色箭头、白边及「AI · 双击计划」；大图233%→223%缩放、Esc关闭与焦点回缩略图通过。收起前置图后打开后置图，没有继承旧计划。历史 D2 unknown 右键前置图也可显示「AI · 右键计划」，失败详情仍独立，不显示成功操作行；没有重新发送右键。两份托管原图在预览前后的 SHA-256 一致，实看不含计划箭头。
+- E 的自有图案面板用精确子进程 / 内核启动身份、唯一面板 ID 与几何约束的只读 SCK 检查确认：仅捕获独立面板自身93×40 PNG，实看紫色箭头、白边和「AI · 双击」；紫色979像素、白色348像素、邻紫白边339像素，首见后198.034ms完成。5644次目标元数据采样全部匹配，面板26/26次 layer0、目标内且层序安全；面板首次缺席至输入 helper 首次出现相隔272.449ms，未观测重叠，最终均缺席。前台和物理指针采样端点相同。这些不证明遮挡后的合成桌面可见、持续零干扰或 Node exit / close 回执；目标被覆盖时图案仍随遮挡，符合用户选择。证据 `/tmp/omniflow-panel-pixels-29457-0rL34a/final-readonly-aggregate-29457.json`，正式 Run 的白名单证据及两原图位于系统临时目录 `omniflow-gui-evidence-oct13-nku0996u/`。
+- 最终 `npm run lint` / `npm test` / `npm run build` 全部 exit0：493文件 / 5625项通过，3文件 / 7项沿用跳过；测试开始11:51:51，耗时46.53s。全量发现并修复 Fast Refresh 共享导出位置、测试只读属性构造，以及工具说明变长后旧上下文测试窗口过小；后者改为按实际首轮估算推导测试预算，仍验证第二轮溢出且工具零执行，生产预算不变。最后两测试文件的 ESLint 分别通过，独立 review 未发现剩余问题。日志 `/tmp/omniflow-pointer-access-final-{lint,test,build}-20261013.log`。构建与开发启动串行，没有发布或推送。
+- QA文档已关闭、正文未修改，面板观察器已退出；开发版与原本机 API / 容器保留，开发版停在 E 的计划缩略图便于查看。亮暗主题切换、窄窗、多显示器、全屏 / 其他 Space、签名安装包及其他 receiver 版本没有在本轮补验；生产名单仍为 TextEdit415 + macOS25F84，既有其他App AX能力不等于支持新定向手势。
+
 ## Agent 真实 GUI 与图案图层复验（2026-10-13）
 
 - 解锁后只使用开发版、Win / libraryId=3、本机 macOS MinIO 和自有可丢弃 TextEdit 三行文档；未启动旧安装版、访问第一个资料库或新增系统权限。真实任务均由 Composer 提交，Session `8d93fc2e-9ac7-4987-9e6a-bf06133aa8b8`；每个 Run 重新发现窗口、首次观察走标准共享批准。生产 receiver 仍限定 TextEdit 1.20 / build415、macOS 26.5.2 / build25F84。

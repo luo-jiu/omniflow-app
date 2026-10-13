@@ -408,7 +408,7 @@ describe('Agent pointer intent indicator', () => {
       f.dependencies.indicatePointer = vi.fn(async () => ({ shown: true, closed: Promise.resolve(true), dispose }));
       const prepared = await f.prepare({ operation: 'doubleClick', point: { x: 10, y: 10 } }, seen.observationId);
       const running = f.runtime.input(prepared, f.controller.signal, f.commit);
-      await vi.advanceTimersByTimeAsync(349);
+      await vi.advanceTimersByTimeAsync(899);
       expect(f.dependencies.indicatePointer).toHaveBeenCalledOnce();
       expect(f.commit.begin).not.toHaveBeenCalled(); expect(f.input).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(1);
@@ -439,7 +439,7 @@ describe('Agent pointer intent indicator', () => {
       f.dependencies.indicatePointer = vi.fn(async () => visual.lease);
       const prepared = await f.prepare({ operation: 'drag', point: { x: 10, y: 10 }, endPoint: { x: 20, y: 20 }, durationMs: 300 }, seen.observationId);
       const running = f.runtime.input(prepared, f.controller.signal, f.commit);
-      await vi.advanceTimersByTimeAsync(shown ? 349 : 0);
+      await vi.advanceTimersByTimeAsync(shown ? 899 : 0);
       if (shown) expect(visual.dispose).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(shown ? 1 : 0);
       await visual.inClosing;

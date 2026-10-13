@@ -6,7 +6,7 @@
 
 ---
 
-2026-10-13：Agent 操作外部获准窗口的鼠标意图图案由 main-only `window-indicator.ts` 与固定原生 helper 承接，不使用下面的交互 `overlay BrowserWindow`。它必须是普通层、nonactivating、点击穿透的视觉面板，排在目标窗口上方并随遮挡；夹层仅允许有效且与完整图案表面完全不相交的窗口，不成为 main / key window。350ms 预告后等待面板进程实际退出才允许正式指针动作，不能用点击穿透配置推定后台事件消费无干扰；没有 overlay 请求、renderer 执行入口或新业务状态 owner。下面的交互弹框会接管鼠标且绑定自有主窗口，不适合直接用作外部应用指示器。生命周期、截图排除和冻结坐标的契约见[鼠标意图指示器](agent-computer-use.md#鼠标意图指示器2026-10-12)。
+2026-10-13：Agent 操作外部获准窗口的鼠标意图图案由 main-only `window-indicator.ts` 与固定原生 helper 承接，不使用下面的交互 `overlay BrowserWindow`。它必须是普通层、nonactivating、点击穿透的视觉面板，排在目标窗口上方并随遮挡；夹层仅允许有效且与完整图案表面完全不相交的窗口，不成为 main / key window。900ms 预告后等待面板进程实际退出才允许正式指针动作，不能用点击穿透配置推定后台事件消费无干扰；没有 overlay 请求、renderer 执行入口或新业务状态 owner。下面的交互弹框会接管鼠标且绑定自有主窗口，不适合直接用作外部应用指示器。生命周期、截图排除和冻结坐标的契约见[鼠标意图指示器](agent-computer-use.md#鼠标意图指示器2026-10-12)。
 
 ## 1. 背景与动机
 
