@@ -104,18 +104,32 @@ struct WindowIndicatorStackEntry {
 
 func windowIndicatorStackIsSafe(_ entries: [WindowIndicatorStackEntry], target: WindowIdentity,
                                 targetStartedAt: Int64?, panelId: UInt32, panelPID: Int32, panelBounds: Rect) -> Bool {
-    guard target.valid, targetStartedAt == target.processStartedAt, panelId != target.windowId,
-          panelPID > 0, panelPID != target.pid, target.bounds.contains(panelBounds),
+    guard target.valid, targetStartedAt == target.processStartedAt, panelId > 0, panelId != target.windowId,
+          panelPID > 0, panelPID != target.pid, panelBounds.valid, target.bounds.contains(panelBounds),
+          entries.count <= 4096,
           entries.filter({ $0.windowId == target.windowId }).count == 1,
           entries.filter({ $0.windowId == panelId }).count == 1,
           let targetIndex = entries.firstIndex(where: { $0.windowId == target.windowId }),
-          let panelIndex = entries.firstIndex(where: { $0.windowId == panelId }), panelIndex + 1 == targetIndex else { return false }
+          let panelIndex = entries.firstIndex(where: { $0.windowId == panelId }), panelIndex < targetIndex else { return false }
     let actual = entries[targetIndex]
     let panel = entries[panelIndex]
-    return actual.onScreen && actual.pid == target.pid && actual.layer == target.layer
-        && actual.bounds == target.bounds && actual.title == target.title && actual.alpha.isFinite && actual.alpha > 0
+    guard actual.onScreen && actual.pid == target.pid && actual.layer == target.layer
+        && actual.bounds == target.bounds && actual.title == target.title
+        && actual.alpha.isFinite && actual.alpha > 0 && actual.alpha <= 1
         && panel.onScreen && panel.pid == panelPID && panel.layer == 0 && panel.bounds == panelBounds
-        && panel.alpha.isFinite && panel.alpha > 0
+        && panel.alpha.isFinite && panel.alpha > 0 && panel.alpha <= 1 else { return false }
+    // AppKit may place a title-bar accessory between an ordered panel and its
+    // target. The entire panel surface must remain below every surface that
+    // could cover that part of the target; same-PID windows get no exemption.
+    // Only fully known, disjoint intervening normal windows are harmless.
+    var interveningIds = Set<UInt32>()
+    for entry in entries[(panelIndex + 1)..<targetIndex] {
+        guard entry.windowId > 0, interveningIds.insert(entry.windowId).inserted,
+              entry.pid > 0, entry.layer == 0, entry.onScreen, entry.bounds.valid,
+              entry.alpha.isFinite, entry.alpha > 0, entry.alpha <= 1,
+              entry.bounds.intersection(panelBounds) == nil else { return false }
+    }
+    return true
 }
 
 func windowIndicatorStack(targetWindowId: UInt32) -> [WindowIndicatorStackEntry]? {

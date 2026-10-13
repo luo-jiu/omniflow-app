@@ -13,10 +13,22 @@ export interface AgentComputerWindowIndicatorRequest {
 export interface AgentComputerWindowIndicatorLease {
   /** The native helper scheduled a display, not proof of continuous visibility. */
   shown: boolean;
+  /** True only after actual process exit/close, or when no child was spawned. Never rejects. */
+  closed: Promise<boolean>;
   dispose(): void;
 }
 
-const noIndicator: AgentComputerWindowIndicatorLease = Object.freeze({ shown: false, dispose() {} });
+export const UNCONFIRMED_WINDOW_INDICATOR_CLOSE_NOTICE = '鼠标图案关闭未确认，Agent 鼠标操作已暂停；请重启应用后再操作。';
+
+/** Main-only lifecycle failure. Never use a kill request as a closure receipt. */
+export class AgentComputerWindowIndicatorCloseError extends Error {
+  constructor() {
+    super(UNCONFIRMED_WINDOW_INDICATOR_CLOSE_NOTICE);
+    this.name = 'AgentComputerWindowIndicatorCloseError';
+  }
+}
+
+const noIndicator: AgentComputerWindowIndicatorLease = Object.freeze({ shown: false, closed: Promise.resolve(true), dispose() {} });
 // Queued child/pipe errors may arrive after close or destroy. This handler has no
 // lease, signal or runtime closure; the temporary emitters can still be collected.
 const ignoreTerminatedError = () => {};
@@ -98,34 +110,38 @@ export async function showAgentComputerWindowIndicator(input: AgentComputerWindo
   if (process.platform !== 'darwin') return noIndicator;
   let normalized: AgentComputerWindowIndicatorRequest;
   try { normalized = request(input); } catch { signal.throwIfAborted(); return noIndicator; }
-  const lease = await new Promise<AgentComputerWindowIndicatorLease>((resolve, reject) => {
+  const lease = await new Promise<AgentComputerWindowIndicatorLease>(resolve => {
     let child: ReturnType<typeof spawn>;
     try { child = spawn(resolveAgentComputerHelperPath(), ['--window-indicator'], { shell: false, stdio: ['pipe', 'pipe', 'pipe'] }); }
     catch { signal.throwIfAborted(); resolve(noIndicator); return; }
     let settled = false;
     let stopping = false;
-    let closed = false;
+    let finished = false;
     let detached = false;
     let size = 0;
     let output = Buffer.alloc(0);
     let killTimer: ReturnType<typeof setTimeout> | undefined;
+    let exitTimer: ReturnType<typeof setTimeout> | undefined;
+    let confirmClosed!: (confirmed: boolean) => void;
+    const closed = new Promise<boolean>(resolveClosed => { confirmClosed = resolveClosed; });
     const startupTimer = setTimeout(() => stop(), 1_000);
     const lifeTimer = setTimeout(() => stop(), 3_000);
     startupTimer.unref(); lifeTimer.unref();
 
-    const settle = (result = noIndicator, aborted = false) => {
+    const settle = (shown = false) => {
       if (settled) return;
       settled = true;
       clearTimeout(startupTimer);
-      if (aborted) reject(signal.reason); else resolve(result);
+      resolve({ shown, closed, dispose: stop });
     };
     const detach = () => {
       if (detached) return;
       detached = true;
-      clearTimeout(startupTimer); clearTimeout(lifeTimer); clearTimeout(killTimer);
+      clearTimeout(startupTimer); clearTimeout(lifeTimer); clearTimeout(killTimer); clearTimeout(exitTimer);
       signal.removeEventListener('abort', cancel);
       for (const emitter of [child, child.stdin!, child.stdout!, child.stderr!]) emitter.on('error', ignoreTerminatedError);
       child.removeListener('error', failed);
+      child.removeListener('exit', onExit);
       child.removeListener('close', onClose);
       child.stdin!.removeListener('error', failed);
       child.stdout!.removeListener('error', failed);
@@ -134,15 +150,24 @@ export async function showAgentComputerWindowIndicator(input: AgentComputerWindo
       // Continue draining while a killed process closes its pipes; no accumulated output.
       child.stdout!.resume();
     };
-    const hardStop = () => {
-      if (closed) return;
-      try { child.kill('SIGKILL'); } catch { /* Visual-only failure. */ }
-      closed = true;
-      child.stdin!.destroy(); child.stdout!.destroy(); child.stderr!.destroy();
+    const finish = (confirmed: boolean) => {
+      if (finished) return;
+      finished = true;
+      settle();
+      output = Buffer.alloc(0);
       detach();
+      child.stdin!.destroy(); child.stdout!.destroy(); child.stderr!.destroy();
+      confirmClosed(confirmed);
+    };
+    const hardStop = () => {
+      if (finished) return;
+      try { child.kill('SIGKILL'); } catch { /* Sending a signal does not prove process exit. */ }
+      if (finished) return;
+      exitTimer = setTimeout(() => finish(false), 300);
+      exitTimer.unref();
     };
     const stop = () => {
-      if (stopping || closed) return;
+      if (stopping || finished) return;
       stopping = true;
       clearTimeout(startupTimer); clearTimeout(lifeTimer);
       signal.removeEventListener('abort', cancel);
@@ -151,19 +176,14 @@ export async function showAgentComputerWindowIndicator(input: AgentComputerWindo
       killTimer = setTimeout(hardStop, 300);
       killTimer.unref();
       try { child.stdin!.end(); } catch { /* TERM remains available. */ }
-      if (!closed) try { child.kill('SIGTERM'); } catch { /* Hard stop remains bounded. */ }
+      if (!finished) try { child.kill('SIGTERM'); } catch { /* Hard stop remains bounded. */ }
     };
-    const cancel = () => { settle(noIndicator, true); stop(); };
+    const cancel = () => stop();
     const failed = () => { if (signal.aborted) cancel(); else stop(); };
-    const onClose = () => {
-      if (closed) return;
-      closed = true;
-      settle();
-      output = Buffer.alloc(0);
-      detach();
-    };
+    const onExit = () => finish(true);
+    const onClose = () => finish(true);
     const onData = (bytes: Buffer) => {
-      if (stopping || closed) return;
+      if (stopping || finished) return;
       size += bytes.length;
       if (size > 512) { stop(); return; }
       // Only the first newline-delimited status is accepted; chatter is invalid.
@@ -179,17 +199,23 @@ export async function showAgentComputerWindowIndicator(input: AgentComputerWindo
         output = Buffer.alloc(0);
         if (signal.aborted) { cancel(); return; }
         if (!receipt.shown) { stop(); return; }
-        settle({ shown: true, dispose: stop });
+        settle(true);
       } catch { stop(); }
     };
 
-    child.on('error', failed); child.once('close', onClose);
+    child.on('error', failed); child.once('exit', onExit); child.once('close', onClose);
     child.stdin!.on('error', failed); child.stdout!.on('error', failed); child.stderr!.on('error', failed);
     child.stdout!.on('data', onData); child.stderr!.resume();
     signal.addEventListener('abort', cancel, { once: true });
     if (signal.aborted) { cancel(); return; }
     try { child.stdin!.write(`${JSON.stringify(normalized)}\n`); } catch { failed(); }
   });
-  if (signal.aborted) { lease.dispose(); signal.throwIfAborted(); }
+  if (signal.aborted) {
+    lease.dispose();
+    // Do not release the caller's execution barrier while an already-spawned
+    // cancelled visual is still within its bounded termination window.
+    if (!await lease.closed) throw new AgentComputerWindowIndicatorCloseError();
+    signal.throwIfAborted();
+  }
   return lease;
 }

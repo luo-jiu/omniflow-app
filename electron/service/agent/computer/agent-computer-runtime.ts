@@ -19,7 +19,8 @@ import { normalizeObservationFocus, type ComputerObservationFocus } from './agen
 import { WINDOW_INPUT_OPERATIONS, type WindowInputOperation } from '../../../../src/shared/computer-use/window-input-contract';
 import type { AgentComputerWindowInputStatus, AgentComputerWindowInputRequest, AgentComputerWindowInputReceipt } from '../../../platform/computer-use';
 import { createWindowInputRequest, windowInputNotice } from './agent-computer-window-input';
-import type { AgentComputerWindowIndicatorRequest, AgentComputerWindowIndicatorLease } from '../../../platform/computer-use/window-indicator';
+import { AgentComputerWindowIndicatorCloseError, UNCONFIRMED_WINDOW_INDICATOR_CLOSE_NOTICE,
+  type AgentComputerWindowIndicatorRequest, type AgentComputerWindowIndicatorLease } from '../../../platform/computer-use/window-indicator';
 
 const OBSERVATION_TTL_MS = 60_000;
 const MAX_RUN_SCREENSHOTS = 32;
@@ -269,6 +270,9 @@ export function createAgentComputerRuntime(dependencies: AgentComputerRuntimeDep
   // This revocation belongs to the Run, so replacing or reapproving its window cannot clear it.
   const inputBlockedRuns = new Set<string>();
   const activeIndicators = new Map<RunShare, () => void>();
+  // A possibly remaining native surface belongs to this main runtime, not a
+  // Run. New observations, permissions, Run release and late exit cannot clear it.
+  let unconfirmedIndicatorExit = false;
   const now = dependencies.now || Date.now;
   const discovery = createAgentComputerWindowDiscovery({ windows: dependencies.windows, now });
   let queue: Promise<unknown> = Promise.resolve();
@@ -283,6 +287,9 @@ export function createAgentComputerRuntime(dependencies: AgentComputerRuntimeDep
   }
   function requireConfirmedInputRelease(runId: string): void {
     if (inputBlockedRuns.has(runId)) throw new Error(UNCONFIRMED_INPUT_RELEASE_NOTICE);
+  }
+  function requireConfirmedIndicatorExit(): void {
+    if (unconfirmedIndicatorExit) throw new AgentComputerWindowIndicatorCloseError();
   }
   function releaseShareRendering(share: RunShare): void {
     const release = share.releaseRendering;
@@ -300,6 +307,7 @@ export function createAgentComputerRuntime(dependencies: AgentComputerRuntimeDep
     if (!dependencies.indicatePointer) return () => undefined;
     const controller = new AbortController();
     let lease: AgentComputerWindowIndicatorLease | undefined;
+    let closureConfirmed = false;
     let stopped = false;
     const stop = () => {
       if (stopped) return;
@@ -322,18 +330,34 @@ export function createAgentComputerRuntime(dependencies: AgentComputerRuntimeDep
         controller.signal.addEventListener('abort', finish, { once: true });
         if (controller.signal.aborted) finish();
       });
+      // A click-through native panel can still affect AppKit drag tracking.
+      // End the visual first and await real exit; TERM/KILL requests alone
+      // cannot prove that its surface has left the WindowServer.
+      stop();
+      closureConfirmed = await lease.closed;
+      if (!closureConfirmed) {
+        unconfirmedIndicatorExit = true;
+        throw new AgentComputerWindowIndicatorCloseError();
+      }
       signal.throwIfAborted();
       if (!share.active) throw new Error('窗口共享已结束');
       return stop;
-    } catch {
+    } catch (error) {
+      // The adapter throws its exact abort reason only after confirmed cleanup
+      // (or before spawning). Every other unknown lifecycle stays blocked.
+      if (error instanceof AgentComputerWindowIndicatorCloseError
+        || (!closureConfirmed && !(controller.signal.aborted && error === controller.signal.reason))) {
+        unconfirmedIndicatorExit = true;
+      }
       stop();
       signal.throwIfAborted();
       if (!share.active) throw new Error('窗口共享已结束');
-      return () => undefined;
+      throw error;
     }
   }
   async function withPointerPreview<T>(preparation: AgentToolMainPreparedExecution, observation: Observation,
     request: AgentComputerWindowIndicatorRequest | undefined, signal: AbortSignal, dispatch: () => Promise<T>): Promise<T> {
+    if (request) requireConfirmedIndicatorExit();
     if (!request || !dependencies.indicatePointer) return dispatch();
     const share = shareFor(preparation.identity);
     if (!share) throw new Error('窗口共享已结束');
@@ -343,6 +367,7 @@ export function createAgentComputerRuntime(dependencies: AgentComputerRuntimeDep
       await boundWindow(preparation, signal);
       signal.throwIfAborted();
       if (observationFor(preparation.identity, observation.id) !== observation) throw new Error('窗口观察已变化，此次操作未发送');
+      requireConfirmedIndicatorExit();
       return await dispatch();
     } finally { stop(); }
   }
@@ -518,6 +543,7 @@ export function createAgentComputerRuntime(dependencies: AgentComputerRuntimeDep
   }
   async function prepareClick(input: { observationId: string; elementId?: string; x?: number; y?: number; button?: 'left' | 'right'; clickCount?: 1 | 2 }, context: AgentToolMainPreparationContext): Promise<AgentToolMainPreparationResult> {
     context.signal.throwIfAborted();
+    requireConfirmedIndicatorExit();
     const observation = observationFor(context.preparationIdentity, input.observationId);
     const candidate = input.elementId ? observation.elements.find(item => item.elementId === input.elementId)?.candidate : undefined;
     if (input.elementId && (!candidate || input.x !== undefined || input.y !== undefined)) throw new Error('控件标识不属于当前窗口观察或混用了坐标');
@@ -610,6 +636,7 @@ export function createAgentComputerRuntime(dependencies: AgentComputerRuntimeDep
       if (scope && !accessibilityAvailable) throw new Error('局部 AX 观察当前不可用，请重新观察窗口');
       const capturedAt = now();
       const inputBlocked = inputBlockedRuns.has(identity.runId);
+      const observedOperations = unconfirmedIndicatorExit ? operations.filter(operation => operation !== 'press') : operations;
       const checkInput = async (): Promise<AgentComputerWindowInputStatus | undefined> => {
         if (inputBlocked || scope || !readsControls || !accessibilityAvailable || !inputOperations.length || !dependencies.inputStatus) return undefined;
         try { return await dependencies.inputStatus(window, signal); }
@@ -677,7 +704,7 @@ export function createAgentComputerRuntime(dependencies: AgentComputerRuntimeDep
       }
       await boundWindow(preparation, signal);
       if (!share.active) throw new Error('窗口共享已结束');
-      const coordinateClickReady = hasScreenshot && accessibilityAvailable && operations.includes('press')
+      const coordinateClickReady = hasScreenshot && accessibilityAvailable && observedOperations.includes('press')
         && candidates.some(candidate => candidateOperations(candidate).includes('press')) && candidateScanComplete && candidateSetsStable;
       // A role-only label cannot identify a requested control. Keep all native
       // candidates for complete coordinate hit-testing, but never issue a
@@ -685,23 +712,23 @@ export function createAgentComputerRuntime(dependencies: AgentComputerRuntimeDep
       // or expose its private identifier.
       const semanticCandidates = candidates.flatMap(candidate => {
         const label = observedLabel(candidate, candidates, knownCandidates, candidateScanComplete && candidateSetsStable, hasScreenshot);
-        return label && candidateOperations(candidate).some(operation => operations.includes(operation)) ? [{ candidate, label }] : [];
+        return label && candidateOperations(candidate).some(operation => observedOperations.includes(operation)) ? [{ candidate, label }] : [];
       });
-      const clickReady = coordinateClickReady || semanticCandidates.some(({ candidate }) => operations.includes('press') && candidateOperations(candidate).includes('press'));
-      const usableFirstParty = firstPartyCandidates.filter(control => control.snapshot.operations.some(operation => operations.includes(operation)));
-      const textReady = semanticCandidates.some(({ candidate }) => candidateOperations(candidate).some(operation => operations.includes(operation) && (operation === 'replaceText' || operation === 'insertText')))
-        || usableFirstParty.some(control => control.snapshot.operations.some(operation => operations.includes(operation) && (operation === 'replaceText' || operation === 'insertText')));
-      const scrollReady = semanticCandidates.some(({ candidate }) => candidateOperations(candidate).some(operation => operations.includes(operation) && operation.startsWith('scroll')))
-        || usableFirstParty.some(control => control.snapshot.operations.some(operation => operations.includes(operation) && operation.startsWith('scroll')));
+      const clickReady = coordinateClickReady || semanticCandidates.some(({ candidate }) => observedOperations.includes('press') && candidateOperations(candidate).includes('press'));
+      const usableFirstParty = firstPartyCandidates.filter(control => control.snapshot.operations.some(operation => observedOperations.includes(operation)));
+      const textReady = semanticCandidates.some(({ candidate }) => candidateOperations(candidate).some(operation => observedOperations.includes(operation) && (operation === 'replaceText' || operation === 'insertText')))
+        || usableFirstParty.some(control => control.snapshot.operations.some(operation => observedOperations.includes(operation) && (operation === 'replaceText' || operation === 'insertText')));
+      const scrollReady = semanticCandidates.some(({ candidate }) => candidateOperations(candidate).some(operation => observedOperations.includes(operation) && operation.startsWith('scroll')))
+        || usableFirstParty.some(control => control.snapshot.operations.some(operation => observedOperations.includes(operation) && operation.startsWith('scroll')));
       if (!clickReady && !textReady && !scrollReady && candidates.length > 0) targetNotice = '本次观察没有可辨认标签的可操作控件，且坐标点击不可用；请勿按 AX 树或列表位置猜测控件。';
       const inputAfter = await checkInput();
       signal.throwIfAborted();
       if (!share.active) throw new Error('窗口共享已结束');
       const availableInputOperations = !inputBlocked && inputBefore?.ready && inputAfter?.ready && inputBefore.profile && inputBefore.profile === inputAfter.profile
         ? inputAfter.operations.filter(operation => inputOperations.includes(operation) && inputBefore.operations.includes(operation)
-          && (mode === 'both' || operation === 'shortcut')) : [];
+          && (mode === 'both' || operation === 'shortcut') && (!unconfirmedIndicatorExit || operation === 'shortcut')) : [];
       const publish = (attachment?: AgentAttachment): AgentToolResult => {
-        const observation: Observation = { id: crypto.randomUUID(), targetId: action.targetId, window, operations: [...operations],
+        const observation: Observation = { id: crypto.randomUUID(), targetId: action.targetId, window, operations: [...observedOperations],
           inputOperations: [...inputOperations], availableInputOperations,
           ...(availableInputOperations.length ? { inputProfile: inputAfter!.profile } : {}), mode,
           ...(attachment ? { width: attachment.width!, height: attachment.height! } : {}), capturedAt, consumed: false,
@@ -717,14 +744,14 @@ export function createAgentComputerRuntime(dependencies: AgentComputerRuntimeDep
               : candidate.role === 'AXScrollArea' ? 'native-scroll-screenshot-bounds' : 'unique-actionable-scrollbar' } : {}),
             ...((scrollButton || label === '原生文本区域' || label === '原生滚动区域') && attachment
               ? { screenshotBounds: screenshotBounds(candidate, window, attachment.width!, attachment.height!) } : {}),
-            operations: candidateOperations(candidate).filter(operation => operations.includes(operation)),
+            operations: candidateOperations(candidate).filter(operation => observedOperations.includes(operation)),
             ...(candidate.description ? { description: candidate.description } : {}),
             ...(candidate.subrole ? { subrole: candidate.subrole } : {}) };
         }),
         ...observation.firstPartyElements.map(({ elementId, control }) => ({ elementId, role: control.snapshot.state.kind === 'text' ? 'textbox' : 'scroll-region',
           label: FIRST_PARTY_CONTROL_LABELS[control.snapshot.controlId], source: 'omniflow-control',
           ...(attachment ? { screenshotBounds: screenshotBounds(control, window, attachment.width!, attachment.height!) } : {}),
-          operations: control.snapshot.operations.filter(operation => operations.includes(operation)) }))];
+          operations: control.snapshot.operations.filter(operation => observedOperations.includes(operation)) }))];
         const keys = [...observation.elements.map(({ candidate }) => JSON.stringify(['ax', candidate.path,
           candidate.role, candidate.identifier ?? null, candidate.identityProfile ?? null])),
         ...observation.firstPartyElements.map(({ control }) => JSON.stringify(['omniflow-control', control.registrationId,
@@ -765,14 +792,16 @@ export function createAgentComputerRuntime(dependencies: AgentComputerRuntimeDep
           ...(attachment ? { imageId: attachment.id, screenshotWidth: attachment.width, screenshotHeight: attachment.height } : {}),
           observationId: observation.id, capturedAt: new Date(capturedAt).toISOString(),
           expiresInMs: Math.max(0, OBSERVATION_TTL_MS - (now() - capturedAt)),
-          clickReady, textReady, scrollReady, operations: [...operations], coordinateClickReady, candidateScanComplete, scopeScanComplete,
+          clickReady, textReady, scrollReady, operations: [...observedOperations], coordinateClickReady, candidateScanComplete, scopeScanComplete,
           inputReady: availableInputOperations.length > 0, inputOperations: [...inputOperations], availableInputOperations,
-          ...(inputBlocked ? { inputNotice: UNCONFIRMED_INPUT_RELEASE_NOTICE }
+          ...(unconfirmedIndicatorExit ? { inputNotice: UNCONFIRMED_WINDOW_INDICATOR_CLOSE_NOTICE }
+            : inputBlocked ? { inputNotice: UNCONFIRMED_INPUT_RELEASE_NOTICE }
             : inputOperations.length ? { inputNotice: windowInputNotice(availableInputOperations.length ? inputAfter : inputAfter?.ready ? undefined : inputAfter) } : {}),
           scope: scope ? { kind: 'element-ancestor', ancestorLevels: scope.ancestorLevels } : { kind: 'window' },
           clickMethod: 'AXPress', observationSource: mode === 'ax' ? 'ax' : 'screenshot', ...page,
           elementsScope: observation.firstPartyElements.length ? 'stable-window-controls' : 'stable-AX-controls', ...summary, ...changeData,
-          ...(!coordinateClickReady ? { notice: scope
+          ...(unconfirmedIndicatorExit ? { notice: UNCONFIRMED_WINDOW_INDICATOR_CLOSE_NOTICE }
+            : !coordinateClickReady ? { notice: scope
             ? `本次只读取原生控件${scope.ancestorLevels ? `向上 ${scope.ancestorLevels} 级的父区域` : '自身区域'}的 AX；${scopeScanComplete ? '区域内控件扫描完整' : '区域内控件扫描不完整'}，不代表全窗口完整或唯一。${hasScreenshot ? '截图仍是获准整窗口。' : ''}只使用本次明确标签的 elementId 和 operations；不提供坐标点击。`
             : mode === 'screenshot'
             ? '本次仅取得窗口图片，没有读取控件或签发动作 ID。需要操作时重新以 ax 或 both 模式观察。'
@@ -933,6 +962,7 @@ export function createAgentComputerRuntime(dependencies: AgentComputerRuntimeDep
     const publicAction = normalizeAgentPreparedActionPublic({ ...input, kind: 'computer.input', version: 1,
       libraryId: context.preparationIdentity.libraryId, targetId: observation.targetId,
       applicationLabel: observation.window.applicationLabel, windowLabel: observation.window.windowLabel });
+    if (publicAction.kind === 'computer.input' && publicAction.operation !== 'shortcut') requireConfirmedIndicatorExit();
     if (publicAction.kind !== 'computer.input' || !dependencies.input || !dependencies.inputStatus
       || !observation.inputOperations.includes(publicAction.operation)
       || !observation.availableInputOperations.includes(publicAction.operation)) throw new Error('本次观察未提供且未获准此后台输入能力');
@@ -945,6 +975,7 @@ export function createAgentComputerRuntime(dependencies: AgentComputerRuntimeDep
     return serial(signal, async () => {
       const action = normalizeAgentPreparedActionPublic(preparation.publicAction);
       if (action.kind !== 'computer.input' || !commit || !dependencies.inputStatus || !dependencies.input) throw new Error('后台输入缺少当前受控执行身份');
+      if (action.operation !== 'shortcut') requireConfirmedIndicatorExit();
       requireConfirmedInputRelease(preparation.identity.runId);
       const observation = observationFor(preparation.identity, action.observationId);
       const inputShare = shares.get(preparation.identity.runId);

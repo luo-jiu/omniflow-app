@@ -103,6 +103,67 @@ check(safe([foreground, panel, target]))
 // Windows above the target cover the visual exactly as they cover the target.
 check(safe([entry(44, layer: 3), foreground, panel, target]))
 check(!safe([panel, foreground, target]))
+// Non-overlapping title-bar attachments can sit between the normal panel and
+// target. The same proof applies to other applications, never PID alone.
+let accessoryBounds = Rect(x: 300, y: 46, width: 66, height: 20)
+for pid in [Int32(123), 456, 999] {
+    check(safe([foreground, panel, entry(55, pid: pid, bounds: accessoryBounds), target]))
+    check(!safe([foreground, panel, entry(55, pid: pid), target]))
+    // Reject intersection with the whole panel surface, including an area
+    // that contains neither the arrow hotspot nor its label.
+    check(!safe([foreground, panel,
+        entry(55, pid: pid, bounds: Rect(x: 20.5, y: 90.5, width: 1, height: 1)), target]))
+}
+check(safe([foreground, panel, entry(55, pid: 123, bounds: accessoryBounds),
+    entry(56, pid: 999, bounds: Rect(x: -99, y: 100, width: 120, height: 20)), target]))
+check(!safe([foreground, panel, entry(55, pid: 123, bounds: accessoryBounds), entry(56), target]))
+// Rect intersection treats touching edges and corners as disjoint, including
+// negative display origins; any positive intersection still hides the plan.
+for touching in [Rect(x: 21, y: 41, width: 66, height: 20),
+    Rect(x: -99, y: 91, width: 120, height: 20),
+    Rect(x: -199, y: 41, width: 100, height: 50),
+    Rect(x: -99, y: -9, width: 120, height: 50),
+    Rect(x: 21, y: 91, width: 20, height: 20)] {
+    check(safe([foreground, panel, entry(55, bounds: touching), target]))
+}
+check(!safe([foreground, panel,
+    entry(55, bounds: Rect(x: -199, y: 41, width: 100.01, height: 50)), target]))
+// Missing or invalid geometric proof cannot be treated as "no intersection".
+for invalid in [Rect(x: Double.nan, y: 46, width: 66, height: 20),
+    Rect(x: 300, y: Double.infinity, width: 66, height: 20),
+    Rect(x: 300, y: 46, width: 0, height: 20),
+    Rect(x: 300, y: 46, width: -66, height: 20),
+    Rect(x: 300, y: 46, width: 66, height: Double.nan),
+    Rect(x: 300, y: 46, width: 66, height: Double.infinity),
+    Rect(x: 10_000_001, y: 46, width: 66, height: 20),
+    Rect(x: 300, y: 46, width: 100_001, height: 20)] {
+    check(!safe([foreground, panel, entry(55, bounds: invalid), target]))
+    check(!safe([foreground, entry(22, bounds: invalid), target], bounds: invalid))
+}
+for invalid in [entry(0, bounds: accessoryBounds), entry(55, pid: 0, bounds: accessoryBounds),
+    entry(55, pid: -1, bounds: accessoryBounds), entry(55, layer: 3, bounds: accessoryBounds),
+    entry(55, layer: -1, bounds: accessoryBounds), entry(55, bounds: accessoryBounds, onScreen: false)] {
+    check(!safe([foreground, panel, invalid, target]))
+}
+for alpha in [0, -0.1, 1.01, Double.nan, Double.infinity] {
+    check(!safe([foreground, panel, entry(55, bounds: accessoryBounds, alpha: alpha), target]))
+}
+let accessory = entry(55, bounds: accessoryBounds)
+check(!safe([foreground, panel, accessory, accessory, target]))
+check(!safe(Array(repeating: foreground, count: 4095) + [panel, target]))
+// Real TextEdit GUI regression: its 66x20 title-bar surface sits above the
+// main window but never intersects the frozen 231x44 action plan surface.
+let textEditWindow = WindowIdentity(windowId: 314, pid: 6966, processStartedAt: 999, layer: 0,
+    bounds: Rect(x: 309, y: 103, width: 673, height: 439), title: "QA")
+let textEditPanelBounds = Rect(x: 315, y: 149, width: 231, height: 44)
+let textEditTarget = entry(314, pid: 6966, bounds: textEditWindow.bounds, title: "QA")
+let textEditPanel = entry(448, pid: 8574, bounds: textEditPanelBounds)
+let textEditAccessory = entry(426, pid: 6966, bounds: Rect(x: 315, y: 109, width: 66, height: 20))
+check(windowIndicatorStackIsSafe([textEditPanel, textEditAccessory, textEditTarget],
+    target: textEditWindow, targetStartedAt: 999, panelId: 448, panelPID: 8574, panelBounds: textEditPanelBounds))
+check(!windowIndicatorStackIsSafe([textEditPanel,
+    entry(426, pid: 6966, bounds: Rect(x: 315, y: 149, width: 66, height: 20)), textEditTarget],
+    target: textEditWindow, targetStartedAt: 999, panelId: 448, panelPID: 8574, panelBounds: textEditPanelBounds))
 check(!safe([foreground, target, panel]))
 check(!safe([foreground, panel]))
 check(!safe([target]))
@@ -116,12 +177,13 @@ for badTarget in [entry(11, pid: 124, bounds: window.bounds, title: "QA"),
     entry(11, pid: 123, bounds: panelBounds, title: "QA"),
     entry(11, pid: 123, bounds: window.bounds, title: "changed"),
     entry(11, pid: 123, bounds: window.bounds, title: "QA", alpha: 0),
+    entry(11, pid: 123, bounds: window.bounds, title: "QA", alpha: 1.01),
     entry(11, pid: 123, bounds: window.bounds, title: "QA", alpha: Double.nan),
     entry(11, pid: 123, bounds: window.bounds, title: "QA", onScreen: false)] {
     check(!safe([foreground, panel, badTarget]))
 }
 for badPanel in [entry(22, pid: 457), entry(22, layer: 3), entry(22, bounds: window.bounds),
-    entry(22, alpha: 0), entry(22, alpha: Double.nan), entry(22, onScreen: false)] {
+    entry(22, alpha: 0), entry(22, alpha: 1.01), entry(22, alpha: Double.nan), entry(22, onScreen: false)] {
     check(!safe([foreground, badPanel, target]))
 }
 check(!safe([foreground, panel, target], bounds: Rect(x: -101, y: 41, width: 120, height: 50)))

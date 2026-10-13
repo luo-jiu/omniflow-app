@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => ({ spawn: vi.fn(), helperPath: vi.fn(() => '/isol
 vi.mock('node:child_process', () => ({ spawn: mocks.spawn }));
 vi.mock('./desktop-computer', () => ({ resolveAgentComputerHelperPath: mocks.helperPath }));
 
-import { showAgentComputerWindowIndicator, type AgentComputerWindowIndicatorRequest } from './window-indicator';
+import { AgentComputerWindowIndicatorCloseError, showAgentComputerWindowIndicator, type AgentComputerWindowIndicatorRequest } from './window-indicator';
 
 const platformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform')!;
 const window: AgentComputerWindowIdentity = {
@@ -45,6 +45,7 @@ function setup(signal = new AbortController().signal, input: AgentComputerWindow
 }
 
 function expectDetached(child: HelperProcess) {
+  expect(child.listenerCount('exit')).toBe(0);
   expect(child.listenerCount('close')).toBe(0);
   // Closure-bearing lifecycle listeners are gone, while a shared no-op handler
   // absorbs queued EPIPE/error events until these temporary emitters are GC'd.
@@ -71,11 +72,16 @@ describe('bounded visual window indicator adapter', () => {
     child.reply();
     const lease = await pending;
     expect(lease.shown).toBe(true);
+    let closed: boolean | undefined;
+    void lease.closed.then(value => { closed = value; });
+    await Promise.resolve(); expect(closed).toBeUndefined();
     expect(child.stdin.end).not.toHaveBeenCalled();
     lease.dispose(); lease.dispose();
     expect(child.stdin.end).toHaveBeenCalledOnce();
     expect(child.kill.mock.calls).toEqual([['SIGTERM']]);
+    await Promise.resolve(); expect(closed).toBeUndefined();
     child.emit('close', 0);
+    await expect(lease.closed).resolves.toBe(true);
     await vi.advanceTimersByTimeAsync(5_000);
     expect(child.kill.mock.calls).toEqual([['SIGTERM']]);
     expectDetached(child);
@@ -112,7 +118,9 @@ describe('bounded visual window indicator adapter', () => {
     { ...request, operation: 'drag' }, { ...request, operation: 'drag', endPoint: request.point },
     { ...request, operation: 'drag', endPoint: { x: -700, y: 600 }, durationMs: 500 },
   ])('leaves malformed or expanded input inert before spawning (%j)', async input => {
-    expect((await showAgentComputerWindowIndicator(input as AgentComputerWindowIndicatorRequest, new AbortController().signal)).shown).toBe(false);
+    const lease = await showAgentComputerWindowIndicator(input as AgentComputerWindowIndicatorRequest, new AbortController().signal);
+    expect(lease.shown).toBe(false);
+    await expect(lease.closed).resolves.toBe(true);
     expect(mocks.spawn).not.toHaveBeenCalled();
   });
 
@@ -138,10 +146,16 @@ describe('bounded visual window indicator adapter', () => {
     { ok: true, shown: true, pid: window.pid }, {}, null])('cleans a refused or invalid status (%j) without an action error', async receipt => {
     const { child, pending } = setup();
     child.reply(receipt);
-    expect((await pending).shown).toBe(false);
+    const lease = await pending;
+    expect(lease.shown).toBe(false);
+    let closed: boolean | undefined;
+    void lease.closed.then(value => { closed = value; });
     expect(child.kill.mock.calls).toEqual([['SIGTERM']]);
     await vi.advanceTimersByTimeAsync(300);
     expect(child.kill.mock.calls).toEqual([['SIGTERM'], ['SIGKILL']]);
+    expect(closed).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(300);
+    await expect(lease.closed).resolves.toBe(false);
     expectDetached(child);
   });
 
@@ -153,7 +167,7 @@ describe('bounded visual window indicator adapter', () => {
     const { child, pending } = setup();
     child.stdout.emit('data', bytes);
     expect((await pending).shown).toBe(false);
-    await vi.advanceTimersByTimeAsync(300);
+    await vi.advanceTimersByTimeAsync(600);
     expectDetached(child);
   });
 
@@ -162,10 +176,13 @@ describe('bounded visual window indicator adapter', () => {
     await vi.advanceTimersByTimeAsync(999);
     expect(child.kill).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
-    expect((await pending).shown).toBe(false);
+    const lease = await pending;
+    expect(lease.shown).toBe(false);
     child.reply();
     await vi.advanceTimersByTimeAsync(300);
     expect(child.kill.mock.calls).toEqual([['SIGTERM'], ['SIGKILL']]);
+    await vi.advanceTimersByTimeAsync(300);
+    await expect(lease.closed).resolves.toBe(false);
     expectDetached(child);
   });
 
@@ -175,10 +192,11 @@ describe('bounded visual window indicator adapter', () => {
     const lease = await pending;
     await vi.advanceTimersByTimeAsync(2_099); expect(child.kill).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1); expect(child.kill.mock.calls).toEqual([['SIGTERM']]);
-    lease.dispose(); await vi.advanceTimersByTimeAsync(300); lease.dispose();
+    lease.dispose(); await vi.advanceTimersByTimeAsync(600); lease.dispose();
     expect(child.kill.mock.calls).toEqual([['SIGTERM'], ['SIGKILL']]);
     expect(child.stdin.end).toHaveBeenCalledOnce();
     expect(child.stdout.destroy).toHaveBeenCalledOnce();
+    await expect(lease.closed).resolves.toBe(false);
     expectDetached(child);
   });
 
@@ -195,10 +213,14 @@ describe('bounded visual window indicator adapter', () => {
 
   it('treats early close and synchronous spawn failure as absent visual feedback', async () => {
     const { child, pending } = setup(); child.emit('close', 64);
-    expect((await pending).shown).toBe(false);
+    const early = await pending;
+    expect(early.shown).toBe(false);
+    await expect(early.closed).resolves.toBe(true);
     expect(child.kill).not.toHaveBeenCalled(); expectDetached(child);
     mocks.spawn.mockImplementationOnce(() => { throw new Error('missing helper'); });
-    expect((await showAgentComputerWindowIndicator(request, new AbortController().signal)).shown).toBe(false);
+    const absent = await showAgentComputerWindowIndicator(request, new AbortController().signal);
+    expect(absent.shown).toBe(false);
+    await expect(absent.closed).resolves.toBe(true);
   });
 
   it.each(['parent', 'stdin', 'stdout', 'stderr'] as const)('handles %s errors, EPIPE and repeated disposal without leaking listeners', async source => {
@@ -212,13 +234,16 @@ describe('bounded visual window indicator adapter', () => {
     expect(child.kill.mock.calls).toEqual([['SIGTERM']]); expectDetached(child);
   });
 
-  it('rejects cancellation immediately, closes the helper and ignores late readiness', async () => {
+  it('retains the execution barrier after startup cancellation until actual exit and ignores late readiness', async () => {
     const controller = new AbortController(); const { child, pending } = setup(controller.signal);
     const rejection = expect(pending).rejects.toMatchObject({ name: 'AbortError' });
-    controller.abort(); await rejection;
+    let finished = false; void pending.then(() => { finished = true; }, () => { finished = true; });
+    controller.abort();
     expect(child.stdin.end).toHaveBeenCalledOnce(); expect(child.kill.mock.calls).toEqual([['SIGTERM']]);
     child.reply(); await vi.advanceTimersByTimeAsync(300);
-    expect(child.kill.mock.calls).toEqual([['SIGTERM'], ['SIGKILL']]); expectDetached(child);
+    expect(child.kill.mock.calls).toEqual([['SIGTERM'], ['SIGKILL']]);
+    expect(finished).toBe(false);
+    child.emit('exit', null, 'SIGKILL'); await rejection; expectDetached(child);
   });
 
   it('also observes abort after readiness and removes its signal listener when the lease is disposed', async () => {
@@ -234,8 +259,22 @@ describe('bounded visual window indicator adapter', () => {
   it('does not return a lease when ready and abort race within the same turn', async () => {
     const controller = new AbortController(); const { child, pending } = setup(controller.signal);
     const rejection = expect(pending).rejects.toMatchObject({ name: 'AbortError' });
-    child.reply(); controller.abort(); await rejection;
-    expect(child.kill.mock.calls).toEqual([['SIGTERM']]); child.emit('close', 0); expectDetached(child);
+    child.reply(); controller.abort();
+    expect(child.kill.mock.calls).toEqual([['SIGTERM']]); child.emit('close', 0);
+    await rejection; expectDetached(child);
+  });
+
+  it('reports unconfirmed startup-cancel cleanup distinctly after the full bounded wait, with no late revival', async () => {
+    const controller = new AbortController(); const { child, pending } = setup(controller.signal);
+    const rejection = expect(pending).rejects.toBeInstanceOf(AgentComputerWindowIndicatorCloseError);
+    let finished = false; void pending.then(() => { finished = true; }, () => { finished = true; });
+    controller.abort(); child.reply();
+    await vi.advanceTimersByTimeAsync(599); expect(finished).toBe(false);
+    await vi.advanceTimersByTimeAsync(1); await rejection;
+    expect(child.kill.mock.calls).toEqual([['SIGTERM'], ['SIGKILL']]);
+    child.emit('exit', 0); child.reply(); controller.abort();
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(child.kill).toHaveBeenCalledTimes(2); expectDetached(child);
   });
 
   it('handles a close synchronously triggered by EOF without subsequently signalling a closed child', async () => {
@@ -245,18 +284,72 @@ describe('bounded visual window indicator adapter', () => {
     expect(child.kill).not.toHaveBeenCalled(); expectDetached(child);
   });
 
+  it.each(['exit', 'close'] as const)('confirms real %s during the bounded wait after KILL and releases every lifecycle resource', async event => {
+    const { child, pending } = setup(); child.reply(); const lease = await pending;
+    lease.dispose();
+    await vi.advanceTimersByTimeAsync(300);
+    expect(child.kill.mock.calls).toEqual([['SIGTERM'], ['SIGKILL']]);
+    let confirmed: boolean | undefined;
+    void lease.closed.then(value => { confirmed = value; });
+    await vi.advanceTimersByTimeAsync(299);
+    expect(confirmed).toBeUndefined();
+    child.emit(event, null, 'SIGKILL');
+    await expect(lease.closed).resolves.toBe(true);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(child.kill).toHaveBeenCalledTimes(2);
+    expect(child.stdin.destroy).toHaveBeenCalledOnce();
+    expect(child.stdout.destroy).toHaveBeenCalledOnce();
+    expect(child.stderr.destroy).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0); expectDetached(child);
+  });
+
+  it.each(['refused', 'invalid', 'error'] as const)('retains the spawned %s child closure even when the intention was never shown', async failure => {
+    const { child, pending } = setup();
+    if (failure === 'refused') child.reply({ ok: true, shown: false });
+    else if (failure === 'invalid') child.reply({ ok: true });
+    else child.emit('error', new Error('spawn or pipe error'));
+    const lease = await pending;
+    expect(lease.shown).toBe(false);
+    let confirmed: boolean | undefined;
+    void lease.closed.then(value => { confirmed = value; });
+    await Promise.resolve(); expect(confirmed).toBeUndefined();
+    expect(child.kill.mock.calls).toEqual([['SIGTERM']]);
+    child.emit('exit', 1);
+    await expect(lease.closed).resolves.toBe(true);
+    expect(vi.getTimerCount()).toBe(0); expectDetached(child);
+  });
+
+  it('never upgrades an unconfirmed KILL to closed after its bounded deadline or a late exit', async () => {
+    const { child, pending } = setup(); child.reply(); const lease = await pending;
+    child.kill.mockImplementation(() => { throw new Error('signal rejected'); });
+    lease.dispose();
+    await vi.advanceTimersByTimeAsync(599);
+    let confirmed: boolean | undefined;
+    void lease.closed.then(value => { confirmed = value; });
+    await Promise.resolve(); expect(confirmed).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(lease.closed).resolves.toBe(false);
+    child.reply(); child.emit('exit', 0); child.emit('close', 0); lease.dispose();
+    await vi.advanceTimersByTimeAsync(5_000);
+    await expect(lease.closed).resolves.toBe(false);
+    expect(child.kill.mock.calls).toEqual([['SIGTERM'], ['SIGKILL']]);
+    expect(vi.getTimerCount()).toBe(0); expectDetached(child);
+  });
+
   it.each(['close', 'hard-kill'] as const)('absorbs queued errors from every terminated emitter after %s without resurrecting or signalling again', async ending => {
     const controller = new AbortController(); const { child, pending } = setup(controller.signal);
     if (ending === 'close') child.emit('close', 0);
-    else await vi.advanceTimersByTimeAsync(1_300);
+    else await vi.advanceTimersByTimeAsync(1_600);
     const lease = await pending;
     expect(lease.shown).toBe(false);
+    await expect(lease.closed).resolves.toBe(ending === 'close');
     const signalsBefore = child.kill.mock.calls.slice();
     for (const emitter of [child, child.stdin, child.stdout, child.stderr]) {
       expect(() => emitter.emit('error', new Error('late queued EPIPE'))).not.toThrow();
     }
     child.reply(); child.emit('close', 0); controller.abort(); lease.dispose();
     await vi.advanceTimersByTimeAsync(5_000);
+    await expect(lease.closed).resolves.toBe(ending === 'close');
     expect(child.kill.mock.calls).toEqual(signalsBefore);
     expectDetached(child);
   });
@@ -266,8 +359,9 @@ describe('bounded visual window indicator adapter', () => {
     for (const stream of [child.stdin, child.stdout, child.stderr]) {
       stream.destroy.mockImplementationOnce(() => { stream.emit('error', new Error('destroy EPIPE')); });
     }
-    lease.dispose(); await vi.advanceTimersByTimeAsync(300);
+    lease.dispose(); await vi.advanceTimersByTimeAsync(600);
     expect(child.kill.mock.calls).toEqual([['SIGTERM'], ['SIGKILL']]);
+    await expect(lease.closed).resolves.toBe(false);
     for (const emitter of [child, child.stdin, child.stdout, child.stderr]) {
       expect(() => emitter.emit('error', new Error('queued EPIPE'))).not.toThrow();
     }
@@ -278,7 +372,9 @@ describe('bounded visual window indicator adapter', () => {
 
   it('does not launch unsupported platforms or requests that were already aborted', async () => {
     Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
-    expect((await showAgentComputerWindowIndicator(request, new AbortController().signal)).shown).toBe(false);
+    const unsupported = await showAgentComputerWindowIndicator(request, new AbortController().signal);
+    expect(unsupported.shown).toBe(false);
+    await expect(unsupported.closed).resolves.toBe(true);
     const controller = new AbortController(); controller.abort('explicit stop');
     await expect(showAgentComputerWindowIndicator(request, controller.signal)).rejects.toBe('explicit stop');
     expect(mocks.spawn).not.toHaveBeenCalled();

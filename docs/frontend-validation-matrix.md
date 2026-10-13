@@ -1,6 +1,36 @@
 # 前端验证矩阵
 
+## Agent 真实 GUI 与图案图层复验（2026-10-13）
+
+- 解锁后只使用开发版、Win / libraryId=3、本机 macOS MinIO 和自有可丢弃 TextEdit 三行文档；未启动旧安装版、访问第一个资料库或新增系统权限。真实任务均由 Composer 提交，Session `8d93fc2e-9ac7-4987-9e6a-bf06133aa8b8`；每个 Run 重新发现窗口、首次观察走标准共享批准。生产 receiver 仍限定 TextEdit 1.20 / build415、macOS 26.5.2 / build25F84。
+
+| Run | 实际结果与验证范围 |
+| --- | --- |
+| A `dd2447cf-5b07-42c5-be81-595501cb55b7` | Command+A 全文选中；内部保存图与独立 CUA AX 一致，事件 / 释放确认。交互创建到提交 108.960s，正常完成，超过旧 30s 通用超时。 |
+| B `eaa2d1fe-9120-4bdc-b55c-e450622301be` | 双击只选中 `bravo`，内部图与独立 CUA AX 一致；旧图案守卫只透明注册后关闭，不计图案显示通过。 |
+| C `ecea607c-6445-42d3-bdef-158b3624e821` | 模型估计终点 `(229,53)`，实际选到 `alpha bravo charlie delta echo fo`；事件成功，但精确选区失败，核验选择停止。 |
+| C2 `31b64182-5923-47a2-985b-d6ab5912bfbc` | 校准终点 `(181,53)`，11 个事件及释放投递，前后保存图完全相同，独立 AX 仍为旧长选区；不计消费成功。 |
+| C3 `8a61a7ed-fa4a-4a00-9fd8-ac7b31beae5b` | 内部 ArrowLeft 折叠旧选区后新观察再拖拽；正文未变，拖拽前后图仍完全相同、独立 AX 无新选区，核验停止。排除旧选区为唯一原因。 |
+| D `5d45bedb-eaa8-4cae-8911-0c1026317538` | 右键仅一次，unknown / commit_unknown、释放 confirmed；后续 AX 含菜单角色，inputReady=false / 能力为空，未重放或选菜单。单窗保存图不包含另窗菜单，稍后独立 CUA 未复现菜单可见，不能宣称独立菜单像素验收通过。Escape 仅由验收者清理自有测试文档。 |
+| C4 `042b77b0-3d53-4b04-8f2b-2a5e55e6ec7a` | 诊断时精确终止自有 `--window-indicator` 子进程，保留内部输入路线；ArrowLeft 后拖拽恢复选区，独立 AX 为 `alpha bravo charlie delta `（末尾一个空格），正文未变。视觉进程身份消失早于后续输入启动 247.598ms，但非严格 NOTE_EXIT，且即时 TERM 缩短了预告；仅支持图案并存相关性，不计正式图案 / 自主视觉坐标精度通过。 |
+| C5 `d29a6790-cee8-43c3-a52c-9a5d4167aad5` | 正式隔离版本 completed：内部 ArrowLeft 折叠旧选区后新 both 观察，拖拽 `(9,53)` → `(181,53)` / 300ms，再新 both 观察；两动作分别 2 / 11 个事件，均 dispatched / committed / confirmed 且匹配最新观察。内部 PNG 与独立 CUA AX 均为 `alpha bravo charlie delta `（末尾一个空格），正文未变；标准交互创建到提交 153.915s，正常完成。只计校准坐标的正式选区闭环，不改写 C 的模型自主终点估计失败。 |
+| B2 `df19aac0-7aa2-443a-b809-9d035a0a90c2` | 正式版本 completed：前后新观察包围恰好一次 doubleClick `(70,53)`，4 个事件、dispatched / committed / confirmed。内部后图实看 `bravo` 蓝色选区，独立 CUA AX selectedText=`bravo`，正文未变；较晚独立截图没有明显蓝色，不计独立选区像素通过。observe / input / observe 同组，双击为紧凑无详情操作行；标准交互创建到提交 127.680s，正常完成。 |
+| D2 `00725cdf-67a6-4390-9097-7acaa5db05a8` | 正式版本 completed：仅一次 rightClick `(70,53)`，Tool failed / unknown / commit_unknown、release confirmed、retryAllowed=false；后 both 的 inputReady=false / availableInputOperations=[]，AX 含 9 个 Menu 与 62 个 MenuItem，未重放或选菜单。独立 CUA 立即确认真实菜单 AX 与菜单像素，正文未变；内部前后 PNG 相同且只有原文档，不含另窗菜单。未知右键独立保留失败详情，前后 observe 分为边界，未展示成功紧凑行；Run 终态自行刷新。验收者仅用 CUA Escape 清理自有 QA 菜单，独立 AX 确认菜单消失，清理不计 Agent 能力。 |
+
+- A 的运行前共享卡、运行中交互卡及终态画面自行刷新，无需用户点击开发版。连续 observe / input / observe 同组，成功快捷键只显示紧凑操作行；缩略图展开、点击进入聊天共用大图、缩放、Esc 关闭及焦点回缩略图通过，保存图片只含获准 TextEdit 窗口。快捷键不生成指针图案。
+- C5 的 observe / shortcut / observe / drag / observe 五工具同组，两成功操作均为紧凑无详情行，终态无需点击开发窗刷新；idle 展开详情及缩略图后，共用大图实看仅含获准 TextEdit 单窗 673×439，Esc 后焦点回缩略图。缩放沿用 A 的实测范围，本轮未重测。
+- 旧“必须原始 z 数组严格相邻”守卫误拒绝了 TextEdit 的 66×20 标题栏附属窗口。修后只允许元数据完整、普通层且与整个图案表面完全无正面积交集的夹层，同 PID 不豁免；首帧与 25ms 循环共用同一策略。C2 / C3 实际面板普通 layer0、完整位于目标内、在目标上方及 Codex 下方，安全顺序样本分别 41 / 41、42 / 42，首末存活跨度约 1132ms / 1151ms，动作后移除。D 最后出现失序样本，约 42.81ms 后面板移除。这些是图层与生命周期证据，不冒充已实看有色图案像素。
+- A / B / C / C2 原生事件诊断的前后台、物理指针采样端点未变。C3 的图案采样指针端点发生变化，不作来源归因；所有图案样本前台均为 Codex，没有变成 helper。短采样不证明持续零干扰。C2 / C3 未通过说明仅有 `ignoresMouseEvents` 和事件投递回执不足以证明 AppKit 拖拽消费；正式隔离后的校准选区闭环由 C5 验证，不能用 C4 代替。
+- 图层修复后的统一 lint / test / build 均 exit0：491 文件 / 5516 项通过，3 文件 / 7 项沿用跳过；测试开始 10:03:58、40.19s，build 串行重建 universal helper。原生纯策略专项与独立只读 review 未发现可行动问题。日志 `/tmp/omniflow-indicator-stack-final-{lint,test,build}-20261013.log`；该门禁尚不覆盖随后预告生命周期隔离改动。限定 GUI 证据由 `/tmp/omniflow-gui-evidence-oct13.py` 导出本 Session / Run 的白名单状态及获准测试窗口 PNG，图层记录 `/tmp/omniflow-indicator-observe-20261013-i1r3E8/`；不导出凭据、其他会话或其他窗口截图。
+- 正式隔离修复改为 350ms 预告后等待真实 exit / close，再完整复验后输入；shown=false 的已启动子进程也必须收口。独立 review 补上 ready 前取消提前放开串行队列、以及关闭未确认后换 Run 可绕过残留面板的缺口：原 main runtime 保留指针门禁至进程重建，旧封存动作、新观察、重新批准、Run 释放与迟到退出均不能清除，文字 / 滚动 / 快捷键保留。3 文件 / 407 项专项、四文件 ESLint、TypeScript、diff 检查通过；源码与文档独立复核未发现剩余可行动问题。
+- 隔离修复最终统一 lint / test / build 均 exit0：491 文件 / 5539 项通过，3 文件 / 7 项沿用跳过，测试开始 10:52:42、35.68s；dev 停止后串行构建，日志 `/tmp/omniflow-indicator-close-final-{lint,test,build}-20261013.log`。C5 / B2 / D2 使用此正式版本，不由 C4 或旧 5516 项结果替代。
+- C5 / B2 / D2 的只读面板采样存活跨度分别为 361.103ms / 369.044ms / 333.330ms，完整采样分别为 14 / 14、14 / 14、13 / 13，layer0 / withinTarget / safeOrder 均为 true（各 4 个写出状态帧不代表全部采样）；TextEdit 66×20 标题栏夹层与整个面板无交集。视觉 helper / 面板首次缺席到输入 helper 首次出现分别相隔 229.161ms / 236.131ms / 250.386ms，无观测重叠。D2 从首次出现到首次缺席为 361.109ms，不能用首末采样跨度判断 350ms 预告不足。采样前台为 Codex，指针两个端点相同，最终面板为空、7 个精确开发版 helper 均已采到缺席。这些记录不证明 Node 实际 exit / close、已实看有色图案像素或持续零干扰；真正关闭 barrier 由正式源码与上述自动门禁、独立 review 核对。白名单状态及 PNG 位于本机系统临时目录的 `omniflow-gui-evidence-oct13-nm67lhcs/`（C5）、`omniflow-gui-evidence-oct13-oh7m9g_4/`（B2）和 `omniflow-gui-evidence-oct13-_5cecc40/`（D2），图层记录及最终聚合位于 `/tmp/omniflow-indicator-observe-20261013-i1r3E8/`。
+- 验收者关闭未修改的唯一 QA 文档后，独立 AX 返回 noWindowsAvailable；自有观察器与原生日志采集均已停止，开发版及本机 API / 容器保留。此清理不计内置 Agent 能力。
+- 亮暗主题 / 窄窗、多显示器、全屏 / 其他 Space、签名发行包、其他 receiver 版本及 Windows / Linux 未验；受控坐标成功不抹掉 C 的模型自主终点估计失败。
+
 ## Agent 鼠标意图指示器（2026-10-12）
+
+以下保留 2026-10-12 锁屏时的阶段结果；解锁后的真实 GUI 与修复范围见本页 2026-10-13 复验。
 
 - 按用户选择采用“贴在目标窗口上，随窗口遮挡”：main runtime 在正式已批准的 `computer.click` 与右键 / 双击 / 拖拽提交前显示紫色箭头、AI 操作标签或静态拖拽路径。图案不移动物理鼠标、不输入、不激活、不置顶；快捷键 / 文本 / 滚动不虚构指针位置。普通层 nonactivating NSPanel 透明注册后复验紧邻目标的 z 顺序，再绘制；目标 / 显示器 / 顺序漂移时关闭，不追踪过期冻结坐标。视觉租约仍由原 Run 共享 owner 持有，没有新 renderer 输入 IPC 或执行状态源。
 - adapter 新增 54 项回归，覆盖严格请求 / ready 回执、1 秒启动预算、3 秒总寿命、EOF / TERM 与 300 毫秒硬收尾、取消 / 迟到 ready / 超限 / EPIPE；runtime 新增 12 项回归，覆盖正式执行时机、AX-only 中心 / 冻结图片映射、350 毫秒预告及其后窗口 / owner / TTL / receiver 复验、取消 / Run 释放、视觉失败与 unknown 清理。原生纯协议专项额外通过；TS 三文件共 384 项及 native / build 接线独立只读 review 未发现可行动问题。
@@ -10,6 +40,8 @@
 - 开发版真实内部 Agent 的新 `computer.input` Tool GUI 流程尚未完成：电脑操作 inventory 超时，原生只读检查确认锁屏，未绕过锁屏或启动旧安装版。原生 TextEdit 四动作与图层夹具结果不能代替这一门禁。解锁后只用开发版、Win / libraryId=3 和本机 macOS MinIO，以本轮可丢弃 TextEdit 文档检验快捷键 / 双击 / 拖拽消费、最后右键 unknown 不重放、操作行分组 / 共享批准 / 缩略图 / 大图及图案遮挡；亮暗 / 窄窗、多显示器、签名包及 Windows / Linux 仍未验收。
 
 ## Agent 后台快捷键、右键、双击与拖拽（2026-10-12）
+
+以下为当时原生源码与夹具验收，最新内置 Agent GUI 结果见本页 2026-10-13 复验。
 
 - 新增独立 `computer.input@1` 四动作，沿原 main-only 单窗授权与一次性观察，不扩大旧 `computer.click` 或历史共享许可。自动化验证新审批 `inputOperations`、both / ax / screenshot / focus 能力交集、字母数字 Command / Control 要求、图片像素到 Retina / 负窗口原点的 points 映射、100～1000ms 不同起终点拖拽、sealed request、Run / owner / TTL 漂移，以及真实 builtin Tool → registry capability → broker → runtime 的提交结算。原生协议与 fake-child 测试验证首发前零投递、每种部分发送边界的唯一 up、同 PID 换窗 / 重启不释放到另一接收者、SIGTERM 退出宽限、坏回执及迟到成功不覆盖 unknown；它们不证明应用消费。
 - 独立 AppKit 夹具实际走 NSEvent / CGEvent / 单次 PostToPid，原公开坐标路线虽然进程收到事件，但 local point 在窗口外且 NSView 未收到。补充 private `CGEventSetWindowLocation` 后，`/tmp/omniflow-input-qa-UV0D47/` 的接收记录确认真实 rightDown / rightUp、doubleDown 和 Command+B 业务计数；首次拖拽被用户输入中断，唯一 cleanup up 且 tracking=false，只计部分执行。新夹具 `/tmp/omniflow-input-qa-WErAxX/drag.log` 完整拖拽圆点从 `(140,150)` 到 `(300,210)`，10 条事件含 8 次真实 MouseDragged、1 次 up，目标后台。`cancel.log` 在新动作 down 后主动 SIGTERM，unknown / cancelled、eventCount=2、releaseSent=true，leftUps 恰好增加 1、tracking=false，未跳向未执行终点。`focus.log` 同进程第二窗变成 key window 后，原窗 focused_window_mismatch / operations=[]、零派发。夹具不证明任意 AppKit / Electron / 浏览器兼容。
