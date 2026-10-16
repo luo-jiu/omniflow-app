@@ -41,4 +41,27 @@ describe('Agent live status', () => {
     expect(selectAgentLiveStatus([{ ...run, currentStep: '整理当前任务上下文' }], [], [{ ...tool, status: 'awaiting_approval' }])).toBeNull();
     expect(selectAgentLiveStatus([run], [{ ...message, runId: 'other' }], [{ ...tool, runId: 'other' }])?.label).toBe('正在思考');
   });
+  it.each(['处理模型响应', '等待确认 file.write', '等待用户输入 interaction.request'])(
+    'does not show model thinking during the main-owned handoff %s before tool snapshots arrive', currentStep => {
+      expect(selectAgentLiveStatus([{ ...run, currentStep }], [], [])).toBeNull();
+    },
+  );
+  it.each([
+    ['准备执行工具', '正在准备工具'], ['准备 computer.observe', '正在准备工具'],
+    ['执行 file.read', '正在调用工具'], ['继续执行 shell.run', '正在调用工具'],
+    ['准备工具续接', '正在处理工具结果'],
+  ])('shows factual handoff feedback for %s until the real tool card arrives', (currentStep, label) => {
+    const phase = { ...run, currentStep };
+    expect(selectAgentLiveStatus([phase], [], [])?.label).toBe(label);
+    expect(selectAgentLiveStatus([phase], [], [tool])).toBeNull();
+    expect(selectAgentLiveStatus([phase], [message], [])).toBeNull();
+  });
+  it('keeps any active tool ahead of compaction and resumes thinking only in the next model phase', () => {
+    const completed = { ...tool, status: 'completed' as const, result: { ok: true } };
+    const second = { ...tool, id: 't2', ordinal: 2 };
+    expect(selectAgentLiveStatus([{ ...run, currentStep: '整理当前任务上下文' }], [], [completed, second])).toBeNull();
+    expect(selectAgentLiveStatus([{ ...run, currentStep: '准备工具续接' }], [], [completed])?.label).toBe('正在处理工具结果');
+    expect(selectAgentLiveStatus([{ ...run, currentStep: '请求 AI 服务' }], [], [completed])?.label).toBe('正在思考');
+    expect(selectAgentLiveStatus([{ ...run, currentStep: '根据工具结果继续思考' }], [], [completed])?.label).toBe('正在思考');
+  });
 });

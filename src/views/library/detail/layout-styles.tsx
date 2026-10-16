@@ -68,6 +68,8 @@ export const DetailWrapper = styled.div`
   background: transparent;
   position: relative;
   --side-panel-visual-width: ${DEFAULT_SIDE_PANEL_WIDTH}px;
+  --side-panel-used-width: clamp(0px, var(--side-panel-visual-width), var(--side-panel-max-width, 80vw));
+  --content-corner-radius: clamp(0px, var(--side-panel-used-width), 12px);
   --content-toolbar-collapsed-safe-space: ${CONTENT_TOOLBAR_COLLAPSED_SAFE_SPACE}px;
   --side-panel-toggle-visual-left: ${SIDE_PANEL_TOGGLE_VISUAL_LEFT}px;
   --side-panel-toggle-drag-before-width: ${SIDE_PANEL_TOGGLE_LEFT - 8}px;
@@ -77,12 +79,28 @@ export const DetailWrapper = styled.div`
   --side-panel-transition-easing: cubic-bezier(0.22, 1, 0.36, 1);
   transition: --side-panel-visual-width var(--side-panel-transition-duration) var(--side-panel-transition-easing);
 
+  /* One continuous sidebar surface also backs the content's rounded cutouts. */
+  &::before {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: calc(var(--side-panel-used-width) + var(--content-corner-radius));
+    pointer-events: none;
+    background: color-mix(in srgb, var(--app-bg-sidebar) 72%, transparent);
+    backdrop-filter: blur(18px) saturate(125%);
+    -webkit-backdrop-filter: blur(18px) saturate(125%);
+  }
+
   html[data-platform="windows"] & {
     --content-toolbar-collapsed-safe-space: ${WINDOWS_CONTENT_TOOLBAR_COLLAPSED_SAFE_SPACE}px;
     --side-panel-toggle-visual-left: ${WINDOWS_SIDE_PANEL_TOGGLE_VISUAL_LEFT}px;
     --side-panel-toggle-drag-before-width: ${Math.max(0, WINDOWS_SIDE_PANEL_TOGGLE_VISUAL_LEFT - 6)}px;
     --side-panel-toggle-drag-after-left: ${WINDOWS_SIDE_PANEL_TOGGLE_VISUAL_LEFT + SIDE_PANEL_TOGGLE_SIZE + 8}px;
     --side-panel-toggle-guard-left: ${Math.max(0, WINDOWS_SIDE_PANEL_TOGGLE_VISUAL_LEFT - 6)}px;
+    background: var(--app-bg-sidebar);
+  }
+
+  html[data-platform="windows"] &::before {
     background: var(--app-bg-sidebar);
   }
 
@@ -160,22 +178,16 @@ export const TitlebarSidePanelToggleButton = styled.button`
 
 export const SidePanel = styled.div`
   position: relative;
-  width: var(--side-panel-visual-width);
+  z-index: 0;
+  width: var(--side-panel-used-width);
   min-width: 0;
   max-width: var(--side-panel-max-width, 80vw);
   display: flex;
   flex-direction: column;
-  /* Keep a renderer-side glass fallback while the native backing is rebuilding after fullscreen. */
-  background: color-mix(in srgb, var(--app-bg-sidebar) 72%, transparent);
-  backdrop-filter: blur(18px) saturate(125%);
-  -webkit-backdrop-filter: blur(18px) saturate(125%);
+  background: transparent;
   flex-shrink: 0;
   height: 100%;
   overflow: hidden;
-
-  html[data-platform="windows"] & {
-    background: var(--app-bg-sidebar);
-  }
 `;
 
 export const ResizeHandle = styled.div`
@@ -286,6 +298,7 @@ export const SidePanelFooter = styled.div`
 `;
 
 export const ContentArea = styled.div`
+  position: relative;
   flex: 1;
   min-width: 0;
   height: 100%;
@@ -293,8 +306,8 @@ export const ContentArea = styled.div`
   display: flex;
   flex-direction: column;
   background: var(--app-bg);
-  border-top-left-radius: clamp(0px, var(--side-panel-visual-width), 12px);
-  border-bottom-left-radius: clamp(0px, var(--side-panel-visual-width), 12px);
+  border-top-left-radius: var(--content-corner-radius);
+  border-bottom-left-radius: var(--content-corner-radius);
 `;
 
 const toolbarActionButtonStyles = css`
@@ -410,7 +423,7 @@ export const ContentToolbar = styled.div`
   flex-shrink: 0;
   background: var(--app-bg);
   border-bottom: 3px solid var(--app-border);
-  border-top-left-radius: clamp(0px, var(--side-panel-visual-width), 12px);
+  border-top-left-radius: var(--content-corner-radius);
   -webkit-app-region: drag;
   position: relative;
   display: flex;

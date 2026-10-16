@@ -15,6 +15,7 @@ import AgentActivityText from './AgentActivityText';
 import { buildAgentToolSummary } from '../agent-tool-presentation';
 import AgentToolIcon from './AgentToolIcon';
 import type { AgentComputerPointerPlan } from '../agent-computer-pointer-plan';
+import { AgentToolDetailLayoutContext, type AgentToolDetailLayout } from '../agent-tool-detail-layout';
 
 const ActivityGroup = styled.section`
   --agent-tool-record-color: color-mix(
@@ -30,11 +31,11 @@ const ActivityGroup = styled.section`
   .agent-activity-group-toggle {
     width: fit-content;
     max-width: 100%;
-    min-height: 23px;
+    min-height: 20px;
     display: flex;
     align-items: center;
     gap: 7px;
-    padding: 0 3px;
+    padding: 0;
     border: 0;
     border-radius: var(--app-radius-medium);
     background: transparent;
@@ -66,6 +67,7 @@ const ActivityGroup = styled.section`
   }
 
   .agent-activity-group-icon {
+    width: 16px;
     color: var(--agent-tool-record-color);
   }
 
@@ -143,29 +145,33 @@ const ActivityGroup = styled.section`
   .agent-activity-group-items {
     ${workspaceScrollbarStyles}
 
-    display: grid;
-    gap: 0;
-    max-height: 156px;
-    margin-top: 0;
+    max-height: 256px;
+    margin-top: 2px;
     padding-left: 0;
     padding-right: 4px;
     overflow-x: hidden;
     overflow-y: auto;
     overflow-anchor: none;
+    transition: max-height 220ms cubic-bezier(0.22, 1, 0.36, 1);
   }
 
-  .agent-activity-group-items > article {
+  .agent-activity-group-content {
+    display: grid;
+    gap: 2px;
+  }
+
+  .agent-activity-group-content > article {
     padding-top: 0;
     padding-bottom: 0;
   }
 
   .agent-activity-group-items .agent-activity-header {
-    min-height: 23px;
+    min-height: 20px;
     gap: 7px;
   }
 
   .agent-activity-group-items .agent-activity-status-icon {
-    width: 20px;
+    width: 16px;
     height: 20px;
   }
 
@@ -173,7 +179,8 @@ const ActivityGroup = styled.section`
     .agent-activity-group-chevron,
     .agent-activity-group-chevron .semi-icon,
     .agent-activity-group-collapse,
-    .agent-activity-group-collapse-inner {
+    .agent-activity-group-collapse-inner,
+    .agent-activity-group-items {
       transition: none;
     }
   }
@@ -232,8 +239,37 @@ export default function AgentToolActivityGroup({
   ...props
 }: AgentToolActivityGroupProps) {
   const [open, setOpen] = React.useState(false);
+  const itemsRef = React.useRef<HTMLDivElement>(null);
+  const contentRef = React.useRef<HTMLDivElement>(null);
+  const detailLayouts = React.useRef(new Map<string, AgentToolDetailLayout>());
+  const updateGroupHeight = React.useCallback(() => {
+    const items = itemsRef.current;
+    const content = contentRef.current;
+    if (!items || !content) return;
+    const details = [...detailLayouts.current.values()];
+    if (!details.some(entry => entry.observation)) {
+      items.style.maxHeight = '256px';
+      return;
+    }
+    // Include every summary row, even when the observation is last in a long group.
+    // Only open, naturally sized bodies are read; no animation-frame DOM scan.
+    const height = details.reduce((total, entry) => {
+      const collapse = entry.body.closest<HTMLElement>('.agent-activity-collapse');
+      const style = window.getComputedStyle(entry.body);
+      const naturalHeight = entry.body.getBoundingClientRect().height
+        + (parseFloat(style.marginTop) || 0) + (parseFloat(style.marginBottom) || 0);
+      return total + naturalHeight - (collapse?.getBoundingClientRect().height || 0);
+    }, content.getBoundingClientRect().height);
+    items.style.maxHeight = `${Math.max(256, Math.ceil(height))}px`;
+  }, []);
+  const reportDetailLayout = React.useCallback((id: string, detail: AgentToolDetailLayout | null) => {
+    if (detail) detailLayouts.current.set(id, detail);
+    else detailLayouts.current.delete(id);
+    updateGroupHeight();
+  }, [updateGroupHeight]);
+  React.useLayoutEffect(updateGroupHeight, [activities, updateGroupHeight]);
   const toggleOpen = () => {
-    if (!open) props.onExpand?.();
+    props.onExpand?.();
     setOpen(current => !current);
   };
   const latest = activities[activities.length - 1];
@@ -264,8 +300,12 @@ export default function AgentToolActivityGroup({
         data-open={open ? true : undefined}
       >
         <div className="agent-activity-group-collapse-inner">
-          <div className="agent-activity-group-items">
-            {activities.map(activity => activityCard(activity, props, open && props.detailsVisible !== false))}
+          <div ref={itemsRef} className="agent-activity-group-items">
+            <AgentToolDetailLayoutContext.Provider value={reportDetailLayout}>
+              <div ref={contentRef} className="agent-activity-group-content">
+                {activities.map(activity => activityCard(activity, props, open && props.detailsVisible !== false))}
+              </div>
+            </AgentToolDetailLayoutContext.Provider>
           </div>
         </div>
       </div>

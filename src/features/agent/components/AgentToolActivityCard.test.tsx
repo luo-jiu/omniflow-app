@@ -10,10 +10,13 @@ import type {
   AgentToolActivitySnapshot,
 } from '@/shared/agent/agent.types';
 import type { AgentShellLogPageV1 } from '@/shared/agent/shell/agent-shell.types';
+import { WorkspaceVisibilityContext } from '@/components/ui/workspace-visibility';
 import { previewAgentAttachment, readAgentShellLogPage } from '../services/agent.api';
 import AgentToolActivityCard from './AgentToolActivityCard';
 import AgentToolActivityGroup from './AgentToolActivityGroup';
 import AgentActivityText from './AgentActivityText';
+import AgentConfirmationCard from './AgentConfirmationCard';
+import AgentInteractionBlock from './AgentInteractionBlock';
 
 vi.mock('@douyinfe/semi-icons', () => ({
   IconAlertCircle: () => null,
@@ -203,7 +206,133 @@ function observationActivity(): AgentToolActivitySnapshot {
   };
 }
 
+function axControlsActivity(withTree = true): AgentToolActivitySnapshot {
+  return {
+    ...observationActivity(),
+    preparation: { preparedActionId: 'window-action', snapshotHash: 'a'.repeat(64), action: {
+      kind: 'computer.observe', version: 2, libraryId: 3, mode: 'ax',
+      targetId: '12022dc1-f61c-4c2a-aac6-2963b60e5f7a', applicationLabel: 'OmniFlow', windowLabel: 'win',
+    } },
+    result: { ok: true, data: {
+      captureScope: 'window', observationSource: 'ax',
+      targetId: '12022dc1-f61c-4c2a-aac6-2963b60e5f7a', observationId: SCREEN_OBSERVATION_ID,
+      ...(withTree ? { axTree: 'AXWindow "win"\n  AXButton "验证关闭按钮"', axTreeTruncated: false } : {}),
+      elements: [{
+        elementId: 'e2564a07-1d96-4b28-a5b5-9831aa2fc3fe', label: '验证关闭按钮', role: 'AXButton',
+        operations: ['press'], identifier: 'private-ax-identifier', screenshotBounds: { x: 13, y: 27 },
+      }, {
+        elementId: '64006031-e1a2-456a-a1a6-431c2b24c1e0', label: 'invalid\ncontrol', role: 'AXButton',
+        operations: ['press'],
+      }],
+      elementsTruncated: false,
+    } },
+  };
+}
+
+function disclosure(renderer: TestRenderer.ReactTestRenderer, label: string) {
+  return renderer.root.findAllByType('details').find(node => (
+    textContent(node.findByType('summary')) === label
+  ))!;
+}
+
+function finishToolCollapse(renderer: TestRenderer.ReactTestRenderer, propertyName = 'grid-template-rows') {
+  const target = {};
+  act(() => renderer.root.findByProps({ className: 'agent-activity-collapse' })
+    .props.onTransitionEnd?.({ currentTarget: target, target, propertyName }));
+}
+
 describe('AgentToolActivityCard computer presentation', () => {
+  it('retains AX and controls through the closing transition and releases them only after the height settles', () => {
+    const renderer = renderCard(axControlsActivity());
+    const toggle = () => act(() => renderer.root.findByProps({ className: 'agent-activity-header' }).props.onClick());
+    toggle();
+    act(() => disclosure(renderer, 'AX').props.onToggle({ currentTarget: { open: true } }));
+    act(() => disclosure(renderer, '控件').props.onToggle({ currentTarget: { open: true } }));
+    toggle();
+    const collapse = renderer.root.findByProps({ className: 'agent-activity-collapse' });
+    expect(collapse.props['aria-hidden']).toBe(true);
+    expect(collapse.props.inert).toBe('');
+    expect(renderer.root.findAllByType('pre')).toHaveLength(1);
+    expect(renderer.root.findAllByType('dl')).toHaveLength(1);
+    finishToolCollapse(renderer, 'opacity');
+    act(() => collapse.props.onTransitionEnd({ currentTarget: {}, target: {}, propertyName: 'grid-template-rows' }));
+    expect(renderer.root.findAllByType('details')).toHaveLength(2);
+    finishToolCollapse(renderer);
+    expect(renderer.root.findAllByType('details')).toHaveLength(0);
+    toggle();
+    expect(disclosure(renderer, 'AX').props.open).toBe(false);
+    expect(disclosure(renderer, '控件').props.open).toBe(false);
+  });
+
+  it('reverses a closing detail without dropping its content and bounds cleanup when no transition event arrives', () => {
+    vi.useFakeTimers();
+    const renderer = renderCard(axControlsActivity());
+    const toggle = () => act(() => renderer.root.findByProps({ className: 'agent-activity-header' }).props.onClick());
+    toggle();
+    act(() => disclosure(renderer, 'AX').props.onToggle({ currentTarget: { open: true } }));
+    toggle();
+    act(() => { vi.advanceTimersByTime(100); });
+    toggle();
+    finishToolCollapse(renderer);
+    act(() => { vi.advanceTimersByTime(500); });
+    expect(renderer.root.findByType('pre').children).toEqual(['AXWindow "win"\n  AXButton "验证关闭按钮"']);
+    toggle();
+    act(() => { vi.advanceTimersByTime(100); });
+    expect(renderer.root.findAllByType('pre')).toHaveLength(1);
+    act(() => { vi.advanceTimersByTime(500); });
+    expect(renderer.root.findAllByType('details')).toHaveLength(0);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('releases closing content immediately when reduced motion is requested', () => {
+    vi.stubGlobal('window', { matchMedia: () => ({ matches: true }) });
+    const renderer = renderCard(axControlsActivity());
+    const toggle = () => act(() => renderer.root.findByProps({ className: 'agent-activity-header' }).props.onClick());
+    toggle();
+    expect(renderer.root.findAllByType('details')).toHaveLength(2);
+    toggle();
+    expect(renderer.root.findAllByType('details')).toHaveLength(0);
+  });
+
+  it('cancels deferred release when the workspace hides or the Tool unmounts during closing', () => {
+    vi.useFakeTimers();
+    const content = (visible: boolean) => <WorkspaceVisibilityContext.Provider value={visible}>
+      {cardElement(axControlsActivity())}
+    </WorkspaceVisibilityContext.Provider>;
+    let renderer!: TestRenderer.ReactTestRenderer;
+    act(() => { renderer = TestRenderer.create(content(true)); });
+    renderers.push(renderer);
+    const toggle = () => act(() => renderer.root.findByProps({ className: 'agent-activity-header' }).props.onClick());
+    toggle();
+    toggle();
+    act(() => renderer.update(content(false)));
+    expect(renderer.root.findAllByType('details')).toHaveLength(0);
+    expect(vi.getTimerCount()).toBe(0);
+    act(() => renderer.update(content(true)));
+    toggle();
+    toggle();
+    expect(vi.getTimerCount()).toBe(1);
+    act(() => renderer.unmount());
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('drops a closing screenshot on owner changes without loading it in the new scope', async () => {
+    vi.useFakeTimers();
+    let finish!: (src: string) => void;
+    const preview = vi.mocked(previewAgentAttachment);
+    preview.mockReturnValueOnce(new Promise(resolve => { finish = resolve; }));
+    const activity = observationActivity();
+    const renderer = renderCard(activity);
+    const toggle = () => act(() => renderer.root.findByProps({ className: 'agent-activity-header' }).props.onClick());
+    toggle();
+    toggle();
+    act(() => renderer.update(cardElement(activity, { ...OWNER_SCOPE, accountScope: 'account-8' })));
+    await act(async () => { finish('data:image/png;base64,YQ=='); });
+    expect(renderer.root.findAllByType('img')).toHaveLength(0);
+    expect(preview).toHaveBeenCalledOnce();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it.each(['shortcut', 'rightClick', 'doubleClick', 'drag'] as const)('renders directed %s as a compact row and keeps release uncertainty inspectable', operation => {
     const identity = { libraryId: 3, targetId: '12022dc1-f61c-4c2a-aac6-2963b60e5f7a',
       applicationLabel: 'OmniFlow', windowLabel: '测试窗口', observationId: SCREEN_OBSERVATION_ID };
@@ -246,7 +375,7 @@ describe('AgentToolActivityCard computer presentation', () => {
     };
     const renderer = renderCard(activity);
     act(() => renderer.root.findByProps({ className: 'agent-activity-header' }).props.onClick());
-    expect(renderer.root.findByType('summary').children).toEqual(['AX', ' · 局部', ' · 已截断']);
+    expect(textContent(renderer.root.findByType('summary'))).toBe('AX · 局部');
     act(() => renderer.root.findByType('details').props.onToggle({ currentTarget: { open: true } }));
     expect(renderer.root.findByType('p').children).toEqual(['局部范围：控件自身；控件扫描完整，不代表全窗口。']);
     expect(previewAgentAttachment).not.toHaveBeenCalled();
@@ -266,13 +395,99 @@ describe('AgentToolActivityCard computer presentation', () => {
     const renderer = renderCard(activity);
     expect(textContent(renderer.root)).toBe('已查看窗口');
     act(() => renderer.root.findByProps({ className: 'agent-activity-header' }).props.onClick());
-    expect(renderer.root.findByType('summary').children).toEqual(['AX']);
+    expect(textContent(renderer.root.findByType('summary'))).toBe('AX');
     act(() => renderer.root.findByType('details').props.onToggle({ currentTarget: { open: true } }));
     expect(renderer.root.findByType('pre').children).toEqual(['AXWindow "win"\n  AXButton "展开目录树"']);
     expect(previewAgentAttachment).not.toHaveBeenCalled();
     expect(renderer.root.findAllByType('img')).toHaveLength(0);
     act(() => renderer.root.findByProps({ className: 'agent-activity-header' }).props.onClick());
+    finishToolCollapse(renderer);
     expect(renderer.root.findAllByType('pre')).toHaveLength(0);
+  });
+
+  it('keeps AX and controls independently closed until requested and resets them when the Tool closes', () => {
+    const renderer = renderCard(axControlsActivity());
+    expect(renderer.root.findAllByType('details')).toHaveLength(0);
+    act(() => renderer.root.findByProps({ className: 'agent-activity-header' }).props.onClick());
+    expect(renderer.root.findAllByType('summary').map(textContent)).toEqual(['AX', '控件']);
+    expect(disclosure(renderer, 'AX').props.open).toBe(false);
+    expect(disclosure(renderer, '控件').props.open).toBe(false);
+    expect(renderer.root.findAllByType('dl')).toHaveLength(0);
+    expect(renderer.root.findAllByType('pre')).toHaveLength(0);
+
+    act(() => disclosure(renderer, '控件').props.onToggle({ currentTarget: { open: true } }));
+    expect(renderer.root.findByType('dt').children).toEqual(['验证关闭按钮']);
+    expect(renderer.root.findByType('dd').children).toEqual(['AXButton · 点击']);
+    expect(disclosure(renderer, 'AX').props.open).toBe(false);
+    expect(renderer.root.findAllByType('pre')).toHaveLength(0);
+    expect(textContent(renderer.root)).not.toContain('private-ax-identifier');
+    expect(textContent(renderer.root)).not.toContain('invalid');
+
+    act(() => disclosure(renderer, 'AX').props.onToggle({ currentTarget: { open: true } }));
+    expect(renderer.root.findByType('pre').children).toEqual(['AXWindow "win"\n  AXButton "验证关闭按钮"']);
+    expect(disclosure(renderer, '控件').props.open).toBe(true);
+    act(() => disclosure(renderer, '控件').props.onToggle({ currentTarget: { open: false } }));
+    expect(renderer.root.findAllByType('dl')).toHaveLength(0);
+    expect(disclosure(renderer, 'AX').props.open).toBe(true);
+    expect(renderer.root.findAllByType('pre')).toHaveLength(1);
+
+    act(() => disclosure(renderer, '控件').props.onToggle({ currentTarget: { open: true } }));
+    act(() => renderer.root.findByProps({ className: 'agent-activity-header' }).props.onClick());
+    finishToolCollapse(renderer);
+    expect(renderer.root.findAllByType('details')).toHaveLength(0);
+    expect(renderer.root.findAllByType('dl')).toHaveLength(0);
+    expect(renderer.root.findAllByType('pre')).toHaveLength(0);
+    act(() => renderer.root.findByProps({ className: 'agent-activity-header' }).props.onClick());
+    expect(disclosure(renderer, 'AX').props.open).toBe(false);
+    expect(disclosure(renderer, '控件').props.open).toBe(false);
+    expect(renderer.root.findAllByType('dl')).toHaveLength(0);
+    expect(renderer.root.findAllByType('pre')).toHaveLength(0);
+    expect(previewAgentAttachment).not.toHaveBeenCalled();
+  });
+
+  it('releases controls in a retained Tool when its group closes and remounts the list closed', () => {
+    let renderer!: TestRenderer.ReactTestRenderer;
+    act(() => { renderer = TestRenderer.create(<AgentToolActivityGroup activities={[axControlsActivity()]}
+      approvalBusyIds={new Set()} interactionBusyIds={new Set()} libraryId={3}
+      onResolveApproval={vi.fn()} ownerScope={OWNER_SCOPE} />); });
+    renderers.push(renderer);
+    act(() => renderer.root.findByProps({ className: 'agent-activity-group-toggle' }).props.onClick());
+    act(() => renderer.root.findByProps({ className: 'agent-activity-header' }).props.onClick());
+    act(() => disclosure(renderer, '控件').props.onToggle({ currentTarget: { open: true } }));
+    expect(renderer.root.findAllByType('dl')).toHaveLength(1);
+    act(() => renderer.root.findByProps({ className: 'agent-activity-group-toggle' }).props.onClick());
+    expect(renderer.root.findAllByType('details')).toHaveLength(0);
+    expect(renderer.root.findAllByType('dl')).toHaveLength(0);
+    act(() => renderer.root.findByProps({ className: 'agent-activity-group-toggle' }).props.onClick());
+    expect(disclosure(renderer, '控件').props.open).toBe(false);
+    expect(renderer.root.findAllByType('dl')).toHaveLength(0);
+    expect(disclosure(renderer, 'AX').props.open).toBe(false);
+  });
+
+  it('keeps controls-only observations naturally sized and restores a closed list after workspace hiding', () => {
+    const activity = axControlsActivity(false);
+    const content = (visible: boolean) => <WorkspaceVisibilityContext.Provider value={visible}>
+      {cardElement(activity)}
+    </WorkspaceVisibilityContext.Provider>;
+    let renderer!: TestRenderer.ReactTestRenderer;
+    act(() => { renderer = TestRenderer.create(content(true)); });
+    renderers.push(renderer);
+    act(() => renderer.root.findByProps({ className: 'agent-activity-header' }).props.onClick());
+    const body = renderer.root.findByProps({ className: 'agent-activity-body' });
+    expect(body.props['data-observation']).toBe(true);
+    expect(body.props['data-scrollable']).toBeUndefined();
+    expect(renderer.root.findAllByType('summary').map(textContent)).toEqual(['控件']);
+    expect(renderer.root.findAllByType('dl')).toHaveLength(0);
+    act(() => disclosure(renderer, '控件').props.onToggle({ currentTarget: { open: true } }));
+    expect(renderer.root.findByType('dd').children).toEqual(['AXButton · 点击']);
+    expect(renderer.root.findAllByType('pre')).toHaveLength(0);
+    act(() => renderer.update(content(false)));
+    expect(renderer.root.findAllByType('details')).toHaveLength(0);
+    expect(renderer.root.findAllByType('dl')).toHaveLength(0);
+    act(() => renderer.update(content(true)));
+    expect(disclosure(renderer, '控件').props.open).toBe(false);
+    expect(renderer.root.findAllByType('dl')).toHaveLength(0);
+    expect(previewAgentAttachment).not.toHaveBeenCalled();
   });
 
   it('releases expanded AX text when its retained Tool group is collapsed and remounts it closed', async () => {
@@ -293,7 +508,7 @@ describe('AgentToolActivityCard computer presentation', () => {
     renderers.push(renderer);
     act(() => renderer.root.findByProps({ className: 'agent-activity-group-toggle' }).props.onClick());
     await act(async () => renderer.root.findByProps({ className: 'agent-activity-header' }).props.onClick());
-    expect(renderer.root.findByType('summary').children).toEqual(['AX']);
+    expect(textContent(renderer.root.findByType('summary'))).toBe('AX');
     expect(renderer.root.findAllByType('pre')).toHaveLength(0);
     act(() => renderer.root.findByType('details').props.onToggle({ currentTarget: { open: true } }));
     expect(renderer.root.findByType('pre').children).toEqual(['AXWindow "win"\n  AXButton "展开目录树"']);
@@ -302,7 +517,7 @@ describe('AgentToolActivityCard computer presentation', () => {
     expect(renderer.root.findAllByType('details')).toHaveLength(0);
     await act(async () => renderer.root.findByProps({ className: 'agent-activity-group-toggle' }).props.onClick());
     expect(renderer.root.findAllByType('pre')).toHaveLength(0);
-    expect(renderer.root.findByType('summary').children).toEqual(['AX']);
+    expect(textContent(renderer.root.findByType('summary'))).toBe('AX');
   });
 
   it('releases an expanded screenshot when its retained parent Tool group is collapsed', async () => {
@@ -329,7 +544,7 @@ describe('AgentToolActivityCard computer presentation', () => {
     expect(renderer.root.findByType('img').props.src).toBe('data:image/png;base64,Yg==');
   });
 
-  it('loads the actual screenshot only while expanded and never repeats the status in its body', async () => {
+  it('loads the actual screenshot only while expanded or closing and never repeats the status in its body', async () => {
     const activity = observationActivity();
     const preview = vi.mocked(previewAgentAttachment);
     let finish!: (src: string) => void;
@@ -341,6 +556,7 @@ describe('AgentToolActivityCard computer presentation', () => {
     act(() => renderer.root.findByProps({ className: 'agent-activity-header' }).props.onClick());
     expect(preview).toHaveBeenCalledWith({ id: SCREEN_IMAGE_ID, libraryId: 3, ownerScope: OWNER_SCOPE, sessionId: activity.sessionId });
     act(() => renderer.root.findByProps({ className: 'agent-activity-header' }).props.onClick());
+    finishToolCollapse(renderer);
     await act(async () => { finish('data:image/png;base64,YQ=='); });
     expect(renderer.root.findAllByType('img')).toHaveLength(0);
     await act(async () => renderer.root.findByProps({ className: 'agent-activity-header' }).props.onClick());
@@ -432,7 +648,97 @@ afterEach(() => {
   renderers.splice(0).forEach((renderer) => {
     act(() => renderer.unmount());
   });
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
   vi.clearAllMocks();
+});
+
+describe('AgentToolActivityCard approval transitions and mixed groups', () => {
+  it('replaces a pending approval with its real business step without an approval receipt row', () => {
+    const onResolveApproval = vi.fn();
+    const pending = shellActivity({ call: { id: 'write-call', name: 'file.write', input: {} }, preparation: undefined,
+      permissionBehavior: 'ask', status: 'awaiting_approval', result: undefined,
+      approval: { approvalId: 'write-approval', status: 'pending',
+        preview: { title: 'approval preview sentinel', description: 'approval description sentinel', risk: 'write' } } });
+    const props = { activity: pending, approvalBusy: true, interactionBusy: false, libraryId: 3,
+      ownerScope: OWNER_SCOPE, onResolveApproval };
+    let renderer!: TestRenderer.ReactTestRenderer;
+    act(() => { renderer = TestRenderer.create(<AgentToolActivityCard {...props} />); });
+    renderers.push(renderer);
+    const confirmation = renderer.root.findByType(AgentConfirmationCard);
+    expect(confirmation.props.busy).toBe(true);
+    act(() => confirmation.props.onResolve(true));
+    expect(onResolveApproval).toHaveBeenCalledWith(expect.objectContaining({ approvalId: 'write-approval', call: pending.call }), true, undefined);
+
+    const approved = { ...pending, approval: { ...pending.approval!, status: 'approved' as const } };
+    act(() => renderer.update(<AgentToolActivityCard {...props} activity={{ ...approved, status: 'running' }} />));
+    expect(renderer.root.findAllByType(AgentConfirmationCard)).toHaveLength(0);
+    expect(textContent(renderer.root.findByProps({ className: 'agent-activity-header' }))).toBe('正在保存文件');
+    act(() => renderer.update(<AgentToolActivityCard {...props} activity={{ ...approved, status: 'completed',
+      result: { ok: true, data: { fileName: 'result.txt' } } }} />));
+    expect(textContent(renderer.root)).toBe('已保存result.txt');
+    expect(renderer.root.findAllByProps({ className: 'agent-activity-header' })).toHaveLength(1);
+    expect(JSON.stringify(renderer.toJSON())).not.toContain('approval preview sentinel');
+    expect(textContent(renderer.root)).not.toMatch(/用户同意|已批准/);
+  });
+
+  it('keeps a denied cancellation visible and preserves a pending interaction as an actionable body', () => {
+    const denied = shellActivity({ call: { id: 'write-call', name: 'file.write', input: {} }, preparation: undefined,
+      permissionBehavior: 'ask', status: 'cancelled', result: { ok: false, message: '用户拒绝了这次保存' },
+      approval: { approvalId: 'write-approval', status: 'denied', preview: { title: '保存', description: '', risk: 'write' } } });
+    const renderer = renderCard(denied);
+    expect(renderer.root.findAllByType(AgentConfirmationCard)).toHaveLength(0);
+    expect(textContent(renderer.root)).toContain('已取消');
+    expect(textContent(renderer.root)).toContain('用户拒绝了这次保存');
+    expect(renderer.root.findByProps({ className: 'agent-activity-collapse' }).props['aria-hidden']).toBe(false);
+
+    const onAction = vi.fn();
+    const waiting = shellActivity({ call: { id: 'choice-call', name: 'interaction.request', input: {} },
+      preparation: undefined, result: undefined, status: 'awaiting_interaction',
+      interaction: { interactionId: 'choice', status: 'pending',
+        request: { kind: 'choice', prompt: '选择保存位置', options: [{ id: 'library', label: '当前资料库' }] } } });
+    act(() => renderer.update(<AgentToolActivityCard activity={waiting} approvalBusy={false} interactionBusy
+      libraryId={3} ownerScope={OWNER_SCOPE} onResolveApproval={vi.fn()} onAction={onAction} />));
+    expect(renderer.root.findByProps({ className: 'agent-activity-collapse' }).props['aria-hidden']).toBe(false);
+    expect(renderer.root.findByType(AgentInteractionBlock).props).toMatchObject({ busy: true, onAction,
+      block: { interactionId: 'choice', status: 'pending', prompt: '选择保存位置' } });
+  });
+
+  it('renders approved read, write, Shell, plugin and observation steps once in their supplied order', () => {
+    const approval = { approvalId: 'approved', status: 'approved' as const,
+      preview: { title: 'approval-only sentinel', description: '', risk: 'write' as const } };
+    const activities = [
+      shellActivity({ call: { id: 'read', name: 'file.read', input: {} }, preparation: undefined,
+        result: { ok: true, data: { fileName: 'source.txt' } } }),
+      shellActivity({ call: { id: 'write', name: 'file.write', input: {} }, preparation: undefined, permissionBehavior: 'ask', approval,
+        result: { ok: true, data: { fileName: 'output.txt' } } }),
+      shellActivity({ permissionBehavior: 'ask', approval }),
+      shellActivity({ call: { id: 'plugin', name: 'example.inspect', input: {} }, preparation: undefined, approval,
+        pluginSource: { pluginId: 'example', pluginVersion: '1', packageFingerprint: 'a', toolId: 'inspect', registrationId: 'plugin:inspect' },
+        result: { ok: true, message: '插件读取完成' } }),
+      observationActivity(),
+    ].map((source, index) => ({ ...source, id: `mixed-${index}`, ordinal: index + 1,
+      call: { ...source.call, id: `mixed-call-${index}` } }));
+    let renderer!: TestRenderer.ReactTestRenderer;
+    act(() => { renderer = TestRenderer.create(<AgentToolActivityGroup activities={activities}
+      approvalBusyIds={new Set()} interactionBusyIds={new Set()} libraryId={3}
+      onResolveApproval={vi.fn()} ownerScope={OWNER_SCOPE} />); });
+    renderers.push(renderer);
+    expect(renderer.root.findByProps({ className: 'agent-activity-group-toggle' }).props['aria-expanded']).toBe(false);
+    act(() => renderer.root.findByProps({ className: 'agent-activity-group-toggle' }).props.onClick());
+    expect(renderer.root.findAllByType(AgentToolActivityCard).map(card => card.props.activity.id)).toEqual(activities.map(value => value.id));
+    expect(renderer.root.findAllByType(AgentConfirmationCard)).toHaveLength(0);
+    expect(renderer.root.findAllByProps({ className: 'agent-shell-summary' })).toHaveLength(1);
+    const text = textContent(renderer.root.findByProps({ className: 'agent-activity-group-items' }));
+    expect(text).toContain('已读取source.txt');
+    expect(text).toContain('已保存output.txt');
+    expect(text).toContain('pwd\\nprintf "done"');
+    expect(text).toContain('插件example版本1工具inspect包指纹a');
+    expect(text).toContain('已查看屏幕');
+    expect(text).not.toContain('approval-only sentinel');
+    expect(text).not.toMatch(/用户同意|已批准/);
+    expect(readShellLogPageMock).not.toHaveBeenCalled();
+  });
 });
 
 describe('AgentToolActivityCard Shell presentation', () => {
@@ -510,7 +816,7 @@ describe('AgentToolActivityCard Shell presentation', () => {
     expect(renderer.root.findByProps({ className: 'agent-activity-body' }).props['data-scrollable'])
       .toBe(true);
     act(() => renderer.root.findByProps({ 'aria-label': '收起工具详情' }).props.onClick());
-    expect(onExpand).toHaveBeenCalledTimes(1);
+    expect(onExpand).toHaveBeenCalledTimes(2);
     expect(renderer.root.findByProps({ className: 'agent-activity-collapse' }).props['aria-hidden'])
       .toBe(true);
   });
@@ -651,7 +957,7 @@ describe('AgentToolActivityCard Shell presentation', () => {
     expect(textContent(renderer.root.findByProps({ role: 'region' }))).toContain('second page');
 
     act(() => summary.props.onClick());
-    expect(onExpand).toHaveBeenCalledTimes(1);
+    expect(onExpand).toHaveBeenCalledTimes(2);
   });
 
   it('ignores an old log response after the rendered Tool activity changes', async () => {
@@ -703,6 +1009,42 @@ describe('AgentToolActivityCard Shell presentation', () => {
 
     expect(textContent(renderer.root)).not.toContain('stale private output');
     expect(textContent(renderer.root)).toContain('new activity output');
+  });
+
+  it('releases grouped Shell details on collapse or workspace hiding and ignores their late responses', async () => {
+    let resolveHiddenPage!: (page: AgentShellLogPageV1) => void;
+    readShellLogPageMock
+      .mockImplementationOnce(() => new Promise(resolve => { resolveHiddenPage = resolve; }))
+      .mockResolvedValueOnce(logPage({ frames: [{ executionId: 'execution-1', observedAt: '',
+        sequence: 1, stream: 'stdout', text: 'fresh group output' }] }));
+    const source = shellActivity();
+    const group = (detailsVisible = true) => <AgentToolActivityGroup activities={[source]}
+      detailsVisible={detailsVisible} approvalBusyIds={new Set()} interactionBusyIds={new Set()} libraryId={3}
+      onResolveApproval={vi.fn()} ownerScope={OWNER_SCOPE} />;
+    let renderer!: TestRenderer.ReactTestRenderer;
+    act(() => { renderer = TestRenderer.create(group()); });
+    renderers.push(renderer);
+    expect(readShellLogPageMock).not.toHaveBeenCalled();
+    const toggleGroup = () => renderer.root.findByProps({ className: 'agent-activity-group-toggle' }).props.onClick();
+    act(toggleGroup);
+    await act(async () => { renderer.root.findByProps({ className: 'agent-shell-summary' }).props.onClick(); });
+    expect(readShellLogPageMock).toHaveBeenCalledTimes(1);
+    act(toggleGroup);
+    expect(renderer.root.findByProps({ className: 'agent-shell-summary' }).props['aria-expanded']).toBe(false);
+    await act(async () => { resolveHiddenPage(logPage({ frames: [{ executionId: 'execution-1', observedAt: '',
+      sequence: 1, stream: 'stdout', text: 'late hidden output' }] })); });
+    expect(textContent(renderer.root)).not.toContain('late hidden output');
+    act(toggleGroup);
+    expect(readShellLogPageMock).toHaveBeenCalledTimes(1);
+    await act(async () => { renderer.root.findByProps({ className: 'agent-shell-summary' }).props.onClick(); });
+    expect(readShellLogPageMock).toHaveBeenCalledTimes(2);
+    expect(textContent(renderer.root)).toContain('fresh group output');
+
+    act(() => renderer.update(group(false)));
+    expect(textContent(renderer.root)).not.toContain('fresh group output');
+    act(() => renderer.update(group(true)));
+    expect(renderer.root.findByProps({ className: 'agent-shell-summary' }).props['aria-expanded']).toBe(false);
+    expect(readShellLogPageMock).toHaveBeenCalledTimes(2);
   });
 
   it('shows a stable error instead of rendering raw IPC failure details', async () => {

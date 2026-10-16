@@ -67,6 +67,7 @@ import { useAgentSession } from './hooks/useAgentSession';
 import { useAgentSessionResume } from './hooks/useAgentSessionResume';
 import { isAgentComputerRunCurrent, useAgentComputerControls } from './hooks/useAgentComputerControls';
 import { useAgentWorkspaceRendering } from './hooks/useAgentWorkspaceRendering';
+import { canAgentScrollInDirection, createAgentScrollFollow, isAgentScrollbarPointer, isAgentScrollKey, isAgentScrollWheel } from './agent-scroll-follow';
 import { loadAgentSessionSelection, saveAgentSessionSelection } from './agent-session-selection';
 import {
   deleteAgentSession,
@@ -385,6 +386,7 @@ export default function AgentWorkspace({
   const scrollRef = React.useRef<HTMLDivElement | null>(null);
   const scrollFrameRef = React.useRef<number | null>(null);
   const shouldFollowScrollRef = React.useRef(true);
+  const scrollFollow = React.useRef(createAgentScrollFollow(shouldFollowScrollRef)).current;
   const indexNavigationRef = React.useRef(false);
   const computerScrollRef = React.useRef(false);
   const pointerInteractionRef = React.useRef(false);
@@ -512,19 +514,23 @@ export default function AgentWorkspace({
   React.useLayoutEffect(() => {
     computerScrollRef.current = false;
     pointerInteractionRef.current = false;
+    scrollFollow.finishUserScroll();
     indexNavigationRef.current = false;
     shouldFollowScrollRef.current = true;
     compositionGuard.current.reset();
-  }, [sessionScopeKey, currentSessionId]);
+  }, [sessionScopeKey, currentSessionId, scrollFollow]);
   React.useEffect(() => {
-    const finishPointer = () => { pointerInteractionRef.current = false; };
+    const finishPointer = () => {
+      pointerInteractionRef.current = false;
+      scrollFollow.finishPointerScroll(scrollRef.current);
+    };
     window.addEventListener('pointerup', finishPointer);
     window.addEventListener('pointercancel', finishPointer);
     return () => {
       window.removeEventListener('pointerup', finishPointer);
       window.removeEventListener('pointercancel', finishPointer);
     };
-  }, []);
+  }, [scrollFollow]);
 
   const configRequestId = React.useRef(0);
   const modelRequestId = React.useRef(0);
@@ -582,10 +588,14 @@ export default function AgentWorkspace({
   React.useEffect(() => {
     const scroll = scrollRef.current;
     if (!scroll) return;
-    const finishNavigation = () => { indexNavigationRef.current = false; };
+    const finishNavigation = (event: Event) => {
+      if (event.target !== scroll) return;
+      indexNavigationRef.current = false;
+      scrollFollow.finishUserScroll();
+    };
     scroll.addEventListener('scrollend', finishNavigation);
     return () => scroll.removeEventListener('scrollend', finishNavigation);
-  }, []);
+  }, [scrollFollow]);
 
   React.useLayoutEffect(() => {
     const textarea = textareaRef.current;
@@ -791,8 +801,8 @@ export default function AgentWorkspace({
   }, [libraryId, submitInteraction, toolActivities, reconcileOperation]);
 
   const handleToolExpand = React.useCallback(() => {
-    shouldFollowScrollRef.current = false;
-  }, []);
+    scrollFollow.pause();
+  }, [scrollFollow]);
 
   const handleOpenSession = React.useCallback(async (target: AgentSessionSummary) => {
     if (await restoreSession(target.id)) {
@@ -1025,20 +1035,43 @@ export default function AgentWorkspace({
       /> : null}
       <AgentScroll
         data-directory-visible={!managerMode ? true : undefined}
-        onWheel={() => { indexNavigationRef.current = false; computerScrollRef.current = false; }}
-        onPointerDown={() => { indexNavigationRef.current = false; computerScrollRef.current = false; pointerInteractionRef.current = true; }}
+        onWheel={event => {
+          indexNavigationRef.current = false;
+          computerScrollRef.current = false;
+          if (!isAgentScrollWheel(event)) {
+            scrollFollow.finishUserScroll();
+            return;
+          }
+          scrollFollow.startUserScroll();
+          if (!canAgentScrollInDirection(event.currentTarget, event.deltaY)) {
+            scrollFollow.onScroll(event.currentTarget);
+            scrollFollow.finishUserScroll();
+          }
+        }}
+        onPointerDown={event => {
+          indexNavigationRef.current = false;
+          computerScrollRef.current = false;
+          pointerInteractionRef.current = true;
+          if (isAgentScrollbarPointer(event)) scrollFollow.startScrollbarDrag(event.currentTarget);
+          else scrollFollow.finishUserScroll();
+        }}
         onKeyDown={event => {
-          if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End'].includes(event.key)) {
+          if (isAgentScrollKey(event)) {
             indexNavigationRef.current = false;
             computerScrollRef.current = false;
+            scrollFollow.startUserScroll();
+            const direction = ['ArrowUp', 'PageUp', 'Home'].includes(event.key) ? -1 : 1;
+            if (!canAgentScrollInDirection(event.currentTarget, direction)) {
+              scrollFollow.onScroll(event.currentTarget);
+              scrollFollow.finishUserScroll();
+            }
           }
         }}
         onScroll={(event) => {
           if (managerMode || indexNavigationRef.current || computerScrollRef.current) return;
-          const element = event.currentTarget;
-          shouldFollowScrollRef.current = (
-            element.scrollHeight - element.scrollTop - element.clientHeight <= 48
-          );
+          // Height transitions can clamp scrollTop without a user scroll. Those
+          // events must not resume following and pull the conversation to its end.
+          scrollFollow.onScroll(event.currentTarget);
         }}
         ref={scrollRef}
       >

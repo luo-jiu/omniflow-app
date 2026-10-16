@@ -177,6 +177,53 @@ describe('AgentTimeline commentary presentation', () => {
     expect(entry.props['data-empty']).toBeUndefined();
     expect(renderer.root.findAllByProps({ 'data-agent-live-status': 'working' })).toHaveLength(0);
   });
+
+  it('alternates model waiting, public commentary and tool execution without overlapping thinking', () => {
+    const run: AgentRunSnapshot = { id: 'run-1', sessionId: 'session-1', model: 'test', profileId: 'test',
+      reasoningEffort: 'medium', revision: 1, status: 'running', userPrompt: 'test',
+      currentStep: '请求 AI 服务', createdAt: '2026-09-08T00:00:00Z', updatedAt: '2026-09-08T00:00:00Z' };
+    const empty: AgentAssistantItemSnapshot = { ...commentary(), content: '', assistantItem: {
+      ...commentary().assistantItem, phase: 'unknown', status: 'streaming', finishedAt: undefined,
+    } };
+    const props = { approvalBusyIds: new Set<string>(), interactionBusyIds: new Set<string>(), libraryId: 3,
+      ownerScope: null, onResolveApproval: vi.fn(), runs: [run], messages: [empty],
+      toolActivities: [] as AgentToolActivitySnapshot[] };
+    let renderer!: TestRenderer.ReactTestRenderer;
+    act(() => { renderer = TestRenderer.create(<AgentTimeline {...props} />); });
+    renderers.push(renderer);
+    const statuses = () => renderer.root.findAll(node => node.type === 'div' && node.props.role === 'status');
+    const update = (overrides: Partial<typeof props>) => {
+      act(() => renderer.update(<AgentTimeline {...props} {...overrides} />));
+    };
+    expect(statuses()).toHaveLength(1);
+    update({ messages: [{ ...empty, content: '我先检查文件内容。' }] });
+    expect(statuses()).toHaveLength(0);
+    expect(renderer.root.findByType(AgentMessageContent).props.content).toBe('我先检查文件内容。');
+
+    // The model has finished its explanation, but the tool snapshot can arrive later.
+    update({ runs: [{ ...run, currentStep: '准备执行工具' }], messages: [commentary()] });
+    expect(statuses()).toHaveLength(1);
+    expect(statuses()[0].findAllByType('span').some(node => node.children.includes('正在准备工具'))).toBe(true);
+    for (const status of ['preparing', 'running', 'awaiting_approval', 'awaiting_interaction'] as const) {
+      update({ runs: [run], messages: [commentary()], toolActivities: [{ ...toolActivity(), status, result: undefined }] });
+      expect(statuses()).toHaveLength(0);
+    }
+    update({ runs: [{ ...run, currentStep: '准备工具续接' }], messages: [commentary()], toolActivities: [toolActivity()] });
+    expect(statuses()).toHaveLength(1);
+    expect(statuses()[0].findAllByType('span').some(node => node.children.includes('正在处理工具结果'))).toBe(true);
+
+    const next: AgentAssistantItemSnapshot = { ...empty, id: 'commentary-2', assistantItem: {
+      ...empty.assistantItem, turnOrdinal: 2,
+    } };
+    update({ runs: [{ ...run, currentStep: '根据工具结果继续思考' }], messages: [commentary(), next], toolActivities: [toolActivity()] });
+    expect(statuses()).toHaveLength(1);
+    update({ runs: [{ ...run, currentStep: '根据工具结果继续思考' }],
+      messages: [commentary(), { ...next, content: '已确认文件格式，接下来检查目录。' }], toolActivities: [toolActivity()] });
+    expect(statuses()).toHaveLength(0);
+    expect(renderer.root.findAllByType(AgentMessageContent).at(-1)?.props.content).toBe('已确认文件格式，接下来检查目录。');
+    update({ runs: [{ ...run, status: 'completed' }], toolActivities: [toolActivity()] });
+    expect(statuses()).toHaveLength(0);
+  });
   it.each(['running', 'preparing', 'awaiting_approval', 'awaiting_interaction', 'cancelled', 'failed', 'interrupted', 'completed'] as const)(
     'keeps %s without a final answer visible and removes the fold control even on reload', status => {
       const run: AgentRunSnapshot = {

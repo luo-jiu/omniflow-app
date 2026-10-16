@@ -792,6 +792,140 @@ describe('useAgentSession event coordination', () => {
     hook.unmount();
   });
 
+  it.each([true, false])('keeps repeated access approvals between their surrounding assistant items (canonical activity: %s)', async (canonicalActivity) => {
+    const initial = { ...sessionSnapshot(), toolActivities: [] };
+    apiMocks.getAgentSession.mockResolvedValue(initial);
+    const hook = renderSessionHook();
+    try {
+      await act(async () => { await hook.current.restore('session-1'); });
+      const before = assistantItem('assistant-before-access', 1, '先申请目录访问', 'commentary', 'completed');
+      act(() => listener?.({
+        item: before, runId: 'run-1', sessionId: 'session-1', type: 'assistant-item-finished',
+      }));
+
+      const expectedOrder = [initial.messages[0].id, before.id];
+      const canonicalMessages = [...initial.messages, before];
+      const completedActivities: AgentToolActivitySnapshot[] = [];
+      for (const ordinal of [1, 2]) {
+        const approval: AgentToolApprovalSnapshot = {
+          approvalId: `approval-access-${ordinal}`,
+          call: { id: `call-access-${ordinal}`, input: {}, name: 'agent.access.request' },
+          preview: { description: '访问当前资料库目录', risk: 'read', title: '目录访问确认' },
+          runId: 'run-1',
+          sessionId: 'session-1',
+        };
+        const pendingActivity: AgentToolActivitySnapshot = {
+          ...activity(1, 'awaiting_approval'),
+          approval: { approvalId: approval.approvalId, preview: approval.preview, status: 'pending' },
+          call: approval.call,
+          id: `activity-access-${ordinal}`,
+          ordinal,
+          permissionBehavior: 'ask',
+        };
+        const required: AgentChatStreamEvent = {
+          ...(canonicalActivity ? { activity: pendingActivity } : {}),
+          approval,
+          runId: 'run-1',
+          sessionId: 'session-1',
+          type: 'tool-approval-required',
+        };
+        act(() => { listener?.(required); listener?.(required); });
+        const anchor = hook.current.messages.at(-1);
+        expect(anchor).toMatchObject({ role: 'tool', toolCallId: approval.call.id });
+        if (!anchor) throw new Error('expected access approval anchor');
+        expectedOrder.push(anchor.id);
+
+        const completedActivity: AgentToolActivitySnapshot = {
+          ...pendingActivity,
+          approval: { ...pendingActivity.approval!, status: 'approved' },
+          finishedAt: '2026-08-23T00:00:03.000Z',
+          result: { ok: true, message: '目录访问已确认' },
+          revision: 2,
+          status: 'completed',
+        };
+        act(() => {
+          listener?.({
+            ...(canonicalActivity ? { activity: completedActivity } : {}),
+            approvalId: approval.approvalId,
+            approved: true,
+            runId: 'run-1',
+            sessionId: 'session-1',
+            type: 'tool-approval-resolved',
+          });
+          listener?.({
+            activity: completedActivity,
+            call: approval.call,
+            result: completedActivity.result!,
+            runId: 'run-1',
+            sessionId: 'session-1',
+            type: 'tool-completed',
+          });
+        });
+        expect(hook.current.messages.at(-1)).toBe(anchor);
+        expect(hook.current.toolActivities).toHaveLength(ordinal);
+        expect(hook.current.toolActivities.at(-1)).toMatchObject({
+          approval: { status: 'approved' }, call: approval.call, status: 'completed',
+        });
+
+        const after = assistantItem(`assistant-after-access-${ordinal}`, ordinal + 1);
+        act(() => {
+          listener?.({ item: after, runId: 'run-1', sessionId: 'session-1', type: 'assistant-item-started' });
+          listener?.({
+            delta: `确认后继续第 ${ordinal} 步`, itemId: after.id, offset: 0,
+            runId: 'run-1', sessionId: 'session-1', type: 'assistant-item-delta',
+          });
+        });
+        expectedOrder.push(after.id);
+        expect(hook.current.messages.map(message => message.id)).toEqual(expectedOrder);
+        expect(hook.current.messages.filter(message => message.toolCallId === approval.call.id)).toHaveLength(1);
+
+        canonicalMessages.push(
+          { ...anchor, content: '目录访问已确认', id: `canonical-tool-access-${ordinal}` },
+          assistantItem(after.id, ordinal + 1, `确认后继续第 ${ordinal} 步`, ordinal === 2 ? 'final' : 'commentary', 'completed'),
+        );
+        completedActivities.push(completedActivity);
+      }
+
+      act(() => listener?.({
+        messages: canonicalMessages,
+        run: run(3, 'completed'),
+        runId: 'run-1',
+        sessionId: 'session-1',
+        toolActivities: completedActivities,
+        type: 'completed',
+      }));
+      expect(hook.current.messages).toEqual(canonicalMessages);
+      expect(hook.current.messages.some(message => message.id.startsWith('agent-tool-anchor-'))).toBe(false);
+      expect(hook.current.toolActivities).toEqual(completedActivities);
+    } finally { hook.unmount(); }
+  });
+
+  it('reuses the existing tool anchor when approval follows tool-started', async () => {
+    apiMocks.getAgentSession.mockResolvedValue({ ...sessionSnapshot(), toolActivities: [] });
+    const hook = renderSessionHook();
+    try {
+      await act(async () => { await hook.current.restore('session-1'); });
+      const startedActivity = activity(1, 'preparing');
+      act(() => listener?.({
+        activity: startedActivity, call: startedActivity.call,
+        runId: 'run-1', sessionId: 'session-1', type: 'tool-started',
+      }));
+      const anchor = hook.current.messages.at(-1);
+      act(() => listener?.({
+        activity: { ...startedActivity, revision: 2, status: 'awaiting_approval' },
+        approval: {
+          approvalId: 'approval-after-start', call: startedActivity.call,
+          preview: { description: '访问目录', risk: 'read', title: '目录访问确认' },
+          runId: 'run-1', sessionId: 'session-1',
+        },
+        runId: 'run-1', sessionId: 'session-1', type: 'tool-approval-required',
+      }));
+      expect(hook.current.messages.at(-1)).toBe(anchor);
+      expect(hook.current.messages.filter(message => message.toolCallId === startedActivity.call.id)).toHaveLength(1);
+      expect(hook.current.toolActivities).toHaveLength(1);
+    } finally { hook.unmount(); }
+  });
+
   it('preserves fallback approval preparation and submits the edited discriminator unchanged', async () => {
     apiMocks.resolveAgentToolApproval.mockResolvedValue({ approved: false });
     apiMocks.getAgentSession.mockResolvedValue(sessionSnapshot());

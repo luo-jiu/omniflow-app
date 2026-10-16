@@ -8,6 +8,12 @@ const tree = 'AXWindow "OmniFlow"\n  AXButton "<img src=x onerror=alert(1)>"';
 
 afterEach(() => { act(() => { renderers.splice(0).forEach(renderer => renderer.unmount()); }); });
 
+function textContent(instance: TestRenderer.ReactTestInstance): string {
+  return instance.children.map(child => (
+    typeof child === 'string' ? child : textContent(child)
+  )).join('');
+}
+
 function render(truncated = false) {
   let renderer!: TestRenderer.ReactTestRenderer;
   act(() => { renderer = TestRenderer.create(<WorkspaceVisibilityContext.Provider value>
@@ -24,7 +30,7 @@ describe('shared window AX preview', () => {
       <AgentToolAxPreview tree={tree} truncated={truncated} scope={{ kind: 'element-ancestor', ancestorLevels: 2 }} scopeScanComplete />
     </WorkspaceVisibilityContext.Provider>); });
     renderers.push(renderer);
-    expect(renderer.root.findByType('summary').children).toEqual(truncated ? ['AX', ' · 局部', ' · 已截断'] : ['AX', ' · 局部']);
+    expect(textContent(renderer.root.findByType('summary'))).toBe('AX · 局部');
     expect(renderer.root.findAllByType('p')).toHaveLength(0);
     act(() => renderer.root.findByType('details').props.onToggle({ currentTarget: { open: true } }));
     expect(renderer.root.findByType('p').children).toEqual(['局部范围：上溯 2 层；控件扫描完整，不代表全窗口。']);
@@ -36,6 +42,7 @@ describe('shared window AX preview', () => {
   });
 
   it.each([
+    { scope: { kind: 'menu' } as const, complete: true, notice: '应用菜单扫描完整，不代表全窗口。' },
     { scope: { kind: 'window' } as const, complete: false, notice: '窗口控件扫描不完整。' },
     { scope: { kind: 'element-ancestor', ancestorLevels: 0 } as const, complete: false,
       notice: '局部范围：控件自身；控件扫描不完整，不代表全窗口。' },
@@ -49,9 +56,9 @@ describe('shared window AX preview', () => {
     expect(renderer.root.findByType('p').children).toEqual([notice]);
   });
 
-  it.each([false, true])('uses an expandable AX label with truthful truncation=%s and plain readable text', truncated => {
+  it.each([false, true])('keeps the AX label simple for truncation=%s and plain readable text', truncated => {
     const renderer = render(truncated);
-    expect(renderer.root.findByType('summary').children).toEqual(truncated ? ['AX', ' · 已截断'] : ['AX']);
+    expect(textContent(renderer.root.findByType('summary'))).toBe('AX');
     expect(renderer.root.findAllByType('pre')).toHaveLength(0);
     act(() => renderer.root.findByType('details').props.onToggle({ currentTarget: { open: true } }));
     expect(renderer.root.findByType('pre').children).toEqual([tree]);

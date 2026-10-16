@@ -1,6 +1,5 @@
 import React from 'react';
 import { IconShrink } from '@douyinfe/semi-icons';
-import OutlineIcon from '@/components/ui/outline-icon';
 import styled from 'styled-components';
 
 import type {
@@ -40,7 +39,7 @@ const Timeline = styled.div`
     display: grid;
     grid-template-rows: 1fr;
     min-width: 0;
-    padding-bottom: 8px;
+    padding-bottom: 6px;
     opacity: 1;
     visibility: visible;
     transition: grid-template-rows 220ms cubic-bezier(0.22, 1, 0.36, 1),
@@ -117,7 +116,7 @@ const AssistantItemSurface = styled.article`
   &[data-variant='conversation'] {
     width: 100%;
     max-width: 100%;
-    padding: 4px 0;
+    padding: 2px 0;
     border: 0;
     border-radius: 0;
     background: transparent;
@@ -146,26 +145,20 @@ const AssistantItemSurface = styled.article`
     min-height: 0;
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 8px;
-    padding: 4px 0;
+    padding: 2px 0;
     color: var(--app-text);
     font-size: 14px;
     line-height: 1.6;
   }
 
-  .agent-work-item-icon {
-    width: 18px;
-    height: 18px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    margin-top: 1px;
-    color: var(--semi-color-primary);
-  }
-
-  &[data-status='failed'] .agent-work-item-icon,
-  &[data-status='cancelled'] .agent-work-item-icon,
-  &[data-status='interrupted'] .agent-work-item-icon {
-    color: var(--semi-color-warning);
+  &[data-work-kind='run-status'] {
+    width: 100%;
+    max-width: 100%;
+    min-height: 31px;
+    grid-template-columns: minmax(0, 1fr);
+    padding: 4px 0;
+    font-size: 14px;
+    line-height: 23px;
   }
 
   .agent-work-item-content {
@@ -272,8 +265,7 @@ export default function AgentTimeline({
         if (item.type === 'run-status') {
           const labels: Record<string, string> = { failed: '执行失败', cancelled: '已停止', interrupted: '任务已中断' };
           return (
-            <AssistantItemSurface data-status={item.run.status} data-variant="work" key={item.key}>
-              <span className="agent-work-item-icon"><OutlineIcon name="alert" /></span>
+            <AssistantItemSurface data-status={item.run.status} data-variant="work" data-work-kind="run-status" key={item.key}>
               <span className="agent-work-item-content">
                 {item.run.error || labels[item.run.status]}
               </span>

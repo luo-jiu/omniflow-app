@@ -4,6 +4,7 @@ import OutlineIcon from '@/components/ui/outline-icon';
 import AgentToolIcon from './AgentToolIcon';
 
 import { workspaceScrollbarStyles } from '@/components/ui/workspace-scrollbar';
+import { WorkspaceVisibilityContext } from '@/components/ui/workspace-visibility';
 import { normalizeAgentPreparedActionPublic } from '@/shared/agent/agent-prepared-action';
 import type {
   AgentOwnerScope,
@@ -26,7 +27,12 @@ import AgentDisclosureChevron from './AgentDisclosureChevron';
 import AgentToolObservationPreview from './AgentToolObservationPreview';
 import type { AgentComputerPointerPlan } from '../agent-computer-pointer-plan';
 import AgentToolAxPreview from './AgentToolAxPreview';
+import AgentToolDetailsPreview from './AgentToolDetailsPreview';
+import { agentToolDetailSurfaceStyles } from './agent-tool-detail-styles';
 import { readAgentShellLogPage } from '../services/agent.api';
+import { useAgentToolDetailLayout } from '../agent-tool-detail-layout';
+
+const TOOL_DETAIL_TRANSITION_MS = 220;
 
 const ActivityCard = styled.article`
   --agent-tool-record-color: color-mix(
@@ -38,7 +44,7 @@ const ActivityCard = styled.article`
   width: min(620px, 100%);
   align-self: flex-start;
   min-width: 0;
-  padding: 2px 3px;
+  padding: 0;
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -47,7 +53,7 @@ const ActivityCard = styled.article`
     display: flex;
     align-items: center;
     gap: 7px;
-    min-height: 23px;
+    min-height: 20px;
   }
 
   &[data-expandable='true'] .agent-activity-header {
@@ -55,7 +61,7 @@ const ActivityCard = styled.article`
   }
 
   .agent-activity-status-icon {
-    width: 20px;
+    width: 16px;
     height: 20px;
     display: inline-flex;
     align-items: center;
@@ -151,9 +157,9 @@ const ActivityCard = styled.article`
     visibility: hidden;
     pointer-events: none;
     transition:
-      grid-template-rows 220ms cubic-bezier(0.22, 1, 0.36, 1),
+      grid-template-rows ${TOOL_DETAIL_TRANSITION_MS}ms cubic-bezier(0.22, 1, 0.36, 1),
       opacity 150ms ease,
-      visibility 0s linear 220ms;
+      visibility 0s linear ${TOOL_DETAIL_TRANSITION_MS}ms;
   }
 
   .agent-activity-collapse[data-open='true'] {
@@ -168,7 +174,7 @@ const ActivityCard = styled.article`
     min-height: 0;
     overflow: hidden;
     transform: translateY(-2px);
-    transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+    transition: transform ${TOOL_DETAIL_TRANSITION_MS}ms cubic-bezier(0.22, 1, 0.36, 1);
   }
 
   .agent-activity-collapse[data-open='true'] .agent-activity-collapse-inner {
@@ -178,14 +184,19 @@ const ActivityCard = styled.article`
   .agent-activity-body {
     display: grid;
     gap: 6px;
-    margin: 4px 0 4px 27px;
+    margin: 4px 0;
+  }
+
+  .agent-activity-body[data-observation='true'] {
+    gap: 2px;
+    margin: 2px 0 0;
   }
 
   .agent-activity-body[data-scrollable='true'] {
+    ${agentToolDetailSurfaceStyles}
     ${workspaceScrollbarStyles}
 
-    max-height: 156px;
-    padding-right: 4px;
+    max-height: 256px;
     overflow: auto;
     overflow-anchor: none;
   }
@@ -319,11 +330,11 @@ const ShellActivity = styled.section`
   .agent-shell-summary {
     width: 100%;
     min-width: 0;
-    min-height: 23px;
+    min-height: 20px;
     display: flex;
     align-items: center;
     gap: 7px;
-    padding: 2px 3px;
+    padding: 0;
     border: 0;
     border-radius: var(--app-radius-medium);
     background: transparent;
@@ -436,16 +447,13 @@ const ShellActivity = styled.section`
   }
 
   .agent-shell-terminal {
+    ${agentToolDetailSurfaceStyles}
     ${workspaceScrollbarStyles}
 
-    max-height: 156px;
+    max-height: 256px;
     margin-top: 4px;
-    padding: 8px 10px;
     overflow: auto;
     overflow-anchor: none;
-    border: 1px solid var(--app-border);
-    border-radius: var(--app-radius-small);
-    background: color-mix(in srgb, var(--app-text) 5%, var(--app-bg));
     color: var(--app-text);
     font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Consolas, monospace;
     font-size: 12px;
@@ -541,6 +549,7 @@ function renderBlock(
   imageContext?: {
     libraryId: number;
     open: boolean;
+    onExpand?: () => void;
     ownerScope: AgentOwnerScope | null;
     sessionId: string;
     toolRunId: string;
@@ -605,7 +614,7 @@ function renderBlock(
     );
   }
   if (block.type === 'details') {
-    return (
+    const details = (
       <dl className="agent-activity-details" key={`details:${index}`}>
         {block.entries.map(entry => (
           <React.Fragment key={`${entry.label}:${entry.value}`}>
@@ -626,6 +635,18 @@ function renderBlock(
           </button>
         </div>) : null}
       </dl>
+    );
+    if (!block.collapsible) return details;
+    if (!imageContext?.open || !imageContext.ownerScope) return null;
+    return (
+      <AgentToolDetailsPreview
+        key={JSON.stringify([imageContext.ownerScope.accountScope, imageContext.ownerScope.backendScope,
+          imageContext.libraryId, imageContext.sessionId, imageContext.toolRunId, 'details', index])}
+        onExpand={imageContext.onExpand}
+        title={block.title || '详情'}
+      >
+        {details}
+      </AgentToolDetailsPreview>
     );
   }
   if (block.type === 'artifact') {
@@ -682,6 +703,7 @@ interface AgentToolActivityCardProps {
 
 interface AgentShellActivityProps {
   activity: AgentToolActivitySnapshot;
+  detailsVisible: boolean;
   libraryId: number;
   onExpand?: () => void;
   ownerScope: AgentOwnerScope | null;
@@ -707,7 +729,7 @@ function shellCommand(activity: AgentToolActivitySnapshot): string {
   }
 }
 
-function AgentShellActivity({ activity, libraryId, onExpand, ownerScope }: AgentShellActivityProps) {
+function AgentShellActivity({ activity, detailsVisible, libraryId, onExpand, ownerScope }: AgentShellActivityProps) {
   const [open, setOpen] = React.useState(false);
   const [loaded, setLoaded] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
@@ -740,13 +762,14 @@ function AgentShellActivity({ activity, libraryId, onExpand, ownerScope }: Agent
     };
   }, [
     activity.id,
+    detailsVisible,
     libraryId,
     ownerScope?.accountScope,
     ownerScope?.backendScope,
   ]);
 
   const loadPage = async (cursor?: string) => {
-    if (loadingRef.current || !ownerScope) return;
+    if (loadingRef.current || !ownerScope || !detailsVisible) return;
     const generation = requestGenerationRef.current;
     const requestOwnerScope = { ...ownerScope };
     loadingRef.current = true;
@@ -790,9 +813,9 @@ function AgentShellActivity({ activity, libraryId, onExpand, ownerScope }: Agent
   };
 
   const toggle = () => {
-    if (!canExpand) return;
+    if (!canExpand || !detailsVisible) return;
     const nextOpen = !open;
-    if (nextOpen) onExpand?.();
+    onExpand?.();
     setOpen(nextOpen);
     if (nextOpen && !loaded && !loading) void loadPage();
   };
@@ -872,6 +895,60 @@ function AgentShellActivity({ activity, libraryId, onExpand, ownerScope }: Agent
   );
 }
 
+function AgentToolDetailBody({
+  id, open, detailsVisible, observation, scrollable, children,
+}: {
+  id: string;
+  open: boolean;
+  detailsVisible: boolean;
+  observation: boolean;
+  scrollable: boolean;
+  children: (contentVisible: boolean) => React.ReactNode;
+}) {
+  const ref = React.useRef<HTMLDivElement>(null);
+  const workspaceActive = React.useContext(WorkspaceVisibilityContext);
+  const active = detailsVisible && workspaceActive;
+  const [retained, setRetained] = React.useState(false);
+  React.useLayoutEffect(() => {
+    if (active && open) {
+      if (!retained) setRetained(true);
+      return;
+    }
+    if (!retained) return;
+    if (!active || (typeof window !== 'undefined'
+      && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches)) {
+      setRetained(false);
+      return;
+    }
+    // Keep the natural body until its grid finishes shrinking. The fallback also
+    // releases it when a cancelled/disabled transition emits no transitionend.
+    const timeout = setTimeout(() => setRetained(false), TOOL_DETAIL_TRANSITION_MS + 50);
+    return () => clearTimeout(timeout);
+  }, [active, open, retained]);
+  useAgentToolDetailLayout(ref, id, open && active, observation);
+  return (
+    <div
+      aria-hidden={!open}
+      {...(!open ? { inert: '' } : {})}
+      className="agent-activity-collapse"
+      data-open={open ? true : undefined}
+      onTransitionEnd={event => {
+        if (!open && event.target === event.currentTarget && event.propertyName === 'grid-template-rows') {
+          setRetained(false);
+        }
+      }}
+    >
+      <div className="agent-activity-collapse-inner">
+        <div ref={ref} className="agent-activity-body"
+          data-observation={observation ? true : undefined}
+          data-scrollable={scrollable ? true : undefined}>
+          {children(active && (open || retained))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function AgentToolActivityCard({
   pointerPlan,
   detailsVisible = true,
@@ -916,6 +993,7 @@ export default function AgentToolActivityCard({
     return (
       <AgentShellActivity
         activity={activity}
+        detailsVisible={detailsVisible}
         libraryId={libraryId}
         onExpand={onExpand}
         ownerScope={ownerScope}
@@ -926,6 +1004,8 @@ export default function AgentToolActivityCard({
   const active = activity.status === 'running' || activity.status === 'preparing';
   const nameOnlyRead = ['file.read', 'attachment.read'].includes(activity.call.name) && (activity.status === 'completed' || active);
   const blocks = nameOnlyRead ? [] : buildAgentToolPresentation(activity, libraryId);
+  const observationDetails = blocks.some(block => block.type === 'attachment-image' || block.type === 'computer-ax'
+    || block.type === 'details' && block.collapsible);
   const summary = buildAgentToolSummary(activity, libraryId);
   const forcedBody = activity.status === 'interrupted'
     || activity.status === 'cancelled' || Boolean(activity.interaction)
@@ -933,7 +1013,7 @@ export default function AgentToolActivityCard({
   const expandable = blocks.length > 0 && !forcedBody;
   const showBody = expanded || forcedBody;
   const toggleExpanded = () => {
-    if (!expanded) onExpand?.();
+    onExpand?.();
     setExpanded(value => !value);
   };
   return (
@@ -971,28 +1051,19 @@ export default function AgentToolActivityCard({
         </button> : null}
       </div>
       {blocks.length > 0 ? (
-        <div
-          aria-hidden={!showBody}
-          className="agent-activity-collapse"
-          data-open={showBody ? true : undefined}
-        >
-          <div className="agent-activity-collapse-inner">
-            <div
-              className="agent-activity-body"
-              data-scrollable={expandable ? true : undefined}
-            >
-              {blocks.map((block, index) => renderBlock(
-                block,
-                index,
-                interactive,
-                interactionBusy,
-                onAction,
-                receiptBusy,
-                { libraryId, open: showBody && detailsVisible, ownerScope, sessionId: activity.sessionId, toolRunId: activity.id, pointerPlan },
-              ))}
-            </div>
-          </div>
-        </div>
+        <AgentToolDetailBody id={activity.id} open={showBody} detailsVisible={detailsVisible}
+          key={JSON.stringify([ownerScope?.accountScope, ownerScope?.backendScope, libraryId, activity.sessionId, activity.id])}
+          observation={observationDetails} scrollable={expandable && !observationDetails}>
+          {contentVisible => blocks.map((block, index) => renderBlock(
+            block,
+            index,
+            interactive,
+            interactionBusy,
+            onAction,
+            receiptBusy,
+            { libraryId, open: contentVisible, onExpand, ownerScope, sessionId: activity.sessionId, toolRunId: activity.id, pointerPlan },
+          ))}
+        </AgentToolDetailBody>
       ) : null}
     </ActivityCard>
   );

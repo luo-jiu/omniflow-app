@@ -60,7 +60,7 @@ export default function AgentAttachmentPreview({ attachment, scope, sessionId, o
   }, [attachment.id, attachment.thumbnail, libraryId, ownerScope, sessionId, planKey, requestKey, workspaceActive, accentColor]);
   React.useEffect(() => {
     const previous = document.activeElement as HTMLElement | null;
-    return () => { if (visibleRef.current && previous?.isConnected) previous.focus(); };
+    return () => { if (visibleRef.current && previous?.isConnected) previous.focus({ preventScroll: true }); };
   }, []);
   React.useEffect(() => {
     if (!workspaceActive) {
@@ -68,7 +68,8 @@ export default function AgentAttachmentPreview({ attachment, scope, sessionId, o
     }
   }, [onClose, workspaceActive]);
   return <ImagePreview visible={workspaceActive} src={src ? [src] : []} disableDownload closeOnEsc maskClosable
-    previewStyle={{ backgroundColor: 'rgba(0, 0, 0, 0.7)', backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)' }}
+    previewStyle={{ backgroundColor: 'rgba(0, 0, 0, 0.7)', backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
+      WebkitAppRegion: 'no-drag' } as React.CSSProperties}
     getPopupContainer={getAppPopupContainer} onClose={onClose}
     onVisibleChange={visible => { if (!visible) onClose(); }}
     previewTitle={error || (loading ? '正在读取清晰图片…' : attachment.name)}

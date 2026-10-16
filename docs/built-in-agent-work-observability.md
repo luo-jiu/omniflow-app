@@ -1,6 +1,6 @@
 # 内置 Agent 工作过程可观察性目标设计
 
-更新时间：2026-09-03
+更新时间：2026-10-16
 
 状态：分阶段实施中。结构化 assistant item、Provider turn 内存 writer、终态事务、上下文过滤、专用 item IPC、renderer 流式对账、工作过程 UI、状态选择器与 Tool 分组已经落地；独立 Workflow / Active Run Dock 已从当前界面撤下，Phase 1C 仍待手工视觉验收，reasoning summary 尚未落地。
 
@@ -53,6 +53,8 @@ Codex 将 assistant 内容区分为 `commentary` 和 `final_answer`，并把 rea
 - reasoning summary 只有 Provider 明确支持时才展示。
 - 计划与 Tool 执行事实分开。
 - 连续读取和搜索可以在展示层语义分组。
+
+2026-10-14 补充对照本地 `project/codex`：`tui/src/chatwidget/streaming.rs` 在公开 commentary 流式输出时隐藏通用状态，完成且队列排空后再恢复；`protocol/src/prompts/base_instructions/default.md` 鼓励较长任务适时给简短进展、可能久等的大块工作前说明下一步。Codex 的命令生命周期仍可保留状态行，OmniFlow 按当前产品约定由工具行单独承担执行期反馈，不能声称所有工具期隐藏都是直接照搬 Codex。模型公开 commentary 复用原请求与 item，不为简介另发请求，也不接入未经 Provider 声明的原始推理。
 
 ### 2.2 OpenCode
 
@@ -118,26 +120,21 @@ Run / ToolRun / approval / interaction
 
 commentary 可以解释方向，但不能证明 Tool 成功、文件已经写入、审批已经通过或计划已经完成。
 
-### 3.1 目标体验
+### 3.1 当前展示体验
 
 一次多步骤任务在界面中的逻辑顺序应接近：
 
 ```text
 用户：检查视频并提取音频
 
-任务进度  1/3
-当前：正在检查视频信息
-下一步：提取第一条音轨
-
 正在确认视频格式和音轨信息。            <- commentary
-收集了 3 项上下文                         <- 可展开的只读 Tool 组
-检查媒体  已完成                          <- Tool 事实
+已检查 视频信息                          <- 可展开工具组的最新操作
 提取音频  等待确认                        <- 审批事实
 
 已提取音频并保存到指定位置。              <- final
 ```
 
-如果模型没有输出 commentary，上述过程仍由任务进度和 Tool 事实成立；页面只能显示“正在思考”，不能自行补写模型正在考虑的内容。
+当前页面没有独立的任务进度卡或“下一步”状态条，计划仍保留为内部规范投影。如果模型没有输出 commentary，过程由 Tool 事实与规范活动状态成立；只有正在等待 Provider 且没有可见工具或流式正文时才显示“正在思考”，不能自行补写模型正在考虑的内容。工具交接文案与分组边界见第 12、13 节。
 
 ## 4. 核心决策：扩展 agent_messages
 
@@ -478,6 +475,8 @@ commentary 不进入摘要，也不更新用户长期记忆。它只是本 Run �
 
 “正在思考”只在 Run active 且正在等待或接收 Provider turn 时出现；idle 或 terminal Session 不显示虚假的活动状态。
 
+当前尾部活动行与工具及可见流式正文互斥。main 使用原 Run `currentStep` 表达模型响应到工具的交接（“准备执行工具”）、批次工具续接和结果处理；renderer 在对应 ToolActivity 尚未到达时提供“正在准备工具 / 正在调用工具”，结果处理提供“正在处理工具结果”，不回落思考，也不让目录授权等慢检查静默。预算压缩后真正执行入口重置交接标志，下一次 Provider 请求重置模型阶段；不提前创建 ToolRun、不从模型文字推断执行，也不新增 renderer 阶段状态。已有准备 / 执行工具和待决审批 / 交互始终优先于压缩提示。
+
 候选状态还必须先排除已经被后续事实取代的旧内容。例如 commentary 之后已经开始 Tool 时由 Tool 覆盖；Tool 完成并开始下一轮 assistant item 后显示“正在思考”，不能重新拿上一轮 commentary 充当当前状态。
 
 “当前”和“下一步”只能来自结构化计划：
@@ -508,9 +507,9 @@ reasoning-summary（Phase 2）
 - Message 使用不可变 `sequence`。
 - assistant item 与最终回答始终使用 `message:${id}`。
 - 已有 tool message 时，继续用 `runId + toolCallId` 替换为 ToolActivity 卡。
-- 活跃 Tool 尚无 tool message 时，锚在同 Run 最新结构化 assistant item 之后。
+- 活跃 Tool 的 started / approval-required 事件创建幂等展示锚点；恢复时缺少 tool message 的活动按相邻 Tool ordinal 区间插入，仅在区间内按创建时间定位 commentary，不能堆到最终回答之后。具体当前规则见 [UI 时间线顺序](built-in-agent-ui-contract.md#42-时间线顺序)。
 - 多 Tool 仍按持久化 `ordinal` 排序。
-- 时间戳只用于损坏或 legacy 数据的降级排序。
+- 时间戳不重排规范消息，也不能跨越 Tool ordinal 边界；只有孤儿活动按时间作全局降级。
 
 视觉层级：
 
@@ -523,25 +522,26 @@ reasoning-summary（Phase 2）
 - 每轮 user 消息后只显示基于规范 Run 起止时间的轻量用时行，不展示 Workflow 卡或 Composer 上方的 Run 摘要条。成功完成且存在 final 后，安全完成的工作过程默认收起，用户可通过用时行的细线 Chevron 展开；失败、未完成和待决内容保持可见，详见 UI 契约。
 - Tool 卡是执行详情、审批和交互的唯一入口，不重复参数、日志和结果正文。
 
-### 13.1 Tool 语义分组
+### 13.1 连续 Tool 分组
 
 分组只发生在 renderer 投影，不改变 ToolRun：
 
-- 仅分组同一 Run、连续、由 Tool Registry 元数据确认只读且属于同一工作阶段的 list、stat、read、search 语义 Tool，不能只匹配显示名称。
-- write、destructive、external、审批、交互、失败、取消、中断、Shell active 和 commentary 都立即断组。
-- 分组摘要可以显示读取、搜索和目录数量；展开后必须保留每个 ToolRun 的状态与详情。
-- 未知 Tool 默认不分组。
-- 分组 key 从首个 ToolRun ID 派生；同一连续分组追加成员时不能重挂载整组。
+- 同一 Session / Run 内相邻的普通 ToolActivity 统一使用 `tool-sequence`，文件读写、Shell、插件、电脑工具及未知工具不按来源、风险或种类拆组；prepared action 与 Registry 展示元数据不作为分组许可。
+- 可见 commentary / assistant / user 消息与空 streaming 占位、不同 Session / Run 断组。pending approval、`awaiting_approval / awaiting_interaction` 与所有 interaction 记录独立显示，包括用户已提交回答及过期 / 取消 / 中断的只读交互历史。
+- preparing、running、已批准真实操作、失败、unknown、取消和中断的普通 Tool 仍可入组；展开后保留每条原状态、结果和受控详情。合组不表示获得授权或执行成功，成功文案与附件块继续由原 presenter 校验。
+- 只有精确 `agent.access.request`、无插件来源、completed / approved / result.ok=true 且无 preparation / interaction 的纯目录授权省略重复卡片，不打断相邻组。规范事实与 ordinal 保留，先按原锚点规则恢复位置再省略展示；拒绝、过期、取消或不完整结果不隐藏，已批准真实业务动作仍展示。
+- 分组收起时显示最新可见工具的动作及原状态，不另造读取 / 搜索计数。key 从首个可见 ToolRun ID 派生，追加成员或后续审批完成并入前组时保持已有首项 key。
 
-如果现有 Tool Registry 还没有稳定的 `groupKind / operationKind` 展示元数据，实现时应先增加受控枚举；禁止在 React 组件里维护一份按 Tool 名称猜测的分组名单。
+完整分组边界与恢复规则以 [UI 时间线契约](built-in-agent-ui-contract.md#42-时间线顺序) 为准；不能为合组新增执行、权限或 Session / Run 状态源。
 
 ### 13.2 稳定性与可访问性
 
 - delta、progress、revision 和 phase 更新不得更换 React key。
 - 用户向上阅读时，新状态不得强制滚动到底部。
+- 工具、工具组或 Shell 详情开合暂停自动跟随；高度收缩引起的 scrollTop 夹紧不算用户滚动。只有真实用户滚动重新接近底部才恢复，内层 AX / 文字详情独立消费的手势不恢复外层跟随。详细行为以 [UI 视觉与交互基线](built-in-agent-ui-contract.md#10-视觉与交互基线) 为准。
 - 动态状态使用克制的 live region，不能逐 token 重复朗读。
 - 工作中动效遵守 `prefers-reduced-motion`。
-- 待确认、待输入、失败和中断默认可见，不能被上下文分组折叠掉。
+- 待确认、待输入及所有交互卡独立可见；失败、unknown、取消和中断工具可在组内折叠，但原状态和安全详情必须可检查，异常 Run 现场不能被整轮完成折叠隐藏。
 
 ### 13.3 不重复展示 Run 摘要
 
@@ -550,7 +550,7 @@ reasoning-summary（Phase 2）
 - 活跃与终态 Run 都不在 user 消息后生成“任务进度”摘要，也不在 Composer 上方复制当前状态。
 - Run、Plan 和状态 selector 继续作为规范事实与内部纯投影保留，不建立第二份 renderer 状态。
 - 等待审批或交互时，只允许时间线对应 ToolActivity 存在一个可编辑实例，不能复制表单草稿或提交入口。
-- 删除汇总卡不隐藏 ToolActivity、审批、交互、失败、中断或最终回答。
+- 删除汇总卡不删除 ToolActivity、审批、交互或最终回答；业务步骤与异常记录仍可在时间线或组内检查，成功纯目录授权仅按第 13.1 节省略重复展示。
 
 ## 14. 模型过程说明 Prompt
 
@@ -559,6 +559,7 @@ System prompt 增加简短工作过程约束：
 - 非平凡 Tool 工作开始前，用一句短说明告诉用户将做什么。
 - 发现会改变执行方向的重要事实时，简短说明变化。
 - Tool 失败且准备改换路径或重试前，简短说明原因和方向。
+- 持续多步骤任务在阶段推进后适时用一两句概括已确认进展与下一步；可能久等的操作前先说明。不按固定时间输出套话，不为简介另发模型请求。
 - 不重复用户原话，不逐个播报普通读取，不写详细内部推理，不预测未发生的成功。
 - commentary 与 Tool call 应尽量在同一个 Provider turn 返回，不能为了状态文字额外制造空转轮次。
 
@@ -600,7 +601,7 @@ Reasoning summary 属于 Phase 2：
 | Provider loop | `agent-orchestrator.ts`、`agent-provider-client.ts` | 每 turn 内存 writer、分类、Tool 前提交、Prompt 约束 |
 | 上下文 | `agent-context-projection.ts`、`agent-context-manager.ts` | commentary 过滤、摘要输入与物理 boundary 分离 |
 | Renderer 状态 | `useAgentSession.ts`、`agent-stream-messages.ts` | itemId + offset 合并、terminal sticky、规范对账 |
-| Renderer 投影 | `agent-timeline.ts`、`agent-workflow-projection.ts` | 三类投影、状态 selector、下一步、只读 Tool 分组 |
+| Renderer 投影 | `agent-timeline.ts`、`agent-workflow-projection.ts` | 三类投影、状态 selector、下一步、连续 Tool 分组 |
 | UI | `AgentTimeline.tsx`、Tool / Composer 周边组件 | 工作过程行、ToolActivity，以及时间线中的单一审批/交互实例 |
 
 ### Phase 1A：持久化与状态机
@@ -625,7 +626,7 @@ Reasoning summary 属于 Phase 2：
 - `useAgentSession` 已实现事件缓冲、terminal 对账和 gap / conflict 主动快照修复。
 - 时间线已拆分 conversation、work journal 和 execution facts；commentary 使用稳定 `message:${id}` 的轻量工作过程行，空 item 不产生空白 UI。
 - 状态 selector 保留结构化优先级、当前/下一步和计划外标记，但当前界面不挂载历史 Workflow 或 Composer 上方 Active Run Dock。
-- Tool Registry 已提供 renderer-safe `kind / risk / groupKind / operationKind`；只有连续、成功、无需审批或交互的同阶段只读 Tool 才分组，未知 Tool fail-closed。
+- 连续普通 Tool 已按同 Session / Run 统一投影为 `tool-sequence`，不再按 Registry 展示元数据拆组；可见消息、待决审批和所有交互卡保留独立边界。失败、unknown、取消和中断仍保留原状态及详情，成功纯目录授权仅省略重复展示。
 - pending approval / interaction 的可编辑实例只存在于时间线对应 ToolActivity，避免两份草稿和提交入口。
 
 完成标准：刷新、卸载返回、重复事件和迟到事件都不产生重复卡片、空白气泡或内容跳位。
@@ -685,7 +686,7 @@ IPC / Renderer：
 - 当前状态优先级、下一步和计划外步骤正确。
 - 后续 Tool 或 assistant turn 开始后，旧 commentary 不再成为当前状态。
 - 活跃与终态 Run 都不生成 Active Run Dock 或历史 Workflow 卡，时间线仍保留 Tool、审批、交互和异常事实。
-- 只读分组不吞掉失败、审批、交互、写 Tool 或 Shell。
+- 混合读写、电脑、Shell、插件及未知工具按连续顺序合组，保留失败 / unknown / 取消 / 中断状态与详情；待决审批及所有交互卡独立，成功纯目录授权省略重复展示而不删除事实。
 
 手工：
 

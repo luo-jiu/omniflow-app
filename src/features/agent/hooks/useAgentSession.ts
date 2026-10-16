@@ -481,6 +481,7 @@ export function useAgentSession({
         sessionId: event.sessionId,
         status: 'awaiting_approval' as const,
       };
+      setMessages(current => ensureToolTimelineAnchor(current, activity));
       setToolActivities(current => upsertAgentToolActivity(current, activity));
       return;
     }

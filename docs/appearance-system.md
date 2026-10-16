@@ -1,6 +1,6 @@
 # 外观系统：主题、图标与跨窗口快照
 
-更新时间：2026-10-13
+更新时间：2026-10-16
 
 适用范围：内置外观选择、主窗口、设置、目录树、CodeMirror、overlay、Agent 原生鼠标意图与隔离插件颜色快照。颜色与图标贡献当前仅支持随应用交付的内置项；功能插件的安装、执行另见 D1 及后续专题，不等于已支持第三方外观包。
 
@@ -40,7 +40,7 @@
 
 - 新增 `accent.foreground` 用于主色底上的可读前景。共享 CSS 已接入非禁用的 Semi 主色实心按钮、选中 checkbox/radio 标记；Agent、插件命令、浏览器资源、下载和视频倍率等直接绘制的主色按钮也消费同一角色。不得通过修改全局 `--semi-white` / `--semi-color-white` 改写危险按钮或其他白色表面。Semi 焦点边框也映射 `focus.border`，不再固定使用组件库蓝色；Switch 的启用态继续使用成功语义。
 - Semi 的 `--semi-color-bg-3` 已映射 `surface.popover`，覆盖下拉、Popover/箭头、日期面板及通知表面；`bg-4` 映射 `surface.elevated`。禁用文字/边框/背景/填充也映射现有语义，避免默认灰色脱离主题。其他状态交互变量尚未逐项适配，配色默认值与控件接入仍须分别核对。
-- macOS 目录树侧栏由原生 `sidebar` vibrancy 单独呈现，renderer 不再叠加 `surface.sidebarVibrancy` 主题色，避免目录名称被主题色污染；Windows 使用 `surface.sidebar` 实色回退。其他工作区若确实需要主题投影，仍须使用低不透明度变量并保留原生材质，不能提高叠层不透明度遮住透色。
+- macOS 目录树保留原生 `sidebar` vibrancy，不消费 `surface.sidebarVibrancy` 主题色；既有 renderer 兜底为 `72%` 的 `surface.sidebar` 与 `18px` 模糊。该单层材质移到 `DetailWrapper::before`，仅延伸最多 `12px` 承托主内容圆角，侧栏容器自身透明；Windows 保持 `surface.sidebar` 实色回退。不得提高原有叠层不透明度或给全幅外壳铺底遮住透色，边界见 [工作区布局](library-detail-workspace.md#48-侧栏材质与主内容圆角)。
 - 目录树拖入背景已消费 `accent.soft`；Agent 回复的代码语法色通过内部 `--app-agent-syntax-*` 变量保留原亮暗值，参加统一切换动效，但仍不由配色包自定义，也不扩充 67 个主题颜色 token。部分媒体工具分类色与漫画光晕尚未接入对应语义项。图片像素、PDF 原文和网站内容保留原色。
 
 本轮收口宿主背景、导航、选中/悬停/按下/焦点、输入/菜单及插件快照；自动检查和 macOS 代表性界面验证见本文第 6 节。维护时区分“配色给了相同值”“组件尚未接入”和“内容保留原色”，避免只按是否变色判断覆盖。
@@ -92,9 +92,11 @@ TextViewer 将外观扩展直接交给 CodeMirror 的 theme 属性，覆盖背�
 
 ### 3.2 Agent 鼠标意图的主题色投影（2026-10-13）
 
-原生面板和共用大图使用同一无尾杆圆角轮廓及 `accent.default` 配色：18% 淡色填充、基准 2.6 主描边、45% 白混色的基准 1.3 亮边、50% 柔光；本轮箭身与描边同比缩为 0.75，原生 blur 也为 4×0.75，可见箭身约 16pt，大图在原图尺寸下约 16px。原生安全表面仍为整数 35×35 / 小数至多 36×36，精确尖端、四向镜像和完整包含守卫保留。无可见标签、背景或拖拽轨迹。共享纯函数将有限合法色值转为 hex，缺失、非法或完全透明时回退 `#5a9e7c`，不读取 DOM 动效中间色。
+原生光标使用约16pt无尾杆圆角轮廓与`accent.default`：18%淡色填充、基准2.6主描边、45%白混色的基准1.3亮边、50%柔光，箭身/描边/blur同比0.75；按压目标再缩为0.7。终态安全表面35/36pt、精确尖端与四向镜像保留，移动期间用有界透明envelope，无标签或轨迹。普通窗口的动画和按压保持目标当前层级并随遮挡，仅有效的精确菜单绑定使用overlay层；不把颜色或动画状态当作升层许可，完整规则见[电脑操作契约](agent-computer-use.md#鼠标意图指示器2026-10-12)。
 
-main 从原 appearanceIpc 已校验缓存的只读 getter 采色，helper 启动及每次 lease.update 取最新值；没有订阅或新主题 owner，也不向模型 action / 新颜色执行 IPC 暴露色值。静止原生图案不保证随主题即时更新。renderer 使用原 AppearanceViewContext。缩略图只显示原 PNG，不叠加指针或单独放大；共用大图由 createAgentComputerPointerPreview 生成有界内部 SVG data URL，以原 PNG `<image>` 和三个固定矢量路径绘制可信计划，不接受任意 SVG。大图 requestKey 包含 accent，主题变化取消旧合成；解码尺寸 / 附件预算、3 秒 deadline、AbortSignal 和作用域清理保留，失败回原图。Semi 沿 width / height 缩放以在显示尺寸栅格化路径，缩放控件、Esc 及焦点恢复沿用；原附件 / 模型图片与持久化图像不改。上一轮四色亮暗 / Win 资料库 / Swift 离屏样式检查漏看实际比例与放大锯齿，其“样式通过”不作为本轮证据；本轮限定验证见[验证矩阵](frontend-validation-matrix.md#agent-原图缩略图矢量大图与-075-尺寸2026-10-13)。原生静止改色和外部窗口生命周期未新验，历史 R 证据不改写。
+main继续从原appearanceIpc可信缓存在启动/update采色，共享纯函数转有限hex，缺失/非法/完全透明回退`#5a9e7c`。不增加主题owner、订阅、模型色值或颜色执行IPC；静止光标不承诺即时改色。新截图直接采原生光标真实像素并统一为canonical PNG，模型/会话/缩略图/大图的颜色与尺寸都来自同一图像，前端不再叠画；修改主题不重着色历史图。只有旧历史计划SVG继续使用只读AppearanceViewContext与accent requestKey，保留固定路径、附件/解码预算、3秒deadline/abort、作用域清理及失败回原图。Semi缩放控件/Esc/焦点恢复沿原协议。
+
+本轮原生离屏正常/按压图及隔离开发Electron真实SCK紫色光标PNG已查看，动态层级/真实输入/聊天预览未全新实机验收；范围见[验证矩阵](frontend-validation-matrix.md#agent-原生光标动画与真实像素截图2026-10-15)。旧四色亮暗和历史R仅代表当时范围。
 
 ## 4. 跨窗口 IPC
 

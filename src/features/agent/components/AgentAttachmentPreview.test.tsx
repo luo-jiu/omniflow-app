@@ -125,6 +125,7 @@ describe('Attachment image preview', () => {
     expect(onClose).toHaveBeenCalledOnce();
     act(() => renderer.unmount());
     expect(focus).toHaveBeenCalledOnce();
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true });
   });
 
   it('closes when the retained agent workspace becomes inactive', async () => {

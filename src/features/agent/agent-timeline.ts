@@ -8,14 +8,13 @@ import {
   isAgentAssistantItem,
   isAgentConversationMessage,
 } from '@/shared/agent/agent.types';
-import { normalizeAgentPreparedActionPublic } from '@/shared/agent/agent-prepared-action';
 import {
   buildAgentWorkflowProjectionFromRunActivities,
   type AgentWorkflowProjection,
 } from './agent-workflow-projection';
 
 type TimelineLayer = 'conversation' | 'work-journal' | 'execution-facts';
-type ToolGroupKind = 'resource-read' | 'internal-operation' | 'computer-use';
+type ToolGroupKind = 'tool-sequence';
 
 export type AgentTimelineItem =
   | {
@@ -96,18 +95,16 @@ function stableSortByOccurredAt<T extends AgentTimelineItem>(items: T[]): T[] {
     .map(entry => entry.item);
 }
 
+function compareToolItems(left: ToolActivityTimelineItem, right: ToolActivityTimelineItem): number {
+  const leftOrdinal = left.activity.ordinal > 0 ? left.activity.ordinal : Number.MAX_SAFE_INTEGER;
+  const rightOrdinal = right.activity.ordinal > 0 ? right.activity.ordinal : Number.MAX_SAFE_INTEGER;
+  return leftOrdinal - rightOrdinal
+    || left.activity.createdAt.localeCompare(right.activity.createdAt)
+    || left.activity.id.localeCompare(right.activity.id);
+}
+
 function stableSortToolItems(items: ToolActivityTimelineItem[]): ToolActivityTimelineItem[] {
-  return [...items].sort((left, right) => {
-    const leftOrdinal = left.activity.ordinal > 0
-      ? left.activity.ordinal
-      : Number.MAX_SAFE_INTEGER;
-    const rightOrdinal = right.activity.ordinal > 0
-      ? right.activity.ordinal
-      : Number.MAX_SAFE_INTEGER;
-    return leftOrdinal - rightOrdinal
-      || left.activity.createdAt.localeCompare(right.activity.createdAt)
-      || left.activity.id.localeCompare(right.activity.id);
-  });
+  return [...items].sort(compareToolItems);
 }
 
 function stableMergeByOccurredAt(
@@ -136,79 +133,20 @@ function isRenderableWorkItem(item: AgentAssistantItemSnapshot): boolean {
   return !(item.assistantItem.phase === 'final' && item.assistantItem.status === 'completed');
 }
 
-function canGroupFailedActivity(activity: AgentToolActivitySnapshot): boolean {
-  // Validation failures can carry deny without any pending approval.
-  return activity.status === 'failed'
-    && activity.approval?.status !== 'pending'
-    && activity.interaction?.status !== 'pending';
+function isApprovedAccessRecord(activity: AgentToolActivitySnapshot): boolean {
+  // Directory scope approval is a permission transition, not a separate task step.
+  // Keep its canonical snapshot and ordinal anchors; omit only the successful display row.
+  return activity.call.name === 'agent.access.request' && !activity.pluginSource
+    && activity.status === 'completed' && activity.approval?.status === 'approved'
+    && activity.result?.ok === true && !activity.interaction && !activity.preparation;
 }
 
-function canJoinReadGroup(activity: AgentToolActivitySnapshot): boolean {
-  if (activity.pluginSource) return false;
-  return activity.toolMetadata?.kind === 'business'
-    && activity.toolMetadata.risk === 'read'
-    && activity.toolMetadata.groupKind === 'resource-read'
-    && (canGroupFailedActivity(activity) || (
-      activity.status === 'completed'
-      && activity.result?.ok !== false
-      && activity.permissionBehavior === 'allow'
-      && !activity.approval
-      && !activity.interaction
-    ));
-}
-
-function canJoinInternalGroup(activity: AgentToolActivitySnapshot): boolean {
-  if (activity.pluginSource) return false;
-  return activity.toolMetadata?.kind === 'business'
-    && activity.call.name !== 'shell.run'
-    && activity.toolMetadata.risk !== 'external'
-    && (canGroupFailedActivity(activity) || (
-      (activity.status === 'completed' || activity.status === 'running' || activity.status === 'preparing')
-      && activity.result?.ok !== false
-      && activity.permissionBehavior === 'allow'
-      && !activity.approval
-      && !activity.interaction
-    ));
-}
-
-function canJoinComputerGroup(activity: AgentToolActivitySnapshot): boolean {
-  const operation = activity.toolMetadata?.builtinComputerTool;
-  if (!operation || activity.pluginSource || activity.toolMetadata?.kind !== 'business'
-    || activity.call.name !== `computer.${operation}`
-    || activity.approval?.status === 'pending' || activity.interaction) return false;
-  // Main may identify an initial preparation before its action exists. Keep
-  // that record in the same display group without implying approval or success.
-  if (activity.status === 'preparing' && !activity.preparation && !activity.result && !activity.approval && !activity.finishedAt) {
-    return activity.toolMetadata.risk === (operation === 'observe' ? 'read' : 'write')
-      && (activity.permissionBehavior === 'allow' || activity.permissionBehavior === 'ask');
-  }
-  try {
-    const action = normalizeAgentPreparedActionPublic(activity.preparation?.action);
-    if ((action.kind !== 'computer.observe' && action.kind !== 'computer.click'
-      && action.kind !== 'computer.setText' && action.kind !== 'computer.scroll' && action.kind !== 'computer.input')
-      || action.kind !== activity.call.name) return false;
-  } catch {
-    return false;
-  }
-  const data = activity.result?.data;
-  if (data && typeof data === 'object' && !Array.isArray(data)
-    && ('dispatchState' in data && data.dispatchState === 'unknown'
-      || 'mutationCommitState' in data && data.mutationCommitState === 'commit_unknown')) return false;
-  if (canGroupFailedActivity(activity)) return true;
-  return (activity.status === 'completed' || activity.status === 'running' || activity.status === 'preparing')
-    && activity.result?.ok !== false
-    && (activity.permissionBehavior === 'allow' && !activity.approval
-      || activity.permissionBehavior === 'ask' && activity.approval?.status === 'approved');
-}
-
-function activityGroupKind(activity: AgentToolActivitySnapshot): ToolGroupKind | null {
-  if (activity.call.name === 'computer.observe' || activity.call.name === 'computer.click'
-    || activity.call.name === 'computer.setText' || activity.call.name === 'computer.scroll' || activity.call.name === 'computer.input'
-    || activity.toolMetadata?.builtinComputerTool) {
-    return canJoinComputerGroup(activity) ? 'computer-use' : null;
-  }
-  if (canJoinReadGroup(activity)) return 'resource-read';
-  return canJoinInternalGroup(activity) ? 'internal-operation' : null;
+function needsStandaloneToolEntry(activity: AgentToolActivitySnapshot): boolean {
+  // Pending decisions must remain directly reachable. Interaction answers are real
+  // conversation content, unlike a successful permission-only approval.
+  return activity.status === 'awaiting_approval' || activity.status === 'awaiting_interaction'
+    || activity.approval?.status === 'pending' || !!activity.interaction
+    || activity.call.name === 'agent.access.request';
 }
 
 function groupToolActivities(items: AgentTimelineItem[]): AgentTimelineItem[] {
@@ -219,8 +157,8 @@ function groupToolActivities(items: AgentTimelineItem[]): AgentTimelineItem[] {
       return;
     }
     const activity = item.activity;
-    const nextGroupKind = activityGroupKind(activity);
-    if (!nextGroupKind) {
+    if (isApprovedAccessRecord(activity)) return;
+    if (needsStandaloneToolEntry(activity)) {
       grouped.push(item);
       return;
     }
@@ -228,14 +166,14 @@ function groupToolActivities(items: AgentTimelineItem[]): AgentTimelineItem[] {
     if (
       previous?.type === 'tool-group'
       && previous.runId === activity.runId
-      && previous.groupKind === nextGroupKind
+      && previous.activities[0].sessionId === activity.sessionId
     ) {
       previous.activities.push(activity);
       return;
     }
     grouped.push({
       activities: [activity],
-      groupKind: nextGroupKind,
+      groupKind: 'tool-sequence',
       key: `activity-group:${activity.id}`,
       layer: 'execution-facts',
       occurredAt: item.occurredAt,
@@ -387,40 +325,77 @@ export function buildAgentTimelineItemsFromProjection(
     messageItemRunIds.push(messageRunId);
   });
 
-  const lastMessageItemIndexByRun = new Map<string, number>();
+  const messageIndexesByRun = new Map<string, number[]>();
   messageItemRunIds.forEach((runId, index) => {
-    if (runId) lastMessageItemIndexByRun.set(runId, index);
+    if (!runId) return;
+    const indexes = messageIndexesByRun.get(runId);
+    if (indexes) indexes.push(index);
+    else messageIndexesByRun.set(runId, [index]);
   });
-  const itemsWithFallbackActivities: AgentTimelineItem[] = [];
+  const beforeMessage = new Map<number, AgentTimelineItem[]>();
+  const afterMessage = new Map<number, AgentTimelineItem[]>();
+  const insertAt = (target: Map<number, AgentTimelineItem[]>, index: number, item: AgentTimelineItem) => {
+    const items = target.get(index);
+    if (items) items.push(item);
+    else target.set(index, [item]);
+  };
   const terminalItem = (run: AgentRunSnapshot): AgentTimelineItem => ({
     key: `run-status:${run.id}`, layer: 'execution-facts',
     occurredAt: run.finishedAt || run.updatedAt, run, type: 'run-status',
   });
 
-  messageItems.forEach((item, index) => {
-    itemsWithFallbackActivities.push(item);
-    const runId = messageItemRunIds[index];
-    if (!runId) return;
-    if (lastMessageItemIndexByRun.get(runId) !== index) return;
-    prepared.activityItemsByRun.get(runId)?.forEach((fallback) => {
-      if (!renderedActivityIds.has(fallback.activity.id)) {
-        itemsWithFallbackActivities.push(fallback);
+  messageIndexesByRun.forEach((indexes, runId) => {
+    const missing = (prepared.activityItemsByRun.get(runId) || [])
+      .filter(item => !renderedActivityIds.has(item.activity.id));
+    const lastIndex = indexes[indexes.length - 1];
+    let missingIndex = 0;
+    let segmentStart = 0;
+
+    // Tool ordinals bound each gap between canonical anchors. Timestamps only
+    // place missing records among commentary inside that gap; messages never move.
+    const mergeGap = (end: number, missingEnd: number, nextAnchor?: number) => {
+      let cursor = segmentStart;
+      while (missingIndex < missingEnd) {
+        const fallback = missing[missingIndex++];
+        while (cursor < end) {
+          const candidate = messageItems[indexes[cursor]];
+          if (candidate.type === 'message' && candidate.message.role === 'assistant') break;
+          if (!(candidate.type === 'message' && candidate.message.role === 'user')
+            && candidate.occurredAt > fallback.occurredAt) break;
+          cursor += 1;
+        }
+        if (cursor < end) insertAt(beforeMessage, indexes[cursor], fallback);
+        else if (nextAnchor !== undefined) insertAt(beforeMessage, nextAnchor, fallback);
+        else insertAt(afterMessage, lastIndex, fallback);
       }
+    };
+
+    indexes.forEach((index, position) => {
+      const item = messageItems[index];
+      if (item.type !== 'tool-activity') return;
+      let missingEnd = missingIndex;
+      while (missingEnd < missing.length && compareToolItems(missing[missingEnd], item) < 0) missingEnd += 1;
+      mergeGap(position, missingEnd, index);
+      segmentStart = position + 1;
     });
+    mergeGap(indexes.length, missing.length);
     const terminal = prepared.terminalRuns.get(runId);
-    if (terminal) itemsWithFallbackActivities.push(terminalItem(terminal));
+    if (terminal) insertAt(afterMessage, lastIndex, terminalItem(terminal));
   });
 
+  const itemsWithFallbackActivities = messageItems.flatMap((item, index) => [
+    ...(beforeMessage.get(index) || []), item, ...(afterMessage.get(index) || []),
+  ]);
   const orphanActivities = prepared.activityItems.filter(item => (
     !renderedActivityIds.has(item.activity.id)
-    && !lastMessageItemIndexByRun.has(prepared.activityRunById.get(item.activity.id) || '')
+    && !messageIndexesByRun.has(prepared.activityRunById.get(item.activity.id) || '')
   ));
   return groupToolActivities(stableMergeByOccurredAt(
     itemsWithFallbackActivities,
     stableSortByOccurredAt([
       ...orphanActivities,
       ...Array.from(prepared.terminalRuns.values())
-        .filter(run => !lastMessageItemIndexByRun.has(run.id)).map(terminalItem),
+        .filter(run => !messageIndexesByRun.has(run.id)).map(terminalItem),
     ]),
   ));
 }
