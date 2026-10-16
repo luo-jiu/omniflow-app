@@ -1,6 +1,6 @@
 # OmniFlow App 前端交接索引
 
-更新时间：2026-09-23
+更新时间：2026-10-16
 
 适用对象：继续维护 `omniflow-app` 前端、Electron 主进程、IPC、桌面交互和前端文档的开发者或 Coding Agent。
 
@@ -102,6 +102,10 @@
   - `docs/cat-catch-full-migration-execution-plan.md`
 - `library detail` 工作区模式、browser / file-viewer / search-home 切换：
   - `docs/library-detail-workspace.md`
+- 内置 Agent 的 macOS 电脑操作阶段收口：
+  - [应用窗口操作](../docs/agent-computer-use.md)（2026-10-16开发预览：AX / 单窗截图、菜单、七种定向输入、原生光标；generic不限旧TextEdit名单，但不代表任意应用兼容。最新输入 / 规范图回归成功，focusCleanup=unconfirmed及连续桌面帧遮挡仍为待观察项。阶段暂停扩展，未来明显问题再复现调整）
+  - [Codex原生研究](../docs/agent-computer-cursor-codex-research.md)（同SHA静态结论 / 推断 / 未知及独立实现差距；pet特殊入场不能泛化成普通移动升层）与[早期调研](../docs/agent-computer-use-research.md)（历史方案，不覆盖现行能力）
+  - [验证矩阵](../docs/frontend-validation-matrix.md)（真实内部Agent与平台夹具分别记载，输入消费、释放、焦点清理及动态遮挡不得合并为一项通过；临时证据仅作线索，持久结论在正文）
 - 内置 Agent 的执行、持久化、IPC、安全和 renderer UI 边界：
   - `docs/built-in-agent-architecture.md`
   - `docs/built-in-agent-shell-architecture.md`

@@ -1,5 +1,378 @@
 # 前端验证矩阵
 
+## Computer Use 阶段收口（2026-10-16）
+
+本批按用户要求结束扩展开发，先整理文档并分批提交。当前执行契约以[电脑操作专题](agent-computer-use.md)为准，Codex 静态依据、推断与差异见[光标研究](agent-computer-cursor-codex-research.md)。下文按日期保留验证原始结论；旧版本的四种输入、TextEdit 限定、移动升102、截图二次叠画及“尚未提交”等描述只代表对应记录时点，不覆盖当前实现。
+
+- 当前实现：七种定向输入共用 generic 输入会话、独立菜单观察与操作、持久原生光标、短距弹簧及长距弧线、真实拖拽反馈，以及模型/会话/缩略图/大图共用的 canonical PNG。普通光标包括移动和拖拽均按目标窗口相对层序，仅精确有效菜单表面允许102层。
+- 已完成验证：当前生产源码全量 lint、508 文件 / 6206 项测试及 build 通过，3 文件 / 7 项跳过；原生双架构 helper 已重编译。独立 review 未发现新的确定阻断问题。收口时另跑安全夹具专用 Vitest，13/13 通过，未启动 GUI；不与默认全量数量混算。
+- 真实内部 Agent：`SHARED_SENDER_RETEST_20261016` 通过限定 AppKit 六类混合输入与焦点清理；最新 `OCCLUSION_POINTER_20261016` 的四次输入均已投递、释放确认，并有实际选区变化，但其 `focusCleanup=unconfirmed`，不能称清理通过。完整 Run 身份和证据见下两节。
+- 保留边界：目标被覆盖时的全桌面连续帧仍未验，不能宣称完全无闪现；复杂应用可能拒绝输入或出现升窗，未承诺所有软件持续零干扰。跨屏/屏外兼容截图非原子，其他系统与未覆盖应用仍按各节限项处理。
+
+后续仅在出现明显、可复现问题或需要扩展明确场景时，按对应观察/输入/释放/焦点/视觉层序证据继续排查；不为评分追加测试，也不将单次未知结果自动重放。临时 `/tmp` 路径供本机复核，长期结论、Run 身份及失败边界已写入本文，不依赖临时产物作为唯一记录。
+
+## 普通光标随目标遮挡（2026-10-16）
+
+用户报告目标被前台窗口覆盖时，移动中的Agent光标突然冒出、停止后消失。旧实现的计划移动和drag down都会授movement overlay102，结束降层，能从源码解释该现象；此用户报告及旧行为保留，不冒充已录制动态帧。Codex后续有界补证纠正先前泛化：已可见光标的普通move不新增移动overlay，已读特殊入口同时要求invisible、animated、pet位置可用与目标点不同；不是所有move或真实drag down都应升层。完整调用链见[光标研究](agent-computer-cursor-codex-research.md)。
+
+本轮实现将普通计划移动、真实posted拖拽 / 按压及App active统一保持原目标当前layer的相对排序，其他App与同App另一窗可自然遮挡；不以升102或反复orderOut模拟显隐。只有精确绑定且仍有效的菜单表面使用overlay102，旧102可见像素撤销后不得作为普通过渡保留，snapshot普通层须等于已同步目标。曲线、实际posted点、0.7按压弹簧、菜单固定绘制范围及正常淡入淡出保留；不改变UI协议、截图白名单、输入授权或提交回执。这是按实际效果收敛的独立实现，不声称Codex不存在内部overlay。
+
+当前专项 **173项 / 2文件通过**：adapter172项及无GUI原生policy harness1项，日志 `/tmp/omniflow-pointer-occlusion-policy-tests-20261016.log`。覆盖普通102默认 / 显式拒绝、其他App及同App覆盖、计划和posted drag各九个采样含按压 / 释放、原目标已在layer3 / 102的相对排序、普通snapshot拒绝102、旧102不能保留为普通可见过渡，并保留菜单102与原曲线 / 按压回归。独立只读review未发现问题；两个测试文件定向ESLint及`git diff --check`通过。本轮重新执行全量lint、508文件 / 6206项测试及build均通过，3文件 / 7项沿用跳过，universal helper已重新编译；日志分别为 `/tmp/omniflow-cursor-occlusion-lint-20261016.log`、`/tmp/omniflow-cursor-occlusion-tests-20261016.log`、`/tmp/omniflow-cursor-occlusion-build-20261016.log`，不借用下节较早源码的结果。复用唯一Vite，通过原入口watch重建恢复开发版，没有另起dev或提交代码。
+
+新视觉实机仍待验：完整覆盖期间的计划移动与真实drag不得穿出；部分遮挡边界应自然裁遮并在可见部分连续移动；同应用另一窗口覆盖时保持原目标归属；菜单来回、正常结束淡出及canonical PNG继续沿原流程核对。下节AppKit的真实输入消费成功发生在此次视觉修正前，不代表本次遮挡、动态帧或所有软件兼容通过。
+
+修复后通过真实Composer提交 `OCCLUSION_POINTER_20261016`，Win3 / full-access / gpt-6.1-sol high，Session `3fa0ec91-ada8-477f-98db-117e8e4a0aec` / Run `be732157-057c-4467-b08d-212e749a3765`，15:58:15.809～15:59:58.471 completed。四次已发送输入（左侧click、右侧click、doubleClick、400ms drag）均dispatched / committed / release confirmed；首次右侧click因键鼠活动首发前拒绝，重新observe后单次成功，没有unknown重放。六张1000×632 canonical PNG为cursorIncluded=false→true×5，受阻前后两张哈希相同；原图/AX确认右侧插入位置改变、bravo双击[16,5]、alpha拖选[10,5]。左侧空白click选区未变，只确认指针位置，不夸大为选区变化。父CUA从提交至终态及固定清理尾窗保持暂停，未主动激活目标。
+
+这轮仍有独立收尾限制：输入helper81765在15:59:44.541（Run结束前13.930s）报告focusCleanup=unconfirmed，firstUnsafe=focusOwnerScope / unsafeBeforeCleanup=true / settle=unsafe / settleReleased=false / axKnown=false，结束后≤5s尾窗无新清理回执，不能记为released或归因用户打断。indicator81761仅有15:59:45.674 `exit reason=hidden`，没有匹配的异常退出或修复失败日志；后续采样两个PID均不存在，但未收退出码。该结果支持限定输入及规范图回归，不证明焦点清理通过或全桌面动态遮挡完全无闪现；本轮没有该连续桌面帧证据。证据前缀 `/tmp/omniflow-directed-agent-e2e-20261016/occlusion-pointer`，含findings、规范图、回执、原生日志、固定尾窗及退出采样。完成后仅对已核实身份的临时AppKit夹具执行进程清理，采样无残留输入/视觉helper，保留唯一开发版；未提交。
+
+## 定向输入共用 sender 与鼠标反馈隔离（2026-10-16）
+
+对同 SHA Codex Service 的有界静态分析确认：controller 的 click 与 keyboard 复用同一 focusEnforcer slot，滚轮也在同一服务中派发；防抢焦点过滤仅按服务自身 sourcePID 豁免。原 OmniFlow 的 generic click 保留焦点 owner，但键盘另起 one-shot helper，存在特定焦点状态下被旧 owner 当外来输入转发的源码风险。这不证明用户此前报告的路径框误输入来自该问题，尚无对应 Run 的因果证据。
+
+本轮将 `directed-v1` 的 click / rightClick / doubleClick / drag / scroll / shortcut / typeText 全部交给同 RunShare 的精确窗口输入 session；旧 profile 继续 one-shot，但首发前关闭全部活跃 focus session，等待可信清理与真实退出，失败不进入 mutation begin。首条键盘不额外建立 synthetic focus；receiver、焦点 token、物理输入、取消释放、未知不重放及全局清理门禁保留。fd3 复用既有反馈校验并绑定 requestId，取消 / 结算 / 关闭后的帧失效，损坏或背压仅停视觉，不影响 stdout 或唯一配对释放。raisedSurface 守卫未放宽。
+
+独立静态 review 未发现问题。runtime 专项133项、平台专项179项、无 GUI 原生 session fd3 harness 通过；全量 lint 通过，508文件 / 6206项测试通过、3文件 / 7项沿用跳过。全量日志 `/tmp/omniflow-shared-sender-lint-20261016.log`、`/tmp/omniflow-shared-sender-tests-20261016.log`；原生专项 `/tmp/omniflow-session-fd3-native-20261016.log`。构建和真实内部 Agent 混合操作结果另记，不以静态分析、单测或事件投递代替应用消费验收。代码未提交。
+
+本轮 `npm run build` 随后通过并重编译 universal helper，日志 `/tmp/omniflow-shared-sender-build-20261016.log`。复用现有 Vite，只触碰主入口触发一次开发版重启，确认仅一个 OmniFlow Electron main；没有另起 dev。临时AppKit夹具 compile-only 后仅启动单实例，其 bundle ID 为 `com.omniflow.computer-qa`，应尝试 generic receiver，不混算旧固定 `com.omniflow.window-input-qa` profile。
+
+真实 Composer 首轮 `SHARED_SENDER_MIXED_20261016`，Run `fca7e12f-66d9-4924-95dd-0d9cd8bc6693` / Session `3fa0ec91-ada8-477f-98db-117e8e4a0aec`，Win3 / full-access / gpt-6.1-sol high，15:28:21.160～15:28:52.566。windows1 / observe1 / hidePointer1，**未发送 input**：首次 both 的 inputReady=false、availableInputOperations=[]，仅返回通用未确认提示，没有可公开归属的具体拒绝原因。不能将此提示断言为unsupported_receiver或用户干扰；模型停止且hidePointer closeConfirmed=true。唯一1000×632 canonical PNG仍为QA初始文本、右侧QA行001、cursorIncluded=false；原生Run窗及结束后4.434s尾窗均无匹配日志，因此没有same helper/source PID、release、focusCleanup或退出证据，本轮为未触发新路线。证据 `/tmp/omniflow-directed-agent-e2e-20261016/shared-sender-mixed-findings.json`；父CUA从提交后至尾窗完成暂停，保留该未验收结果。
+
+同一授权Session的新任务 `SHARED_SENDER_RETEST_20261016` / Run `65915bd0-1a7e-49b4-8ece-a62b8f7a5f67`，15:33:24.335～15:35:39.589 completed。实际七次input为click、shortcut、typeText、scroll两次、doubleClick和drag（六种操作，不含rightClick）；九次observe均inputReady=true，前两次仅五种pointer能力，第三次起七种能力均可用。七次公开回执均dispatched / committed / releaseState=confirmed，全部原生动作来自同一helper PID73684；没有独立记录CGEvent sourcePID，不将helper PID冒充该字段。首click为safe / windowNotificationOnly，其余alreadyFocused。
+
+canonical PNG与公开AX确认全选[0,36]、精确两行Unicode输入、右侧QA行001→040→001及纵向值0→0.301006→0、双击bravo[16,5]、拖选alpha[10,5]。Run结束后75ms focusCleanup=released，settle=confirmed / settleReleased=true / tapJoined=true / firstUnsafe=none / unrestored=false；15:37:17精确PID采样确认73684不存在，未收退出码。证据前缀 `/tmp/omniflow-directed-agent-e2e-20261016/shared-sender-retest`，含findings、九张规范原图、有限原生日志、清理尾窗与process-exit-sample.json。父CUA运行及收尾期间保持暂停；没有要求用户停止正常工作。该轮通过限定AppKit混合输入及清理，未证明其他应用兼容或全过程零抢前台。
+
+用户同时报告：当前台窗口覆盖目标时，Agent拖拽的光标移动会短暂出现、停止后消失。源码已定位计划移动与drag down均设置movement升层原因，102层允许越过普通遮挡窗，结束后降层，符合该可见现象；尚未独立捕获动态帧。本轮输入消费通过**不代表遮挡视觉通过**，该问题与Bézier几何、输入source修复分别核对，后续修复与验证另记。
+
+## 后台单击的合成焦点保护（2026-10-16，首次实机未通过）
+
+并行使用条件补充：用户在测试期间会正常使用电脑；AI操作若使窗口或浮层遮挡当前工作，用户会用快捷键切回、收起或折叠它们。这些是正常纠正操作，不能仅凭后续physical-input-active、前台变化或浮层消失就将失败归因于用户，须区分“操作触发升窗→用户切回”与用户先主动切换。用户还报告曾继续打字进入突然出现的路径框，并观察到Codex也有偶发抢前台；这属于用户报告，尚未绑定精确Run、应用或控制来源，不能据此改写既有原生日志或断言OmniFlow/Codex谁触发了某一次变化。实用验收以尽量后台操作、尊重用户切回、中断后配对释放并重新观察为准，偶发升窗单列兼容边界，不将永久零升窗作为本批硬指标；误输入仍保留为体验问题。结束时状态一致只证明收尾，不能排除期间曾升窗或键盘误路由。后续因果复测优先记录动作阶段、前台/键盘焦点变化及用户纠正的先后关系，不记录用户键入正文。
+
+针对下节 WebStorm“派发成功但结构面板不打开”的稳定缺口，继续只读逆向同一 Codex Service 后新增三层保护：持久目标状态、持久防抢焦点和临时旧前台恢复。该阶段main的RunShare持有唯一原生输入会话，仅为generic普通单击接线；其他输入沿当时原路线，后续七操作统一见上节。协议2分别报告鼠标事件、焦点副作用和最终清理，只有可信终端加真实进程退出才允许交接；焦点恢复未知会阻断新观察 / 新 Run 中的后续输入，不自动重放。
+
+静态 review 已修正取消时未恢复的合成前台被误认成用户接管、首发前过早注册保护、前台通知陈旧，以及持久 target / auxiliary / 键盘转发接收 PID 的启动身份校验。纯回归使用状态模型、伪 stdin/stdout 和普通 Mach port；不安装真实键鼠 tap、不发送输入或暂停屏幕更新。原生 input、tap 生命周期、indicator、identity、menu 五个无 GUI harness 已通过。
+
+最终源码全量 `npm run lint`、`npm run build` 通过，arm64 / x86_64 universal helper 已重新编译；x86_64 中新合成焦点保持首发前拒绝，编译成功不授予其私有 ABI 支持。`npm test` 为508文件 / 6186项通过、3文件 / 7项沿用跳过。四个输入会话 / 平台 / runtime 专项文件共300项通过。日志分别为 `/tmp/omniflow-focus-full-lint-20261016.log`、`/tmp/omniflow-focus-build-20261016.log`、`/tmp/omniflow-focus-full-test-20261016.log`、`/tmp/omniflow-focus-session-tests-20261016.log`。
+
+解锁后已通过开发版实际 Composer、Win / ID3、`gpt-6.1-sol / high` 发送 `DIRECTED_IDE_SAFEFOCUS_20261016`。Run `87dbe13b-7f7d-483a-9e5f-df8cc1160aa5` 为 windows1 / observe2 / input(click)1 / hidePointer1；原生诊断确认 `selectedChildren / depth0 / initial`，因此拒绝窄 Command 分支并实际进入 `focusRoute=safe`。click(15,153) 两个事件 dispatched / committed、release confirmed，焦点回执 retained；后置 AX / canonical PNG 仍为项目面板，没有打开结构。模型只读核对后停止，未发送恢复点击或换路线。后续观察的 raisedSurface 拒绝与原点击是否消费分别记录。
+
+该 Run 结束后233ms出现原生 `focusCleanup=unconfirmed`，所以视觉 hidePointer 的 `closeConfirmed=true` 不能代替输入焦点清理成功。证据前缀 `/tmp/omniflow-directed-agent-e2e-20261016/directed-ide-safefocus` 保留精确 Run、回执、两张2048×1058图片及结束后有界清理日志。调用前后 frontmostChanged=false / pointerMoved=false 仅证明采样端点，不能宣称全过程持续无干扰。旧十次 Run 的失败记录保持不变。
+
+进一步静态对照发现预构造事件应在实际发送前刷新 monotonic timestamp，且 Codex 高层选择敏感 click 会传入非 nil 目标窗口，不能将 nil-window 适配视为等价。后续修正和固定清理原因诊断仍需独立新 Run；新合成焦点暂限已证 arm64 普通应用及可确认辅助进程，不推定任意应用 / x86_64 / 发行包支持；未提交代码。
+
+刷新实际发送时间戳、加入固定诊断并重建helper后，复用同一Vite仅重启一次开发Electron（确认唯一main），从真实Composer发出 `DIRECTED_IDE_TIMESTAMP_20261016`，Run `cb511cb1-a5e4-40ca-9777-0e2807d3ae95`。windows1 / observe2 / click1 / hidePointer1，**后置canonical PNG确实出现结构工具窗口，独立CUA AX也确认“结构 工具窗口 / 结构视图树”**。原生仍走safe，窗口属性诊断为activationPoint / windowID / frame可读、activationPointWithinWindow=false；未新增激活点鼠标事件，不能向原获准窗外猜点点击。
+
+该click仍为unknown / commit_unknown、release confirmed；native `transientStage=raisedSurface`、eventCount=2 / releaseSent=true，尚不能从这两个字段区分完整click后的最终检查失败和down后中断再补唯一up。模型按要求只读核对后停止，没有恢复点击；结构面板暂保持打开。后观察inputReady=true、七项availableInputOperations可用。两次模型AX摘要均截断，未覆盖结构面板，不能把缺少该子树当成不存在；真实PNG与独立完整AX分别保留来源。
+
+本次Run结束后11ms `focusCleanup=released`：firstUnsafe=none、settle=confirmed、tapJoined=true，CPS / NSWorkspace / 额外AX采样一致、unrestored=false。该有界清理结果通过，不推定整个过程中持续零干扰。证据前缀 `directed-ide-timestamp`，后图SHA256 `45710f7f9045ed686e677d1002e29628c46aa32719e49847c4e44bb9447fd846`。本轮全量lint / build通过、6186项测试通过，日志 `/tmp/omniflow-focus-timestamp-final-lint-20261016.log`、`/tmp/omniflow-focus-timestamp-full-test-20261016.log`、`/tmp/omniflow-focus-timestamp-build-20261016.log`。恢复关闭的新任务尚未提交时Mac再次锁屏，等待解锁；unknown阶段将补固定诊断，不放松门禁。
+
+随后已补 `failurePhase / completedStepCount` 内部诊断并独立review通过；pure回归确认beforeStep / 1的down后失败加清理up，与completion / 2的完整click后失败，可产生完全相同的旧公开回执。所有guard、释放顺序和公开字段保持原样。最终源码再次全量lint / build通过，508文件 / 6186项测试通过、3文件 / 7项跳过；日志 `/tmp/omniflow-input-phase-final-lint-20261016.log`、`/tmp/omniflow-input-phase-full-test-20261016.log`、`/tmp/omniflow-input-phase-build-20261016.log`。原生helper已更新，新增阶段尚无真实Run证据；Mac锁屏期间未发送恢复关闭任务、未启动额外开发进程，结构面板仍待恢复。代码未提交。
+
+再次解锁后，从真实Composer提交 `DIRECTED_IDE_RECOVERY_CLOSE_20261016`，Run `64f98f86-3369-4b1b-869a-0404703590d9`，只尝试恢复关闭结构面板。windows1 / observe2 / click1 / hidePointer1，public click为dispatched / committed、eventCount=2、release confirmed；主click helper正常完成，没有failurePhase失败日志。前后canonical PNG仍显示结构面板，独立CUA未见布局变化，**恢复未通过**。后观察inputReady=false；raisedSurface属于后续独立探测helper，不能混成主click失败。主helper在Run结束后17ms清理released、settle confirmed。证据前缀 `directed-ide-recovery-close`。
+
+因此此前单次真实打开不能推定稳定兼容；接下来先对齐已证Codex窗口激活通知的windowNumber / flags，继续用新的内部Agent Run验收。当前AXActivationPoint虽然可读，却不在获准窗口内；只尝试绑定原窗口的通知，不向该点追加鼠标事件。该受限适配与完整Codex窗口激活序列分别记录，不放松原guard或把已派发写成已消费。
+
+当前旧版本的明确隐藏控件对照 `DIRECTED_IDE_HIDE_CONTROL_20261016`，Run `f089fb6c-f00f-416d-97eb-598279c25bca`，只有windows1 / observe2 / hidePointer1，**没有发送输入**。模型因截图小横杠和截断AX均无法明确定位结构面板标题栏隐藏按钮而停止；两张canonical PNG完全相同，结构面板仍开。inputReady=true并不解决定位缺口；隐藏查询无匹配不等于控件不存在。没有主输入helper或匹配清理日志，hidePointer成功不应写成焦点清理成功。证据前缀`directed-ide-hide-control`。
+
+随后受限`windowNotificationOnly`补丁已独立review通过：原窗口绑定精确且AXActivationPoint可读时，仅13/1通知携带真实窗口ID和0xc0000；缺可选属性回nil，原身份改变仍拒绝，不追加激活点鼠标事件。全量lint / build通过，508文件 / 6186项测试通过，3文件 / 7项跳过；日志`/tmp/omniflow-window-notify-{lint,tests,build}-20261016.log`。build重新编译universal helper，复用现有唯一开发Electron，未另起dev；新Run启动新的输入helper，生产效果另行核对。代码未提交。
+
+真实Composer新Run `ec6e8600-b341-4fc2-9124-fb50c60a689a` / `DIRECTED_IDE_WINDOW_NOTIFY_20261016`为windows1 / observe2 / click1 / hidePointer1。主helper明确`focusRoute=safe / activationRoute=windowNotificationOnly`；click(15,153) dispatched / committed、2events、release confirmed，**canonical PNG与独立CUA AX均确认结构面板关闭、项目及运行面板保留**。后观察因用户键鼠活动停用输入，模型停止，没有继续打开或再关闭。主click无failurePhase失败或raisedSurface诊断；pointerMoved=true不能归因为Agent移动，也不能宣称全过程零干扰。
+
+该Run结束后256ms仍`focusCleanup=unconfirmed`，firstUnsafe=settleDeadline、settle=focusMismatch、tapJoined=true、unrestored=false；NSWorkspace前台与CPS键盘焦点均非目标，但二者不一致，末次非原子AX诊断与CPS一致。当前main已阻断后续输入，不能拿视觉关闭成功或helper退出覆盖未知清理。证据前缀`directed-ide-window-notify`。下一步先核对持久helper的通知RunLoop与前台采样；尚不能把此结果归为稳定兼容或放宽清理门禁。
+
+主RunLoop服务修复及AX等待后恢复前的刷新复核已独立review通过。单turn只在main线程锁外运行，原等待 / 取消 / 身份 / unsafe / 配对释放 / 严格cleanup条件保持；no-GUI真实CFRunLoopPerformBlock、预算、防重入和tap生命周期专项通过。最终全量lint / build通过，508文件 / 6186项测试通过、3文件 / 7项沿用跳过，日志`/tmp/omniflow-input-mainloop-final-{lint,tests,build}-20261016.log`。复用Vite watcher只重启一次Electron，确认唯一新main；旧未知清理记录保留，不改写为released。重启后重新登录并仅进入Win / ID3，独立新会话的真实界面与清理效果另验。代码未提交。
+
+上述最终源码的真实Composer验收 `DIRECTED_IDE_MAINLOOP_20261016`，Run `43e3f71f-7017-4c8e-a833-1a6de6bb20fa`，Session `3fa0ec91-ada8-477f-98db-117e8e4a0aec`，Win / ID3、`gpt-6.1-sol / high`、完全访问。windows1 / observe3 / click2 / hidePointer1；三张canonical PNG确认**结构面板关→开→关，项目树高度及运行面板恢复**，收尾后独立完整CUA AX确认结构工具窗口已关闭。同一主helper PID62140复用；首click为safe / windowNotificationOnly、dispatched / committed、2events、release confirmed，末端采样frontmostChanged=false / pointerMoved=false。
+
+第二click为alreadyFocused，在down后、正常up前触发raisedSurface：`failurePhase=beforeStep / completedStepCount=1 / eventCount=2 / releaseSent=true`。其中第二事件是原窗口的唯一清理up，不能按完整正常click结算；公开unknown / commit_unknown保持，模型只读复核后停止。后图确实关闭结构，但末次observe为inputReady=false、提示目标应用正在前台使用；本轮没有physical-input-active或用户键鼠notice的肯定证据，无法确定谁或何种机制激活目标，也不能从首click的端点采样推定第二click或整个过程无干扰。**视觉往返及清理通过，两次公开回执均正常与持续后台无干扰尚未通过**。
+
+Run于14:52:07.017结束，主helper在26ms后`focusCleanup=released`，firstUnsafe=none / unsafeCount=0 / settle=confirmed / settleReleased=true / tapJoined=true / unrestored=false，前台、CPS及末次AX采样一致；另行只读进程核对确认PID62140已退出。取证覆盖结束后约5s，期间父验收工具暂停CUA调用，清理取完后才独立核对GUI。这与旧轮同时改变了主RunLoop及外部观察交错条件，不能将改善单独归因于某项修复。证据根`/tmp/omniflow-directed-agent-e2e-20261016/`，前缀`directed-ide-mainloop`，包含findings.json、native-fixed-diagnostics.log、native-cleanup-tail.log及三张原图；旧Run均保持原结论，不放宽raisedSurface、清理或未知结果禁止重放门禁。
+
+## 定向 Unicode、滚轮与复杂 IDE 输入复验（2026-10-16）
+
+2026-10-16，开发版 OmniFlow 的 Win 资料库（ID 3），测试 Session `fc580e88-8c2e-40c4-ba34-c1ef96c41a1b`，通过实际 Composer 发送任务，模型 `gpt-6.1-sol / high`、完全访问。本轮目前有 **10 个**已完成并存档的独立 Run；Run 为 completed 只表示调度结束，不代替每项任务的验收结果。
+
+| Run / 标记 | 实际工具次数 | 结果与限制 |
+| --- | --- | --- |
+| `d82080d1-12ac-4f4b-82ac-e4dd8297b625` / `DIRECTED_TEXT_E2E_20261016` | windows 1、observe 3、input(click) 1；共 5 | 首次 both 可用七操作，click 在执行前被拒，公开错误为“当前窗口未确认可接受后台定向输入”；重新观察明确显示用户键鼠活动、inputReady=false。失败回执没有 dispatchState / commit / release / operationId，原生派发日志为空，不能记为已发送。正文保持空白；保留该失败。 |
+| `80062959-4997-403c-9363-a698824aefe9` / `DIRECTED_TEXT_RETEST_20261016` | windows 1、observe 3、input(typeText) 1；共 5 | **通过限定 Unicode 文字输入**。CGEventPostToPid、eventCount=6、releaseState=confirmed、dispatched / committed；后置 AX / PNG 与独立 CUA 核对精确三行，涵盖中文、🌟、组合字符 é、ZWJ emoji 👩‍💻、换行及✅。没有先发多余 click。 |
+| `b41f97bd-208c-4f3e-be19-b062f5537128` / `DIRECTED_SCROLL_E2E_20261016` | windows 1、observe 4、input(scroll) 2、hidePointer 1；共 8 | **通过限定定向滚轮往返**。同点 deltaY=-480 / +480，两次各 eventCount=1、releaseState=confirmed、dispatched / committed。PNG 首行 Row001→Row109→Row001，纵向 AXValue 0→0.7188139059→0；独立 CUA 最终确认 Row001～Row030 和 AXValue=0。480 是发送的滚轮量，不能宣称页面实际仅移动 480 像素。 |
+| `b334bf8f-f631-4a1f-be52-7c1177ddd565` / `DIRECTED_IDE_E2E_20261016` | windows 1、observe 2；共 3 | **未通过操作验收，未派发输入**。精确 WebStorm 目标两次 inputReady=false；公开提示唯一映射 focused_element_mismatch。原生输入日志为空。106 个候选与截断 AX 摘要不能证明不存在弹窗，也不能代替可用鼠标能力；未打开结构面板。 |
+| `5d1f6644-13e8-4a79-8b7f-3c98a849d190` / `DIRECTED_IDE_RETEST_20261016` | windows 1、observe 2、input(click) 1、hidePointer 1；共 5 | generic 焦点修正后 inputReady=true，鼠标五操作可用。模型在 2048×1058 规范图选点 (15,153)，click eventCount=2、releaseState=confirmed、dispatched / committed。但后置 AX / PNG 仍为项目面板，没有结构工具窗口，**只证明派发，尚未证明 Java 控件消费**；模型核对后停止，未重复点击。 |
+| `f5f6f129-b784-4aa1-9f28-12eb988973db` / `DIRECTED_IDE_SUBTYPE_20261016` | windows 1、observe 2、input(click) 1、hidePointer 1；共 5 | subtype / button 参数修正后，前后五种鼠标操作均可用；同点 click 的 native 固定日志为 transient_ui_active、eventCount=2、posted=true、releaseSent=true。公共回执为 unknown / commit_unknown、releaseState=confirmed、retryAllowed=false；公共回执没有 eventCount，不把日志字段伪装成公共字段。后置 AX / PNG 仍未显示结构工具窗口，模型没有重放。**尚未通过 IDE 消费验收**，保留新失败。 |
+| `8a583325-59dd-406c-b8dc-e5c9e101bf85` / `DIRECTED_IDE_SOURCE_20261016` | windows 1、observe 2、input(click) 1、hidePointer 1；共 5 | generic 鼠标 source0 复测：两次观察五鼠标操作可用；click(15,153) eventCount=2、releaseState=confirmed、dispatched / committed。原生固定日志无 transientStage 拒绝，前后 AX / PNG 仍为项目面板，未显示结构工具窗口。**只证明派发成功，IDE 控件消费仍未通过**。 |
+
+后续两次独立 IDE Run 均保留失败：`e2200e9e-a6d7-40c7-9b4d-7e5842a7a609` / `DIRECTED_IDE_COMMAND_20261016` 与 `def1e46e-b8dc-4729-8cc8-252e50593fa3` / `DIRECTED_IDE_POLICY_DIAG_20261016` 都是 windows1 / observe2 / click1 / hidePointer1、click2事件 dispatched / committed、release confirmed，后置AX与PNG没有结构面板。第一轮分类 rejectedSemantic；第二轮固定细分为 leafPress(depth0,initial)，证明 Command 分支没有启用，不能记成 Command-click 已发送或失败。第二轮后观察另见 raisedSurface 拒绝，仍不据此认定原点击消费。两批图片均2048×1058、cursorIncluded=false/true，存档前缀分别 directed-ide-command / directed-ide-policy-diag。
+
+第十次独立 Run `4792ba4e-a103-4798-a8f5-b988255e8f32` / `DIRECTED_IDE_NO_AXPRESS_20261016` 去掉错误的 AXPress 前提后复测，仍为 windows1 / observe2 / click1 / hidePointer1。固定诊断明确为 `selectedChildren / depth0 / initial`，没有进入 Command 分支；plain click 的两个事件 dispatched / committed、release confirmed，后置 AX / PNG 仍无结构面板。随后观察另见 raisedSurface 拒绝。该结果支持继续补有保护的 synthetic focus，不支持忽略选择能力或把 Command-click 记为已发送。证据前缀 `directed-ide-no-axpress`；两图2048×1058、cursorIncluded=false/true。
+
+文字输入的 `input_json / prepared_action_json / result_json` 仅保留 textLength=38、textBytes=60，没有原始 text 字段；合成正文在用户测试任务、后置 AX 与截图中可见，属于正常观察，不把“输入审计不存正文”误写成“会话完全不含正文”。本轮不读取或输出模型隐藏推理。
+
+所有规范 PNG 均从真实 ToolRun 的 imageId 解析，经该测试 Session 的附件绑定核验后导出，模型、历史预览及验收保存的是同一张图；没有二次绘制光标。尺寸、SHA256、附件 ID 和完整文件名分别记录在以下证据清单：
+
+| 图片清单 | PNG 数量 / 尺寸 | cursorIncluded（按观察顺序） |
+| --- | --- | --- |
+| `directed-text-images.json` | 2 / 673×439 | false、false |
+| `directed-text-retest-images.json` | 2 / 673×439 | false、false |
+| `directed-scroll-images.json` | 3 / 673×439 | false、true、true |
+| `directed-ide-images.json` | 1 / 2048×1058 | false |
+| `directed-ide-retest-images.json` | 2 / 2048×1058 | false、true |
+| `directed-ide-subtype-images.json` | 2 / 2048×1058 | false、true |
+| `directed-ide-source-images.json` | 2 / 2048×1058 | false、true |
+| `directed-ide-command-images.json` | 2 / 2048×1058 | false、true |
+| `directed-ide-policy-diag-images.json` | 2 / 2048×1058 | false、true |
+| `directed-ide-no-axpress-images.json` | 2 / 2048×1058 | false、true |
+
+定向滚动中间规范图 `directed-scroll-observe-5-d25ebd10-2847-41d7-b611-8edd7d8b5792.png` 可见 Row109 起始和正文内原生紫色光标；IDE 后图 `directed-ide-retest-observe-4-e3d2cbee-1224-4436-809e-818c71263438.png` 可见结构图标附近光标，但面板未打开。cursorIncluded=false 的文字截图不能提供光标展示通过证据。
+
+各 Run 的 `*-native-fixed-diagnostics.log` 只保留固定格式操作与状态。成功文字、滚动、IDE click 的派发日志均为 targetFrontmostAfter=false、frontmostChanged=false、pointerMoved=false；这只证明调用前后采样端点未改变前台应用和系统指针，**不证明整个过程中持续无干扰或其他应用均兼容**。独立 CUA 观察单独记录在 `comparison-manual-receipts.json`，不冒充 OmniFlow 原生工具结果。
+
+WebStorm 的 mouseEventSubtype 修正后新 Run 仍未通过消费验收；其 transient_ui_active 的具体原生子阶段尚未定位。source0 复测虽然未再触发瞬态拒绝，仍未证明控件消费。前述拒绝、已派发未消费、unknown 结果分别保留，不以未来复测覆盖失败。
+
+## 内部 Agent 非浏览器端到端复验（2026-10-16）
+
+本轮通过开发版 OmniFlow 的输入框粘贴任务并点击发送，使用 `win`（libraryId=3）、`gpt-6.1-sol / high`、完全访问与真实 Tool / Broker / Provider / 会话附件链。复用已有开发实例，没有运行安装版或额外启动 Electron；浏览器排除。目标仅为合成临时 Finder 目录、TextEdit 测试文件及 IDE 可逆面板，不操作业务资料库内容。以下 completed 是 Run 终态，各动作是否成功分别列出。
+
+| 样本 / Run | 实际结果 | 边界 |
+| --- | --- | --- |
+| Finder 初始 `83b253da-f9da-4d5e-86cb-b99382f966d9` | windows×2、observe×4；摘要含“群组” AXMenuButton 及 AXShowMenu / AXPress，但没有可操作 ID，没有发送写动作 | 稳定能力转换缺口，未打开菜单；首次窗口过滤无结果后模型按精确标题找到目标。不是应用无法接收点击 |
+| TextEdit 输入 `a63be0be-7e67-417c-9243-2d44e61c54cb` | windows×1、observe×5、setText×2；替换中文 / emoji 两行后追加第三行，两次 dispatched / committed，AX、PNG 及独立 CUA 确认三行一致 | 未保存 / 关闭；本轮图 cursorIncluded=false，不作为光标显示通过证据 |
+| TextEdit 初始滚动 `66bfb369-2691-40b7-9059-97dfd157e88d` | 写入100行后选通用 AXScrollArea 的 down/page，返回 unknown / commit_unknown；后观察图与前图 SHA 相同、仍为 Line001。模型只读核对后停止滚动，成功清空 | 原生错误 -25205，未重放或改路；同观察另有 native-scroll-button 页按钮，初次选择指引随后补充。此原失败保留，不因独立新任务通过而改写 |
+| WebStorm `1a49ea71-2455-4cf0-bcd6-c2d78596591e` | windows×1、observe×3；精确窗口有106候选，筛“结构”仍无该按钮 ID，截图成功，未发送点击 / 输入 | 扫描 partial；摘要仅见“项目结构树”，不能称已看到结构按钮但漏转。inputReady=false / unsupported_receiver 是当前实现限制，不是 OS 不支持 |
+| Finder 修后 `dd0bca16-1042-49db-a76b-b27282d9e592` | 56.755秒；windows×1、observe×4、menu×2，群组 open 与菜单 cancel 均 dispatched / committed，无 unknown / 重试。两张规范 PNG 确认菜单展开→关闭、三个合成文件保留；独立 CUA 同样确认关闭 | 菜单图 cursorIncluded=true；普通窗图正确排除旧菜单光标、cursorIncluded=false。只证明该工具栏菜单闭环，扫描仍可 partial |
+| TextEdit 独立复测 `051430ff-127e-4af6-99a0-074c23147c33` | 75.445秒；windows×1、observe×6、setText×2、scroll×2，11工具全部 completed。模型首次选择明确的 native-scroll-button，下翻 / 上翻均 dispatched / committed，五张规范 PNG 确认空白→Line001→Line030→Line001→空白；AX纵向值0→0.4082969432→0 | 无 unknown / 重放 / 替代路线。最终空白 PNG 与最初空白 SHA相同；所有图 cursorIncluded=false，不计 TextEdit 光标显示验收 |
+
+Finder 根因是严格 action 数组转换会因自定义描述丢掉标准动作。修复只保留精确10个已消费的回调，不执行自定义描述；维持32项 / 总2048字节、类型与期限限制，污染名称不归一化，真实能力移除使菜单指纹失效。两处原生协议回归覆盖混合描述、污染名称、总量 / 类型 / 期限和指纹变化；不是扩大定向 receiver 白名单。
+
+Codex CUA 在同一 Finder“群组”控件完成打开 / 取消，在同一 WebStorm“结构”按钮打开面板后点“隐藏”恢复布局，均由新 AX 确认；没有改代码或运行 / 停止程序。这是独立对照，不计入 OmniFlow ToolRun。静态对照还确认 Codex 有定向坐标事件、Unicode 键盘文本、delta 滚轮和框架 AX 启用路线；OmniFlow 仍只对已验收 TextEdit profile 提供定向四动作，普通单击 / 文本 / 滚动依赖 AX。具体证据及未知分支见[研究文档](agent-computer-cursor-codex-research.md#11-非浏览器复杂控件与输入路线对照2026-10-16)。
+
+本机证据 `/tmp/omniflow-agent-e2e-receipts-20261016/` 保存精确测试 Run 的只读数据库快照、安全回执摘要、原始 PNG 与有限原生计数日志；`comparison-manual-receipts.json` 单列 Codex CUA 来源。历史失败没有覆盖。临时文件可能被系统清理，持久 Run / 附件仍以原会话记录追查。
+
+TextEdit 复测四次写入的固定原生日志均 axError=0，目标前后均在后台、frontmostChanged=false / pointerMoved=false，仅证明采样端点。独立 CUA 确认最终空白，随后关闭本轮 TextEdit 与 Finder 测试窗，临时文件保留；IDE布局保持初始状态。TextEdit 关闭后自动打开的文件面板经 CUA Escape 收起，未计为 OmniFlow 能力。没有扩大权限、receiver 名单或旧 unknown 的重试规则，也未提交代码。
+
+本轮 `npm run lint`、`npm test`、`npm run build` 与 `git diff --check` 全部通过；全量506文件 / 6064项通过、3文件 / 7项沿用跳过，universal helper已重新编译。全量日志 `/tmp/omniflow-full-test-20261016.log`、构建日志 `/tmp/omniflow-build-20261016.log`。仅本机macOS开发版验收，不推定发行包、其他系统版本、复杂IDE编辑 / 通用滚轮或跨窗拖放可用。
+
+## 非浏览器软件兼容性抽测（2026-10-15）
+
+本轮通过 `tools/computer-use/software-compatibility-smoke.cjs` 直接调用生产 platform adapter，使用已有 macOS 权限，未启动安装版或业务开发客户端、未进入资料库。它是实际应用与生产原生接口的集成测试，不是模型 / Tool Broker / 内置 Agent UI 端到端验收。浏览器明确排除；文本、图片和访达目录均为临时合成样本。
+
+### 首轮基线（保留历史）
+
+下表记录修复前的实际结果；窗口身份和菜单观察的当前状态见后续复测，不用新结果改写旧失败。
+
+| 软件 | 实际结果 | 边界 / 问题 |
+| --- | --- | --- |
+| 文本编辑 | 中文与 emoji 替换、追加、清空均从原图和 AX 确认；160 行文本下翻到约 022～045，再回初始可见页 | 上翻后的即时 AX offset 略非零，未宣称精确恢复；上翻期间原生指示器因 `foreground_changed` 退出，输入仍成功；该滚动批次 `actionsPassed=true`、总 `status=failed` |
+| 预览 | 临时 PNG 放大、缩小真实生效；工具栏上的小原生光标进入图片 | 缩回接近初始构图，非像素级还原；“显示”菜单已打开，但专用菜单观察遗漏，截图没有弹出菜单 |
+| 计算器 | 后台打开历史边栏、关闭恢复；独立 CUA 确认状态，计算结果仍为 216 | 展开 / 收起改变窗口尺寸；测试器持有旧 bounds、读到动画中间态，或超过 2 秒稳定读取预算时，动作后的观察失败；这些报告保留 failed，不能计完整 smoke 通过；最后一次展开后由独立 CUA 恢复收起，不混算生产写入 |
+| 活动监视器 | 内存→CPU→内存，截图确认列和统计图真实改变；光标在对应控件上 | 未操作停止、采样、进程诊断或用户数据 |
+| 访达 | 临时目录 AX 和单窗截图可用；普通 AX 已实际完成图标→列表，后观察确认列表视图 | 专用菜单观察为 `menus=[] / truncated=true`，不等于菜单关闭；普通 AX 还可能以两条路径暴露同一选项；显式路径解决测试器选择后，恢复图标项位于原窗上沿之外，没有普通点击候选，往返未通过 |
+| WebStorm | 精确目标窗口截图成功，独立 CUA 可读到真实控件 | 同 PID 两个普通窗口 bounds 相同，当前 `ambiguousCGWindow` 在扫描前拒绝；candidate=0，菜单启动 `target_changed`，本轮未发送 IDE 操作 |
+
+六张基础截图均逐张实看，只含各自目标窗口，无整屏混入、黑图或空白。文字与分类 / 缩放结果图也独立核对；预览正文自带的旧绿色箭头属于合成图片，不能当成本轮指示器证据。新光标证据来自工具栏或正文上的真实小窗像素和 `cursorIncluded` 回执。
+
+首轮 WebStorm 原生日志为 nodes=0 / axWindowMatched=false / firstAXError=0，明确不是树深度或 getter 错误；当时尚未核对 AXWindow↔CGWindowID 对应方式。访达和预览的真实菜单存在于原窗口树，但当时专用扫描的严格祖先 / fingerprint 入口遗漏菜单，具体拒绝属性尚未确认。TextEdit 指示器退出只证明 placement 期间前台 PID 读值变化，不能区分用户切换和系统暂态。这些诊断和失败均保留，后续修复依据见下节。
+
+原生动作日志中的已核对 AXPress / 文本 / 翻页均 axError=0、目标前后后台、frontmostChanged=false；部分 pointerMoved=true 发生在用户继续使用电脑期间，不能归因于 Agent 或据此承诺持续零干扰。所有已运行批次均单 Electron、45 秒 / 12 进程上限，监督组及指示器 / 菜单 helper 真实关闭。helper 关闭不代表目标菜单已关闭，不完整菜单观察也不能证明关闭。
+
+首轮本机证据入口 `/tmp/omniflow-software-batch-20261015/`，含六应用只读回执、动作批次回执、显式动作计划和原生日志；真实产物位于系统临时目录的 `omniflow-software-compatibility-*`。该阶段只新增测试器和验证记录，未修改生产实现、未提交；启动器 13 项及只读 / 计划无 GUI 检查、脚本语法和定向 ESLint 已通过。当时沿用上轮菜单光标门禁，没有重新计为新构建。
+
+### 身份、光标恢复与菜单根修复后的复测
+
+先对照同一 Codex Service 的原生窗口 ID getter、应用 active / 菜单层级原因和独立菜单通知根，再修改生产实现：AX 根以精确 PID / CGWindowID 关联；光标前台变化时在原 placement 期限内暂隐重验；同应用当前 `AXMenuOpened` 引用可补充与前向树父关系不一致的 popup 根，仍保留菜单祖先指纹、代数和动作前复验。具体静态证据、推断与未知见[研究文档](agent-computer-cursor-codex-research.md#六应用抽测后的针对性对照2026-10-15)。
+
+| 软件 | 最新已确认范围 | 仍保留的限制 |
+| --- | --- | --- |
+| 文本编辑 | 首轮中文 / emoji 编辑和上下翻页结果继续有效 | 尚无本轮前台变化恢复策略的 TextEdit 实机复测，不把旧 `foreground_changed` 批次改为通过 |
+| 预览 | `/tmp/omniflow-preview-persistent-capture-final.json` 的展开 / 取消均已派发；三张动作前后截图均成功且含原生光标，无 captureError；取消后的原图及独立 CUA 完整 AX 均确认真实 toolbar popup 已关闭 | 测试器只得到 partial 的 menuCount=0，`menuClosureProven=false`，整体仍 failed；独立关闭证据不改写该自动断言。正文自带的旧菜单属于合成 PNG 内容，不能误认作仍打开的 popup |
+| 计算器 | 首轮后台历史边栏开关与结果 216 不变继续有效 | 旧几何 / 动画稳定性失败未由本轮覆盖，不能计完整 smoke 通过 |
+| 活动监视器 | `/tmp/omniflow-activity-restore-fixed.json` 恢复“内存”通过，`actionsPassed=true`，截图含原生光标；此前 CPU / 内存列与统计图变化继续有效 | 未操作进程停止、采样或诊断 |
+| 访达 | `/tmp/omniflow-finder-persistent-capture-final.json` 与 `/tmp/omniflow-finder-pointer-persistent-final.json` 均 passed / actionsPassed=true：列表→图标→列表四步及四张后观察截图全部成功；带光标批次四张动作前图均显示图案，两个展开菜单截图含原生光标；最终原图确认列表视图且真实菜单关闭 | 两次选择后的普通截图不复用菜单 surface 图案，cursorIncluded=false 是正确结果；专项菜单观察仍 partial，回执保留 menuMayRemainOpen=true，关闭结论来自原图独立核对而非空列表 |
+| WebStorm | `/tmp/omniflow-webstorm-fixed-read.json` passed：同尺寸重叠窗口精确绑定、108 个 AX 候选及单窗口 PNG 均可用，菜单来源发现成功 | AX / 菜单扫描仍 partial；`inputReadiness.ready=false / unsupported_receiver`，未执行 IDE 写入；未展开菜单时 menuCount=0 本身不算失败 |
+
+修复前 `/tmp/omniflow-finder-menu-ax-roundtrip-final.json` 的语义往返通过但两次后截图失败；`/tmp/omniflow-preview-menu-final.json` 的展开截图成功、取消后截图失败，原 failed 均保留。访达无光标隔离诊断 `/tmp/omniflow-finder-capture-error-diagnostic.json` 在活跃 menu helper 已完成菜单 SCK 截图后，两次普通单窗捕获均为原生 `window_capture_timeout`，因此不是仅由光标像素或 renderer 重绘引起。测试器临时关闭菜单 lease 再拍的 `/tmp/omniflow-finder-close-helper-diagnostic2.json` 四步动作及四张截图全部 passed；它只缩小了故障范围，不是生产修复通过，也不证明目标菜单已关闭。仅加 `autoreleasepool` 的 `/tmp/omniflow-finder-pool-regression.json` 仍在相同两步失败，不能认定根因是 Objective-C 临时对象未释放。
+
+当前已接入由同一活跃 menu lease 执行普通 `captureWindow` 的路线，以接近 Codex 同一 Service 执行 Skyshot 的结构。普通捕获只允许原获准窗口与完整位于原窗内的可信光标，不沿用菜单 union 或菜单图案扩边。上述访达无光标 `TOgGTG/` 与带光标 `WkdyOu/` 批次、预览 `6fe3Fx/` 批次已实机证明同一 Run / 同窗的菜单→普通截图闭环；预览自动关闭断言仍 failed，与截图成功分开记录。没有据此认定底层超时根因或将 `autoreleasepool` 记为修复。父关系不一致且没有当前新菜单通知的已打开菜单仍不支持；partial 空列表、helper 关闭或测试器 status=passed 均不单独证明目标菜单关闭；跨 Run 并发活跃 SCK 尚未验收。
+
+同源码菜单夹具 `/tmp/omniflow-menu-followup-chain-verified.json` 曾在一级菜单返回 `target_changed`，保留 failed。随后 `/tmp/omniflow-menu-chain-error-diagnostic.json` 三级真实动作、光标与截图均 passed，最终 selectionCount=3 / menuVisible=false，接收器记录后台且非 key / main；pointer、menu、receiver 及监督组真实退出。尚未证明前次失败由光标层级或通知竞态导致，也未排除间歇失败，不因重跑成功改写旧失败。
+
+新路线的 `/tmp/omniflow-menu-chain-persistent-capture-final.json`（`SV66QG/`）全部 passed：三级菜单动作 / 光标 / 菜单截图、实际取消与关闭均成功，新增 `postMenuScreenshotsPassed=true` 确认四次关闭后仍可用同 lease 截取普通原窗。独立原图确认三级动作计数 3 和真实关闭，接收器 frontmost / wasFrontmost / wasKeyOrMain 均 false；所有 cleanup 为 true。以上属于独立夹具及真实软件 adapter 集成证据，不替代内部 Agent E2E 或任意软件持续零干扰。
+
+截图路线改动前全量 gate 为506 文件 / 6048 项通过、3 文件 / 7 项沿用跳过，三命令均 exit0；旧日志 `/tmp/omniflow-menu-followup-lint-final.log`、`/tmp/omniflow-menu-followup-test-capture-final.log`、`/tmp/omniflow-menu-followup-build-final.log` 保留。新路线后的 `npm run lint` / `npm test` / `npm run build` 均 exit0：506 文件 / 6064 项通过、3 文件 / 7 项沿用跳过，universal helper prepare 同样 exit0；日志 `/tmp/omniflow-persistent-capture-{lint,test,build}.log`。CJS 夹具按既有 CommonJS 规则的定向 lint 通过；最终精确进程检查没有 click helper、原生菜单夹具、监督器或 watchdog 残留。本轮未提交、未启动业务开发客户端，也没有新增内部 Agent / 模型 / Broker / UI 端到端证据。
+
+## Agent 原生多级菜单（2026-10-15）
+
+- 先核对 Codex Service 的应用级 menuOpened 通知、独立 AX 根、AXPick / AXPress 和菜单 CG 层级，再接入 `computer.observe(scope=menu)` / `computer.menu`。实机发现 NSMenu 的 parent 回到原窗但不在原窗 AXChildren；新增当前通知引用支持该首条关联，其余父子链、进程身份、祖先指纹及代数仍复验。逆向证据与差异见[研究文档](agent-computer-cursor-codex-research.md)，执行契约见[电脑操作](agent-computer-use.md#应用菜单与多级菜单2026-10-15)。
+- 独立 AppKit 夹具经仓库安全监督器运行，只启动1个 Electron，峰值5个进程（上限12）、总期限45秒。最新 `omniflow-menu-chain-HiKC6d/` 实测一级、二级、三级动作分别使计数到1/2/3；禁用项拒绝、关闭子菜单不暴露叶子、每次旧ID复用拒绝、真实 AXCancel 关闭均通过。接收器记录 wasFrontmost=false / wasKeyOrMain=false；这是采样证据，不是连续系统级零干扰证明。helper、接收器和监督组真实退出均确认。
+- 三张原生截图通过，范围分别820×442、903×442、1008×442；后两张实际包含伸出主窗的菜单。已查看一级及三级原图，菜单项和AX一致，主窗外未扩成整屏采集。上一轮 `omniflow-menu-chain-7U37kc/` 的菜单全部位于主窗内，同样通过。产物目录均位于本机临时目录，完整日志入口 `/tmp/omniflow-menu-chain-20261015/chain-{notified,outside}.log`。测试使用临时自有窗口，无账号、资料库或用户文件读写。
+- 最终 `npm run lint` / `npm test` / `npm run build` 全部exit0：505文件 / 6015项通过，3文件 / 7项沿用跳过；包含universal Swift helper、TypeScript和Vite。日志为同目录 `lint-final.log` / `test-complete.log` / `build-final.log`。新增工具说明曾导致32K首轮预算超限，已合并重复说明并加入至少1024任务token余量回归，未放宽模型预算。独立review发现的普通窗surface混入、capture祖先复验、启动失败关闭等待和夹具终态焦点漏报均已修复；临时原生诊断已移除。
+- 续做菜单光标前补查同一 Codex 二进制：`positionElement` 使用 `systemSelection.applicationWindow.id` 关联光标，菜单通知单独维持overlay原因；没有证据支持“每级菜单必重绑窗口”。本轮 `resolvePointer` 根据最近真实AXMenu签发私有热点与surface，原窗口关联保留，动画后AX动作独立复验。菜单关闭代数、精确CG身份和成对菜单生命周期监听共同决定视觉有效性；监听不全只拒绝菜单图案，普通窗行为保留。原生32pt菜单允许35/36pt图案有限外伸；模型与renderer未获得新surface参数。
+- 最新 `menu-chain-smoke.cjs --pointer` 实机 exit0，产物 `omniflow-menu-chain-gnagCz/` 位于本机临时目录，入口 `/tmp/omniflow-menu-pointer-20261015/pointer-smoke-final.log`。一级→二级→三级→取消全过程复用同一个helper PID/启动身份/windowId；实际覆盖主窗外目标和32pt三级菜单。7张菜单原生PNG均含箭头，已查看三级 `pointer-9.png`，图像为2016×884（1008×442pt），没有renderer补画。关闭一级/三级菜单后snapshot不可用，后续主窗动作复用原面板恢复；选择计数1→2→3、禁用/旧ID拒绝和实际cancel关闭均通过。接收器wasFrontmost=false、wasKeyOrMain=false，只作为本次采样；没有连续系统级零干扰保证。启动1个Electron、峰值6/12进程、期限45秒、接收器约8.2秒结束，pointer/menu/receiver和监督进程组实际退出全部确认。
+- 最后代码的 `npm run lint` / `npm test` / `npm run build` 全部exit0：505文件/6047项通过、3文件/7项既有跳过；包含universal Swift helper、TypeScript和Vite，日志 `/tmp/omniflow-menu-pointer-20261015/{lint,test,build}-final.log`。独立监督器13项无GUI测试通过，脚本按Node/CJS环境定向lint通过。交叉review发现的“缺MenuClosed监听仍接受菜单计划”已修复并复核；首次完整门禁及首次实机通过保留，不替代修复后的最终结果。
+- **后续验收**：本轮未提交。尚未重跑真实内置Agent菜单端到端；当前开发版未运行，标准开发入口默认显示/可能获得焦点，未为了补测置前用户应用。其他第三方App、菜单栏、层24、跨进程hosted菜单、多屏与helper创建前已打开且不可枚举的菜单仍未覆盖；夹具结果不能替代这些范围。菜单跨surface动态路线已有原生连续几何/层序测试和同实例实际update，尚未单独录制菜单动画逐帧像素；最外沿图案扩crop有几何与协议测试，本夹具外伸仍在主窗/菜单总crop内。下一步可在已运行开发版的Win/library3中用限定Finder菜单open→观察→cancel任务验证真实模型/Broker链，不选择业务菜单命令。
+
+## GUI 诊断启动器事故与恢复（2026-10-15）
+
+- 光标补测过程中，仓库外临时 `probe-hide.cjs` 误用绝对 `node_modules/electron` 路径加载 npm launcher 包，并用返回值是否为字符串判断运行态。该包在 Electron main 中也返回可执行路径，导致每个实例再次 spawn 同一脚本；没有入口代数检查和独立总时限。用户报告启动了数百个 OmniFlow / Electron 实例，需关机清理。这是本轮 Agent 编写测试脚本的错误，不把它记录为功能验收成功。
+- 事故后停止本轮全部 GUI 测试和诊断。只读进程检查未发现该批 Electron / probe / 临时夹具残留；已有 Go 后端未作处理。`probe-hide.cjs`、同批 `driver.cjs` 和 `partial-only.cjs` 已替换为不加载 Electron、不导入 child_process、直接失败的禁用占位脚本；原始源码仅以 `.disabled-source.txt` 留档，未再次运行原脚本。禁用后的 probe 用普通 Node 验证直接退出1，没有创建 Electron。
+- 证据位于 `/tmp/omniflow-cursor-layer-upgrade-20261015/launcher-incident-20261015/manifest.json`，记录原脚本 SHA256 与禁用状态；同批目录保留实际失败与成功报告。原始测试记录不能覆盖本次事故；后续恢复前必须先完成启动器的无 GUI 生命周期验证，并采用有代数限制、单实例限制和独立期限的统一入口，禁止临时另写自递归 launcher。
+- 事故后暂停期间只做源码与无 GUI 检查；随后按用户“定位原因、加限制后继续”的指示，完成下述启动保护并恢复独立视觉夹具。没有启动业务开发客户端或重新执行内置 Agent Run。改动仍未提交，原失败记录保留。
+
+
+
+## Agent 小窗连续移动、窗口跟随与受监督验收（2026-10-15）
+
+本节是当日旧层级策略的历史验收。移动临时升102及其相关采样/提前降层策略，已由本页2026-10-16“普通光标随目标遮挡”修正；这些历史帧不证明新策略动态遮挡通过。
+
+- 原生 panel 保持35/36pt并逐帧移动；原窗口平移保留局部热点，缩放越界暂隐、新合法计划恢复；稳定身份与精确输入观察分离，syncTarget仅在新观察及native ACK后更新捕获绑定。普通层相对原目标排序；应用活跃/菜单与移动独立决定临时102层。暂缺 `kCGWindowIsOnscreen` 按SDK解释为未显示，整条目标记录缺失只允许固定250ms隐藏重查；输入、心跳、路线及快照期限不续期。当前契约见[电脑操作](agent-computer-use.md#鼠标意图指示器2026-10-12)。
+- `safe-fixture-launcher.mjs` 统一Node入口、全局独占锁和独立Node watchdog，单次启动Electron；拒绝递归marker、shell、detached子组、Electron/node再启动和app.relaunch，仅允许显式原生helper。默认30秒/12进程，硬上限60秒/16进程；父进程消失、超时或超量时验证组身份后TERM→KILL，确认组已消失才移除锁，未知不自动接管。13项独立无GUI测试通过，包含真实Node组成功/超时/超量/父进程SIGKILL；运行命令 `npx vitest run --config tools/computer-use/safe-fixture-vitest.config.mjs`，不与默认全量数量混算。独立审查通过后才恢复实机；此守卫针对已审可信夹具，不是任意JavaScript沙箱。
+- 顺序执行监督sanity（不创建窗口）、12轮hide/show、完整视觉及仓库截图smoke。所有运行都只启动1个Electron主进程，观测同组峰值分别2/6/8/7，均实际清理且锁释放；每个visual run限制45秒/12进程。日志位于 `/tmp/omniflow-cursor-layer-upgrade-20261015/supervised-{sanity,hide,full,capture-smoke}.log`。仓库 `cursor-capture-smoke.cjs` 已拆出Electron-only `cursor-capture-fixture.cjs`，也统一走监督器；错误入口与继承marker以普通Node验证直接拒绝，无Electron启动。
+- 完整视觉产物 `supervised-full-vFndpo/`：同一panel平移、缩放越界隐藏/新计划恢复、hide/show、覆盖状态、真实关闭全部通过。500个10ms层序样本中，467个idle样本均为cover→panel→target，移动阶段25个layer102样本；前台PID未变成fixture/helper，无focus，target/cover输入计数均0。正常hide到真实close约508.6ms，结束确认native进程、目标和覆盖窗全部消失。
+- 实际SCK录制284帧，short/same/long/return动作区间分别13/4/34/34个样本，均无空光标帧；同点唯一质心1个，长距/返回离首尾弦最大70.41/83.46px，确认真实弧线。调用到ACK墙钟256.0/70.6/584.8/666.1ms，包含IPC与终态复验，不作为纯动画时长。`motion-analysis.json`保留全部像素分析，`actual-cursor-motion.gif`来自同批真实帧裁剪；resize恢复PNG已查看，箭头与柔光清晰无标签。
+- 五张阶段截图全部为 `included-windows` 单帧；迁移后的仓库smoke产物 `omniflow-cursor-capture-smoke-zhrTHd/`，前后均700×480、381个光标变化像素，光标surface以外像素不变，同PID不透明覆盖窗未进入图像。两窗均不可聚焦、鼠标穿透；无实际输入、无账号/资料库读取或新系统权限。
+- **提前降层未计实机通过**：`supervised-partial-ePUODr/` 和补充命中分类的 `supervised-partial-b7hUsV/` 均未测到ACK前回0，原报告保留failed；第二轮500个命中分类均为none。SDK的 `NSWindow.windowNumber(at:belowWindowWithWindowNumber:)` 返回能被mouseDown命中的窗口，鼠标穿透夹具不能保证这个前提，也不能排除外部遮挡。因此不为测试改掉与Codex相同的API；提前清movement原因的策略有原生测试，真实可命中目标、菜单、Spaces/全屏、多屏和任意App后台输入仍待独立验收。较早 `early-lower-zHE2tM/` 的foreground_changed与事故前hide失败同样不计通过。
+- 最后全量 `lint` / `test` exit0，501文件 / 5942项通过、3文件 / 7项沿用跳过；日志 `lint-supervised-final.log` / `test-supervised-final.log`。隐藏元数据修复后的完整 `npm run build` exit0，包含universal Swift helper、TypeScript及Vite，日志 `build-recovery.log`；此后仅增加测试启动器/夹具/文档，没有继续修改生产源码。原生与runtime独立review未发现剩余阻断finding，`git diff --check`通过。此轮未重做内置Agent端到端，不用隔离视觉结果替代真实动作消费或任意软件持续零干扰证明。
+
+## Agent 光标移动曲线与显隐体验（2026-10-15，改造前基线）
+
+- 已核对 Codex 原生静态调用链：短距离 / 长距离分流、真实三次 Bézier 位置采样、多候选路径选择及440ms alpha+blur；区别于仅旋转箭头的视觉错觉。OmniFlow独立实现短距离直线弹簧、长距离2条单曲线+8条双曲线候选、控制点凸包完整包含及最多8段透明包络，近边界有严格验证的直线路线。实际拖拽仍仅跟随posted点，未将视觉曲线变成输入轨迹。具体事实、差异与身份锚点见[研究](agent-computer-cursor-codex-research.md)，当前合同见[电脑操作](agent-computer-use.md#鼠标意图指示器2026-10-12)。
+- 同点不再清空/orderOut；取消额外900ms固定等待，仅等native ready/update。首次在目标点440ms淡入；观察/思考/等待保留，明确hide及成功completed Run正常淡出，取消/失败/换窗/目标失效立即清理并可升级进行中的淡出。执行身份同步撤销，原abort hook保留至真实close，旧share清理不删除新share。独立review发现首现fade与8段路线的旧预算不足，已修为native/adapter startup1400/1600ms、route2800/3000ms；8段+全部150ms placement+16ms tick模拟≤2128ms，超时不因heartbeat续期。
+- 全量`npm run lint` exit0、`npm test` exit0：501文件 / 5911项通过、3文件 / 7项沿用跳过，日志`/tmp/omniflow-cursor-ux-{lint,tests}-20261015.log`。首次build发现两处测试deferred Promise推断成unknown，已补lease泛型，随后完整TypeScript检查及90项runtime定向测试通过。最后预算修复后148项native/adapter定向测试、scoped ESLint、Swift双架构typecheck通过；最终`npm run build` exit0，包含universal helper、TypeScript和Vite，日志`/tmp/omniflow-cursor-ux-final-build-20261015.log`。未将定向新项混算为先前全量5911。
+- 自建1360×480、showInactive/focusable=false的隔离Electron视觉夹具，通过生产adapter更新同一原生panel，以ScreenCaptureKit仅目标+自有光标两窗白名单录制实际PNG帧；无键鼠输入、无账号/资料库数据、无新权限。旧helper基线281帧：长距/返回ACK约64/62ms且实际位置直接跳变，隐藏约32ms直接消失。曲线版本初验278帧长距/返回约550/646ms，曲线中间位置可见；正常隐藏约503ms并逐步衰减。
+- 最终helper重验282帧，产物`/tmp/omniflow-cursor-ux-20261015/final-EXn3lt/`：首现ready约535ms（未录到首次淡入全程），短距ACK190ms、同点55ms、长距567ms、返回649ms、hide到真实closed475ms；这些是调用到ACK/exit的墙钟时间，含IPC/复验。短距像素质心离首尾弦最大0.26px，同点6帧位置不变；长距27个不同质心、离弦70.46px，返回28个不同质心、离弦83.29px，证实实际绘制弧线而非只验证数学路径。真实淡出帧逐步减弱，inputEvents=0、fixtureFocused=false、cursorClosed=true、fixtureDestroyed=true，Electron退出确认。实际帧裁剪动画为同目录上级`actual-cursor-motion.gif`，未重新绘制箭头。
+- 开发Electron、非首个Win/libraryId=3、gpt-6.1-sol的真实内置Agent Run `7adf0920-f350-4a07-91d5-df20b2f7f1d6`只操作临时QA窗口，computer.input仅一次doubleClick，四事件committed/release confirmed；后观察与独立CUA均确认计数0→1，后图cursorIncluded=true。交互等待129.159秒，期间独立CG确认PID67586/window4384仍onScreen、layer0、36×36pt；提交“正常结束”后Run completed且工具序列没有hidePointer，随后独立确认该进程不存在、其所有窗口已消失。限定审计与前后存在性证据保存于`/tmp/omniflow-cursor-ux-20261015/agent-completion-receipts.json`。这一Run确认等待保留/正常完成自动清理；精确440ms淡出像素来自隔离视觉夹具，不把晚于结束的存在性检查当作退出延迟测量。
+- **旧版连续性问题**（小窗移动改造的最新状态见本文件后续验收）：最终长距35个采样帧中，frame62在中点换段透明复验时无光标，前后帧间隔约14–20ms；初验没采到该间隙。其余短距/同点/返回样本未缺光标，不能据此保证全程无闪烁。这轮采用大包络panel换surface并透明等待WindowServer核验；后续已改为35/36pt小窗逐帧移动，旧录制不能证明新路线的连续性，也不再把双缓冲视为唯一修复方向。本轮尚无Codex动态blur、完整运动旋转/形变、多屏及真实按压像素验收；先前目标AppKit拖拽自行升窗的failed记录仍保留，本轮零输入视觉夹具不证明任意软件真实输入持续零干扰。
+
+## Agent 双窗口单帧截图与后台输入复验（2026-10-15）
+
+本节拖拽中的 `0→102→0` 为旧层级策略实测，保留其失败结论；当前普通拖拽不再授102，见本页2026-10-16层级修正。单帧截图与输入消费结论不等于当前动态遮挡验证。
+
+- 同屏完整目标在macOS14.2+改用精确目标+自有光标两窗白名单单帧，跨屏/屏外保留独立完整窗口与原生透明像素合成；平台只返回一张canonical PNG及私有captureMethod，UI/模型继续共用，单图8MiB/完整回执12MiB。原子成功不补采底图，身份变化不被fallback吞掉。实现及SDK边界见[电脑操作契约](agent-computer-use.md#鼠标意图指示器2026-10-12)及[Codex研究](agent-computer-cursor-codex-research.md)。
+- `lint`及全量`test` exit0：501文件/5878项通过，3文件/7项沿用跳过，日志`/tmp/omniflow-cursor-atomic-{lint,test}-20261015.log`。初次构建在独立review修正原生文件期间被Swift检测到源变更而退出；源稳定后最终`npm run build` exit0（universal helper、TypeScript、Vite），日志`/tmp/omniflow-cursor-atomic-final-build-20261015.log`。最后限制fallback错误类别后原生capture专项重测通过，日志`/tmp/omniflow-cursor-atomic-final-protocol-20261015.log`。
+- 仓库`cursor-capture-smoke.cjs`已改为验证单帧canonical图，并建立与目标相同PID、完整覆盖目标矩形的不透明测试窗；测试基准独立捕获仅用于静态像素比较，不是生产额外底图。实际exit0，明确`captureMethod=included-windows`：移动前后均700×480、381个光标变化像素，光标bounds外像素不变，同PID额外窗未进入图片；人工查看原图确认主题箭头和柔光。无输入、无focus，光标/目标/覆盖窗与Electron退出均确认。日志`/tmp/omniflow-cursor-atomic-capture-smoke-20261015.log`，产物目录后缀`omniflow-cursor-capture-smoke-2yT5lL/`。非主屏、跨屏/屏外兼容及真实菜单仍未据此记为通过。
+- 一次独立原生输入夹具实际收到单次1000ms后台拖拽：stdout dispatched=true、eventCount=33、releaseSent=true，33条实际fd3反馈与33条接收事件对应；真实回调31次dragMoves，圆点(140,150)→(300,210)、tracking=false、frontmost=false，CUA独立AX与画面核对一致。光标真实退出、自建覆盖窗与采样器清理确认。但该次层序脚本错误使用不保证前后顺序的CG `.optionAll` 下标，baselineCovered断言失败，不能计入层级通过；后续须改用`.optionOnScreenOnly`层序另验。日志`/tmp/omniflow-cursor-live-acceptance-20261015.log`，产物`/tmp/omniflow-cursor-live-acceptance-20261015/run-qVaAj0/`。没有用户文档或资料库文件写入，真实按压像素帧尚未采集。
+- 修正采样器后另跑一次单次拖拽（`run-3J22kL/`）：接收端仍实际消费33事件、31次移动与配对释放；同次`.optionOnScreenOnly`快照确认光标`0→102→0`，up反馈后约53ms恢复普通层，结束前25/25样本正确贴在当前目标上方，关闭后窗口确实消失。但目标在down反馈后约25ms升到遮挡窗前，原`afterDragCovered`断言失败，原报告保留failed；独立`read-only-layer-analysis.{json,txt}`只记录部分通过，不能称拖拽后仍被原cover遮挡。夹具没有显式mouseDown抬窗代码，具体AppKit内部触发点未追踪；采样前台PID始终不变，不等于窗口顺序不变。物理指针期间有移动，不作来源归因或持续零干扰结论；按压/回弹真实像素帧仍未采集。
+- 开发Electron、非首个Win/libraryId=3、gpt-6.1-sol中，在独立Session `cc0054ed-86cd-4382-8c19-08ff62f2f940`完成真实内置Agent双击与图片链路核验。首Run `e9a365a9-9755-4c46-a05b-6ba66854d6d1`仅一次doubleClick，四事件dispatched/committed、release confirmed；后观察与独立CUA计数均为0→1，760×462 canonical PNG含原生紫色光标，前观察cursorIncluded=false、后观察true，均带native-window。窗口查找/观察/双击/后观察同一折叠组，成功双击无额外详情；缩略图打开共用大图、192%→182%缩放、Esc关闭及焦点回缩略图实测通过。该次等待交互因测试任务只提供一个选项而触发既有2–30选项校验，没有重复动作或冒充等待成功。
+- 同Session第二个独立Run `330d6770-588a-40de-b55b-511c597f10d3`重新观察后仅双击一次，四事件committed/release confirmed，后图与独立CUA计数均为1→2，760×462后图cursorIncluded=true。改为两个选项后进入真实等待，111.914秒后提交，未被30秒时限中断；期间只读确认自有helper PID49980/window3593仍存在、onScreen=true、layer0。提交“结束验收”后UI自行刷新，computer.hidePointer返回ok=true/closeConfirmed=true并正常结束（总用时2m44）；随后通过optionAll与kill(pid,0)独立确认该确切窗口、helper及其所有窗口均消失。本轮只共享临时QA唯一窗口，没有扩大系统权限或写资料库文件；canonical PNG与限定回执保存在`/tmp/omniflow-atomic-e2e-receipts-20261015/`，等待和退出证据见`wait2-receipt-summary.json`。非主屏/跨屏兼容、菜单、真实Retina/2048缩图和任意App后台输入仍不由这些结果覆盖。
+
+## Agent 原生光标动画与真实像素截图（2026-10-15）
+
+本节是当日初版原生光标基线，其中临时102仅描述旧实现；当前层级策略及尚未验证的动态遮挡边界见本页2026-10-16记录。
+
+- 按[Codex研究](agent-computer-cursor-codex-research.md)补原生有界弹簧移动、0.7按压恢复、真实posted反馈、临时layer102及精确私有snapshot；截图读取真实光标窗透明像素，canonical PNG统一进入模型/会话/缩略图/大图，新图不再renderer叠箭头。冻结目标与输入/释放结算、真实退出门禁保留。实现及两窗非原子限制见[电脑操作契约](agent-computer-use.md#鼠标意图指示器2026-10-12)。
+- `npm run lint`、全量 `npm test`、`npm run build` 均exit0：501文件 / 5870项通过，3文件 / 7项沿用跳过；通用macOS helper编译通过。日志 `/tmp/omniflow-cursor-native-{lint,test,build}-20261015.log`。独立复核发现的snapshot时限与title匹配已修复，随后两文件130项（含Swift原生harness）通过，日志 `/tmp/omniflow-cursor-snapshot-tests-20261015.log`。输入fd3的真实pipe非阻塞/EPIPE、纯事件构造，以及原生几何/弹簧/层级/合成像素均有定向测试，无系统输入。
+- macOS开发Electron的隔离本地测试窗（无账号/资料库数据、既有录屏权限、不请求新权限）实际调用生产indicator/capture adapter：700×480目标底图、真实透明指针副图及381个变化像素；逐像素核对光标bounds以外不变。实际PNG已人工查看，约16pt紫色箭头与柔光位于预期位置，无标签；title字段实际存在并成功通过严格身份复验。随后同panel弹簧移动180/100pt并收小，snapshot回到layer0；dispose后真实close确认，目标全过程未收到focus事件。没有发送真实键鼠或AX动作，不能以此证明目标应用消费输入。
+- 可复现工具为 `node tools/computer-use/cursor-capture-smoke.cjs`，只创建自有隔离窗口、showInactive和视觉位置，不含真实输入、资料库读取或系统授权。工具在2秒内等待macOS显示动画结束、精确原生身份与最终bounds连续稳定，45秒总期限及子进程组清理有界。仓库工具实际exit0：移动前后均700×480、381个变化像素，光标范围外不变；inputEvents=0、fixtureFocused=false、cursorExitConfirmed=true、fixtureDestroyed=true，Electron退出已确认。日志 `/tmp/omniflow-cursor-capture-smoke-final-20261015.log`，该次产物目录后缀 `omniflow-cursor-capture-smoke-R9uPbN/`，移动后原图已查看。早期隔离测试产物 `/tmp/omniflow-native-cursor-smoke-20261015/` 保留；工具每次使用独立临时目录。
+- 原生离屏正常/0.7按压2×及8×图已查看，圆角和柔光存在；不把离屏图当动态桌面验收。真实内置Agent任务、后台遮挡下升层/还原、AX菜单开闭、真实输入期间动画、Retina/2048整链路、聊天缩放/Esc与焦点恢复尚未按本轮代码重新手验；本轮未进入任何资料库，也未启动已安装旧版。上述限项不能外推为任意App兼容或持续零干扰。
+
+## Agent 终态文字对齐（2026-10-14）
+
+- “已停止 / 执行失败 / 任务已中断”及其错误说明去掉前置图标与缩进，与思考文字使用相同的14px / 23px和上下4px、左右0px留白；错误保留自然换行。仅调整 Run 状态文字，未新增样式镜像测试。
+- `lint`、全量 `test`、`build` 均 exit0：500文件 / 5802项通过，3文件 / 7项沿用跳过；日志 `/tmp/omniflow-agent-terminal-status-{lint,test,build}-20261014.log`。真实 macOS 开发版、非首个 Win / libraryId=3、暗色正常宽度，在原只读验收记录确认“已停止”无图标且与正文左边缘对齐；未发新任务或修改资料库文件。本轮未另验亮色、窄窗及 Windows/Linux。
+
+## Agent 模型等待与工具状态交替（2026-10-14）
+
+- 工具准备 / 执行、审批 / 交互和可见流式说明均优先于尾部思考占位；模型响应到工具及批次续接也不短暂回落思考。main 复用原 Run 更新发布“准备执行工具”，预算压缩后的执行入口恢复该标志；没有活动卡的慢权限检查提供准备反馈，下一次模型请求才恢复思考。长任务 Prompt 鼓励已确认进展与下一步的一两句同轮公开说明，不另发模型请求或固定轮播。参考本地 Codex 的 commentary / 通用状态互斥和进度提示，边界见 [Agent UI](built-in-agent-ui-contract.md) 与 [工作过程](built-in-agent-work-observability.md)。
+- 新增10项 selector / 时间线回归，覆盖空模型轮次→公开说明→工具交接→准备 / 执行 / 等待用户→结果处理→下一轮模型等待；加强既有主进程用例，验证 commentary 结束前交接、预算压缩后恢复、计划控制及 Tool 终态到下一模型轮次的顺序。独立复核发现的慢权限检查静默已修正并复看通过。最终 `lint`、全量 `test`、`build` 均 exit0：500文件 / 5802项通过，3文件 / 7项沿用跳过；日志 `/tmp/omniflow-agent-progress-{lint,test,build}-20261014.log`。
+- 真实 macOS 开发版、非首个 Win / libraryId=3、暗色正常宽度、gpt-5.5 中，在独立进度验收会话分两轮各执行一次仅等待8秒的 Shell 命令。确认公开说明、等待批准及工具运行均不叠加思考；第二轮模型实际输出“第一次休眠命令已确认完成”及下一步，最后仅保留最终答复、活动状态清理。两条验收命令仅等待，没有读写用户文件或执行网络操作；完成后恢复原会话及折叠状态。模型等待恢复、压缩、重连与迟到快照由自动化覆盖，本轮未逐帧手验；亮色、窄窗及 Windows/Linux未另验。
+
+## Agent AX 标题简化（2026-10-14）
+
+- AX 折叠标题不再显示“已截断”技术提示；局部范围标签保留，结果与模型投影继续携带原截断信息。同步既有组件断言及当前展示契约，没有新增测试。
+- `lint`、全量 `test`、`build` 均 exit0：500文件 / 5792项通过，3文件 / 7项沿用跳过；日志 `/tmp/omniflow-ax-label-{lint,test,build}-20261014.log`。真实 macOS 开发版、非首个 Win / libraryId=3，在既有只读验收会话确认 AX 标题只显示“AX”，展开仍可查看正文，并恢复任务过程折叠状态。未发新任务或修改资料库文件；本轮未另验亮色及 Windows/Linux。
+
+## Agent 单条观察详情关闭动画（2026-10-14）
+
+- 单条工具收起时原先同步卸载 AX / 控件 / 缩略图，外层虽有220ms网格高度过渡，正文却已清空。现在保留正文至自身高度过渡结束后释放，关闭即设置 `aria-hidden / inert`，仅接受当前容器的高度结束事件；无事件时270ms内兜底释放。快速反向取消旧清理；减少动态效果、父层隐藏、工作区隐藏及 owner / backend / library / Session / ToolRun 切换立即释放，不延长执行或数据权限。现行生命周期见 [Agent UI](built-in-agent-ui-contract.md)。
+- 新增5项交互回归，覆盖动画期间保留及禁用交互、子元素 / 透明度事件过滤、快速重新展开、无事件兜底、reduced-motion、隐藏 / 卸载清理及账号变化后的迟到图片丢弃；已有关闭清理断言改在高度过渡完成后验证。修前专项复现正文提前消失；最终 `lint`、全量 `test`、`build` 均 exit0：500文件 / 5792项通过，3文件 / 7项沿用跳过；日志 `/tmp/omniflow-agent-close-animation-{lint,test,build}-20261014.log`。
+- 真实 macOS 开发版、非首个 Win / libraryId=3、暗色正常宽度，在既有标题验收会话检查“检查 Agent 步骤标题”详情及展开 AX 的关闭 / 重新展开，完成关闭后 AX / 控件恢复默认收起，空格键关闭正常。通过开发工具动画面板记录到关闭容器的 `grid-template-rows / opacity / visibility` 及箭头 / 内层 transform 过渡，随后关闭开发工具、恢复原窗口宽度和任务过程折叠状态。未发新任务、执行 Agent 宿主动作或修改资料库文件，开发客户端保持运行。快速反向和减少动态效果由自动化覆盖，本轮未另验亮色、Windows/Linux或所有开合层级。
+
+## Agent 折叠箭头与均匀行距（2026-10-14）
+
+- AX / 控件入口复用工具行的 `AgentDisclosureChevron` 细线箭头，常显在文字前，与文字间隔4px，隐藏浏览器原生三角；保留原生 `details / summary` 的独立开合、键盘与焦点语义。观察正文取消叠加的上下外边距，统一工具行、AX、控件入口为20px最小行高和2px相邻间隔；展开内容框的4px间距及256px / 232px独立限高保留。现行规则见 [Agent UI](built-in-agent-ui-contract.md)。
+- 相关两文件44项组件回归通过；最终 `lint`、全量 `test`、`build` 均 exit0：500文件 / 5787项通过，3文件 / 7项沿用跳过。日志 `/tmp/omniflow-agent-disclosure-chevron-spacing-{lint,test,build}-20261014.log`。只读样式复核与 `git diff --check` 通过，没有新增样式镜像测试。
+- 真实 macOS 开发版、非首个 Win / libraryId=3、暗色正常宽度，在既有标题验收会话确认工具组摘要、工具行、AX、控件及下一工具行间隔均匀，两个入口均使用同款细线箭头。点击 AX 展开后箭头旋转，空格键收起后恢复均匀排列；控件保持独立收起。未发新任务、执行 Agent 宿主动作或修改资料库文件，开发客户端保持运行。本轮未另验亮色、窄窗、活跃 Run 和 Windows/Linux。
+
+## Agent AX 控件列表默认折叠（2026-10-14）
+
+- AX 树原有独立折叠，AX-only 的控件列表却以普通 `details` 直接渲染，导致展开观察后始终铺开。现在仅由可信电脑观察 presenter 给控件详情添加 `collapsible` 展示标记，显示独立“控件”入口并默认收起，与 AX 树分别开合；列表展开时才挂载正文，保持原字色 / 排版、共享细边框和256px独立滚动。没有 AX 树的控件观察也进入自然高度分支，不再叠加外层限高。旧记录重新投影即生效，无存储或 IPC 迁移；现行契约见 [Agent UI](built-in-agent-ui-contract.md) 与 [电脑观察](agent-computer-use.md#图像与清理)。
+- 新增3项组件集成回归，覆盖 AX / 控件独立默认收起和开合、工具 / 工具组关闭后的释放与复原、无树控件观察的自然高度、工作区隐藏清理及非法标签 / 私有字段不展示。最终 `lint`、全量 `test`、`build` 均 exit0：500文件 / 5787项通过，3文件 / 7项沿用跳过；日志 `/tmp/omniflow-agent-controls-disclosure-{lint,test,build}-20261014.log`。独立接线复核与 `git diff --check` 通过。
+- 真实 macOS 开发版、非首个 Win / libraryId=3、暗色正常宽度，在既有标题验收会话打开观察详情，确认 AX 和控件均默认收起。单开控件时 AX 保持收起，控件框内滚至末尾“Agent 输入 / textbox · 替换文本、插入文本”不带动聊天，空格键可收起控件；单开 AX 时控件保持收起。工具详情收起后再开，两入口恢复收起，结束保留该状态便于查看。未发新任务、执行 Agent 宿主动作或修改资料库文件，开发客户端保持运行。
+- 工作区隐藏、工具组关闭与只有控件的观察由组件回归覆盖；本轮未在 GUI 另验亮色、窄窗、活跃 Run、Windows/Linux。
+
+## Agent 工具图标左对齐与纵向间距（2026-10-14）
+
+- 再按用户截图将工具组摘要到首行、组内相邻操作行之间的间隔各增加2px，使用清单 `margin-top:2px` 与内容网格 `gap:2px`；外层条目尾距仍为6px。非首个 Win / libraryId=3、暗色正常宽度实看四行间隔一致，收起没有额外空白，重新展开正常，并恢复原展开状态。`lint`、全量 `test`、`build` 均 exit0，500文件 / 5784项通过、3文件 / 7项跳过；日志 `/tmp/omniflow-agent-tool-row-gap2-{lint,test,build}-20261014.log`，`git diff --check` 通过。未发新任务或修改资料库文件。
+- 后续按用户微调，将条目尾距从4px改为6px；图标左对齐与20px工具行保持。非首个 Win / libraryId=3、暗色正常宽度实看并验证工具组点击收起 / 空格展开正常。修后 `lint`、全量 `test`、`build` 均 exit0，仍为500文件 / 5784项通过、3文件 / 7项跳过，日志 `/tmp/omniflow-agent-spacing6-{lint,test,build}-20261014.log`；`git diff --check` 通过。以下保留首轮4px的调整记录。
+- 工具组摘要、普通工具及 Shell 摘要去掉原左右3px留白，内外图标槽同步为16px宽、20px高，使图标左边缘与正文对齐；图形维持16px，工具行最小高度由23px减至20px。时间线条目尾距由8px减至4px，正文 / commentary 上下 padding 由4px减至2px；折叠箭头20px槽位、31px活动占位、220ms开合及256px / 232px详情上限保留。现行规则见 [Agent UI](built-in-agent-ui-contract.md)。
+- `lint`、全量 `test`、`build` 均 exit0：500 文件 / 5784 项通过，3 文件 / 7 项沿用跳过；日志 `/tmp/omniflow-agent-icon-spacing-{lint,test,build}-20261014.log`。没有新增样式镜像测试；独立只读复核确认内外图标槽、三类入口一致，无新增裁切来源，`git diff --check` 通过。
+- 真实 macOS 开发版、非首个 Win / libraryId=3、暗色正常宽度，在既有 `COMPUTER_STEP_TITLE_QA2_20261014` 实看正文、工具组摘要及三条展开记录左边缘一致，行距与上下正文间距收紧。单条文字详情的框线保持同一左边缘，展开 / 收起及悬停箭头正常；收起工具组后用空格键重新展开，焦点与入口正常，结束时恢复原先组展开、详情收起状态。未发新任务、执行 Agent 宿主动作或修改资料库文件，开发客户端保持运行。
+- Shell 样式由共享图标和既有组件测试覆盖，本轮未另做真实日志 GUI 验收；亮色、窄窗、活跃 Run 和 Windows/Linux 未重新手验。
+
+## Agent 展开内容限高增加 100px（2026-10-14）
+
+- 普通工具文字详情、AX 控件列表、Shell 日志及普通展开工具组的上限由 `156px` 增至 `256px`；AX 树 `pre` 由 `132px` 增至 `232px`。工具组 CSS、收起观察详情后的回落值及自然高度计算下限同步更新，保留原 220ms 动画、独立滚动和观察 / 缩略图自然高度。现行值见 [Agent UI](built-in-agent-ui-contract.md)；以下各节保留调整前的历史数值。
+- `lint`、全量 `test`、`build` 均 exit0：500 文件 / 5784 项通过，3 文件 / 7 项沿用跳过；日志 `/tmp/omniflow-agent-detail-height-plus100-{lint,test,build}-20261014.log`。仅更新已有工具组回落断言，没有新增样式镜像测试；只读复核确认文字框及工具组祖先没有遗漏旧上限。
+- 真实 macOS 开发版、非首个 Win / libraryId=3、暗色正常宽度，在既有标题验收会话确认两个控件框均增高至 256px，展开 AX 树后正文为 232px；AX 框内滚动不改变外层聊天位置，收起正常。未发新任务、执行宿主动作或修改资料库文件。Shell 日志及普通工具组由既有自动化和样式接线复核，本轮未另做真实日志 GUI 验收；亮色、窄窗及 Windows/Linux 未重新手验。
+
+## Agent AX 控件列表独立限高（2026-10-14）
+
+- AX-only 观察同时返回树摘要和控件列表时，外层为完整展示观察内容而取消统一限高；控件列表只加了文字表面，遗漏自身滚动边界，最多 128 项会直接撑高聊天。现在仅在观察正文直属的 details 文字框设置整体 `156px` 上限、共享滚动条和 `overflow:auto`，保留全部条目；AX 树仍独立折叠且 `pre` 最高 `132px`，观察正文和缩略图不受此限高裁切。契约见 [Agent UI](built-in-agent-ui-contract.md)。
+- `lint`、全量 `test`、`build` 均 exit0：500 文件 / 5784 项通过，3 文件 / 7 项沿用跳过；日志 `/tmp/omniflow-ax-controls-height-{lint,test,build}-20261014.log`。本轮仅局部 CSS 修复，没有新增实现镜像测试；只读复核确认成功观察没有其他同类无界长文本分支。
+- 真实 macOS 开发版、非首个 Win / libraryId=3、暗色正常宽度，在既有 `COMPUTER_STEP_TITLE_QA2_20261014` 展开同一观察：控件文字框完整显示并保持 156px，框内滚至末尾的“Agent 输入 / textbox · 替换文本、插入文本”时外层聊天位置不变；滚回开头、单独展开 / 收起 AX 树正常。没有新 Run、宿主动作或资料库文件修改。检查时开发进程未运行，构建完成后启动 `npm run dev` 验证，保留客户端与该详情便于查看；亮色、窄窗及 Windows/Linux 未重新手验。
+
+## Agent 连续工具统一折叠与授权行隐藏（2026-10-14）
+
+- 同 Session / Run 内相邻的实际工具统一归入 `tool-sequence`，不再按读取、写入、电脑操作、Shell、插件来源或风险类别拆组；可见消息、空 streaming 等待项和不同 Session / Run 仍断组。待确认、待回答和所有真实交互记录保留独立入口。失败、unknown、取消和中断的普通工具可入组，展开仍显示原状态与详情。现行规则见 [Agent UI](built-in-agent-ui-contract.md)。
+- 成功的纯目录授权 `agent.access.request` 在完成、已批准、结果成功且无插件来源、交互或业务准备动作时，只隐藏其展示行；规范 ToolRun、ordinal 和既有顺序锚点保留。已批准的真实业务操作继续显示；拒绝、过期、取消、中断或不完整的授权不隐藏。Shell 日志在收组 / 隐藏工作区时释放，迟到分页回执丢弃。
+- 最终 `lint`、全量 `test`、`build` 均 exit0：500 文件 / 5784 项通过，3 文件 / 7 项沿用跳过；日志 `/tmp/omniflow-contiguous-tools-{lint,test,build}-20261014.log`。回归覆盖跨类别顺序、消息 / Session / Run 边界、pending→approved 合组、授权隐藏条件、业务动作保留、插件来源及 Shell 日志生命周期；独立复核 4 文件 / 93 项通过，未发现剩余可行动问题。旧插件分组断言按本轮规则更新，来源校验保留。
+- 真实 macOS 开发版仅用非首个 Win / libraryId=3、暗色正常宽度：既有 `COMPUTER_STEP_TITLE_QA2_20261014` 的窗口查找和两次观察收为一个折叠行，展开按序保留“查找步骤标题验收窗口”“检查 Agent 步骤标题”“已查看窗口”。切到“提取音频并整理目录”恢复旧记录，四次已批准授权不再单独展示，读取、保存、移入回收站及设置类型实际记录保留，消息之间仍分组；没有重新执行这些操作。返回标题验收会话后继续核对恢复结果。
+- 本轮未新发 Agent 任务、执行宿主动作或写资料库文件；实时确认转换及混合 Shell / 插件由自动化覆盖，未另做新 Run GUI 验证。亮色、窄窗、应用重启及 Windows/Linux 未重新手验。开发客户端保持运行；下方各节保留历史验收，旧类别分组描述以本节为准。
+
+## Agent 电脑步骤可选标题（2026-10-14）
+
+- 六类可信内置电脑工具 windows / observe / click / setText / scroll / input 接受可选 `title`，模型同次调用提供公开短目的，例如“检查页面状态”“验证关闭按钮”；缺省或空白保留旧文案，无额外模型请求和历史回填。prepare 前剥离字段，不进入 runtime / action / 审批；成功观察和写动作仍须原身份 / 提交回执校验，失败、取消与 unknown 不被标题覆盖。windows 保留原 resource-read 分组。协议、隐私与 Codex CLI 参考见[电脑步骤标题](agent-computer-use.md#可选步骤标题2026-10-14)。
+- 新增回归覆盖六类 schema / Unicode 长度 / 缺省、adapter 不传标题且原输入不变、input 混合手势拒绝、真实 main 来源、windows 分组、状态与回执、AX-only、setText 审计 / stream / 恢复与正文摘录过滤、实际 Provider prompt 接线。原固定 32k 上下文压缩夹具受累积注册目录增长影响，改按实际 catalog / prompt 加固定历史空间计算预算，仍断言旧轮超限并压缩、近期轮保留、原 transcript 不变；生产预算策略不改。
+- 最终 `lint`、全量 `test`、`build` 均 exit0：500 文件 / 5797 项通过，3 文件 / 7 项沿用跳过；日志 `/tmp/omniflow-computer-step-title-{lint,test,build}-20261014.log`。独立复核未发现剩余可行动问题，`git diff --check` 通过。
+- 真实 macOS 开发版仅用非首个 Win / libraryId=3、暗色正常宽度：旧 SCROLL4 保留默认“已查看窗口 / 已发送滚动 / 已发送文本输入”。新只读 `COMPUTER_STEP_TITLE_QA2_20261014` 由真实 gpt-5.5 完成 windows + 两次 AX 观察，实看“查找步骤标题验收窗口”“检查 Agent 步骤标题”和第二次故意缺省的“已查看窗口”；准备 / 运行时标题、原共享确认、成功分组及最终回答正常。切换文件模式及旧会话后重新打开验收会话，标题与缺省文案保持。只观察当前 OmniFlow 窗口，未执行点击、文字写入、滚动或资料库文件操作。
+- 首轮 QA 因开发源码 watcher 重载取消，记录保留原取消状态，第二轮用新窗口引用独立完成；不把首轮计为观察成功。点击等写操作标题由匹配回执的自动化覆盖，本轮未另做真实宿主点击；亮色、窄窗、应用重启后的新标题恢复及 Windows/Linux 未重新 GUI 验证。开发客户端保持运行。
+
+## Agent 开合跳动与大图关闭（2026-10-14）
+
+- 观察详情收起时，工具组原先从无上限立即恢复 `156px`，早于正文高度动画；布局收缩产生的 `scroll` 又可能误恢复自动跟随。现在按完整工具组自然高度做 `220ms` 数值过渡，覆盖末尾观察、同时展开、图片 / AX 迟到增高及同组追加摘要行。所有手动开合暂停跟随；只有属于外层的真实滚轮、滚动按键或滚动条拖动才能恢复，用户手势持续到根 `scrollend`，内层文字滚动及无位移的滚动条点击不会遗留意图。底部内容不足时浏览器仍会按合法滚动范围夹紧位置，不额外添加空白占位。
+- 大图右上角关闭按钮位于底层标题栏拖动区域，原生命中拦截其点击；仅在共用预览根设 `no-drag`，保留原关闭入口和底层拖窗能力。关闭恢复焦点使用 `preventScroll`，避免带动聊天。契约见 [Agent UI](built-in-agent-ui-contract.md) 和 [桌面浮层](desktop-platform-architecture.md)。
+- 专项 4 文件 / 52 项通过，覆盖长组末尾、快速反向、异步高度、追加摘要、用户多帧滚动、内层键盘 / 滚轮归属、拖动末帧与无位移清理。最终 `lint`、全量 `test`、`build` 均 exit0：499 文件 / 5749 项通过，3 文件 / 7 项沿用跳过；日志 `/tmp/omniflow-agent-collapse-preview-{lint,test,build}-20261014.log`。独立源码复核未发现剩余可行动问题。
+- 真实 macOS 开发版只用非首个 Win / libraryId=3 的既有 SCROLL4 会话，暗色正常宽度验证普通详情、观察详情、工具组及整轮开合；观察收起时上方聊天保持位置，末尾缩略图完整，AX 独立滚动不带动聊天。复现修前 X 点击无效，修后相同坐标重复关闭成功；缩放、Esc、遮罩关闭及返回原焦点均正常。未发送新消息、执行 Agent 宿主动作或写资料库文件，开发版保持运行。
+- 亮色、窄窗、系统减少动态效果、真实新增 delta 后的跟随及 Windows/Linux 未重新 GUI 验证；滚动恢复由专项覆盖，reduced-motion 的直接落点由样式接线复核。
+
+## Agent 展开文字详情统一边框与对齐（2026-10-14）
+
+- 普通工具可展开的文字正文、AX 展开的扫描说明与树文本、AX-only 独立控件详情及 Shell 日志统一复用 `agentToolDetailSurfaceStyles`：共享 `raised` 主题表面、细边框、小圆角和 `8px 10px` 内边距。普通正文整体一框，AX 摘要及缩略图留在框外；共享片段不设置字体、滚动或限高，保留原默认收起、观察自然增高、AX `132px` 文本滚动及普通详情 / Shell `156px` 上限。契约见 [Agent UI](built-in-agent-ui-contract.md#5-状态展示契约)。
+- 全量 `lint`、`test`、`build` 和 `theme:audit` 均 exit0；498 文件 / 5743 项通过，3 文件 / 7 项沿用跳过。日志 `/tmp/omniflow-agent-detail-frame-{lint,test,build,theme}-20261014.log`。独立源码复核未发现可行动问题，`git diff --check` 通过；本轮视觉调整没有新增实现镜像测试。
+- 真实 macOS 开发版仅使用非首个 Win / libraryId=3 的既有 SCROLL4 会话，暗色下展开 `computer.windows` 普通文字详情及 AX，确认两者均有完整边框与背景、缩略图完整独立、AX 长文本自身滚动。将侧栏从 `367px` 拖至最大 `797px`，在约 `640px` 聊天栏内确认文字框无横向溢出，再恢复原侧栏宽度和临时展开的普通工具；保留用户原先展开的首张观察与 AX。未发送新消息、执行 Agent 宿主动作或写资料库文件。
+- 后续按用户标注去掉 `.agent-activity-body` 的 `27px` 左缩进，使普通详情、缩略图及 AX 入口 / 内容框与工具行左边缘对齐，保留文字框内边距。真实 Win 会话暗色正常宽度及最大侧栏下再次核对，观察内容完整、框无横向溢出，之后恢复侧栏宽度；未执行 Agent 动作。修后 `lint`、全量 `test`、`build` 均 exit0（498 文件 / 5743 项通过，3 文件 / 7 项跳过），日志 `/tmp/omniflow-agent-detail-align-{lint,test,build}-20261014.log`，独立复核与 diff 检查通过。
+- 亮色主题、Shell 真实日志与 AX-only 控件详情本轮未另行 GUI 复验，后两者由已有组件测试及共享样式接线复核覆盖；Windows/Linux 未重新手验。
+
+## Agent 缩略图与 AX 独立展示（2026-10-14）
+
+- 观察正文与所在工具组原来各有一层 `156px` 限高，`136px` 缩略图叠加 AX 折叠入口、间距和其他工具行后会被重复裁切。现在仅对 presenter 生成的图片 / AX 观察详情解除正文限高，且仅在该详情展开时解除所在工具组限高；缩略图完整展示，AX 仍为独立、默认折叠的区域，长文本仅在自己的 `132px` 区域内滚动。普通工具详情、普通工具组及 Shell 日志保留原限高，读取与挂载生命周期不变。契约见 [Agent 观察展示](built-in-agent-ui-contract.md)。
+- 相关四文件组件测试 73 项通过；全量 `lint`、`test`、`build` 均 exit0，498 文件 / 5743 项通过，3 文件 / 7 项沿用跳过。日志 `/tmp/omniflow-agent-thumbnail-{lint,test,build}-20261014.log`；独立源码复核未发现可行动问题，`git diff --check` 通过。
+- 真实 macOS 开发版只使用非首个 Win / libraryId=3、暗色既有 SCROLL4 会话：单张及同时展开两张缩略图均完整，无观察正文或工具组的外层滚动条；展开 AX 后仅其长文本自身滚动。侧栏从 `367px` 拖至 Agent 最大 `797px`，在约 `640px` 聊天栏内重复检查两图及 AX 展开，无横向溢出或图片裁切；之后恢复原侧栏宽度、第一张详情展开及 AX 折叠状态，收起本轮临时打开的第二张详情。
+- 未发送新 Agent 消息、执行宿主动作或写入资料库文件。亮色主题、Windows/Linux 未重新手验；缩略图内部捕获到的原窗口滚动条属于图片像素，不计作 Agent 容器滚动条。
+
+## Agent 确认记录的线性顺序（2026-10-14）
+
+- 目录授权 `agent.access.request` 只发 approval-required 且没有持久 Tool message；原恢复兜底将其全部追加到 Run 最后，导致最终回答下面不断累积确认记录。实时审批现在复用幂等工具锚点，恢复与终态对账按相邻 Tool ordinal 区间插回过程，区间内按创建时间定位 commentary，completed final 在执行事实之后；不改权限、SQLite、IPC 或 Provider transcript。规则见 [Agent UI 时间线](built-in-agent-ui-contract.md#42-时间线顺序)。
+- 新增 12 项回归，覆盖反复确认、重复 required、已有 started、规范/兼容活动、终态替换、四次授权与操作交错、同毫秒与时钟回拨、同区间多授权、嵌套访问、重复锚点、多 Run 及失败/取消终态。修复前对应测试复现确认记录落在 final 后，修复后通过。
+- 全量 `lint`、`test`、`build` 均 exit0；498 文件 / 5743 项通过，3 文件 / 7 项沿用跳过。日志 `/tmp/omniflow-agent-order-{lint,test,build}-20261014.log`。
+- 真实 macOS 开发版仅用非首个 Win / libraryId=3：原有音频整理会话四次确认分别位于读取、保存、回收、配置之前，最终回答之后无确认尾部；切换文件模式再返回后顺序保持，鼠标折叠和键盘 Return 展开正常。未发送新 Agent 消息、触发真实写操作或修改资料库文件。真实新任务的批准/拒绝交互、亮色/窄窗、Windows/Linux 未重新手验，实时路径由 hook 测试覆盖。
+
+## 目录树与主内容圆角露底（2026-10-14）
+
+- 主内容左上/左下圆角裁切后，原侧栏材质止于分栏边界，缺口直接露出原生 backing。将既有材质移到 `DetailWrapper::before`，按实际侧栏宽度加至多 `12px` 圆角半径绘制；侧栏、背板与圆角共享现有 CSS 宽度，收起时归零。未给全幅外壳铺底，未提高原有不透明度，也未改 Viewer 背景或 Electron 窗口配置。契约见 [工作区布局](library-detail-workspace.md#48-侧栏材质与主内容圆角)。
+- `lint`、全量 `test`、`build`、`theme:audit` 均 exit0；497 文件 / 5731 项通过，3 文件 / 7 项沿用跳过。日志 `/tmp/omniflow-corner-{lint,test,build,theme-audit}-20261014.log`。
+- 真实 macOS 开发版仅用非首个 Win / libraryId=3：暗色 Agent 圆角缺口消失，收起/展开、拖至最小 `240px` 与 Agent 最大 `797px`、恢复原宽度均正常；工具页、浏览器空白页、文本预览和设置交界处无缺口，专用内容背景保留。主题样板临时白天预览及原生全屏内圆角也已实看。未发送 Agent 消息或修改资料库文件。
+- 原生全屏退出时 CUA 连接停在菜单状态，重启开发客户端恢复现场；不记为退出全屏验收通过。Windows/Linux、多桌面背景、视频 HTML 全屏、全部 Viewer 和原生网页内容未重验，瞬时 resize 未绘制帧仍不在此 CSS 修复承诺内。
+
 ## Agent 电脑工具自主选择指引（2026-10-13）
 
 - 原 prompt assembler 新增按实际 capabilities 的电脑工具选择投影，description 补使用意图；模型依任务选择，文件 / CLI 等价优先，当前 GUI / 未保存内容 / 明确指定 UI 时主动调用。外部首次 observe 显式 windowRef，AX 优先、必要 both、screenshot 只读；语义动作优先，input 仅必要且有能力并选最小动作，动作后观察、后台无高亮先核对 AX、证据不足只读后停止、unknown 不重放、拒绝不 Shell 绕过、界面阶段结束 hide。原 runtime 权限、observe 默认 both、可见性、tool_choice 和模型保留，非视觉及无工具 fallback 不暗示 GUI 能力。
