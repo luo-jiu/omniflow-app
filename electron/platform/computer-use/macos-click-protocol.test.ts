@@ -154,12 +154,47 @@ check(!unsupportedAction.truncated)
 let pressAction = ScanBudget()
 check(candidatePressAction(.success, names(Array(repeating: kAXPressAction, count: 32)), budget: pressAction) == true)
 check(!pressAction.truncated)
-for raw in [nil, names([1]), names([""]), names(["AX\nPress"]), names([String(repeating: "a", count: 65)]),
+for raw in [nil, names([1]), names([kAXPressAction, 1]),
             names(Array(repeating: kAXPressAction, count: 33))] as [CFArray?] {
     let actionBudget = ScanBudget()
     check(candidatePressAction(.success, raw, budget: actionBudget) == nil)
     check(actionBudget.truncated && actionBudget.firstAXErrorCode == nil)
 }
+// Finder toolbar controls mix standard callbacks with descriptive custom
+// actions. Ignore custom callbacks without normalizing them into a standard
+// name; malformed noise keeps the scan partial but cannot erase AXPress.
+let finderCustomActions = ["Name:移到上一项\nTarget:0x0\nSelector:(null)",
+    "Name:从工具栏移除\u{202e} Target:0x0 Selector:(null)", String(repeating: "x", count: 65)]
+let finderActions = ScanBudget()
+check(candidateActionNames(.success, names([kAXPressAction, kAXShowMenuAction] + finderCustomActions), budget: finderActions)
+    == [kAXPressAction, kAXShowMenuAction])
+check(finderActions.truncated && finderActions.firstAXErrorCode == nil)
+let harmlessCustom = ScanBudget()
+check(candidateActionNames(.success, names([kAXPressAction, "UnknownCustom", kAXRaiseAction]), budget: harmlessCustom) == [kAXPressAction])
+check(!harmlessCustom.truncated)
+for polluted in ["", "AX\nPress", "AXPress\0", "AX\u{202e}Press", " AXPress", "AXPress ", "axpress", String(repeating: "a", count: 65)] {
+    let actionBudget = ScanBudget()
+    check(candidateActionNames(.success, names([polluted]), budget: actionBudget) == [])
+    check(candidatePressAction(.success, names([polluted])) == false)
+    if polluted.isEmpty || !validSemanticText(polluted, maximumBytes: 64) { check(actionBudget.truncated) }
+}
+for standard in supportedCandidateActionNames {
+    let actionBudget = ScanBudget()
+    check(candidateActionNames(.success, names([standard]), budget: actionBudget) == [standard])
+    check(!actionBudget.truncated)
+}
+let actionByteBoundary = ScanBudget()
+check(candidateActionNames(.success, names([kAXPressAction, String(repeating: "x", count: 2048 - kAXPressAction.utf8.count)]), budget: actionByteBoundary) == [kAXPressAction])
+check(actionByteBoundary.truncated)
+for values: [Any] in [[kAXPressAction, String(repeating: "x", count: 2048 - kAXPressAction.utf8.count + 1)],
+    [String(repeating: "x", count: 2048), kAXPressAction], [kAXPressAction, String(repeating: "中", count: 683)]] {
+    let actionBudget = ScanBudget()
+    check(candidateActionNames(.success, names(values), budget: actionBudget) == nil)
+    check(actionBudget.truncated && actionBudget.firstAXErrorCode == nil)
+}
+let expiredActions = ScanBudget(deadline: 0)
+check(candidateActionNames(.success, names([kAXPressAction]), budget: expiredActions) == nil)
+check(expiredActions.truncated)
 for error in [AXError.failure, .attributeUnsupported, .noValue] {
     let actionBudget = ScanBudget()
     check(candidatePressAction(error, nil, budget: actionBudget) == nil)

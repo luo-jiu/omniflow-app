@@ -33,6 +33,32 @@ vi.mock('@/features/file-explorer', () => ({
 
 const renderers: TestRenderer.ReactTestRenderer[] = [];
 
+describe('native menu confirmation', () => {
+  it('renders and approves only the sealed menu operation and label', () => {
+    const action = { kind: 'computer.menu' as const, version: 1 as const, libraryId: 3,
+      targetId: '237e3952-2a40-4c7b-b2f4-bec335a79cce', applicationLabel: 'QA', windowLabel: '菜单测试',
+      observationId: '83fc584b-037d-4c82-8883-a609846ea0d4', elementId: '805f4b48-ec6e-4f78-b45b-e01f10bb247e',
+      elementLabel: '执行二级动作', operation: 'press' as const };
+    const input = approval(action); input.call.name = 'computer.menu'; input.call.input = { operation: 'open', elementLabel: '伪造' };
+    const { renderer, onResolve } = renderCard(input);
+    const content = textContent(renderer.root);
+    expect(content).toContain('允许选择菜单项'); expect(content).toContain('执行二级动作');
+    expect(content).not.toContain('伪造'); expect(content).toContain('重新查看确认结果');
+    const allow = renderer.root.findAllByType('button').find(button => textContent(button) === '允许')!;
+    expect(allow.props.disabled).toBe(false); act(() => allow.props.onClick());
+    expect(onResolve).toHaveBeenCalledWith(true, action);
+  });
+
+  it('shows separately granted menu operations and associated capture scope', () => {
+    const action = { kind: 'computer.observe' as const, version: 2 as const, libraryId: 3,
+      targetId: '237e3952-2a40-4c7b-b2f4-bec335a79cce', applicationLabel: 'QA', windowLabel: '菜单测试',
+      operations: ['press' as const], menuOperations: ['open' as const, 'press' as const, 'cancel' as const] };
+    const input = approval(action); input.call.name = 'computer.observe';
+    const { renderer } = renderCard(input); const content = textContent(renderer.root);
+    for (const label of ['及此应用菜单', '菜单栏和当前原生菜单', '展开菜单', '选择菜单项', '关闭菜单']) expect(content).toContain(label);
+  });
+});
+
 describe('plugin file-output confirmation', () => {
   it('shows the immutable destination and content digest and passes the same action to approval', () => {
     const action: AgentPluginFileOutputPreparedActionPublicV1 = { kind: 'plugin.file-output', version: 1, libraryId: 3,
@@ -220,7 +246,7 @@ describe('AgentConfirmationCard', () => {
       operations: ['press' as const], inputOperations: [...WINDOW_INPUT_OPERATIONS] };
     const input = approval(action); input.call.name = 'computer.observe'; input.call.input = { inputOperations: ['globalClick'] };
     const { renderer, onResolve } = renderCard(input);
-    expect(renderer.root.findAllByType('dd').map(textContent)).toEqual(['OmniFlow', '测试窗口', '点击、快捷键、右键、双击、拖拽']);
+    expect(renderer.root.findAllByType('dd').map(textContent)).toEqual(['OmniFlow', '测试窗口', '点击、快捷键、右键、双击、拖拽、单击、文字输入、滚轮']);
     expect(textContent(renderer.root)).toContain('后台定向输入发送后需重新查看确认实际结果');
     expect(textContent(renderer.root)).not.toContain('globalClick');
     const allow = renderer.root.findAllByType('button').find(button => textContent(button) === '允许')!;

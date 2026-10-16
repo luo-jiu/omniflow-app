@@ -1,6 +1,6 @@
 import type {
   AgentChatStreamEvent,
-  AgentComputerSetTextPreparedActionPublicV1,
+  AgentComputerPrivateTextPreparedAction,
   AgentSessionSnapshot,
   AgentToolActivitySnapshot,
   AgentToolApprovalSnapshot,
@@ -15,7 +15,7 @@ import {
   agentToolRegistry,
   type AgentToolSnapshot,
 } from './agent-tool-registry';
-import { isAgentComputerTextLegacyAuditName, projectAgentComputerTextInput,
+import { isAgentComputerPrivateTextLegacyCall, projectAgentComputerTextInput,
   projectAgentComputerTextPreview, projectAgentComputerTextResult } from './agent-tool-audit';
 
 function compactSkillActivationResult(result: AgentToolResult): AgentToolResult {
@@ -61,36 +61,40 @@ function compactShellResult(result: AgentToolResult): AgentToolResult {
   };
 }
 
-function builtinComputerTool(activity: AgentToolActivitySnapshot, tool: AgentToolSnapshot): 'observe' | 'click' | 'setText' | 'scroll' | 'input' | undefined {
-  const operation = activity.call.name === 'computer.observe' ? 'observe'
+function builtinComputerTool(activity: AgentToolActivitySnapshot, tool: AgentToolSnapshot): 'windows' | 'observe' | 'click' | 'setText' | 'scroll' | 'input' | 'menu' | undefined {
+  const operation = activity.call.name === 'computer.windows' ? 'windows'
+    : activity.call.name === 'computer.observe' ? 'observe'
     : activity.call.name === 'computer.click' ? 'click'
     : activity.call.name === 'computer.setText' ? 'setText'
     : activity.call.name === 'computer.scroll' ? 'scroll'
-    : activity.call.name === 'computer.input' ? 'input' : undefined;
+    : activity.call.name === 'computer.input' ? 'input'
+    : activity.call.name === 'computer.menu' ? 'menu' : undefined;
   if (!operation || tool.registrationId !== `builtin:computer.${operation}@1`
     || tool.name !== activity.call.name || tool.executor !== 'main' || tool.kind !== 'business'
     || tool.pluginSource || tool.pluginOperation || activity.pluginSource
-    || ((operation === 'setText' || operation === 'scroll' || operation === 'input') && (tool.risk !== 'write' || typeof tool.prepareMain !== 'function'))) return undefined;
+    || (operation === 'windows' && (tool.risk !== 'read' || typeof tool.prepareMain !== 'function'))
+    || ((operation === 'setText' || operation === 'scroll' || operation === 'input' || operation === 'menu') && (tool.risk !== 'write' || typeof tool.prepareMain !== 'function'))) return undefined;
   // This classification may keep the initial prepare row in its display group; it grants no prepared action or approval.
   if (activity.status === 'preparing' && activity.preparation === undefined && activity.result === undefined
     && activity.approval === undefined && activity.interaction === undefined && activity.finishedAt === undefined
     && (activity.permissionBehavior === 'allow' || activity.permissionBehavior === 'ask')
-    && tool.risk === (operation === 'observe' ? 'read' : 'write') && typeof tool.prepareMain === 'function') return operation;
+    && tool.risk === (operation === 'observe' || operation === 'windows' ? 'read' : 'write') && typeof tool.prepareMain === 'function') return operation;
   try {
     const action = normalizeAgentPreparedActionPublic(activity.preparation?.action);
     return action.kind === activity.call.name ? operation : undefined;
   } catch { return undefined; }
 }
 
-function computerTextAction(input: unknown): AgentComputerSetTextPreparedActionPublicV1 | undefined {
+function computerTextAction(input: unknown): AgentComputerPrivateTextPreparedAction | undefined {
   try {
     const action = normalizeAgentPreparedActionPublic(input);
-    return action.kind === 'computer.setText' ? action : undefined;
+    return action.kind === 'computer.setText' || action.kind === 'computer.input' && action.operation === 'typeText' ? action : undefined;
   } catch { return undefined; }
 }
 
 function compactComputerTextActivity(activity: AgentToolActivitySnapshot): AgentToolActivitySnapshot {
-  const action = activity.call.name === 'computer.setText' ? computerTextAction(activity.preparation?.action) : undefined;
+  const action = activity.call.name === 'computer.setText' || activity.call.name === 'computer.input'
+    ? computerTextAction(activity.preparation?.action) : undefined;
   return { ...activity, call: { ...activity.call, input: projectAgentComputerTextInput(activity.call.input) },
     ...(activity.preparation ? { preparation: action ? { ...activity.preparation, action } : undefined } : {}),
     ...(activity.approval ? { approval: { ...activity.approval, preview: projectAgentComputerTextPreview(action) } } : {}),
@@ -100,8 +104,8 @@ function compactComputerTextActivity(activity: AgentToolActivitySnapshot): Agent
 
 /** A rejected legacy alias needs privacy cleanup, not builtin display provenance. */
 function hasPrivateComputerTextActivity(activity: AgentToolActivitySnapshot): boolean {
-  return activity.call.name === 'computer.setText'
-    || activity.permissionBehavior === 'deny' && isAgentComputerTextLegacyAuditName(activity.call.name);
+  return (activity.call.name === 'computer.setText' || activity.call.name === 'computer.input'
+    || activity.permissionBehavior === 'deny') && isAgentComputerPrivateTextLegacyCall(activity.call.name, activity.call.input);
 }
 
 export function projectAgentToolActivityForRenderer(
@@ -170,14 +174,17 @@ export function projectAgentChatStreamEventForRenderer(
     || source.activity?.call.name === AGENT_SKILL_ACTIVATE_TOOL_NAME;
   const shellCall = source.call?.name === AGENT_SHELL_RUN_TOOL_NAME
     || source.activity?.call.name === AGENT_SHELL_RUN_TOOL_NAME;
-  const textCall = source.call?.name === 'computer.setText'
+  const textCall = (source.call?.name === 'computer.setText' || source.call?.name === 'computer.input')
+    && isAgentComputerPrivateTextLegacyCall(source.call?.name, source.call?.input)
     || !!source.activity && hasPrivateComputerTextActivity(source.activity)
-    || source.approval?.call.name === 'computer.setText'
-    || !source.activity && source.result?.ok === false && isAgentComputerTextLegacyAuditName(source.call?.name);
-  const textAction = computerTextAction(source.activity?.call.name === 'computer.setText'
-    ? source.activity.preparation?.action
-    : source.approval?.call.name === 'computer.setText' ? source.approval.preparation?.action : undefined);
-  const textApproval = source.approval?.call.name === 'computer.setText' ? {
+    || (source.approval?.call.name === 'computer.setText' || source.approval?.call.name === 'computer.input')
+      && isAgentComputerPrivateTextLegacyCall(source.approval?.call.name, source.approval?.call.input)
+    || !source.activity && source.result?.ok === false && isAgentComputerPrivateTextLegacyCall(source.call?.name, source.call?.input);
+  const textAction = computerTextAction(source.activity?.call.name === 'computer.setText' || source.activity?.call.name === 'computer.input'
+    ? source.activity.preparation?.action : source.approval?.call.name === 'computer.setText' || source.approval?.call.name === 'computer.input'
+      ? source.approval.preparation?.action : undefined);
+  const textApproval = source.approval && (source.approval.call.name === 'computer.setText' || source.approval.call.name === 'computer.input')
+    && isAgentComputerPrivateTextLegacyCall(source.approval.call.name, source.approval.call.input) ? {
     ...source.approval,
     call: { ...source.approval.call, input: projectAgentComputerTextInput(source.approval.call.input) },
     preview: projectAgentComputerTextPreview(textAction),

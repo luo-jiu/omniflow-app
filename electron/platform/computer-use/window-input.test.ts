@@ -20,6 +20,7 @@ const request: AgentComputerWindowInputRequest = {
   window, profile: 'appkit-fixture-v1', operation: 'rightClick', point: { x: -800, y: 500 },
 };
 const success = { ok: true, dispatched: true, method: 'CGEventPostToPid', eventCount: 2, releaseSent: true };
+const focusToken = 'a'.repeat(64);
 const ready = { ok: true, ready: true, profile: 'appkit-fixture-v1', operations: ['shortcut', 'rightClick', 'doubleClick', 'drag'] };
 const failure = { ok: false, dispatched: false, error: { code: 'target_changed', message: 'The frozen window changed.' } };
 
@@ -27,7 +28,12 @@ class HelperProcess extends EventEmitter {
   stdout = new EventEmitter();
   stdin = Object.assign(new EventEmitter(), { end: vi.fn() });
   stderr = { resume: vi.fn() };
+  progress = new EventEmitter();
+  stdio = [this.stdin, this.stdout, this.stderr, this.progress];
   kill = vi.fn(() => true);
+  pointer(...events: unknown[]) {
+    this.progress.emit('data', Buffer.from(events.map(event => JSON.stringify(event)).join('\n') + '\n'));
+  }
   reply(value: unknown, code = 0) {
     this.stdout.emit('data', Buffer.from(typeof value === 'string' ? value : JSON.stringify(value)));
     this.emit('close', code);
@@ -44,6 +50,92 @@ afterEach(() => {
 });
 
 describe('directed window input adapter', () => {
+  it.each([
+    { operations: ['typeText'] },
+    { operations: ['typeText'], focusToken: 'A'.repeat(64) },
+    { operations: ['typeText'], focusToken: 'a'.repeat(63) },
+    { operations: ['click'], focusToken },
+    { operations: [], ready: false, focusToken },
+  ])('rejects missing, malformed or inapplicable private focus receipts %j', async receipt => {
+    const child = new HelperProcess(); mocks.spawn.mockReturnValue(child);
+    const pending = getAgentComputerWindowInputStatus(window, new AbortController().signal);
+    child.reply({ ok: true, ready: true, profile: 'directed-v1', ...receipt });
+    await expect(pending).rejects.toMatchObject({ dispatchState: 'not-dispatched', releaseState: 'not-required' });
+  });
+
+  it.each([
+    { operation: 'typeText', text: 'x' },
+    { operation: 'typeText', text: 'x', focusToken: 'z'.repeat(64) },
+    { operation: 'click', point: request.point, focusToken },
+    { operation: 'shortcut', shortcut: { key: 'a', modifiers: [] }, focusToken },
+  ])('rejects missing or unexpected text receiver binding before dispatch %j', async operation => {
+    await expect(inputAgentComputerWindow({ window, profile: 'directed-v1', ...operation } as AgentComputerWindowInputRequest,
+      new AbortController().signal)).rejects.toMatchObject({ dispatchState: 'not-dispatched' });
+    expect(mocks.spawn).not.toHaveBeenCalled();
+  });
+
+  it('accepts a generic directed receiver only with its explicit seven-operation readiness receipt', async () => {
+    const child = new HelperProcess(); mocks.spawn.mockReturnValue(child);
+    const pending = getAgentComputerWindowInputStatus(window, new AbortController().signal);
+    const operations = ['shortcut', 'rightClick', 'doubleClick', 'drag', 'click', 'typeText', 'scroll'];
+    child.reply({ ok: true, ready: true, profile: 'directed-v1', operations, focusToken });
+    await expect(pending).resolves.toEqual({ ready: true, profile: 'directed-v1', operations, focusToken });
+  });
+
+  it.each([
+    { operation: 'click', point: request.point, eventCount: 2 },
+    { operation: 'scroll', point: request.point, deltaX: 0, deltaY: -400, eventCount: 1 },
+    { operation: 'typeText', text: '界🌟\r\n\t'.repeat(6), eventCount: 4 },
+    { operation: 'typeText', text: '🌟'.repeat(4096), eventCount: 820 },
+  ] as const)('dispatches bounded $operation through the same exact-window helper contract', async fields => {
+    const { eventCount, ...operation } = fields;
+    const child = new HelperProcess(); mocks.spawn.mockReturnValue(child);
+    const input = { window, profile: 'directed-v1', ...operation, ...(operation.operation === 'typeText' ? { focusToken } : {}) };
+    const pending = inputAgentComputerWindow(input, new AbortController().signal);
+    expect(JSON.parse(child.stdin.end.mock.calls[0][0])).toEqual(input);
+    expect(mocks.spawn.mock.calls[0][1]).toEqual(['--window-input']);
+    child.reply({ ...success, eventCount });
+    await expect(pending).resolves.toEqual({ dispatched: true, method: 'CGEventPostToPid', eventCount, releaseSent: true });
+    expect(mocks.getSources).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { operation: 'typeText', text: '' }, { operation: 'typeText', text: '\ud800' },
+    { operation: 'typeText', text: 'x'.repeat(4097) }, { operation: 'typeText', text: 'x\0' },
+    { operation: 'typeText', text: 'x', point: request.point },
+    { operation: 'click', point: request.point, text: 'private' },
+    { operation: 'scroll', point: request.point, deltaX: 0, deltaY: 0 },
+    { operation: 'scroll', point: request.point, deltaX: 0, deltaY: -1001 },
+    { operation: 'scroll', point: request.point, deltaX: 0.1, deltaY: -100 },
+  ])('rejects malformed new input before spawning a helper', async operation => {
+    await expect(inputAgentComputerWindow({ window, profile: 'directed-v1', ...operation, ...(operation.operation === 'typeText' ? { focusToken } : {}) } as AgentComputerWindowInputRequest,
+      new AbortController().signal)).rejects.toMatchObject({ dispatchState: 'not-dispatched', releaseState: 'not-required' });
+    expect(mocks.spawn).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { operation: { operation: 'scroll', point: request.point, deltaX: 1, deltaY: 0 }, eventCount: 2 },
+    { operation: { operation: 'typeText', text: '🌟'.repeat(11) }, eventCount: 2 },
+    { operation: { operation: 'typeText', text: 'x' }, eventCount: 820 },
+    { operation: { operation: 'click', point: request.point }, eventCount: 820 },
+  ])('keeps operation-specific event counts and treats contradictory success as unknown', async ({ operation, eventCount }) => {
+    const child = new HelperProcess(); mocks.spawn.mockReturnValue(child);
+    const pending = inputAgentComputerWindow({ window, profile: 'directed-v1', ...operation, ...(operation.operation === 'typeText' ? { focusToken } : {}) } as AgentComputerWindowInputRequest,
+      new AbortController().signal);
+    child.reply({ ...success, eventCount });
+    await expect(pending).rejects.toMatchObject({ dispatchState: 'unknown', releaseState: 'unconfirmed' });
+  });
+
+  it('extends only Unicode text helper execution beyond the existing five-second deadline', async () => {
+    vi.useFakeTimers();
+    const child = new HelperProcess(); mocks.spawn.mockReturnValue(child);
+    const pending = inputAgentComputerWindow({ window, profile: 'directed-v1', operation: 'typeText', text: '中文', focusToken }, new AbortController().signal);
+    await vi.advanceTimersByTimeAsync(5_001);
+    expect(child.kill).not.toHaveBeenCalled();
+    child.reply(success);
+    await expect(pending).resolves.toMatchObject({ dispatched: true, releaseSent: true });
+  });
+
   it('checks only a frozen window and returns a private profile with explicit capabilities', async () => {
     const child = new HelperProcess(); mocks.spawn.mockReturnValue(child);
     const pending = getAgentComputerWindowInputStatus(window, new AbortController().signal);
@@ -267,5 +359,130 @@ describe('directed window input adapter', () => {
     mocks.spawn.mockImplementation(() => { throw new Error('spawn unavailable'); });
     await expect(inputAgentComputerWindow(request, new AbortController().signal)).rejects.toBeInstanceOf(AgentComputerWindowInputError);
     await expect(inputAgentComputerWindow(request, new AbortController().signal)).rejects.toMatchObject({ dispatchState: 'not-dispatched', releaseState: 'not-required' });
+  });
+
+  it('streams split and coalesced posted pointer frames on fd3 without changing the final receipt', async () => {
+    const child = new HelperProcess(); mocks.spawn.mockReturnValue(child);
+    const feedback = vi.fn();
+    const input = { ...request, operation: 'drag' as const, endPoint: { x: -600, y: 550 }, durationMs: 100 };
+    const pending = inputAgentComputerWindow(input, new AbortController().signal, feedback);
+    expect(mocks.spawn).toHaveBeenCalledWith(expect.any(String), ['--window-input'], {
+      shell: false, stdio: ['pipe', 'pipe', 'pipe', 'pipe'], env: { ...process.env, OMNIFLOW_WINDOW_INPUT_POINTER_FD: '3' },
+    });
+    const down = { phase: 'down', point: input.point, sequence: 1 };
+    const move = { phase: 'move', point: { x: -725.5, y: 512.25 }, sequence: 2 };
+    const up = { phase: 'up', point: move.point, sequence: 3 };
+    const first = Buffer.from(JSON.stringify(down) + '\n');
+    child.progress.emit('data', first.subarray(0, 12));
+    expect(feedback).not.toHaveBeenCalled();
+    child.progress.emit('data', Buffer.concat([first.subarray(12), Buffer.from(JSON.stringify(move) + '\n' + JSON.stringify(up) + '\n')]));
+    expect(feedback.mock.calls.map(call => call[0])).toEqual([down, move, up]);
+    child.reply({ ...success, eventCount: 10 });
+    await expect(pending).resolves.toEqual({ dispatched: true, method: 'CGEventPostToPid', eventCount: 10, releaseSent: true });
+    child.pointer({ ...down, sequence: 4 });
+    expect(feedback).toHaveBeenCalledTimes(3);
+  });
+
+  it.each([
+    { phase: 'up', point: request.point, sequence: 1 },
+    { phase: 'move', point: request.point, sequence: 1 },
+    { phase: 'down', point: request.point, sequence: 2 },
+    { phase: 'down', point: request.point, sequence: 1.5 },
+    { phase: 'down', point: { x: 0, y: 500 }, sequence: 1 },
+    { phase: 'down', point: { x: -801, y: 500 }, sequence: 1 },
+    { phase: 'down', point: { x: -800, y: null }, sequence: 1 },
+    { phase: 'down', point: { ...request.point, extra: 1 }, sequence: 1 },
+    { phase: 'down', point: request.point, sequence: 1, extra: true },
+    { phase: 'click', point: request.point, sequence: 1 },
+  ])('silences malformed pointer feedback %j independently of the final input result', async event => {
+    const child = new HelperProcess(); mocks.spawn.mockReturnValue(child);
+    const feedback = vi.fn();
+    const pending = inputAgentComputerWindow(request, new AbortController().signal, feedback);
+    child.pointer(event);
+    child.pointer({ phase: 'down', point: request.point, sequence: 1 });
+    expect(feedback).not.toHaveBeenCalled();
+    expect(child.kill).not.toHaveBeenCalled();
+    child.reply(success);
+    await expect(pending).resolves.toMatchObject({ releaseSent: true });
+  });
+
+  it.each([
+    { phase: 'down', point: request.point, sequence: 2 },
+    { phase: 'move', point: request.point, sequence: 2 },
+    { phase: 'up', point: { x: -799, y: 500 }, sequence: 2 },
+    { phase: 'up', point: request.point, sequence: 3 },
+  ])('checks phase, location and sequence after down for %j', async event => {
+    const child = new HelperProcess(); mocks.spawn.mockReturnValue(child);
+    const feedback = vi.fn();
+    const pending = inputAgentComputerWindow(request, new AbortController().signal, feedback);
+    child.pointer({ phase: 'down', point: request.point, sequence: 1 }, event,
+      { phase: 'up', point: request.point, sequence: 2 });
+    expect(feedback).toHaveBeenCalledTimes(1);
+    child.reply(success);
+    await expect(pending).resolves.toMatchObject({ releaseSent: true });
+  });
+
+  it('permits both double-click pairs but bounds feedback to the approved operation', async () => {
+    const child = new HelperProcess(); mocks.spawn.mockReturnValue(child);
+    const feedback = vi.fn();
+    const pending = inputAgentComputerWindow({ ...request, operation: 'doubleClick' }, new AbortController().signal, feedback);
+    const events = ['down', 'up', 'down', 'up'].map((phase, index) => ({ phase, point: request.point, sequence: index + 1 }));
+    child.pointer(...events, { phase: 'down', point: request.point, sequence: 5 });
+    expect(feedback.mock.calls.map(call => call[0])).toEqual(events);
+    child.reply({ ...success, eventCount: 4 });
+    await expect(pending).resolves.toMatchObject({ eventCount: 4 });
+  });
+
+  it.each(['frame', 'total', 'invalid-json', 'error', 'end'] as const)('drains %s feedback failure without killing input or changing receipt classification', async kind => {
+    const child = new HelperProcess(); mocks.spawn.mockReturnValue(child);
+    const feedback = vi.fn();
+    const pending = inputAgentComputerWindow(request, new AbortController().signal, feedback);
+    if (kind === 'error') child.progress.emit('error', new Error('EPIPE'));
+    else if (kind === 'end') { child.progress.emit('data', Buffer.from('{')); child.progress.emit('end'); }
+    else child.progress.emit('data', Buffer.from(kind === 'frame' ? ' '.repeat(257) : kind === 'total' ? ' '.repeat(16_385) : '{\n'));
+    child.pointer({ phase: 'down', point: request.point, sequence: 1 });
+    expect(feedback).not.toHaveBeenCalled();
+    expect(child.progress.listenerCount('data')).toBe(1);
+    expect(child.kill).not.toHaveBeenCalled();
+    child.reply({ ...failure, dispatched: 'unknown', method: 'CGEventPostToPid', eventCount: 2, releaseSent: true }, 70);
+    await expect(pending).rejects.toMatchObject({ dispatchState: 'unknown', releaseState: 'confirmed' });
+  });
+
+  it('keeps callback errors isolated and drains later frames through paired release', async () => {
+    const child = new HelperProcess(); mocks.spawn.mockReturnValue(child);
+    const feedback = vi.fn(() => { throw new Error('indicator gone'); });
+    const pending = inputAgentComputerWindow(request, new AbortController().signal, feedback);
+    child.pointer({ phase: 'down', point: request.point, sequence: 1 }, { phase: 'up', point: request.point, sequence: 2 });
+    expect(feedback).toHaveBeenCalledOnce();
+    expect(child.progress.listenerCount('data')).toBe(1);
+    expect(child.kill).not.toHaveBeenCalled();
+    child.reply(success);
+    await expect(pending).resolves.toMatchObject({ releaseSent: true });
+  });
+
+  it('drops feedback immediately on cancellation but still waits for and preserves the native release receipt', async () => {
+    const child = new HelperProcess(); mocks.spawn.mockReturnValue(child);
+    const feedback = vi.fn();
+    const controller = new AbortController();
+    const pending = inputAgentComputerWindow(request, controller.signal, feedback);
+    child.pointer({ phase: 'down', point: request.point, sequence: 1 });
+    controller.abort();
+    child.pointer({ phase: 'up', point: request.point, sequence: 2 });
+    expect(feedback).toHaveBeenCalledOnce();
+    expect(child.progress.listenerCount('data')).toBe(1);
+    expect(child.kill.mock.calls).toEqual([['SIGTERM']]);
+    child.reply(success);
+    await expect(pending).resolves.toMatchObject({ dispatched: true, releaseSent: true });
+  });
+
+  it('rejects pointer feedback for a keyboard-only shortcut without affecting its receipt', async () => {
+    const child = new HelperProcess(); mocks.spawn.mockReturnValue(child);
+    const feedback = vi.fn();
+    const pending = inputAgentComputerWindow({ window, profile: request.profile, operation: 'shortcut',
+      shortcut: { key: 'escape', modifiers: [] } }, new AbortController().signal, feedback);
+    child.pointer({ phase: 'down', point: request.point, sequence: 1 });
+    expect(feedback).not.toHaveBeenCalled();
+    child.reply(success);
+    await expect(pending).resolves.toMatchObject({ releaseSent: true });
   });
 });

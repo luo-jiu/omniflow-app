@@ -6,7 +6,7 @@ import { createAgentToolRegistry } from '../agent-tool-registry';
 import { buildAgentProviderRequestBody } from '../agent-provider-model';
 
 const computerTools = ['computer.windows', 'computer.observe', 'computer.click', 'computer.setText',
-  'computer.scroll', 'computer.input', 'computer.hidePointer'];
+  'computer.scroll', 'computer.input', 'computer.menu', 'computer.hidePointer'];
 const context = { platform: 'darwin' as const, libraryId: 3, selectedNodeIds: [] };
 
 describe('computer routing in the effective model prompt', () => {
@@ -21,15 +21,38 @@ describe('computer routing in the effective model prompt', () => {
     expect(prompt).toContain('需要外观判断、AX 信息不足');
     expect(prompt).toContain('也不是任意像素点击');
     expect(prompt).toContain('inputReady 与对应 availableInputOperations 必须支持');
+    expect(prompt).toContain('AX 没有可操作 ID 但本次提供 click');
+    expect(prompt).toContain('非安全焦点插入');
+    expect(prompt).toContain('deltaY 正值向上、负值向下');
     expect(prompt).toContain('每次动作后用 computer_observe 核对');
     expect(prompt).toContain('不能自动重放或换路线再次执行同一动作');
     expect(prompt).toContain('连续动作之间保持箭头');
+    expect(prompt).toContain('每次电脑工具调用优先提供可选的 title');
+    expect(prompt).toContain('验证关闭按钮');
+    expect(prompt).toContain('未填写时界面使用默认操作文案');
+    expect(prompt).toContain('不要预先声称操作成功');
+    expect(prompt).toContain('scope=menu、mode=ax');
+    expect(prompt).toContain('逐级新观察后按 menuOperations');
+    expect(prompt).toContain('不扫描其他普通窗口或其他应用');
+    expect(prompt).toContain('以原获准窗口为任务锚点');
   });
 
   it('omits unavailable action guidance from a read-only observation surface', () => {
     const prompt = agentComputerRoutingPrompt(['computer.observe']);
     expect(prompt).toContain('computer_observe');
     expect(prompt.match(/computer_\w+/gu)?.every(name => name === 'computer_observe')).toBe(true);
+    expect(prompt).toContain('可选的 title');
+    expect(agentComputerRoutingPrompt(['computer.hidePointer'])).not.toContain('可选的 title');
+  });
+
+  it('keeps the pointer through observation, thinking and waits until the GUI phase explicitly ends', () => {
+    const prompt = buildAgentSystemPrompt(context, undefined, ['file.read', ...computerTools]);
+    expect(prompt).toContain('computer_hidePointer 只在明确结束当前界面操作阶段、不再需要箭头时调用');
+    expect(prompt).toContain('连续动作之间保持箭头');
+    expect(prompt).toContain('观察、思考或等待确认/用户回答时不要仅因暂时停顿而隐藏');
+    expect(prompt).toContain('界面阶段已经结束并转为纯文字回答、文件或领域工具工作时，可先隐藏箭头');
+    expect(prompt).toContain('不要为了隐藏而提前结束仍需继续的界面阶段');
+    expect(prompt).toContain('Run 结束自动清理');
   });
 
   it('does not introduce computer routing into Runs without computer tools', () => {
@@ -72,5 +95,6 @@ describe('computer routing in the effective model prompt', () => {
       name: 'computer_windows', description: '按应用名发现窗口',
     }) })]);
     expect(body).not.toHaveProperty('tool_choice');
+    expect(systemPrompt).toContain('title 只用于步骤展示，不影响目标、权限或结果');
   });
 });

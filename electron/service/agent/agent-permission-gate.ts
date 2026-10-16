@@ -15,6 +15,7 @@ const BUILTIN_COMPUTER_TOOL_RISKS = new Map<string, 'read' | 'write'>([
   ['computer.setText', 'write'],
   ['computer.scroll', 'write'],
   ['computer.input', 'write'],
+  ['computer.menu', 'write'],
 ]);
 
 function isBuiltinPreparedComputerTool(

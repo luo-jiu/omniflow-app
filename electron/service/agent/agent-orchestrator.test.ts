@@ -60,8 +60,10 @@ import { AGENT_ACTIVE_CONTEXT_SUMMARY_PREFIX } from './agent-active-context';
 import { AGENT_COMPLETION_CHECK_PROMPT } from './agent-completion-check';
 import type { AgentProviderMessage } from './agent-provider-model';
 import {
+  estimateAgentFixedInputTokens,
   estimateAgentProviderTurnTokens,
   estimateAgentTextTokens,
+  getAgentHistoryTokenBudget,
   resolveAgentContextBudget,
 } from './agent-context-projection';
 import { buildAgentSystemPrompt } from './agent-prompt-assembler';
@@ -271,6 +273,25 @@ describe('Agent orchestrator', () => {
     });
   }
 
+  it('leaves task context in a 32k model after the complete built-in tool surface and safety reserves', async () => {
+    const budget = resolveAgentContextBudget({ contextWindowTokens: 32_000 });
+    mocks.streamAgentProviderTurn.mockImplementationOnce(async (_connection, input, onDelta) => {
+      if (process.platform === 'darwin') expect(input.tools).toEqual(expect.arrayContaining([
+        expect.objectContaining({ name: 'computer.menu' }),
+      ]));
+      const fixedTokens = estimateAgentFixedInputTokens([input.systemPrompt], input.tools);
+      // Keep at least an ordinary result's worth of task/history space beyond
+      // the separate output and tool-loop reserves; do not raise the window.
+      expect(getAgentHistoryTokenBudget(fixedTokens, budget)).toBeGreaterThanOrEqual(1_024);
+      onDelta('固定上下文预算已核对。');
+      return { content: '固定上下文预算已核对。', toolCalls: [] };
+    });
+    const webContents = sender();
+    const orchestrator = createOrchestrator();
+    const started = await orchestrator.start(webContents as never, request());
+    await waitForCompletedFinal(webContents, '固定上下文预算已核对。', started);
+  });
+
   function computerTextFixture(behavior: 'allow' | 'ask' = 'allow', toolInput: Record<string, unknown> = {
     observationId: '83fc584b-037d-4c82-8883-a609846ea0d4', elementId: '805f4b48-ec6e-4f78-b45b-e01f10bb247e',
     mode: 'replace', text: '中🪟a',
@@ -376,6 +397,71 @@ describe('Agent orchestrator', () => {
         expect(JSON.stringify(value)).not.toContain('password=');
       }
     } finally { await orchestrator.shutdown(); fixture.restore(); }
+  });
+
+  it.each([
+    ['computer.input', true, 'allow'], ['computer.input', true, 'ask'],
+    ['computer.input', false, 'allow'], ['computer_input', false, 'allow'],
+  ] as const)('keeps directed Unicode body main-only for %s (images=%s, preparation=%s)', async (name, supportsImages, behavior) => {
+    const raw = { observationId: '83fc584b-037d-4c82-8883-a609846ea0d4', operation: 'typeText', text: '正文 private🌟\r\n' };
+    const prepareMain = vi.fn<NonNullable<AgentTool['prepareMain']>>(async input => {
+      const value = input as typeof raw;
+      const { text, textLength, textBytes } = validateComputerText(value.text, 'insert');
+      return { publicAction: { kind: 'computer.input', version: 1, libraryId: 3,
+        targetId: '237e3952-2a40-4c7b-b2f4-bec335a79cce', applicationLabel: 'OmniFlow', windowLabel: 'QA',
+        observationId: value.observationId, operation: 'typeText', textLength, textBytes }, binding: { text },
+      decision: { behavior, risk: 'write', preview: { title: text, description: text, risk: 'write' } } };
+    });
+    const execute = vi.fn<NonNullable<AgentTool['execute']>>(async (input, context) => {
+      expect(input).toEqual(raw);
+      expect(context.preparation?.binding).toEqual({ text: raw.text });
+      context.onProgress({ message: raw.text });
+      const action = context.preparation!.publicAction;
+      const data = { ...action, operation: 'computer.input', inputOperation: 'typeText', operationId: context.preparation!.identity.toolRunId,
+        dispatchState: 'dispatched', mutationCommitState: 'committed', inputMethod: 'CGEventPostToPid', releaseState: 'confirmed',
+        eventCount: 2, nextAction: 'observe', retryAllowed: false, text: raw.text, textHash: 'private-directed-body-hash' };
+      const result = { ok: true, message: raw.text, data };
+      context.commitSettlement!.begin({ ok: false, data: { ...data, dispatchState: 'unknown', mutationCommitState: 'commit_unknown' } });
+      context.commitSettlement!.settle(result);
+      return result;
+    });
+    const registry = createAgentToolRegistry([{ name: 'computer.input', registrationId: 'builtin:computer.input@1', executor: 'main', risk: 'write',
+      description: 'Directed text', inputSchema: { type: 'object', additionalProperties: false,
+        properties: { observationId: { type: 'string' }, operation: { const: 'typeText' }, text: { type: 'string' } },
+        required: ['observationId', 'operation', 'text'] }, prepareMain, execute }]);
+    const snapshotSpy = vi.spyOn(agentToolRegistry, 'createSnapshot').mockReturnValue(registry.createSnapshot());
+    mocks.streamAgentProviderTurn.mockResolvedValueOnce({ content: '', toolCalls: [{ id: 'directed-text', name, input: raw }] })
+      .mockImplementationOnce(async (_connection, _input, onDelta) => {
+        onDelta('定向文字验证完成。'); return { content: '定向文字验证完成。', toolCalls: [] };
+      });
+    const webContents = sender();
+    const orchestrator = createOrchestrator({ getModelMetadata: async () => ({ supportsImages }) });
+    try {
+      const started = await orchestrator.start(webContents as never, { ...request(), userPrompt: '验证定向文字隐私' });
+      if (supportsImages && behavior === 'ask') {
+        const approval = await pendingWindowApproval(webContents);
+        expect(approval.preview).toMatchObject({ title: '输入窗口文字', description: expect.stringContaining('字符') });
+        expect(JSON.stringify(approval)).not.toContain(raw.text);
+        await approveWindow(orchestrator, webContents, approval);
+      }
+      await waitForCompletedFinal(webContents, '定向文字验证完成。', started);
+      const session = (await store.getSession(started.sessionId, OWNER_SCOPE, 3))!;
+      const activity = session.toolActivities[0];
+      expect(activity.call.input).toMatchObject({ observationId: raw.observationId, operation: 'typeText', textLength: 13, textBytes: 20 });
+      expect(activity.call.input).not.toHaveProperty('text');
+      if (supportsImages) {
+        expect(execute).toHaveBeenCalledOnce();
+        expect(activity.result).toMatchObject({ ok: true, data: { operation: 'computer.input', inputOperation: 'typeText',
+          releaseState: 'confirmed', mutationCommitState: 'committed' } });
+      } else {
+        expect(prepareMain).not.toHaveBeenCalled(); expect(execute).not.toHaveBeenCalled();
+        expect(activity.permissionBehavior).toBe('deny');
+      }
+      for (const value of [session, webContents.send.mock.calls, mocks.streamAgentProviderTurn.mock.calls[1][1]]) {
+        expect(JSON.stringify(value)).not.toContain(raw.text);
+        expect(JSON.stringify(value)).not.toContain('private-directed-body-hash');
+      }
+    } finally { await orchestrator.shutdown(); snapshotSpy.mockRestore(); }
   });
 
   it.each(['computer.setText', 'computer_setText'])('keeps filtered builtin setText body private when the provider returns unavailable %s', async name => {
@@ -694,6 +780,7 @@ describe('Agent orchestrator', () => {
       onDelta('普通任务完成。'); return { content: '普通任务完成。', toolCalls: [] };
     });
     const observe = vi.spyOn(agentComputerRuntime, 'observe');
+    const releaseComputer = vi.spyOn(agentComputerRuntime, 'releaseRun');
     try {
       const started = await orchestrator.start(webContents as never, request());
       expect(rendering.keepOwnerRendering).toHaveBeenCalledOnce();
@@ -702,7 +789,36 @@ describe('Agent orchestrator', () => {
       await vi.waitFor(() => expect(rendering.release).toHaveBeenCalledOnce());
       expect(rendering.held()).toBe(false);
       expect(observe).not.toHaveBeenCalled();
-    } finally { await orchestrator.shutdown(); observe.mockRestore(); }
+      expect(releaseComputer).toHaveBeenCalledWith(started.runId, 'normal');
+    } finally { await orchestrator.shutdown(); observe.mockRestore(); releaseComputer.mockRestore(); }
+  });
+
+  it('keeps the Run abort hook during a completed cursor fade and upgrades cleanup without rewriting its completed result', async () => {
+    const webContents = sender();
+    const rendering = ownerRenderingFixture();
+    const orchestrator = createOrchestrator({ keepOwnerRendering: rendering.keepOwnerRendering });
+    let finishFade!: () => void;
+    const fade = new Promise<void>(resolve => { finishFade = resolve; });
+    const releaseComputer = vi.spyOn(agentComputerRuntime, 'releaseRun').mockImplementation((_runId, mode) =>
+      mode === 'normal' ? fade : Promise.resolve());
+    mocks.streamAgentProviderTurn.mockImplementation(async (_connection, _input, onDelta) => {
+      onDelta('动画清理测试完成。'); return { content: '动画清理测试完成。', toolCalls: [] };
+    });
+    try {
+      const started = await orchestrator.start(webContents as never, request());
+      await waitForCompletedFinal(webContents, '动画清理测试完成。', started);
+      await vi.waitFor(() => expect(releaseComputer).toHaveBeenCalledWith(started.runId, 'normal'));
+      expect(rendering.release).not.toHaveBeenCalled();
+      expect(orchestrator.stop(started.sessionId, webContents.id)).toBe(true);
+      expect(releaseComputer).toHaveBeenCalledWith(started.runId, 'immediate');
+      expect(rendering.release).toHaveBeenCalledOnce();
+      finishFade();
+      await expect(orchestrator.shutdown()).resolves.toBe(true);
+      expect((await store.getSession(started.sessionId, OWNER_SCOPE, 3))!.runs[0].status).toBe('completed');
+      expect(webContents.send.mock.calls.map(call => call[1])).not.toContainEqual(
+        expect.objectContaining({ type: 'cancelled', runId: started.runId }),
+      );
+    } finally { finishFade(); await orchestrator.shutdown(); releaseComputer.mockRestore(); }
   });
 
   it.each(['stop', 'release-owner', 'shutdown'] as const)('holds the owner at the first sharing approval and releases synchronously on %s', async reason => {
@@ -711,6 +827,7 @@ describe('Agent orchestrator', () => {
     const webContents = sender();
     const orchestrator = createOrchestrator({ keepOwnerRendering: rendering.keepOwnerRendering,
       contextBudget: { contextWindowTokens: 128_000 } });
+    const releaseComputer = vi.spyOn(agentComputerRuntime, 'releaseRun');
     let stopping: Promise<boolean> | undefined;
     try {
       const started = await orchestrator.start(webContents as never, { ...request(), userPrompt: '只读当前窗口AX' });
@@ -734,13 +851,16 @@ describe('Agent orchestrator', () => {
       expect(rendering.keepOwnerRendering).toHaveBeenCalledOnce();
       expect(rendering.release).toHaveBeenCalledOnce();
       expect(fixture.capture).not.toHaveBeenCalled();
-    } finally { await orchestrator.shutdown(); fixture.restore(); }
+      expect(releaseComputer).toHaveBeenCalledWith(started.runId, 'immediate');
+      expect(releaseComputer).not.toHaveBeenCalledWith(started.runId, 'normal');
+    } finally { await orchestrator.shutdown(); fixture.restore(); releaseComputer.mockRestore(); }
   });
 
   it('does not release the owner while waiting for a user interaction', async () => {
     const rendering = ownerRenderingFixture();
     const webContents = sender();
     const orchestrator = createOrchestrator({ keepOwnerRendering: rendering.keepOwnerRendering });
+    const releaseComputer = vi.spyOn(agentComputerRuntime, 'releaseRun');
     mocks.streamAgentProviderTurn.mockResolvedValueOnce({ content: '', toolCalls: [{ id: 'rendering-interaction',
       name: 'interaction.request', input: { title: '选择范围', prompt: '请选择范围', kind: 'choice',
         options: [{ id: 'current', label: '当前范围' }, { id: 'all', label: '全部范围' }] } }] });
@@ -751,9 +871,11 @@ describe('Agent orchestrator', () => {
       ));
       expect(rendering.held()).toBe(true);
       expect(rendering.release).not.toHaveBeenCalled();
+      expect(releaseComputer).not.toHaveBeenCalled();
       expect(orchestrator.stop(started.sessionId, webContents.id)).toBe(true);
       expect(rendering.release).toHaveBeenCalledOnce();
-    } finally { await orchestrator.shutdown(); }
+      expect(releaseComputer).toHaveBeenCalledWith(started.runId, 'immediate');
+    } finally { await orchestrator.shutdown(); releaseComputer.mockRestore(); }
   });
 
   it('releases rendering after a provider failure without letting restoration change its terminal result', async () => {
@@ -761,6 +883,7 @@ describe('Agent orchestrator', () => {
     rendering.release.mockImplementation(() => { throw new Error('Renderer restoration failed'); });
     const webContents = sender();
     const orchestrator = createOrchestrator({ keepOwnerRendering: rendering.keepOwnerRendering });
+    const releaseComputer = vi.spyOn(agentComputerRuntime, 'releaseRun');
     mocks.streamAgentProviderTurn.mockRejectedValue(new Error('Provider unavailable'));
     webContents.send.mockImplementation((_channel, event) => {
       if (event.type === 'error') expect(rendering.held()).toBe(true);
@@ -774,7 +897,9 @@ describe('Agent orchestrator', () => {
       expect((await store.getSession(started.sessionId, OWNER_SCOPE, 3))!.runs[0]).toMatchObject({
         status: 'failed', error: expect.stringContaining('Provider unavailable'),
       });
-    } finally { await orchestrator.shutdown(); }
+      expect(releaseComputer).toHaveBeenCalledWith(started.runId, 'immediate');
+      expect(releaseComputer).not.toHaveBeenCalledWith(started.runId, 'normal');
+    } finally { await orchestrator.shutdown(); releaseComputer.mockRestore(); }
   });
 
   it('cleans the acquired owner lease when started delivery fails before the Run task exists', async () => {
@@ -2016,6 +2141,21 @@ describe('Agent orchestrator', () => {
     const toolStartedIndex = events.findIndex(event => event?.type === 'tool-started');
     expect(commentaryIndex).toBeGreaterThanOrEqual(0);
     expect(toolStartedIndex).toBeGreaterThan(commentaryIndex);
+    const runBeforeCommentary = events.slice(0, commentaryIndex).filter(event => event?.type === 'run-updated').at(-1)?.run;
+    expect(runBeforeCommentary).toMatchObject({
+      contextUsage: { phase: 'after-response' },
+      currentStep: '准备执行工具',
+      status: 'running',
+    });
+    expect(events.slice(0, toolStartedIndex).filter(event => event?.type === 'run-updated').at(-1)?.run.currentStep)
+      .toBe('准备执行工具');
+    const toolCompletedIndex = events.findIndex(event => event?.type === 'tool-completed');
+    const nextAssistantIndex = events.findIndex((event, index) => index > toolCompletedIndex && event?.type === 'assistant-item-started');
+    expect(nextAssistantIndex).toBeGreaterThan(toolCompletedIndex);
+    expect(events.slice(0, toolCompletedIndex).filter(event => event?.type === 'run-updated').at(-1)?.run.currentStep)
+      .toBe('执行 file.list');
+    expect(events.slice(toolCompletedIndex, nextAssistantIndex).filter(event => event?.type === 'run-updated')
+      .map(event => event.run.currentStep)).toEqual(['准备工具续接', '根据工具结果继续思考']);
     const completedEvent = webContents.send.mock.calls
       .map(call => call[1])
       .find(event => event?.type === 'completed');
@@ -3401,6 +3541,14 @@ describe('Agent orchestrator', () => {
     await waitForCompletedFinal(webContents, '两个结果都已处理。');
     expect(executeMain).toHaveBeenCalledTimes(2);
     expect(mocks.streamAIServiceProfile).toHaveBeenCalledTimes(1);
+    const events = webContents.send.mock.calls.map(call => call[1]);
+    const compactionIndex = events.findIndex(event => event?.type === 'run-updated'
+      && event.run.currentStep === '整理当前任务上下文');
+    const nextToolIndex = events.findIndex((event, index) => index > compactionIndex && event?.type === 'tool-started');
+    expect(compactionIndex).toBeGreaterThanOrEqual(0);
+    expect(nextToolIndex).toBeGreaterThan(compactionIndex);
+    expect(events.slice(compactionIndex, nextToolIndex).filter(event => event?.type === 'run-updated').at(-1)?.run)
+      .toMatchObject({ currentStep: '准备执行工具', status: 'running' });
     const activities = (await store.getSession(started.sessionId, OWNER_SCOPE, 3))?.toolActivities;
     expect((activities?.[0].result?.data as { text?: string })?.text).toBe(firstResultText);
     expect(activities?.[1].result).toEqual(secondResult);
@@ -3491,6 +3639,8 @@ describe('Agent orchestrator', () => {
     expect(snapshot?.toolActivities).toHaveLength(8);
     expect(snapshot?.toolActivities.every(activity => activity.call.name === 'file.list')).toBe(true);
     expect(snapshot?.messages.some(message => message.toolName === 'agent.plan.set')).toBe(false);
+    const planEvent = webContents.send.mock.calls.map(call => call[1]).find(event => event?.type === 'run-updated' && event.run.plan);
+    expect(planEvent?.run.currentStep).toBe('准备执行工具');
   });
 
   it('executes more than eight business Tool calls from one provider turn', async () => {
@@ -7126,13 +7276,31 @@ describe('Agent orchestrator', () => {
       return { content: '已经继续。', toolCalls: [] };
     });
 
-    const webContents = sender();
-    const orchestrator = createOrchestrator({ contextBudget: { contextWindowTokens: 32_000 } });
-    const started = await orchestrator.start(webContents as never, {
+    const currentRequest = {
       ...request(),
       sessionId,
       userPrompt: '继续处理',
+    };
+    const registeredTools = agentToolRegistry.list();
+    const tools = [createAgentPlanControlTool(registeredTools.filter(tool => tool.kind === 'business').map(tool => tool.name)), ...registeredTools];
+    const catalog = skillPromptCatalog();
+    const systemPrompt = buildAgentSystemPrompt(currentRequest.appContext, currentRequest.perception,
+      registeredTools.map(tool => tool.name), catalog.summaries, catalog.omittedSkillCount);
+    const firstTurnTokens = estimateAgentProviderTurnTokens({
+      messages: [{ content: currentRequest.userPrompt, role: 'user' }], systemPrompt, tools,
     });
+    const defaults = resolveAgentContextBudget(undefined);
+    // Keep room for the recent Run and summary as the registered catalog grows; the older Run must still overflow.
+    const contextBudget = { contextWindowTokens: firstTurnTokens
+      + defaults.outputReserveTokens + defaults.toolLoopReserveTokens + 6_000 };
+    expect(estimateAgentProviderTurnTokens({ systemPrompt, tools, messages: [
+      { content: firstOnly, role: 'user' }, { content: firstOnly, role: 'assistant' },
+      { content: recent, role: 'user' }, { content: recent, role: 'assistant' },
+      { content: currentRequest.userPrompt, role: 'user' },
+    ] })).toBeGreaterThan(contextBudget.contextWindowTokens - defaults.outputReserveTokens);
+    const webContents = sender();
+    const orchestrator = createOrchestrator({ contextBudget });
+    const started = await orchestrator.start(webContents as never, currentRequest);
     await vi.waitFor(() => {
       expect(webContents.send).toHaveBeenCalledWith(
         'agent:chat:event',

@@ -4,9 +4,11 @@ import type {
 } from '@/shared/agent/agent.types';
 import { buildFileFullName } from '@/utils/fileTreeSettings';
 import { equalAgentPreparedActionPublic, normalizeAgentPreparedActionPublic } from '@/shared/agent/agent-prepared-action';
+import { getAgentComputerStepTitle } from '@/shared/agent/agent-computer-step-title';
+import { normalizeWindowMenuOperations } from '@/shared/computer-use/window-menu-contract';
 import { normalizeComputerElementOperations } from '@/shared/computer-use/computer-use-contract';
 import { committedAgentFileParents, getPluginOperationPreparedAction } from './agent-published-file';
-import { COMPUTER_INPUT_LABELS, formatComputerInputShortcut } from './agent-computer-input-display';
+import { COMPUTER_INPUT_LABELS, COMPUTER_MENU_LABELS, formatComputerInputShortcut } from './agent-computer-input-display';
 
 type ToolPresenter = (
   activity: AgentToolActivitySnapshot,
@@ -48,6 +50,10 @@ function computerElementDetails(data: Record<string, unknown>): AgentPresentatio
     if (!element || typeof element.elementId !== 'string' || !COMPUTER_REFERENCE_ID.test(element.elementId)
       || !computerElementText(element.label) || !computerElementText(element.role)) return [];
     try {
+      if (computerObservationScope(data)?.scope?.kind === 'menu') {
+        const operations = normalizeWindowMenuOperations(element.menuOperations);
+        return [{ label: element.label, value: `${element.role} · ${operations.map(operation => COMPUTER_MENU_LABELS[operation]).join('、')}` }];
+      }
       const operations = normalizeComputerElementOperations(element.operations);
       const actions = [
         ...(operations.includes('press') ? ['点击'] : []),
@@ -58,7 +64,8 @@ function computerElementDetails(data: Record<string, unknown>): AgentPresentatio
       return [{ label: element.label, value: `${element.role} · ${actions.join('、')}` }];
     } catch { return []; }
   });
-  return entries.length ? [{ type: 'details', title: data.elementsTruncated === true ? '控件 · 已截断' : '控件', entries }] : [];
+  return entries.length ? [{ type: 'details', collapsible: true,
+    title: data.elementsTruncated === true ? '控件 · 已截断' : '控件', entries }] : [];
 }
 
 function computerObservationScope(data: Record<string, unknown>): Pick<Extract<AgentPresentationBlock, { type: 'computer-ax' }>, 'scope' | 'scopeScanComplete'> | null {
@@ -79,6 +86,9 @@ function computerObservationScope(data: Record<string, unknown>): Pick<Extract<A
   const levels: unknown = descriptors.ancestorLevels?.value;
   const candidateComplete = Object.getOwnPropertyDescriptor(data, 'candidateScanComplete');
   const coordinateReady = Object.getOwnPropertyDescriptor(data, 'coordinateClickReady');
+  if (kind === 'menu' && keys.length === 1 && candidateComplete?.enumerable && 'value' in candidateComplete
+    && candidateComplete.value === false && coordinateReady?.enumerable && 'value' in coordinateReady
+    && coordinateReady.value === false) return { scope: { kind }, scopeScanComplete: completeDescriptor.value };
   if (kind !== 'element-ancestor' || keys.length !== 2 || typeof levels !== 'number' || !Number.isSafeInteger(levels)
     || levels < 0 || levels > 3 || !candidateComplete?.enumerable || !('value' in candidateComplete) || candidateComplete.value !== false
     || !coordinateReady?.enumerable || !('value' in coordinateReady) || coordinateReady.value !== false) return null;
@@ -92,23 +102,31 @@ export function builtInComputerAction(activity: AgentToolActivitySnapshot, libra
   try {
     const action = normalizeAgentPreparedActionPublic(activity.preparation?.action);
     return (action.kind === 'computer.observe' || action.kind === 'computer.click'
-      || action.kind === 'computer.setText' || action.kind === 'computer.scroll' || action.kind === 'computer.input')
+      || action.kind === 'computer.setText' || action.kind === 'computer.scroll' || action.kind === 'computer.input' || action.kind === 'computer.menu')
       && action.kind === activity.call.name && (libraryId === undefined || action.libraryId === libraryId) ? action : null;
   } catch {
     return null;
   }
 }
 
-function computerObservationPresenter(activity: AgentToolActivitySnapshot, libraryId: number): AgentPresentationBlock[] {
+function computerObservationResult(activity: AgentToolActivitySnapshot, libraryId: number) {
   const action = builtInComputerAction(activity, libraryId);
   const data = asRecord(activity.result?.data);
   if (action?.kind !== 'computer.observe' || activity.result?.ok !== true || !data
     || (action.version === 2 ? data.captureScope !== 'window' || data.targetId !== action.targetId
       : data.displayId !== action.displayId)
-    || typeof data.observationId !== 'string' || !COMPUTER_REFERENCE_ID.test(data.observationId)) return [];
+    || typeof data.observationId !== 'string' || !COMPUTER_REFERENCE_ID.test(data.observationId)) return null;
   const mode = action.version === 2 ? action.mode ?? 'both' : 'both';
   if (action.version === 2 && (mode === 'ax' ? data.observationSource !== 'ax'
-    : data.observationSource !== undefined && data.observationSource !== 'screenshot')) return [];
+    : data.observationSource !== undefined && data.observationSource !== 'screenshot')) return null;
+  if (action.version === 2 && (action.scope === 'menu') !== (computerObservationScope(data)?.scope?.kind === 'menu')) return null;
+  return { action, data, mode };
+}
+
+function computerObservationPresenter(activity: AgentToolActivitySnapshot, libraryId: number): AgentPresentationBlock[] {
+  const observation = computerObservationResult(activity, libraryId);
+  if (!observation) return [];
+  const { action, data, mode } = observation;
   const blocks: AgentPresentationBlock[] = [];
   if (mode !== 'ax' && typeof data.imageId === 'string' && COMPUTER_REFERENCE_ID.test(data.imageId)
     && Number.isInteger(data.screenshotWidth) && Number(data.screenshotWidth) >= 1 && Number(data.screenshotWidth) <= 2048
@@ -161,6 +179,20 @@ function computerInputDispatched(activity: AgentToolActivitySnapshot, libraryId:
     : data.direction === action.direction && data.unit === action.unit;
 }
 
+function computerMenuDispatched(activity: AgentToolActivitySnapshot, libraryId: number): boolean {
+  const action = builtInComputerAction(activity, libraryId);
+  const data = asRecord(activity.result?.data);
+  if (activity.status !== 'completed' || activity.result?.ok !== true || action?.kind !== 'computer.menu'
+    || data?.operation !== action.kind || data.operationId !== activity.id
+    || data.dispatchState !== 'dispatched' || data.mutationCommitState !== 'committed'
+    || data.nextAction !== 'observe' || data.retryAllowed !== false) return false;
+  return equalAgentPreparedActionPublic(action, {
+    kind: 'computer.menu', version: 1, libraryId: data.libraryId, targetId: data.targetId,
+    applicationLabel: data.applicationLabel, windowLabel: data.windowLabel,
+    observationId: data.observationId, elementId: data.elementId, elementLabel: data.elementLabel, operation: data.menuOperation,
+  });
+}
+
 function computerWindowInputDispatched(activity: AgentToolActivitySnapshot, libraryId: number): boolean {
   const action = builtInComputerAction(activity, libraryId);
   const data = asRecord(activity.result?.data);
@@ -171,6 +203,8 @@ function computerWindowInputDispatched(activity: AgentToolActivitySnapshot, libr
     || data.inputMethod !== 'CGEventPostToPid' || data.releaseState !== 'confirmed') return false;
   const fields = action.operation === 'shortcut' ? { shortcut: data.shortcut }
     : action.operation === 'drag' ? { point: data.point, endPoint: data.endPoint, durationMs: data.durationMs }
+      : action.operation === 'typeText' ? { textLength: data.textLength, textBytes: data.textBytes }
+        : action.operation === 'scroll' ? { point: data.point, deltaX: data.deltaX, deltaY: data.deltaY }
       : { point: data.point };
   return equalAgentPreparedActionPublic(action, {
     kind: 'computer.input', version: 1, libraryId: data.libraryId, targetId: data.targetId,
@@ -270,6 +304,7 @@ const TOOL_TITLES: Record<string, string> = {
   'computer.setText': '输入文本',
   'computer.scroll': '滚动窗口',
   'computer.input': '向窗口发送输入',
+  'computer.menu': '操作应用菜单',
   'file.write': '保存文件',
   'file.delete': '移入回收站',
   'file.rename': '重命名文件',
@@ -289,13 +324,23 @@ const TOOL_TITLES: Record<string, string> = {
   'shell.run': '运行 Shell 命令',
 };
 
+function computerStepTitle(activity: AgentToolActivitySnapshot): string | undefined {
+  const operation = activity.toolMetadata?.builtinComputerTool;
+  if (!operation || activity.pluginSource || activity.toolMetadata?.kind !== 'business'
+    || !['windows', 'observe', 'click', 'setText', 'scroll', 'input', 'menu'].includes(operation)
+    || activity.call.name !== `computer.${operation}`) return undefined;
+  return getAgentComputerStepTitle(activity.call.input);
+}
+
 export function buildAgentToolSummary(activity: AgentToolActivitySnapshot, libraryId: number): {
   label: string;
   subject?: string;
   action?: Extract<import('@/shared/agent/agent.types').AgentPresentationAction, { action: 'tree.revealNode' }>;
 } {
   const data = asRecord(activity.result?.data);
+  const stepTitle = computerStepTitle(activity);
   if (activity.status === 'running' || activity.status === 'preparing') {
+    if (stepTitle) return { label: stepTitle };
     const path = textValue(asRecord(activity.call.input)?.path);
     return { label: activity.call.name === 'file.read'
       ? (activity.status === 'running' ? '正在读取' : '准备读取')
@@ -303,17 +348,25 @@ export function buildAgentToolSummary(activity: AgentToolActivitySnapshot, libra
     ...(activity.call.name === 'file.read' ? { subject: path.replace(/\\/g, '/').split('/').pop() || undefined } : {}) };
   }
   if (activity.status !== 'completed') return { label: getAgentToolTitle(activity) };
-  if (activity.call.name === 'computer.observe') return { label: builtInComputerAction(activity, libraryId)?.version === 2 ? '已查看窗口' : '已查看屏幕' };
-  if (activity.call.name === 'computer.click') return { label: computerClickDispatched(activity, libraryId) ? '已发送点击' : getAgentToolTitle(activity) };
+  if (activity.call.name === 'computer.windows' && stepTitle && activity.result?.ok === true) return { label: stepTitle };
+  if (activity.call.name === 'computer.observe') return { label: stepTitle && computerObservationResult(activity, libraryId)
+    ? stepTitle : builtInComputerAction(activity, libraryId)?.version === 2 ? '已查看窗口' : '已查看屏幕' };
+  if (activity.call.name === 'computer.click') return { label: computerClickDispatched(activity, libraryId)
+    ? stepTitle || '已发送点击' : getAgentToolTitle(activity) };
   if (activity.call.name === 'computer.setText' || activity.call.name === 'computer.scroll') return {
     label: computerInputDispatched(activity, libraryId)
-      ? activity.call.name === 'computer.setText' ? '已发送文本输入' : '已发送滚动'
+      ? stepTitle || (activity.call.name === 'computer.setText' ? '已发送文本输入' : '已发送滚动')
       : getAgentToolTitle(activity),
   };
+  if (activity.call.name === 'computer.menu') {
+    const action = builtInComputerAction(activity, libraryId);
+    return { label: computerMenuDispatched(activity, libraryId) ? '已发送菜单操作' : getAgentToolTitle(activity),
+      ...(action?.kind === 'computer.menu' ? { subject: action.elementLabel } : {}) };
+  }
   if (activity.call.name === 'computer.input') {
     const action = builtInComputerAction(activity, libraryId);
     return { label: computerWindowInputDispatched(activity, libraryId) && action?.kind === 'computer.input'
-      ? `已发送${COMPUTER_INPUT_LABELS[action.operation]}` : getAgentToolTitle(activity),
+      ? stepTitle || `已发送${COMPUTER_INPUT_LABELS[action.operation]}` : getAgentToolTitle(activity),
     ...(action?.kind === 'computer.input' && action.operation === 'shortcut'
       ? { subject: formatComputerInputShortcut(action.shortcut) } : {}) };
   }
@@ -368,6 +421,7 @@ export function getAgentToolTitle(activity: AgentToolActivitySnapshot): string {
   const computerAction = builtInComputerAction(activity);
   if (computerAction?.kind === 'computer.observe' && computerAction.version === 2) return '查看窗口';
   if (computerAction?.kind === 'computer.click' && computerAction.version !== 1) return '点击窗口';
+  if (computerAction?.kind === 'computer.menu') return COMPUTER_MENU_LABELS[computerAction.operation];
   if (computerAction?.kind === 'computer.input') return `发送${COMPUTER_INPUT_LABELS[computerAction.operation]}`;
   return getAgentToolNameTitle(activity.call.name);
 }
@@ -450,7 +504,7 @@ export function buildAgentToolPresentation(
   }
   if (activity.status === 'completed') {
     if (computerClickDispatched(activity, libraryId) || computerInputDispatched(activity, libraryId)
-      || computerWindowInputDispatched(activity, libraryId)) return [];
+      || computerWindowInputDispatched(activity, libraryId) || computerMenuDispatched(activity, libraryId)) return [];
     const specific = TOOL_PRESENTERS[activity.call.name]?.(activity, libraryId) || [];
     return [
       ...pluginSourceBlocks,

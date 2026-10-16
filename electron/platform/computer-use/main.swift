@@ -10,12 +10,14 @@ do {
     case "--targets": try targets(readTargetsRequest())
     case "--windows": try sharedWindows()
     case "--window-targets": try windowTargets(readWindowRequest(allowScope: true))
-    case "--window-capture": try windowCapture(readWindowRequest())
+    case "--window-capture": try windowCapture(readWindowRequest(allowPointer: true))
     case "--click": try click(readClickRequest())
     case "--set-text": try setText(readSetTextRequest())
     case "--scroll": try scroll(readScrollRequest())
     case "--window-input-check": windowInputCheck(try readWindowRequest())
     case "--window-input": try windowInput(readWindowInputRequest())
+    case "--window-input-session": try windowInputSession()
+    case "--window-menu-session": try windowMenuSession()
     case "--window-indicator": try windowIndicator()
     case "--request-permission":
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary

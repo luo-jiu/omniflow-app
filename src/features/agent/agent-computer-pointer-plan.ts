@@ -36,6 +36,9 @@ export function buildAgentComputerPointerPlans(activities: readonly AgentToolAct
       if (action?.kind !== 'computer.observe' || action.version !== 2 || (action.mode ?? 'both') !== 'both'
         || activity.status !== 'completed' || activity.result?.ok !== true || !data
         || data.captureScope !== 'window' || data.targetId !== action.targetId
+        // New native observations already contain any visible cursor pixels.
+        // Only legacy captures retain their historical display-only plan.
+        || data.cursorPresentation === 'native-window'
         || data.applicationLabel !== undefined && data.applicationLabel !== action.applicationLabel
         || data.windowLabel !== undefined && data.windowLabel !== action.windowLabel
         || data.mode !== undefined && data.mode !== 'both'
@@ -54,7 +57,8 @@ export function buildAgentComputerPointerPlans(activities: readonly AgentToolAct
       || activity.ordinal <= observed.activity.ordinal || !activity.sessionId || !activity.runId
       || !activity.preparation?.preparedActionId || !/^[a-f0-9]{64}$/u.test(activity.preparation.snapshotHash)) continue;
     if (action.kind !== 'computer.click' && action.kind !== 'computer.input') continue;
-    if (action.kind === 'computer.click' && action.version !== 2 || action.kind === 'computer.input' && action.operation === 'shortcut') continue;
+    if (action.kind === 'computer.click' && action.version !== 2 || action.kind === 'computer.input'
+      && (action.operation === 'shortcut' || action.operation === 'typeText' || action.operation === 'scroll')) continue;
     if (action.targetId !== observed.action.targetId || action.applicationLabel !== observed.action.applicationLabel
       || action.windowLabel !== observed.action.windowLabel || action.observationId !== observed.data.observationId) continue;
     const width = observed.data.screenshotWidth as number;

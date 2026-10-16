@@ -16,6 +16,52 @@ const textAction: AgentComputerSetTextPreparedActionPublicV1 = {
 };
 
 describe('Agent Tool audit projection', () => {
+  it('freezes directed text privacy for canonical and provider names and projects only public text counts', () => {
+    const inputTool = { ...trustedTextTool, name: 'computer.input', registrationId: 'builtin:computer.input@1' };
+    const registrations = new Map([[inputTool.name, inputTool]]);
+    const resolve = createAgentComputerTextAuditSourceResolver({ get: name => registrations.get(name) || null });
+    registrations.clear();
+    const input = { observationId: textInput.observationId, operation: 'typeText', text: textInput.text,
+      title: textInput.text, nested: { text: textInput.text } };
+    for (const name of ['computer.input', 'computer_input']) {
+      const projected = projectAgentToolAuditInput(input, resolve(name));
+      expect(projected).toMatchObject({ complete: true, sensitive: false, input: {
+        observationId: textInput.observationId, operation: 'typeText', textLength: 3, textBytes: 8 } });
+      expect(JSON.stringify(projected)).not.toContain(textInput.text);
+      expect(projected.input).not.toHaveProperty('title');
+      expect(projectAgentComputerTextInput(projected.input)).toEqual(projected.input);
+    }
+    expect(projectAgentToolAuditInput({ observationId: textInput.observationId, operation: 'click', point: { x: 1, y: 2 } }, resolve('computer.input')).input)
+      .toEqual({ observationId: textInput.observationId, operation: 'click', point: { x: 1, y: 2 } });
+    expect(JSON.stringify(projectAgentToolAuditInput({ ...input, operation: 'click' }, resolve('computer.input')))).not.toContain(textInput.text);
+  });
+
+  it('preserves only the directed text receipt identity and release settlement without exposing text or native errors', () => {
+    const { elementId: _element, mode: _mode, ...identity } = textAction; void _element; void _mode;
+    const action = { ...identity, kind: 'computer.input' as const, operation: 'typeText' as const };
+    for (const state of ['dispatched', 'not-dispatched', 'unknown'] as const) {
+      const mutationCommitState = state === 'dispatched' ? 'committed' : state === 'not-dispatched' ? 'uncommitted' : 'commit_unknown';
+      const receipt = { ok: state === 'dispatched', message: textInput.text, data: { ...action, operation: 'computer.input', inputOperation: 'typeText',
+        operationId: textInput.elementId, dispatchState: state, mutationCommitState, inputMethod: 'CGEventPostToPid',
+        releaseState: state === 'not-dispatched' ? 'not-required' : 'confirmed', eventCount: 2,
+        nextAction: 'observe', retryAllowed: false, text: textInput.text, privateTextHash: 'secret' } };
+      const projected = projectAgentComputerTextResult(receipt, action);
+      expect(projected).toMatchObject({ ok: receipt.ok, data: { operation: 'computer.input', inputOperation: 'typeText',
+        textLength: 3, textBytes: 8, dispatchState: state, mutationCommitState, releaseState: receipt.data.releaseState } });
+      expect(JSON.stringify(projected)).not.toContain(textInput.text);
+      expect(JSON.stringify(projected)).not.toContain('secret');
+    }
+  });
+
+  it('keeps menu audit at the public opaque-reference contract and retains sensitive-input rejection', () => {
+    const source = { name: 'computer.menu', registrationId: 'builtin:computer.menu@1', executor: 'main' as const,
+      kind: 'business' as const, risk: 'write', prepareMain: async () => undefined };
+    const input = { observationId: textInput.observationId, elementId: textInput.elementId, operation: 'open', title: '展开更多操作' };
+    const projection = projectAgentToolAuditInput(input, source);
+    expect(projection).toEqual({ complete: true, sensitive: false, truncated: false, input });
+    expect(projectAgentToolAuditInput({ ...input, password: 'not-for-history' }, source)).toMatchObject({ sensitive: true });
+  });
+
   it('captures trusted text privacy identity and provider alias independently of later registry availability', () => {
     const registered = { ...trustedTextTool };
     const registrations = new Map([[registered.name, registered]]);
@@ -64,6 +110,41 @@ describe('Agent Tool audit projection', () => {
     expect(JSON.stringify(projection)).not.toContain(textInput.text);
     expect(projectAgentToolAuditInput({ ...textInput, text: '' }, trustedTextTool).input)
       .toMatchObject({ mode: 'replace', textLength: 0, textBytes: 0 });
+  });
+
+  it('retains a public step title through private text audit and repeated history projection', () => {
+    const input = { ...textInput, title: '  更新\n测试草稿  ' };
+    const projection = projectAgentToolAuditInput(input, trustedTextTool);
+    expect(projection).toMatchObject({ complete: true, sensitive: false, input: {
+      title: '更新 测试草稿', observationId: textInput.observationId, elementId: textInput.elementId,
+      mode: 'replace', textLength: 3, textBytes: 8,
+    } });
+    expect(projectAgentComputerTextInput(projection.input)).toEqual(projection.input);
+    expect(JSON.stringify(projection)).not.toContain(textInput.text);
+    expect(input).toEqual({ ...textInput, title: '  更新\n测试草稿  ' });
+    expect(projectAgentToolAuditInput({ ...textInput, text: '', title: '清空编辑区' }, trustedTextTool).input)
+      .toMatchObject({ title: '清空编辑区', textLength: 0, textBytes: 0 });
+    const resolve = createAgentComputerTextAuditSourceResolver({ get: name => name === trustedTextTool.name ? trustedTextTool : null });
+    expect(projectAgentToolAuditInput(input, resolve('computer_setText')).input).toEqual(projection.input);
+  });
+
+  it('drops titles that echo private text or credentials instead of publishing them as step labels', () => {
+    for (const input of [
+      { ...textInput, title: textInput.text },
+      { ...textInput, title: `输入 ${textInput.text} 到编辑区` },
+      { ...textInput, text: '内部\n  测试正文', title: '写入 内部 测试正文' },
+      { ...textInput, text: `客户内部项目代号：海棠；${'其他内部说明。'.repeat(30)}`, title: '填写内部项目代号：海棠' },
+      { ...textInput, text: '秘密🪟🪟🪟🪟内容', title: '填写 🪟🪟🪟🪟' },
+      { ...textInput, text: 'x'.repeat(64_001), title: '检查输入区' },
+      { ...textInput, text: null, title: '检查输入区' },
+      { ...textInput, title: 'password=private-value' },
+      { ...textInput, title: 'Authorization: Bearer abcdefghijklmnop' },
+      { ...textInput, title: '[REDACTED]' },
+    ]) {
+      const output = projectAgentComputerTextInput(input);
+      expect(output).not.toHaveProperty('title');
+      expect(output).not.toHaveProperty('text');
+    }
   });
 
   it('inspects original text for sensitive credentials and full structural depth before omitting it', () => {

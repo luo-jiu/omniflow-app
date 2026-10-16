@@ -10,6 +10,7 @@ import type {
   ComputerTextMode,
 } from '../computer-use/computer-use-contract';
 import type { WindowInputOperation, WindowInputPoint, WindowInputShortcut } from '../computer-use/window-input-contract';
+import type { WindowMenuOperation } from '../computer-use/window-menu-contract';
 
 export {
   AGENT_SHELL_PREPARED_ACTION_VERSION,
@@ -32,7 +33,7 @@ export interface AgentToolDisplayMetadata {
 
 export interface AgentToolRendererMetadata {
   /** Main-owned display provenance only; never an execution or attachment grant. */
-  builtinComputerTool?: 'observe' | 'click' | 'setText' | 'scroll' | 'input';
+  builtinComputerTool?: 'windows' | 'observe' | 'click' | 'setText' | 'scroll' | 'input' | 'menu';
   groupKind?: AgentToolDisplayGroupKind;
   kind: 'business' | 'control';
   operationKind?: AgentToolDisplayOperationKind;
@@ -346,6 +347,8 @@ export const AGENT_COMPUTER_SCROLL_PREPARED_ACTION_KIND = 'computer.scroll' as c
 export const AGENT_COMPUTER_SCROLL_PREPARED_ACTION_VERSION = 1 as const;
 export const AGENT_COMPUTER_INPUT_PREPARED_ACTION_KIND = 'computer.input' as const;
 export const AGENT_COMPUTER_INPUT_PREPARED_ACTION_VERSION = 1 as const;
+export const AGENT_COMPUTER_MENU_PREPARED_ACTION_KIND = 'computer.menu' as const;
+export const AGENT_COMPUTER_MENU_PREPARED_ACTION_VERSION = 1 as const;
 
 export const AGENT_PREPARED_ACTION_PUBLIC_IDENTITIES = [{
   kind: AGENT_MEDIA_EXTRACT_AUDIO_PREPARED_ACTION_KIND,
@@ -395,6 +398,9 @@ export const AGENT_PREPARED_ACTION_PUBLIC_IDENTITIES = [{
 }, {
   kind: AGENT_COMPUTER_INPUT_PREPARED_ACTION_KIND,
   version: AGENT_COMPUTER_INPUT_PREPARED_ACTION_VERSION,
+}, {
+  kind: AGENT_COMPUTER_MENU_PREPARED_ACTION_KIND,
+  version: AGENT_COMPUTER_MENU_PREPARED_ACTION_VERSION,
 }] as const;
 
 export interface AgentComputerWindowsPreparedActionPublicV1 {
@@ -444,6 +450,10 @@ export interface AgentComputerObservePreparedActionPublicV2 {
   operations?: ComputerElementOperation[];
   /** Separately approved directed window input; historical actions never grant it implicitly. */
   inputOperations?: WindowInputOperation[];
+  /** Associated native menus are observed only through this explicit scope. */
+  scope?: 'menu';
+  /** Historical window shares never grant menu operations implicitly. */
+  menuOperations?: WindowMenuOperation[];
 }
 
 export interface AgentComputerClickPreparedActionPublicV2 {
@@ -507,6 +517,20 @@ export interface AgentComputerScrollPreparedActionPublicV1 {
   unit: ComputerScrollUnit;
 }
 
+/** Public menu action; native menu windows and AX paths stay in the sealed main binding. */
+export interface AgentComputerMenuPreparedActionPublicV1 {
+  kind: typeof AGENT_COMPUTER_MENU_PREPARED_ACTION_KIND;
+  version: typeof AGENT_COMPUTER_MENU_PREPARED_ACTION_VERSION;
+  libraryId: number;
+  targetId: string;
+  applicationLabel: string;
+  windowLabel: string;
+  observationId: string;
+  elementId: string;
+  elementLabel: string;
+  operation: WindowMenuOperation;
+}
+
 /** Directed input in one frozen window; pixel points belong to its bound screenshot observation. */
 export type AgentComputerInputPreparedActionPublicV1 = {
   kind: typeof AGENT_COMPUTER_INPUT_PREPARED_ACTION_KIND;
@@ -518,9 +542,14 @@ export type AgentComputerInputPreparedActionPublicV1 = {
   observationId: string;
 } & (
   | { operation: 'shortcut'; shortcut: WindowInputShortcut }
-  | { operation: 'rightClick' | 'doubleClick'; point: WindowInputPoint }
+  | { operation: 'click' | 'rightClick' | 'doubleClick'; point: WindowInputPoint }
   | { operation: 'drag'; point: WindowInputPoint; endPoint: WindowInputPoint; durationMs: number }
+  | { operation: 'scroll'; point: WindowInputPoint; deltaX: number; deltaY: number }
+  | { operation: 'typeText'; textLength: number; textBytes: number }
 );
+
+export type AgentComputerPrivateTextPreparedAction = AgentComputerSetTextPreparedActionPublicV1
+  | Extract<AgentComputerInputPreparedActionPublicV1, { operation: 'typeText' }>;
 
 export interface AgentPluginRenamePreparedActionPublicV1 {
   kind: typeof AGENT_PLUGIN_RENAME_PREPARED_ACTION_KIND;
@@ -725,6 +754,7 @@ export interface AgentFileAuthorityCompletionV1 {
 }
 
 export type AgentPreparedActionPublic =
+  | AgentComputerMenuPreparedActionPublicV1
   | AgentComputerInputPreparedActionPublicV1
   | AgentComputerWindowsPreparedActionPublicV1
   | AgentComputerSetTextPreparedActionPublicV1
@@ -1299,13 +1329,14 @@ export type AgentPresentationBlock =
   | {
       tree: string;
       truncated: boolean;
-      scope?: { kind: 'window' } | { kind: 'element-ancestor'; ancestorLevels: number };
+      scope?: { kind: 'window' } | { kind: 'menu' } | { kind: 'element-ancestor'; ancestorLevels: number };
       scopeScanComplete?: boolean;
       type: 'computer-ax';
     }
   | {
       entries: Array<{ label: string; value: string }>;
       actions?: AgentPresentationAction[];
+      collapsible?: boolean;
       title?: string;
       type: 'details';
     }

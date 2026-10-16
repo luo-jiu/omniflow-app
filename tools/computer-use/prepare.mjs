@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { chmod, cp, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 
 if (process.platform !== 'darwin') {
@@ -10,7 +11,7 @@ if (process.platform !== 'darwin') {
 }
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const sourcePaths = ['macos-click.swift', 'macos-semantic.swift', 'macos-window-input.swift', 'macos-window-indicator.swift', 'main.swift']
+const sourcePaths = ['macos-click.swift', 'macos-semantic.swift', 'macos-window-input.swift', 'macos-window-input-focus.swift', 'macos-window-input-focus-taps.swift', 'macos-window-input-session.swift', 'macos-window-indicator.swift', 'macos-window-menu.swift', 'main.swift']
   .map(name => path.join(projectRoot, 'electron/platform/computer-use', name));
 const outputRoot = path.join(projectRoot, 'build/native/computer-use');
 const binaryName = 'omniflow-click';

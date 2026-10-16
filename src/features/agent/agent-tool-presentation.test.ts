@@ -61,6 +61,8 @@ function directedWindowInput(operation: AgentComputerInputPreparedActionPublicV1
   const identity = { libraryId: 3, targetId: WINDOW_TARGET_ID, applicationLabel: 'OmniFlow', windowLabel: '测试窗口', observationId: OBSERVATION_ID };
   const fields = operation === 'shortcut' ? { operation, shortcut: { key: 'a' as const, modifiers: ['command' as const] } }
     : operation === 'drag' ? { operation, point: { x: 10, y: 20 }, endPoint: { x: 30, y: 40 }, durationMs: 100 }
+      : operation === 'typeText' ? { operation, textLength: 3, textBytes: 8 }
+        : operation === 'scroll' ? { operation, point: { x: 10, y: 20 }, deltaX: 0, deltaY: -300 }
       : { operation, point: { x: 10, y: 20 } };
   return { ...completedActivity('computer.input', { ...identity, ...fields, operation: 'computer.input', inputOperation: operation,
     operationId: 'activity-1', dispatchState: 'dispatched', mutationCommitState: 'committed',
@@ -69,8 +71,58 @@ function directedWindowInput(operation: AgentComputerInputPreparedActionPublicV1
   preparation: { preparedActionId: 'prepared', snapshotHash: 'a'.repeat(64), action: { kind: 'computer.input', version: 1, ...identity, ...fields } } };
 }
 
+function menuAction(): AgentToolActivitySnapshot {
+  const identity = { libraryId: 3, targetId: WINDOW_TARGET_ID, applicationLabel: 'QA', windowLabel: '菜单窗口',
+    observationId: OBSERVATION_ID, elementId: 'b5de6d3f-b8ec-4e73-a6be-81b717adf7ba', elementLabel: '执行二级动作' };
+  return { ...completedActivity('computer.menu', { ...identity, operation: 'computer.menu', menuOperation: 'press',
+    operationId: 'activity-1', dispatchState: 'dispatched', mutationCommitState: 'committed', nextAction: 'observe', retryAllowed: false }),
+    toolMetadata: { kind: 'business', risk: 'write', builtinComputerTool: 'menu' },
+    preparation: { preparedActionId: 'prepared', snapshotHash: 'a'.repeat(64), action: {
+      kind: 'computer.menu', version: 1, ...identity, operation: 'press',
+    } },
+  };
+}
+
+describe('native menu presentation', () => {
+  it('shows only a dispatch claim and sealed label, even when the model title asserts completion', () => {
+    const source = menuAction(); source.call.input = { title: '已成功执行二级业务操作', elementLabel: '伪造菜单项' };
+    expect(buildAgentToolSummary(source, 3)).toEqual({ label: '已发送菜单操作', subject: '执行二级动作' });
+    expect(buildAgentToolPresentation(source, 3)).toEqual([]);
+  });
+
+  it.each([['menuOperation', 'open'], ['elementLabel', '其他菜单'], ['elementId', IMAGE_ID], ['targetId', IMAGE_ID],
+    ['operationId', 'other'], ['libraryId', 4], ['dispatchState', 'unknown'], ['mutationCommitState', 'commit_unknown'],
+    ['nextAction', 'retry'], ['retryAllowed', true]])('refuses to claim dispatch for mismatched %s', (key, value) => {
+    const source = menuAction(); (source.result!.data as Record<string, unknown>)[String(key)] = value;
+    expect(buildAgentToolSummary(source, 3).label).not.toContain('已发送');
+    expect(buildAgentToolPresentation(source, 3)).not.toEqual([]);
+  });
+
+  it('retains failure guidance and rejects plugin metadata', () => {
+    const source = menuAction();
+    expect(buildAgentToolSummary({ ...source, toolMetadata: undefined }, 3).label).not.toContain('已发送');
+    source.status = 'failed'; source.result = { ok: false, message: '菜单操作结果未知，请先观察，勿重发' };
+    expect(buildAgentToolPresentation(source, 3)).toEqual([{ type: 'notice', tone: 'danger', message: source.result.message }]);
+  });
+
+  it('shows bounded menu AX and operation labels without treating the scope as a full window', () => {
+    const source = windowObservation();
+    source.preparation!.action = { kind: 'computer.observe', version: 2, libraryId: 3, targetId: WINDOW_TARGET_ID,
+      applicationLabel: 'QA', windowLabel: '菜单窗口', mode: 'ax', scope: 'menu', menuOperations: ['open', 'press', 'cancel'] };
+    source.result = { ok: true, data: { captureScope: 'window', targetId: WINDOW_TARGET_ID, observationId: OBSERVATION_ID,
+      observationSource: 'ax', scope: { kind: 'menu' }, scopeScanComplete: true, candidateScanComplete: false, coordinateClickReady: false,
+      axTree: 'AXMenu 更多操作', axTreeTruncated: false,
+      elements: [{ elementId: IMAGE_ID, label: '更多操作', role: 'AXMenuItem', menuOperations: ['open'] }] } };
+    expect(buildAgentToolPresentation(source, 3)).toEqual([
+      { type: 'computer-ax', tree: 'AXMenu 更多操作', truncated: false, scope: { kind: 'menu' }, scopeScanComplete: true },
+      { type: 'details', collapsible: true, title: '控件', entries: [{ label: '更多操作', value: 'AXMenuItem · 展开菜单' }] },
+    ]);
+  });
+});
+
 describe('directed window input presentation', () => {
-  it.each([['shortcut', '已发送快捷键'], ['rightClick', '已发送右键'], ['doubleClick', '已发送双击'], ['drag', '已发送拖拽']] as const)(
+  it.each([['shortcut', '已发送快捷键'], ['rightClick', '已发送右键'], ['doubleClick', '已发送双击'], ['drag', '已发送拖拽'],
+    ['click', '已发送单击'], ['typeText', '已发送文字输入'], ['scroll', '已发送滚轮']] as const)(
     'shows %s as a compact dispatch record without asserting target success', (operation, label) => {
       const source = directedWindowInput(operation);
       expect(buildAgentToolSummary(source, 3)).toEqual({ label, ...(operation === 'shortcut' ? { subject: 'Command + A' } : {}) });
@@ -160,6 +212,108 @@ function axObservation(): AgentToolActivitySnapshot {
   return activity;
 }
 
+function windowDiscovery(): AgentToolActivitySnapshot {
+  return { ...completedActivity('computer.windows', { windows: [] }),
+    toolMetadata: { kind: 'business', risk: 'read', builtinComputerTool: 'windows' } };
+}
+
+function withComputerTitle(activity: AgentToolActivitySnapshot, title: unknown = '验证关闭按钮'): AgentToolActivitySnapshot {
+  return { ...activity, call: { ...activity.call, input: { ...(activity.call.input as Record<string, unknown>), title } } };
+}
+
+describe('computer step titles', () => {
+  const activities = [
+    ['windows', windowDiscovery], ['observe', windowObservation], ['click', semanticClick],
+    ['setText', () => computerInput('setText')], ['scroll', () => computerInput('scroll')],
+    ['input', () => directedWindowInput('doubleClick')],
+  ] as const;
+
+  it.each(activities)('uses the optional model title for a trusted successful %s', (_, createActivity) => {
+    const source = withComputerTitle(createActivity(), '  验证   关闭按钮  ');
+    expect(buildAgentToolSummary(source, 3)).toEqual({ label: '验证 关闭按钮' });
+    expect(buildAgentToolPresentation(source, 3)).toEqual(buildAgentToolPresentation(createActivity(), 3));
+  });
+
+  it.each(activities)('shows the %s title while preparing and running, before an action is available', (_, createActivity) => {
+    const source = withComputerTitle(createActivity());
+    source.preparation = undefined;
+    source.result = undefined;
+    for (const status of ['preparing', 'running'] as const) {
+      source.status = status;
+      expect(buildAgentToolSummary(source, 3)).toEqual({ label: '验证关闭按钮' });
+    }
+  });
+
+  it('retains the authoritative shortcut next to a custom title', () => {
+    expect(buildAgentToolSummary(withComputerTitle(directedWindowInput(), '选择全部文本'), 3))
+      .toEqual({ label: '选择全部文本', subject: 'Command + A' });
+  });
+
+  it.each([undefined, '', '   ', 1, {}, '窗'.repeat(81)])('retains the default summary for invalid or omitted titles: %j', title => {
+    const source = title === undefined ? windowObservation() : withComputerTitle(windowObservation(), title);
+    expect(buildAgentToolSummary(source, 3)).toEqual({ label: '已查看窗口' });
+  });
+
+  it('preserves the existing window discovery fallback when no title is supplied', () => {
+    expect(buildAgentToolSummary(windowDiscovery(), 3)).toEqual({ label: '已完成 computer.windows' });
+  });
+
+  it.each(['failed', 'interrupted', 'cancelled', 'awaiting_approval'] as const)(
+    'does not replace the actual %s state with a model title', status => {
+      const source = withComputerTitle(windowObservation());
+      source.status = status;
+      expect(buildAgentToolSummary(source, 3)).toEqual({ label: '查看窗口' });
+      expect(buildAgentToolPresentation(source, 3)).toEqual(buildAgentToolPresentation({ ...windowObservation(), status }, 3));
+    },
+  );
+
+  it.each(['missing-metadata', 'plugin-source', 'wrong-tool', 'control-kind'] as const)(
+    'ignores a custom title for %s', reason => {
+      let source = withComputerTitle(windowObservation());
+      if (reason === 'missing-metadata') source.toolMetadata = undefined;
+      if (reason === 'plugin-source') source = { ...source, pluginSource: { pluginId: 'fake', pluginVersion: '1',
+        packageFingerprint: 'a', toolId: 'computer.observe', registrationId: 'plugin-tool:fake' } };
+      if (reason === 'wrong-tool') source.call.name = 'file.read';
+      if (reason === 'control-kind') source.toolMetadata!.kind = 'control';
+      for (const status of ['running', 'completed'] as const) {
+        source.status = status;
+        expect(buildAgentToolSummary(source, 3).label).not.toContain('验证关闭按钮');
+      }
+    },
+  );
+
+  it.each(['failed-result', 'wrong-target', 'invalid-observation', 'wrong-library', 'missing-action'] as const)(
+    'retains the default observation label when %s cannot prove the observation', reason => {
+      const source = withComputerTitle(windowObservation());
+      const data = source.result!.data as Record<string, unknown>;
+      if (reason === 'failed-result') source.result!.ok = false;
+      if (reason === 'wrong-target') data.targetId = IMAGE_ID;
+      if (reason === 'invalid-observation') data.observationId = 'invalid';
+      if (reason === 'missing-action') source.preparation = undefined;
+      expect(buildAgentToolSummary(source, reason === 'wrong-library' ? 4 : 3).label).not.toContain('验证关闭按钮');
+    },
+  );
+
+  it('supports a verified AX-only observation without requiring an image', () => {
+    expect(buildAgentToolSummary(withComputerTitle(axObservation(), '读取窗口控件'), 3)).toEqual({ label: '读取窗口控件' });
+  });
+
+  it.each(activities.filter(([operation]) => !['windows', 'observe'].includes(operation)))(
+    'does not hide an unknown %s dispatch behind its model title', (_, createActivity) => {
+      const source = withComputerTitle(createActivity());
+      Object.assign(source.result!.data as Record<string, unknown>, { dispatchState: 'unknown', mutationCommitState: 'commit_unknown' });
+      expect(buildAgentToolSummary(source, 3).label).not.toContain('验证关闭按钮');
+      expect(buildAgentToolPresentation(source, 3)).not.toEqual([]);
+    },
+  );
+
+  it('does not use a window discovery title for a failed result', () => {
+    const source = withComputerTitle(windowDiscovery());
+    source.result!.ok = false;
+    expect(buildAgentToolSummary(source, 3)).toEqual({ label: '已完成 computer.windows' });
+  });
+});
+
 describe('Agent Tool presentation registry', () => {
   it.each([false, true])('projects local AX scope without presenting it as a complete window: %s', scopeScanComplete => {
     const activity = axObservation();
@@ -170,7 +324,7 @@ describe('Agent Tool presentation registry', () => {
     expect(buildAgentToolPresentation(activity, 3)).toEqual([
       { type: 'computer-ax', tree: 'AXWindow "OmniFlow"', truncated: false,
         scope: { kind: 'element-ancestor', ancestorLevels: 1 }, scopeScanComplete },
-      { type: 'details', title: '控件', entries: [{ label: '显示边栏', value: 'AXButton · 点击' }] },
+      { type: 'details', collapsible: true, title: '控件', entries: [{ label: '显示边栏', value: 'AXButton · 点击' }] },
     ]);
   });
 
@@ -218,7 +372,7 @@ describe('Agent Tool presentation registry', () => {
     expect(buildAgentToolSummary(activity, 3)).toEqual({ label: '已查看窗口' });
     expect(buildAgentToolPresentation(activity, 3)).toEqual([
       { type: 'computer-ax', tree: 'AXWindow "OmniFlow"', truncated: false },
-      { type: 'details', title: '控件', entries: [{ label: '显示边栏', value: 'AXButton · 点击' }] },
+      { type: 'details', collapsible: true, title: '控件', entries: [{ label: '显示边栏', value: 'AXButton · 点击' }] },
     ]);
     Object.assign(activity.result!.data as Record<string, unknown>, {
       imageId: IMAGE_ID, screenshotWidth: 1024, screenshotHeight: 640,
@@ -232,7 +386,7 @@ describe('Agent Tool presentation registry', () => {
     delete data.axTree; delete data.axTreeTruncated;
     data.elements = [{ elementId: ELEMENT_ID, role: 'TextArea', label: 'Agent 输入',
       source: 'omniflow-control', operations: ['replaceText', 'insertText'], screenshotBounds: { x: 0, y: 0 } }];
-    expect(buildAgentToolPresentation(activity, 3)).toEqual([{ type: 'details', title: '控件',
+    expect(buildAgentToolPresentation(activity, 3)).toEqual([{ type: 'details', collapsible: true, title: '控件',
       entries: [{ label: 'Agent 输入', value: 'TextArea · 替换文本、插入文本' }] }]);
     expect(JSON.stringify(buildAgentToolPresentation(activity, 3))).not.toContain('screenshotBounds');
   });

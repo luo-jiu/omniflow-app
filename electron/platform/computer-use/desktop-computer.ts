@@ -555,30 +555,94 @@ export async function getAgentComputerWindowTarget(window: AgentComputerWindowId
   } catch { throw new AgentComputerInputError('共享窗口控件回执无效，请重新查看窗口', 'not-dispatched'); }
 }
 
-/** Desktop-independent capture of one frozen window; never captures or crops the screen. */
-export async function captureAgentComputerWindow(window: AgentComputerWindowIdentity, signal: AbortSignal): Promise<Buffer> {
-  signal.throwIfAborted();
+export interface AgentComputerWindowCapture {
+  /** The canonical window image, with native cursor pixels when included. */
+  png: Buffer;
+  cursorIncluded: boolean;
+  captureMethod: 'independent-window' | 'included-windows' | 'composited-windows';
+}
+
+function screenshotPNG(encoded: unknown, width: number, height: number): Buffer {
+  if (typeof encoded !== 'string' || !encoded.length
+    || encoded.length > Math.ceil(8 * 1024 * 1024 / 3) * 4 || encoded.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(encoded)) throw new Error('invalid screenshot');
+  const png = Buffer.from(encoded, 'base64');
+  if (png.length < 24 || png.length > 8 * 1024 * 1024 || png.toString('base64') !== encoded
+    || !png.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+    || png.readUInt32BE(8) !== 13 || png.toString('ascii', 12, 16) !== 'IHDR'
+    || png.readUInt32BE(16) !== width || png.readUInt32BE(20) !== height) throw new Error('invalid PNG');
+  return png;
+}
+
+export interface AgentComputerWindowCaptureRequest {
+  window: AgentComputerWindowIdentity;
+  pointerWindow?: AgentComputerWindowIdentity;
+}
+
+/** Main-only shared validation for one-shot and retained native transports. */
+export function prepareAgentComputerWindowCapture(window: AgentComputerWindowIdentity,
+  pointerWindow?: unknown): AgentComputerWindowCaptureRequest {
   const identity = requestedWindow(window);
+  let pointer: AgentComputerWindowIdentity | undefined;
+  if (pointerWindow !== undefined) {
+    try {
+      pointer = windowIdentity(pointerWindow, false) as AgentComputerWindowIdentity;
+      if (![0, 102].includes(pointer.layer) || pointer.pid === identity.pid || pointer.windowId === identity.windowId
+        || pointer.bounds.width > 128 || pointer.bounds.height > 128 || !containsRect(identity.bounds, pointer.bounds)) throw new Error('invalid cursor window');
+    } catch { throw new AgentComputerInputError('鼠标图案身份无效，请重新查看窗口', 'not-dispatched'); }
+  }
   if (systemPreferences.getMediaAccessStatus('screen') === 'denied') {
     throw new AgentComputerInputError('请在 macOS 系统设置 → 隐私与安全性 → 屏幕录制中允许 OmniFlow 后重新查看窗口', 'not-dispatched');
   }
-  const result = await runHelper('--window-capture', signal, { window: identity });
-  signal.throwIfAborted();
+  return { window: identity, ...(pointer ? { pointerWindow: pointer } : {}) };
+}
+
+/** Both transports must validate the same exact scope and canonical PNG. */
+export function parseAgentComputerWindowCapture(result: unknown,
+  request: AgentComputerWindowCaptureRequest): AgentComputerWindowCapture {
+  const { window: identity, pointerWindow: pointer } = request;
   try {
-    const fields = objectFields(result, ['ok', 'window', 'pngBase64', 'width', 'height']);
+    const fields = objectFields(result, ['ok', 'window', 'pngBase64', 'width', 'height',
+      ...(pointer ? ['cursorIncluded', 'captureMethod'] : [])]);
     const actual = windowIdentity(fields.window, false) as AgentComputerWindowIdentity;
     const width = integer(fields.width, 1, 2048);
     const height = integer(fields.height, 1, 2048);
-    const encoded = fields.pngBase64;
-    if (fields.ok !== true || !sameWindow(actual, identity) || typeof encoded !== 'string' || !encoded.length
-      || encoded.length > Math.ceil(8 * 1024 * 1024 / 3) * 4 || encoded.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(encoded)) throw new Error('invalid screenshot');
-    const png = Buffer.from(encoded, 'base64');
-    if (png.length < 24 || png.length > 8 * 1024 * 1024 || png.toString('base64') !== encoded
-      || !png.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
-      || png.readUInt32BE(8) !== 13 || png.toString('ascii', 12, 16) !== 'IHDR'
-      || png.readUInt32BE(16) !== width || png.readUInt32BE(20) !== height) throw new Error('invalid PNG');
-    return png;
+    if (fields.ok !== true || !sameWindow(actual, identity)) throw new Error('invalid screenshot');
+    const png = screenshotPNG(fields.pngBase64, width, height);
+    let cursorIncluded = false;
+    let captureMethod: AgentComputerWindowCapture['captureMethod'] = 'independent-window';
+    if (pointer) {
+      if (fields.captureMethod === 'independent-window' && fields.cursorIncluded === false) {
+        captureMethod = fields.captureMethod;
+      } else if ((fields.captureMethod === 'included-windows' || fields.captureMethod === 'composited-windows')
+        && fields.cursorIncluded === true) {
+        cursorIncluded = true;
+        captureMethod = fields.captureMethod;
+      } else throw new Error('invalid cursor capture receipt');
+    }
+    return { png, cursorIncluded, captureMethod };
   } catch { throw new AgentComputerInputError('共享窗口截图回执无效，请重新查看窗口', 'not-dispatched'); }
+}
+
+async function captureWindow(window: AgentComputerWindowIdentity, signal: AbortSignal,
+  pointerWindow?: AgentComputerWindowIdentity): Promise<AgentComputerWindowCapture> {
+  signal.throwIfAborted();
+  const request = prepareAgentComputerWindowCapture(window, pointerWindow);
+  const result = await runHelper('--window-capture', signal, request);
+  signal.throwIfAborted();
+  return parseAgentComputerWindowCapture(result, request);
+}
+
+/** Desktop-independent capture of one frozen window; never captures or crops the screen. */
+export async function captureAgentComputerWindow(window: AgentComputerWindowIdentity, signal: AbortSignal): Promise<Buffer> {
+  return (await captureWindow(window, signal)).png;
+}
+
+/** Main-only cursor identity comes from its directly spawned, live visual helper. */
+export async function captureAgentComputerWindowWithPointer(window: AgentComputerWindowIdentity, signal: AbortSignal,
+  pointerWindow: AgentComputerWindowIdentity): Promise<AgentComputerWindowCapture> {
+  signal.throwIfAborted();
+  if (!pointerWindow) throw new AgentComputerInputError('鼠标图案身份无效，请重新查看窗口', 'not-dispatched');
+  return captureWindow(window, signal, pointerWindow);
 }
 
 export async function clickAgentComputerPoint(point: AgentComputerPoint, signal: AbortSignal): Promise<void> {

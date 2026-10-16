@@ -1,5 +1,5 @@
 import { BrowserWindow, webContents } from 'electron';
-import { captureAgentComputerWindow, clickAgentComputerPoint, getAgentComputerWindows, getAgentComputerWindowTarget,
+import { captureAgentComputerWindow, captureAgentComputerWindowWithPointer, clickAgentComputerPoint, getAgentComputerWindows, getAgentComputerWindowTarget,
   requestAgentComputerClickPermission, statusAgentComputerClick, setAgentComputerText, scrollAgentComputerControl,
   getAgentComputerWindowInputStatus, inputAgentComputerWindow, showAgentComputerWindowIndicator } from '../../../platform/computer-use';
 import { getAgentAttachmentStore } from '../agent-attachment-runtime';
@@ -8,6 +8,8 @@ import { agentRenderingLeases } from './agent-computer-rendering-service-runtime
 import { agentFirstPartyControls } from './agent-first-party-controls';
 import type { AgentComputerWindowIndicatorLease, AgentComputerWindowIndicatorRequest } from '../../../platform/computer-use/window-indicator';
 import { resolveComputerPointerAccent } from '../../../../src/shared/computer-use/pointer-appearance';
+import { createAgentComputerMenuSession } from '../../../platform/computer-use/window-menu';
+import { createAgentComputerWindowInputSession } from '../../../platform/computer-use/window-input-session';
 
 let getAccentColor: () => string | undefined = () => undefined;
 
@@ -25,7 +27,12 @@ async function indicatePointer(request: AgentComputerWindowIndicatorRequest, sig
     get shown() { return lease.shown; },
     closed: lease.closed,
     dispose: () => lease.dispose(),
+    ...(lease.hide ? { hide: lease.hide.bind(lease) } : {}),
     ...(lease.update ? { update: (next: AgentComputerWindowIndicatorRequest) => lease.update!(withAppearance(next)) } : {}),
+    ...(lease.syncTarget ? { syncTarget: lease.syncTarget.bind(lease) } : {}),
+    ...(lease.pointerEvent ? { pointerEvent: lease.pointerEvent.bind(lease) } : {}),
+    ...(lease.inputSettled ? { inputSettled: lease.inputSettled.bind(lease) } : {}),
+    ...(lease.snapshot ? { snapshot: lease.snapshot.bind(lease) } : {}),
   };
 }
 
@@ -42,12 +49,15 @@ export const agentComputerRuntime = createAgentComputerRuntime({
     return Number(match[1]);
   },
   capture: captureAgentComputerWindow,
+  captureWithPointer: captureAgentComputerWindowWithPointer,
   targets: getAgentComputerWindowTarget,
   click: clickAgentComputerPoint,
   setText: setAgentComputerText,
   scroll: scrollAgentComputerControl,
   inputStatus: getAgentComputerWindowInputStatus,
   input: inputAgentComputerWindow,
+  inputSession: createAgentComputerWindowInputSession,
+  menuSession: createAgentComputerMenuSession,
   indicatePointer,
   clickStatus: statusAgentComputerClick,
   requestClickPermission: requestAgentComputerClickPermission,
@@ -56,7 +66,8 @@ export const agentComputerRuntime = createAgentComputerRuntime({
   firstPartyControls: agentFirstPartyControls,
 });
 
-export function releaseAgentComputerRun(runId: string): void {
-  agentComputerRuntime.releaseRun(runId);
+export function releaseAgentComputerRun(runId: string, mode: 'normal' | 'immediate' = 'immediate'): Promise<void> {
+  const closed = agentComputerRuntime.releaseRun(runId, mode);
   agentFirstPartyControls.releaseRun(runId);
+  return Promise.resolve(closed);
 }

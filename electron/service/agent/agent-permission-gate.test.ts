@@ -37,6 +37,7 @@ describe('Run permissions for prepared built-in computer tools', () => {
     { kind: 'computer.observe', version: 2, ...target, mode: 'both', operations: ['press'], inputOperations: ['shortcut'] },
     { kind: 'computer.click', version: 3, ...element, button: 'left', clickCount: 1 },
     { kind: 'computer.setText', version: 1, ...element, mode: 'replace', textLength: 3, textBytes: 8 },
+    { kind: 'computer.menu', version: 1, ...element, elementLabel: '打开菜单', operation: 'open' },
     { kind: 'computer.scroll', version: 1, ...element, direction: 'down', unit: 'page' },
     { kind: 'computer.input', version: 1, ...target, observationId: element.observationId,
       operation: 'shortcut', shortcut: { key: 'a', modifiers: ['command'] } },

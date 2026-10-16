@@ -12,6 +12,8 @@ import {
   AGENT_COMPUTER_SET_TEXT_PREPARED_ACTION_VERSION,
   AGENT_COMPUTER_SCROLL_PREPARED_ACTION_KIND,
   AGENT_COMPUTER_SCROLL_PREPARED_ACTION_VERSION,
+  AGENT_COMPUTER_MENU_PREPARED_ACTION_KIND,
+  AGENT_COMPUTER_MENU_PREPARED_ACTION_VERSION,
   AGENT_COMPUTER_INPUT_PREPARED_ACTION_KIND,
   AGENT_COMPUTER_INPUT_PREPARED_ACTION_VERSION,
   AGENT_FILE_PUBLISH_PREPARED_ACTION_KIND,
@@ -38,6 +40,7 @@ import {
   type AgentComputerSetTextPreparedActionPublicV1,
   type AgentComputerScrollPreparedActionPublicV1,
   type AgentComputerInputPreparedActionPublicV1,
+  type AgentComputerMenuPreparedActionPublicV1,
   type AgentFileStagePreparedActionPublicV1,
   type AgentFileUploadPreparedActionPublicV1,
   type AgentMediaExtractAudioOutputFormat,
@@ -58,7 +61,10 @@ import {
   normalizeWindowInputOperations,
   normalizeWindowInputPoint,
   normalizeWindowInputShortcut,
+  normalizeWindowInputScrollDelta,
 } from '../computer-use/window-input-contract';
+
+import { normalizeWindowMenuOperation, normalizeWindowMenuOperations } from '../computer-use/window-menu-contract';
 
 const MAX_OUTPUT_FILE_NAME_CHARACTERS = 255;
 const MAX_TARGET_LABEL_CHARACTERS = 500;
@@ -71,7 +77,8 @@ const COMPUTER_CLICK_FIELDS = new Set([
   'screenshotWidth', 'screenshotHeight', 'x', 'y', 'button', 'clickCount',
 ]);
 const COMPUTER_OBSERVE_V2_FIELDS = new Set(['kind', 'version', 'libraryId', 'targetId', 'applicationLabel', 'windowLabel']);
-const COMPUTER_OBSERVE_V2_OPTIONAL_FIELDS = new Set(['operations', 'mode', 'inputOperations']);
+const COMPUTER_OBSERVE_V2_OPTIONAL_FIELDS = new Set(['operations', 'mode', 'inputOperations', 'scope', 'menuOperations']);
+const COMPUTER_MENU_FIELDS = new Set([...COMPUTER_OBSERVE_V2_FIELDS, 'observationId', 'elementId', 'elementLabel', 'operation']);
 const COMPUTER_INPUT_FIELDS = new Set([
   'kind', 'version', 'libraryId', 'targetId', 'applicationLabel', 'windowLabel', 'observationId', 'operation',
 ]);
@@ -329,30 +336,46 @@ export function normalizeAgentComputerObservePreparedActionPublicV2(input: unkno
   if (hasMode && source.mode !== 'ax' && source.mode !== 'screenshot' && source.mode !== 'both') {
     throw new Error('Agent 应用窗口观察方式无效');
   }
+  const hasScope = Object.prototype.hasOwnProperty.call(source, 'scope');
+  if (hasScope && source.scope !== 'menu') throw new Error('Agent 应用窗口观察范围无效');
   return { kind: AGENT_COMPUTER_OBSERVE_PREPARED_ACTION_KIND, version: AGENT_COMPUTER_OBSERVE_PREPARED_ACTION_VERSION_V2,
     ...computerTarget(source), ...(hasMode ? { mode: source.mode as AgentComputerObservePreparedActionPublicV2['mode'] } : {}),
     ...(Object.prototype.hasOwnProperty.call(source, 'operations')
       ? { operations: normalizeComputerElementOperations(source.operations) } : {}),
     ...(Object.prototype.hasOwnProperty.call(source, 'inputOperations')
-      ? { inputOperations: normalizeWindowInputOperations(source.inputOperations) } : {}) };
+      ? { inputOperations: normalizeWindowInputOperations(source.inputOperations) } : {}),
+    ...(hasScope ? { scope: 'menu' as const } : {}),
+    ...(Object.prototype.hasOwnProperty.call(source, 'menuOperations')
+      ? { menuOperations: normalizeWindowMenuOperations(source.menuOperations) } : {}) };
 }
 
 export function normalizeAgentComputerInputPreparedActionPublicV1(input: unknown): AgentComputerInputPreparedActionPublicV1 {
-  const base = strictComputerObject(input, COMPUTER_INPUT_FIELDS, new Set(['shortcut', 'point', 'endPoint', 'durationMs']));
+  const base = strictComputerObject(input, COMPUTER_INPUT_FIELDS, new Set(['shortcut', 'point', 'endPoint', 'durationMs', 'deltaX', 'deltaY', 'textLength', 'textBytes']));
   if (base.kind !== AGENT_COMPUTER_INPUT_PREPARED_ACTION_KIND
     || base.version !== AGENT_COMPUTER_INPUT_PREPARED_ACTION_VERSION
     || typeof base.observationId !== 'string' || !COMPUTER_OBSERVATION_ID_PATTERN.test(base.observationId)) {
     throw new Error('Agent 应用窗口输入动作无效');
   }
   const fields = base.operation === 'shortcut' ? ['shortcut']
-    : base.operation === 'rightClick' || base.operation === 'doubleClick' ? ['point']
+    : base.operation === 'click' || base.operation === 'rightClick' || base.operation === 'doubleClick' ? ['point']
+      : base.operation === 'scroll' ? ['point', 'deltaX', 'deltaY']
+        : base.operation === 'typeText' ? ['textLength', 'textBytes']
       : base.operation === 'drag' ? ['point', 'endPoint', 'durationMs'] : null;
   if (!fields) throw new Error('Agent 应用窗口输入操作无效');
   const source = strictComputerObject(base, new Set([...COMPUTER_INPUT_FIELDS, ...fields]));
   const target = { kind: AGENT_COMPUTER_INPUT_PREPARED_ACTION_KIND, version: AGENT_COMPUTER_INPUT_PREPARED_ACTION_VERSION,
     ...computerTarget(source), observationId: source.observationId as string };
   if (source.operation === 'shortcut') return { ...target, operation: 'shortcut', shortcut: normalizeWindowInputShortcut(source.shortcut) };
-  if (source.operation === 'rightClick' || source.operation === 'doubleClick') {
+  if (source.operation === 'typeText') {
+    const textLength = source.textLength, textBytes = source.textBytes;
+    if (typeof textLength !== 'number' || !Number.isSafeInteger(textLength) || textLength < 1 || textLength > COMPUTER_TEXT_MAX_UNICODE_SCALARS
+      || typeof textBytes !== 'number' || !Number.isSafeInteger(textBytes) || textBytes < textLength
+      || textBytes > textLength * 4 || textBytes > COMPUTER_TEXT_MAX_UTF8_BYTES) throw new Error('Agent 应用窗口文字摘要无效');
+    return { ...target, operation: 'typeText', textLength, textBytes };
+  }
+  if (source.operation === 'scroll') return { ...target, operation: 'scroll', point: normalizeWindowInputPoint(source.point),
+    ...normalizeWindowInputScrollDelta(source.deltaX, source.deltaY) };
+  if (source.operation === 'click' || source.operation === 'rightClick' || source.operation === 'doubleClick') {
     return { ...target, operation: source.operation, point: normalizeWindowInputPoint(source.point) };
   }
   if (typeof source.durationMs !== 'number' || !Number.isSafeInteger(source.durationMs)
@@ -371,6 +394,16 @@ function computerElementTarget(source: Record<string, unknown>) {
     throw new Error('Agent 应用窗口控件身份无效');
   }
   return { ...computerTarget(source), observationId: source.observationId, elementId: source.elementId };
+}
+
+export function normalizeAgentComputerMenuPreparedActionPublicV1(input: unknown): AgentComputerMenuPreparedActionPublicV1 {
+  const source = strictComputerObject(input, COMPUTER_MENU_FIELDS);
+  if (source.kind !== AGENT_COMPUTER_MENU_PREPARED_ACTION_KIND || source.version !== AGENT_COMPUTER_MENU_PREPARED_ACTION_VERSION) {
+    throw new Error('Agent prepared action 类型或版本不受支持');
+  }
+  return { kind: AGENT_COMPUTER_MENU_PREPARED_ACTION_KIND, version: AGENT_COMPUTER_MENU_PREPARED_ACTION_VERSION,
+    ...computerElementTarget(source), elementLabel: computerLabel(source.elementLabel, 200),
+    operation: normalizeWindowMenuOperation(source.operation) };
 }
 
 export function normalizeAgentComputerClickPreparedActionPublicV3(input: unknown): AgentComputerClickPreparedActionPublicV3 {
@@ -727,6 +760,9 @@ export function normalizeAgentPreparedActionPublic(
   const kind = Object.getOwnPropertyDescriptor(source, 'kind')?.value;
   const version = Object.getOwnPropertyDescriptor(source, 'version')?.value;
   if (kind === undefined || version === undefined) throw new Error('Agent prepared action 类型或版本不受支持');
+  if (kind === AGENT_COMPUTER_MENU_PREPARED_ACTION_KIND && version === AGENT_COMPUTER_MENU_PREPARED_ACTION_VERSION) {
+    return normalizeAgentComputerMenuPreparedActionPublicV1(source);
+  }
   if (kind === AGENT_COMPUTER_INPUT_PREPARED_ACTION_KIND && version === AGENT_COMPUTER_INPUT_PREPARED_ACTION_VERSION) {
     return normalizeAgentComputerInputPreparedActionPublicV1(source);
   }

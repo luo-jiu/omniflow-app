@@ -8,7 +8,7 @@ export type AgentComputerProviderProjectionMode = 'computer-observe' | 'computer
 
 const OBSERVATION_FIELDS = ['captureScope', 'targetId', 'applicationLabel', 'windowLabel', 'imageId',
   'observationId', 'screenshotWidth', 'screenshotHeight', 'capturedAt', 'expiresInMs', 'clickReady',
-  'textReady', 'scrollReady', 'operations', 'inputReady', 'inputOperations', 'availableInputOperations', 'inputNotice',
+  'textReady', 'scrollReady', 'operations', 'menuReady', 'menuOperations', 'menuCapture', 'imageUnavailableReason', 'inputReady', 'inputOperations', 'availableInputOperations', 'inputNotice',
   'coordinateClickReady', 'candidateScanComplete', 'clickMethod', 'observationSource', 'mode',
   'elementsScope', 'searchScope', 'totalMatched', 'offset', 'limit', 'hasMore', 'changeSummary', 'notice'] as const;
 
@@ -36,9 +36,12 @@ export function normalizeAgentComputerObservationScopeForProvider(result: AgentT
   const kind = ownValue(raw, 'kind');
   const scopeScanComplete = ownValue(data, 'scopeScanComplete');
   if (typeof scopeScanComplete !== 'boolean') throw invalidScope();
-  let scope: { kind: 'window' } | { kind: 'element-ancestor'; ancestorLevels: number };
+  let scope: { kind: 'window' } | { kind: 'menu' } | { kind: 'element-ancestor'; ancestorLevels: number };
   if (kind === 'window' && keys.length === 1) scope = { kind };
-  else if (kind === 'element-ancestor' && keys.length === 2) {
+  else if (kind === 'menu' && keys.length === 1) {
+    if (ownValue(data, 'candidateScanComplete') !== false || ownValue(data, 'coordinateClickReady') !== false) throw invalidScope();
+    scope = { kind };
+  } else if (kind === 'element-ancestor' && keys.length === 2) {
     const ancestorLevels = ownValue(raw, 'ancestorLevels');
     if (typeof ancestorLevels !== 'number' || !Number.isSafeInteger(ancestorLevels) || ancestorLevels < 0 || ancestorLevels > 3
       || ownValue(data, 'candidateScanComplete') !== false || ownValue(data, 'coordinateClickReady') !== false) throw invalidScope();

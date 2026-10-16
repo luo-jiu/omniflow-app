@@ -1,7 +1,12 @@
+import type { WindowMenuOperation } from '@/shared/computer-use/window-menu-contract';
 import type { WindowInputOperation, WindowInputShortcut } from '@/shared/computer-use/window-input-contract';
 
 export const COMPUTER_INPUT_LABELS: Record<WindowInputOperation, string> = {
-  shortcut: '快捷键', rightClick: '右键', doubleClick: '双击', drag: '拖拽',
+  shortcut: '快捷键', rightClick: '右键', doubleClick: '双击', drag: '拖拽', click: '单击', typeText: '文字输入', scroll: '滚轮',
+};
+
+export const COMPUTER_MENU_LABELS: Record<WindowMenuOperation, string> = {
+  open: '展开菜单', press: '选择菜单项', cancel: '关闭菜单',
 };
 
 const KEY_LABELS: Record<string, string> = {

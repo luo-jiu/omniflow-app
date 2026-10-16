@@ -182,7 +182,7 @@ import {
   createAgentToolPrepareBroker,
   type AgentToolPrepareBroker,
 } from './agent-tool-prepare-broker';
-import { createAgentComputerTextAuditSourceResolver, isBuiltinComputerSetTextTool,
+import { createAgentComputerTextAuditSourceResolver, isBuiltinComputerPrivateTextCall,
   projectAgentComputerTextInput, projectAgentComputerTextPreview, projectAgentComputerTextResult,
   projectAgentToolAuditInput, type AgentComputerTextAuditSourceResolver } from './agent-tool-audit';
 import {
@@ -931,7 +931,7 @@ function createPreparedRuntime(
     throw new Error('Agent Tool dynamic prepared risk 与公开动作不匹配');
   }
   const preview = Object.freeze(normalizeActionPreview(
-    options.computerText && action.kind === 'computer.setText'
+    options.computerText && (action.kind === 'computer.setText' || action.kind === 'computer.input' && action.operation === 'typeText')
       ? projectAgentComputerTextPreview(action)
     : result.decision.behavior === 'ask'
       ? result.decision.preview
@@ -2142,7 +2142,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     let pluginInputError: string | undefined;
     const registeredTool = capabilitySnapshot.toolSnapshot.get(call.name);
     const computerTextAuditSource = resolveComputerTextAuditSource(call.name);
-    const privateComputerText = isBuiltinComputerSetTextTool(computerTextAuditSource);
+    const privateComputerText = isBuiltinComputerPrivateTextCall(computerTextAuditSource, call.input);
     const mainExecutionTimeoutMs = tool?.name === interactionRequestTool.name
       && tool.registrationId === INTERACTION_REQUEST_TOOL_REGISTRATION_ID && tool.executor === 'main'
       && tool.kind === 'business' && tool.risk === 'write' && !tool.pluginSource && !tool.pluginOperation
@@ -3023,7 +3023,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
 
     const textAction = preparedApproval?.current.action;
     result = normalizeAgentToolResult(privateComputerText ? projectAgentComputerTextResult(result,
-      textAction?.kind === 'computer.setText' ? textAction : undefined) : result);
+      textAction?.kind === 'computer.setText' || textAction?.kind === 'computer.input' && textAction.operation === 'typeText' ? textAction : undefined) : result);
     await progressWrites;
     activity = await completeActivity(result);
     result = activity.result || result;
@@ -3101,6 +3101,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     const providerMaxOutputTokens = resolveAgentProviderOutputTokens(contextBudget);
     let assistantRunCharacterCount = 0;
     let activeAssistantWriter: AgentAssistantTurnWriter | null = null;
+    let computerRunCompleted = false;
     const exposeActiveAssistantWriter = (writer: AgentAssistantTurnWriter | null) => {
       const active = activeRuns.get(sessionId);
       if (!active || active.runId !== runId) return;
@@ -3224,12 +3225,16 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
           currentStep: `正在重新连接 ${attempt}/${maximum}`, status: 'running', updatedAt: now(),
         });
       };
-      const publishContextUsage = async (request: AgentContextRequest, phase: AgentContextUsageSnapshot['phase']) => {
+      const publishContextUsage = async (
+        request: AgentContextRequest,
+        phase: AgentContextUsageSnapshot['phase'],
+        preparingTools = false,
+      ) => {
         if (controller.signal.aborted) return;
         const updatedAt = now();
         await updateRunAndEmit(sender, store, sessionId, runId, {
           contextUsage: usageLedger.snapshot(request, phase, updatedAt),
-          currentStep: completionReviewPending ? '正在核对结果'
+          currentStep: preparingTools ? '准备执行工具' : completionReviewPending ? '正在核对结果'
             : phase === 'before-request' ? '请求 AI 服务' : phase === 'after-response' ? '处理模型响应' : '准备工具续接',
           status: 'running', updatedAt,
         });
@@ -3474,13 +3479,13 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
           content: turn.content,
           role: 'assistant',
           ...(toolCalls.length > 0 ? { toolCalls: toolCalls.map(call =>
-            isBuiltinComputerSetTextTool(resolveComputerTextAuditSource(call.name))
+            isBuiltinComputerPrivateTextCall(resolveComputerTextAuditSource(call.name), call.input)
               ? { ...call, input: projectAgentComputerTextInput(call.input), inputError: call.inputError ? '文字输入参数无效' : undefined }
               : call) } : {}),
         });
         await publishContextUsage({ messages, systemPrompt: buildAgentSystemPrompt(input.appContext, currentPerception,
           roundCapabilityView.capabilities, skillSummaries, omittedSkillCount, modelAdapter),
-          tools: roundCapabilityView.providerTools }, 'after-response');
+          tools: roundCapabilityView.providerTools }, 'after-response', toolCalls.length > 0);
         controller.signal.throwIfAborted();
         const checkCompletion = shouldCheckAgentCompletion({
           checked: completionChecked, completedToolCalls, pendingToolCalls: toolCalls.length, nonReadToolAttempted,
@@ -3755,6 +3760,13 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
             }
           }
 
+          // Budget checks can run a model compaction; restore the tool handoff
+          // before control dispatch or permission/preparation work starts.
+          await updateRunAndEmit(sender, store, sessionId, runId, {
+            currentStep: '准备执行工具',
+            status: 'running',
+            updatedAt: now(),
+          });
           if (call.name !== AGENT_PLAN_CONTROL_TOOL_NAME
             && capabilitySnapshot.getTool(call.name, activeSkillId)?.risk !== 'read') nonReadToolAttempted = true;
           const result = call.name === AGENT_PLAN_CONTROL_TOOL_NAME
@@ -3974,6 +3986,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         type: 'completed',
       });
       scheduleSessionTitle(sender, store, session, runId, input, runtimeConnection, completedResult.assistantItem.content);
+      computerRunCompleted = completedResult.run.status === 'completed';
     } catch (error) {
       const finishedAt = now();
       const effectiveError = error;
@@ -4026,8 +4039,11 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         });
       }
     } finally {
-      controller.signal.removeEventListener('abort', releaseComputerOnAbort);
-      releaseAgentComputerRun(runId);
+      try {
+        // Keep the existing Run abort hook through a normal visual fade so a
+        // late cancellation can still upgrade it to immediate cleanup.
+        await releaseAgentComputerRun(runId, computerRunCompleted && !controller.signal.aborted ? 'normal' : 'immediate');
+      } finally { controller.signal.removeEventListener('abort', releaseComputerOnAbort); }
       const renderingOwner = activeRuns.get(sessionId);
       if (renderingOwner?.runId === runId) releaseRunRendering(renderingOwner);
       await waitForMediaArtifactSaves(save => save.runId === runId);

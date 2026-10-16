@@ -20,6 +20,7 @@ class Pipe extends EventEmitter {
   destroy = vi.fn();
 }
 class HelperProcess extends EventEmitter {
+  pid = 90;
   stdout = new Pipe();
   stderr = new Pipe();
   stdin = Object.assign(new Pipe(), { write: vi.fn<(value: string) => boolean>().mockReturnValue(true), end: vi.fn() });
@@ -60,6 +61,43 @@ function expectDetached(child: HelperProcess) {
 }
 
 describe('Run-owned persistent visual window indicator adapter', () => {
+  it('keeps one root-bound lease when moving into a short external menu and back', async () => {
+    const { child, pending } = setup(); child.reply(); const lease = await pending;
+    const menuSurface = { ...window, windowId: 82, layer: 101, bounds: { x: 10, y: 200, width: 120, height: 32 } };
+    const menuRequest = { ...request, point: { x: 70, y: 216 }, menuSurface };
+    const moving = lease.update!(menuRequest); child.reply(); await expect(moving).resolves.toBe(true);
+    expect(mocks.spawn).toHaveBeenCalledOnce();
+    const captured = lease.snapshot!();
+    const surface = { windowId: 92, pid: child.pid, processStartedAt: 1_700_000_000_100, layer: 102,
+      bounds: { x: 63, y: 209, width: 35, height: 35 } };
+    child.reply({ ok: true, shown: true, window: surface });
+    await expect(captured).resolves.toEqual(surface);
+    const returning = lease.update!(request); child.reply(); await expect(returning).resolves.toBe(true);
+    const rootCapture = lease.snapshot!();
+    child.reply({ ok: true, shown: true, window: { ...surface, layer: 0, bounds: { x: -808, y: 493, width: 36, height: 36 } } });
+    await expect(rootCapture).resolves.toMatchObject({ layer: 0 });
+    expect(mocks.spawn).toHaveBeenCalledOnce(); child.emit('exit', 0);
+  });
+  it.each(['other-pid', 'other-start', 'root-id', 'wrong-layer', 'outside-menu', 'drag'])('refuses a malformed private menu plan before spawn: %s', async problem => {
+    const menuSurface = { ...window, windowId: 82, layer: 101, bounds: { x: 10, y: 200, width: 120, height: 32 },
+      ...(problem === 'other-pid' ? { pid: 1 } : {}),
+      ...(problem === 'other-start' ? { processStartedAt: 1 } : {}),
+      ...(problem === 'root-id' ? { windowId: window.windowId } : {}),
+      ...(problem === 'wrong-layer' ? { layer: 0 } : {}) };
+    const input = { ...request, menuSurface, point: problem === 'outside-menu' ? request.point : { x: 70, y: 216 },
+      ...(problem === 'drag' ? { operation: 'drag' as const, endPoint: { x: 80, y: 216 } } : {}) };
+    const lease = await showAgentComputerWindowIndicator(input, new AbortController().signal);
+    expect(lease.shown).toBe(false); expect(mocks.spawn).not.toHaveBeenCalled();
+  });
+  it.each(['oversize', 'far-away', 'wrong-layer'])('rejects an unbound menu capture surface: %s', async problem => {
+    const menuSurface = { ...window, windowId: 82, layer: 101, bounds: { x: 10, y: 200, width: 120, height: 32 } };
+    const { child, pending } = setup(new AbortController().signal, { ...request, point: { x: 70, y: 216 }, menuSurface });
+    child.reply(); const lease = await pending; const captured = lease.snapshot!();
+    child.reply({ ok: true, shown: true, window: { windowId: 92, pid: child.pid, processStartedAt: 1_700_000_000_100,
+      layer: problem === 'wrong-layer' ? 0 : 102,
+      bounds: { x: problem === 'far-away' ? 100 : 63, y: 209, width: problem === 'oversize' ? 37 : 35, height: 35 } } });
+    await expect(captured).resolves.toBeUndefined(); expect(child.kill).toHaveBeenCalled(); child.emit('exit', 0);
+  });
   it('writes one fixed request line and keeps stdin alive until the returned lease closes', async () => {
     const { child, pending } = setup();
     expect(mocks.spawn).toHaveBeenCalledOnce();
@@ -86,6 +124,96 @@ describe('Run-owned persistent visual window indicator adapter', () => {
     await vi.advanceTimersByTimeAsync(5_000);
     expect(child.kill.mock.calls).toEqual([['SIGTERM']]);
     expectDetached(child);
+  });
+
+  it.each(['exit', 'close'] as const)('allows normal fade to finish and confirms only actual %s', async event => {
+    const { child, pending } = setup(); child.reply(); const lease = await pending;
+    let closed: boolean | undefined; void lease.closed.then(value => { closed = value; });
+    lease.hide!(); lease.hide!();
+    expect(lease.shown).toBe(false);
+    expect(child.stdin.write.mock.calls.map(([line]) => JSON.parse(line))).toEqual([request, { hide: true }]);
+    expect(child.stdin.end).not.toHaveBeenCalled(); expect(child.kill).not.toHaveBeenCalled();
+    await expect(lease.update!(request)).resolves.toBe(false);
+    await expect(lease.snapshot!()).resolves.toBeUndefined();
+    lease.pointerEvent!({ phase: 'down', point: request.point }); lease.inputSettled!();
+    await vi.advanceTimersByTimeAsync(440);
+    expect(closed).toBeUndefined(); expect(child.kill).not.toHaveBeenCalled();
+    child.reply(); await vi.advanceTimersByTimeAsync(160);
+    expect(closed).toBeUndefined(); expect(lease.shown).toBe(false);
+    expect(child.stdin.write).toHaveBeenCalledTimes(2); expect(child.kill).not.toHaveBeenCalled();
+    child.emit(event, 0); await expect(lease.closed).resolves.toBe(true);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(child.stdin.end).not.toHaveBeenCalled(); expect(child.kill).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0); expectDetached(child);
+  });
+
+  it.each(['update', 'snapshot'] as const)('settles an outstanding %s when normal hide begins', async operation => {
+    const { child, pending } = setup(); child.reply(); const lease = await pending;
+    const outstanding = operation === 'update' ? lease.update!(request) : lease.snapshot!();
+    lease.hide!();
+    await expect(outstanding).resolves.toBe(operation === 'update' ? false : undefined);
+    child.reply(); await vi.advanceTimersByTimeAsync(440);
+    expect(lease.shown).toBe(false); expect(child.kill).not.toHaveBeenCalled();
+    child.emit('close', 0); await expect(lease.closed).resolves.toBe(true);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(child.kill).not.toHaveBeenCalled(); expect(vi.getTimerCount()).toBe(0); expectDetached(child);
+  });
+
+  it.each(['abort', 'dispose', 'parent', 'stdin', 'stdout', 'stderr'] as const)('upgrades a normal fade immediately on %s without waiting for grace', async source => {
+    const controller = new AbortController(); const { child, pending } = setup(controller.signal);
+    child.reply(); const lease = await pending;
+    let closed: boolean | undefined; void lease.closed.then(value => { closed = value; });
+    lease.hide!(); await vi.advanceTimersByTimeAsync(250);
+    if (source === 'abort') controller.abort();
+    else if (source === 'dispose') lease.dispose();
+    else (source === 'parent' ? child : child[source]).emit('error', new Error('EPIPE'));
+    expect(child.stdin.end).toHaveBeenCalledOnce(); expect(child.kill.mock.calls).toEqual([['SIGTERM']]);
+    await vi.advanceTimersByTimeAsync(299); lease.dispose(); lease.hide!();
+    expect(child.kill.mock.calls).toEqual([['SIGTERM']]); expect(closed).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(child.kill.mock.calls).toEqual([['SIGTERM'], ['SIGKILL']]);
+    await vi.advanceTimersByTimeAsync(299); expect(closed).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1); await expect(lease.closed).resolves.toBe(false);
+    child.emit('close', 0); child.reply(); await vi.advanceTimersByTimeAsync(5_000);
+    await expect(lease.closed).resolves.toBe(false);
+    expect(child.kill).toHaveBeenCalledTimes(2); expect(vi.getTimerCount()).toBe(0); expectDetached(child);
+  });
+
+  it('bounds normal fade grace before retaining the original TERM and KILL waits', async () => {
+    const { child, pending } = setup(); child.reply(); const lease = await pending;
+    let closed: boolean | undefined; void lease.closed.then(value => { closed = value; });
+    lease.hide!(); await vi.advanceTimersByTimeAsync(649);
+    expect(child.stdin.end).not.toHaveBeenCalled(); expect(child.kill).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(child.stdin.end).toHaveBeenCalledOnce(); expect(child.kill.mock.calls).toEqual([['SIGTERM']]);
+    await vi.advanceTimersByTimeAsync(299); expect(child.kill).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(1); expect(child.kill.mock.calls).toEqual([['SIGTERM'], ['SIGKILL']]);
+    await vi.advanceTimersByTimeAsync(299); expect(closed).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1); await expect(lease.closed).resolves.toBe(false);
+    child.emit('exit', 0); child.reply(); await vi.advanceTimersByTimeAsync(5_000);
+    await expect(lease.closed).resolves.toBe(false);
+    expect(child.stdin.write).toHaveBeenCalledTimes(2); expect(vi.getTimerCount()).toBe(0); expectDetached(child);
+  });
+
+  it.each(['false', 'throw'] as const)('immediately closes when the hide command write returns %s', async failure => {
+    const { child, pending } = setup(); child.reply(); const lease = await pending;
+    if (failure === 'false') child.stdin.write.mockReturnValueOnce(false);
+    else child.stdin.write.mockImplementationOnce(() => { throw new Error('EPIPE'); });
+    lease.hide!();
+    expect(child.stdin.end).toHaveBeenCalledOnce(); expect(child.kill.mock.calls).toEqual([['SIGTERM']]);
+    await vi.advanceTimersByTimeAsync(600); await expect(lease.closed).resolves.toBe(false);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(child.kill.mock.calls).toEqual([['SIGTERM'], ['SIGKILL']]);
+    expect(vi.getTimerCount()).toBe(0); expectDetached(child);
+  });
+
+  it('clears fade grace when writing hide synchronously closes the child', async () => {
+    const { child, pending } = setup(); child.reply(); const lease = await pending;
+    child.stdin.write.mockImplementationOnce(() => { child.emit('close', 0); return true; });
+    lease.hide!(); await expect(lease.closed).resolves.toBe(true);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(child.kill).not.toHaveBeenCalled(); expect(child.stdin.end).not.toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(0); expectDetached(child);
   });
 
   it.each(['click', 'rightClick', 'doubleClick', 'drag'] as const)('serializes only the finite %s pointer intent', async operation => {
@@ -121,6 +249,141 @@ describe('Run-owned persistent visual window indicator adapter', () => {
     child.reply(); await expect(updating).resolves.toBe(true);
     expect(mocks.spawn).toHaveBeenCalledOnce(); expect(lease.shown).toBe(true);
     lease.dispose(); child.emit('close', 0); await expect(lease.closed).resolves.toBe(true); expectDetached(child);
+  });
+
+  it('projects posted phases without ACKs and keeps sequence across visual updates', async () => {
+    const { child, pending } = setup(); child.reply(); const lease = await pending;
+    lease.pointerEvent!({ phase: 'down', point: request.point });
+    const updating = lease.update!({ ...request, point: { x: -700, y: 500 } });
+    child.reply(); await expect(updating).resolves.toBe(true);
+    lease.pointerEvent!({ phase: 'up', point: { x: -700, y: 500 } });
+    lease.inputSettled!();
+    expect(child.stdin.write.mock.calls.map(([line]) => JSON.parse(line))).toEqual([
+      request, { pointer: { sequence: 1, phase: 'down', point: request.point } },
+      { ...request, point: { x: -700, y: 500 } },
+      { pointer: { sequence: 2, phase: 'up', point: { x: -700, y: 500 } } }, { inputSettled: true },
+    ]);
+    expect(lease.shown).toBe(true); lease.dispose(); child.emit('close', 0);
+  });
+
+  it('accepts only the live helper surface at the ordinary target layer for capture', async () => {
+    const { child, pending } = setup(); child.reply(); const lease = await pending;
+    const surface = { ...window, windowId: 91, pid: child.pid,
+      bounds: { x: -810, y: 490, width: 36, height: 36 } };
+    const snapshot = lease.snapshot!();
+    expect(child.stdin.write).toHaveBeenLastCalledWith('{"snapshot":true}\n');
+    await expect(lease.snapshot!()).resolves.toBeUndefined();
+    await expect(lease.update!(request)).resolves.toBe(false);
+    await vi.advanceTimersByTimeAsync(850);
+    expect(lease.shown).toBe(true);
+    child.reply({ ok: true, shown: true, window: surface });
+    await expect(snapshot).resolves.toEqual(surface);
+    expect(lease.shown).toBe(true); lease.dispose(); child.emit('close', 0);
+  });
+
+  it('synchronizes a moved target before accepting new plans or snapshot bounds', async () => {
+    const { child, pending } = setup(); child.reply(); const lease = await pending;
+    const target = { ...window, title: 'Renamed fixture', bounds: { ...window.bounds, x: 300, y: 200 } };
+    const next = { ...request, window: target, point: { x: 500, y: 500 } };
+    const syncing = lease.syncTarget!({ ...target, applicationLabel: 'Fixture' } as AgentComputerWindowIdentity);
+    expect(child.stdin.write).toHaveBeenLastCalledWith(`${JSON.stringify({ target })}\n`);
+    await expect(lease.syncTarget!(target)).resolves.toBe(false);
+    await expect(lease.update!(next)).resolves.toBe(false);
+    await expect(lease.snapshot!()).resolves.toBeUndefined();
+    lease.pointerEvent!({ phase: 'move', point: request.point });
+    expect(child.stdin.write).toHaveBeenCalledTimes(2);
+    child.reply(); await expect(syncing).resolves.toBe(true);
+    const updating = lease.update!(next); child.reply(); await expect(updating).resolves.toBe(true);
+    const surface = { ...target, windowId: 91, pid: child.pid, bounds: { x: 490, y: 490, width: 36, height: 36 } };
+    const snapshot = lease.snapshot!(); child.reply({ ok: true, shown: true, window: surface });
+    await expect(snapshot).resolves.toEqual(surface);
+    expect(mocks.spawn).toHaveBeenCalledOnce(); expect(lease.shown).toBe(true);
+    lease.dispose(); child.emit('close', 0); await expect(lease.closed).resolves.toBe(true);
+  });
+
+  it.each(['update', 'snapshot'] as const)('does not replace an outstanding %s with target synchronization', async operation => {
+    const { child, pending } = setup(); child.reply(); const lease = await pending;
+    const outstanding = operation === 'update' ? lease.update!(request) : lease.snapshot!();
+    await expect(lease.syncTarget!(window)).resolves.toBe(false);
+    expect(child.stdin.write).toHaveBeenCalledTimes(2);
+    child.reply({ ok: true, shown: operation === 'update' });
+    await expect(outstanding).resolves.toBe(operation === 'update' ? true : undefined);
+    expect(lease.shown).toBe(true); lease.dispose(); child.emit('close', 0);
+  });
+
+  it.each(['windowId', 'pid', 'processStartedAt', 'layer'] as const)('refuses changed %s during target synchronization and waits for actual exit', async field => {
+    const { child, pending } = setup(); child.reply(); const lease = await pending;
+    await expect(lease.syncTarget!({ ...window, [field]: window[field] + 1 })).resolves.toBe(false);
+    expect(lease.shown).toBe(false); expect(child.stdin.write).toHaveBeenCalledTimes(1);
+    let closed: boolean | undefined; void lease.closed.then(value => { closed = value; });
+    await Promise.resolve(); expect(closed).toBeUndefined();
+    child.emit('exit', 0); await expect(lease.closed).resolves.toBe(true);
+  });
+
+  it.each(['abort', 'timeout', 'rejection', 'hide'] as const)('cannot revive synchronized geometry after %s', async failure => {
+    const controller = new AbortController(); const { child, pending } = setup(controller.signal);
+    child.reply(); const lease = await pending;
+    const target = { ...window, bounds: { ...window.bounds, x: 300 } };
+    const syncing = lease.syncTarget!(target);
+    if (failure === 'abort') controller.abort();
+    else if (failure === 'timeout') await vi.advanceTimersByTimeAsync(1_200);
+    else if (failure === 'rejection') child.reply({ ok: true, shown: false });
+    else lease.hide!();
+    await expect(syncing).resolves.toBe(false);
+    child.reply();
+    await expect(lease.update!({ ...request, window: target, point: { x: 500, y: 500 } })).resolves.toBe(false);
+    await expect(lease.snapshot!()).resolves.toBeUndefined(); expect(lease.shown).toBe(false);
+    child.emit('exit', 0); await expect(lease.closed).resolves.toBe(true); expectDetached(child);
+  });
+
+  it('keeps a temporarily unavailable cursor alive and accepts a later exact snapshot', async () => {
+    const { child, pending } = setup(); child.reply(); const lease = await pending;
+    const missing = lease.snapshot!(); child.reply({ ok: true, shown: false });
+    await expect(missing).resolves.toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1_300);
+    expect(lease.shown).toBe(true); expect(child.kill).not.toHaveBeenCalled();
+    const surface = { ...window, windowId: 91, pid: child.pid, bounds: { x: -810, y: 490, width: 36, height: 36 } };
+    const snapshot = lease.snapshot!(); child.reply({ ok: true, shown: true, window: surface });
+    await expect(snapshot).resolves.toEqual(surface);
+    lease.dispose(); child.emit('close', 0); expectDetached(child);
+  });
+
+  it.each([{ window }, { extra: true }, { ok: false }])('rejects a malformed unavailable snapshot: %j', async fields => {
+    const { child, pending } = setup(); child.reply(); const lease = await pending;
+    const snapshot = lease.snapshot!(); child.reply({ ok: true, shown: false, ...fields });
+    await expect(snapshot).resolves.toBeUndefined(); expect(lease.shown).toBe(false);
+    child.emit('close', 0); await expect(lease.closed).resolves.toBe(true);
+  });
+
+  it.each(['pid', 'windowId', 'layer', 'unbound-overlay', 'large', 'outside', 'start', 'extra'] as const)('closes on an invalid capture surface: %s', async invalid => {
+    const { child, pending } = setup(); child.reply(); const lease = await pending;
+    const surface: Record<string, unknown> = { ...window, windowId: 91, pid: child.pid,
+      bounds: { x: -810, y: 490, width: 36, height: 36 } };
+    if (invalid === 'pid') surface.pid = window.pid;
+    if (invalid === 'windowId') surface.windowId = window.windowId;
+    if (invalid === 'layer') surface.layer = 101;
+    if (invalid === 'unbound-overlay') surface.layer = 102;
+    if (invalid === 'large') surface.bounds = { x: -810, y: 490, width: 129, height: 36 };
+    if (invalid === 'outside') surface.bounds = { x: -1_450, y: 490, width: 36, height: 36 };
+    if (invalid === 'start') surface.processStartedAt = 0;
+    if (invalid === 'extra') surface.captureDisplay = true;
+    const snapshot = lease.snapshot!(); child.reply({ ok: true, shown: true, window: surface });
+    await expect(snapshot).resolves.toBeUndefined(); expect(lease.shown).toBe(false);
+    child.emit('close', 0); await expect(lease.closed).resolves.toBe(true);
+  });
+
+  it('bounds a missing snapshot response and resolves it on cancellation', async () => {
+    const { child, pending } = setup(); child.reply(); const lease = await pending;
+    const snapshot = lease.snapshot!();
+    await vi.advanceTimersByTimeAsync(1_200);
+    await expect(snapshot).resolves.toBeUndefined(); expect(lease.shown).toBe(false);
+    child.emit('close', 0); expectDetached(child);
+    const controller = new AbortController();
+    const next = setup(controller.signal); next.child.reply(); const cancelledLease = await next.pending;
+    const cancelled = cancelledLease.snapshot!(); controller.abort();
+    await expect(cancelled).resolves.toBeUndefined();
+    cancelledLease.pointerEvent!({ phase: 'up', point: request.point }); cancelledLease.inputSettled!();
+    expect(next.child.stdin.write).toHaveBeenCalledTimes(2); next.child.emit('close', 0);
   });
 
   it('rebuilds the exact identity and strips public discovery labels without forwarding private fields', async () => {
@@ -199,9 +462,19 @@ describe('Run-owned persistent visual window indicator adapter', () => {
     expectDetached(child);
   });
 
-  it('times out startup at one second and cannot be revived by a late ready line', async () => {
+  it.each([1_200, 1_599])('accepts delayed readiness at %ims after native registration and fade', async delay => {
     const { child, pending } = setup();
-    await vi.advanceTimersByTimeAsync(999);
+    let ready = false; void pending.then(() => { ready = true; });
+    await vi.advanceTimersByTimeAsync(delay);
+    expect(ready).toBe(false); expect(child.kill).not.toHaveBeenCalled();
+    child.reply(); const lease = await pending;
+    expect(lease.shown).toBe(true); lease.dispose(); child.emit('close', 0);
+    await expect(lease.closed).resolves.toBe(true); expectDetached(child);
+  });
+
+  it('times out startup at 1600ms and cannot be revived by a late ready line', async () => {
+    const { child, pending } = setup();
+    await vi.advanceTimersByTimeAsync(1_599);
     expect(child.kill).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
     const lease = await pending;
@@ -330,7 +603,7 @@ describe('Run-owned persistent visual window indicator adapter', () => {
     const { child, pending } = setup(); child.reply(); const lease = await pending;
     const updating = lease.update!({ ...request, point: { x: -700, y: 600 } });
     let accepted: boolean | undefined; void updating.then(value => { accepted = value; });
-    await vi.advanceTimersByTimeAsync(999);
+    await vi.advanceTimersByTimeAsync(2_999);
     expect(accepted).toBeUndefined(); expect(lease.shown).toBe(true);
     await vi.advanceTimersByTimeAsync(1);
     await expect(updating).resolves.toBe(false); expect(lease.shown).toBe(false);
@@ -342,6 +615,17 @@ describe('Run-owned persistent visual window indicator adapter', () => {
     child.emit('close', 0); child.reply();
     await expect(lease.closed).resolves.toBe(false);
     expect(lease.shown).toBe(false); expectDetached(child);
+  });
+
+  it.each([2_200, 2_999])('allows a bounded long route to ACK at %ims without prematurely terminating it', async delay => {
+    const { child, pending } = setup(); child.reply(); const lease = await pending;
+    const updating = lease.update!({ ...request, point: { x: -700, y: 600 } });
+    let accepted: boolean | undefined; void updating.then(value => { accepted = value; });
+    await vi.advanceTimersByTimeAsync(delay);
+    expect(accepted).toBeUndefined(); expect(child.kill).not.toHaveBeenCalled();
+    child.reply(); await expect(updating).resolves.toBe(true);
+    expect(lease.shown).toBe(true); lease.dispose(); child.emit('close', 0);
+    await expect(lease.closed).resolves.toBe(true); expectDetached(child);
   });
 
   it.each(['abort', 'dispose', 'exit', 'close'] as const)('settles a pending update on %s while keeping closure evidence separate', async ending => {
@@ -566,7 +850,7 @@ describe('Run-owned persistent visual window indicator adapter', () => {
   it.each(['close', 'hard-kill'] as const)('absorbs queued errors from every terminated emitter after %s without resurrecting or signalling again', async ending => {
     const controller = new AbortController(); const { child, pending } = setup(controller.signal);
     if (ending === 'close') child.emit('close', 0);
-    else await vi.advanceTimersByTimeAsync(1_600);
+    else await vi.advanceTimersByTimeAsync(2_200);
     const lease = await pending;
     expect(lease.shown).toBe(false);
     await expect(lease.closed).resolves.toBe(ending === 'close');

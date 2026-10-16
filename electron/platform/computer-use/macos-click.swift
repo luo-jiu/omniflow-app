@@ -332,7 +332,31 @@ struct ObservationScope: Decodable {
     let ancestorLevels: Int
     var valid: Bool { anchor.valid && ancestorLevels >= 0 && ancestorLevels <= 3 && ancestorLevels <= anchor.path.count }
 }
-struct WindowRequest: Decodable { let window: WindowIdentity; var scope: ObservationScope? = nil }
+struct WindowRequest: Decodable {
+    let window: WindowIdentity
+    var scope: ObservationScope? = nil
+    // Private native identity from main's visual-helper pipe, never model coordinates.
+    var pointerWindow: WindowIdentity? = nil
+}
+
+// Also validate typed callers: a persistent native session does not pass
+// through the CLI decoder before requesting another ordinary window frame.
+func validateWindowRequest(_ request: WindowRequest, allowScope: Bool = false, allowPointer: Bool = false) throws {
+    guard request.window.valid, allowScope || request.scope == nil, allowPointer || request.pointerWindow == nil,
+          request.scope?.valid != false, request.pointerWindow.map({ validCapturePointer($0, target: request.window) }) != false,
+          request.scope.map({ request.window.bounds.contains($0.anchor.bounds)
+            && $0.anchor.documentBounds.map({ !request.window.bounds.contains($0) }) != false }) != false else { throw invalidRequest() }
+}
+
+func validCapturePointer(_ pointer: WindowIdentity, target: WindowIdentity) -> Bool {
+    // A transient active/menu cursor may use level 102; application targets
+    // remain ordinary layer-zero windows. This is not a general extra-window list.
+    let normalIdentity = WindowIdentity(windowId: pointer.windowId, pid: pointer.pid,
+        processStartedAt: pointer.processStartedAt, layer: 0, bounds: pointer.bounds, title: pointer.title)
+    return normalIdentity.valid && (pointer.layer == 0 || pointer.layer == 102)
+        && pointer.pid != target.pid && pointer.windowId != target.windowId
+        && pointer.bounds.width <= 128 && pointer.bounds.height <= 128 && target.bounds.contains(pointer.bounds)
+}
 
 struct ResolvedObservationScope<Element> {
     let element: Element
@@ -563,25 +587,28 @@ func readTargetsRequest() throws -> TargetsRequest {
     return request
 }
 
-func readWindowRequest(allowScope: Bool = false) throws -> WindowRequest {
+func readWindowRequest(allowScope: Bool = false, allowPointer: Bool = false) throws -> WindowRequest {
     let (data, _) = try readInput()
-    return try parseWindowRequest(data, allowScope: allowScope)
+    return try parseWindowRequest(data, allowScope: allowScope, allowPointer: allowPointer)
 }
 
-func parseWindowRequest(_ data: Data, allowScope: Bool = false) throws -> WindowRequest {
+func parseWindowRequest(_ data: Data, allowScope: Bool = false, allowPointer: Bool = false) throws -> WindowRequest {
     let (_, object) = try parseInput(data)
-    _ = try fields(object, required: ["window"], optional: allowScope ? ["scope"] : [])
+    _ = try fields(object, required: ["window"], optional: Set((allowScope ? ["scope"] : []) + (allowPointer ? ["pointerWindow"] : [])))
     let window = try fields(object["window"], required: ["windowId", "pid", "processStartedAt", "layer", "bounds"], optional: ["title"])
     if let title = window["title"], !(title is String) { throw invalidRequest() }
     try validateRectFields(window["bounds"])
+    if let raw = object["pointerWindow"] {
+        let pointer = try fields(raw, required: ["windowId", "pid", "processStartedAt", "layer", "bounds"], optional: ["title"])
+        if let title = pointer["title"], !(title is String) { throw invalidRequest() }
+        try validateRectFields(pointer["bounds"])
+    }
     if let raw = object["scope"] {
         let scope = try fields(raw, required: ["anchor", "ancestorLevels"])
         try validateCandidateFields(scope["anchor"])
     }
-    guard let request = try? JSONDecoder().decode(WindowRequest.self, from: data), request.window.valid,
-          request.scope?.valid != false,
-          request.scope.map({ request.window.bounds.contains($0.anchor.bounds)
-            && $0.anchor.documentBounds.map({ !request.window.bounds.contains($0) }) != false }) != false else { throw invalidRequest() }
+    guard let request = try? JSONDecoder().decode(WindowRequest.self, from: data) else { throw invalidRequest() }
+    try validateWindowRequest(request, allowScope: allowScope, allowPointer: allowPointer)
     return request
 }
 
@@ -821,6 +848,75 @@ func axElements(_ element: AXUIElement, attribute: String, limit: Int, requireCo
     }
 }
 
+struct AXWindowNumberIdentity: Equatable {
+    let pid: Int32
+    let windowId: UInt32
+}
+
+// The rectangle is a freshness check, never a substitute for the WindowServer ID.
+// Unidentified siblings do not invalidate an independently confirmed target.
+// They never become candidates through title/geometry; known duplicates reject.
+func selectExactAXWindow<Element>(_ elements: [Element], expected: WindowIdentity,
+                                  identity: (Element) -> AXWindowNumberIdentity?,
+                                  bounds: (Element) -> Rect?,
+                                  unidentified: () -> Void = {}) -> Element? {
+    guard expected.valid, !elements.isEmpty, elements.count <= 32 else { return nil }
+    let expectedIdentity = AXWindowNumberIdentity(pid: expected.pid, windowId: expected.windowId)
+    var match: Element?
+    for element in elements {
+        guard let current = identity(element), current.pid == expected.pid, current.windowId > 0 else {
+            unidentified(); continue
+        }
+        if current == expectedIdentity {
+            guard match == nil else { return nil }
+            match = element
+        }
+    }
+    guard let match = match, let currentBounds = bounds(match), currentBounds.valid,
+          expected.bounds.matchesAX(currentBounds), identity(match) == expectedIdentity else { return nil }
+    return match
+}
+
+private typealias AXWindowNumberFunction = @convention(c) (AXUIElement, UnsafeMutablePointer<CGWindowID>) -> AXError
+private let axWindowNumberFunction: AXWindowNumberFunction? = {
+    guard let symbol = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "_AXUIElementGetWindow") else { return nil }
+    return unsafeBitCast(symbol, to: AXWindowNumberFunction.self)
+}()
+
+enum AXWindowIdentityReadFailure: String { case deadline, symbol, process, role, number }
+private let axWindowIdentityLogger = Logger(subsystem: "com.omniflow.agent.computer-use", category: "window-identity")
+
+func axWindowNumberIdentity(_ element: AXUIElement, budget: ScanBudget? = nil,
+                            readFailure: (AXWindowIdentityReadFailure, Int32) -> Void = { _, _ in }) -> AXWindowNumberIdentity? {
+    func failed(_ reason: AXWindowIdentityReadFailure, _ error: AXError? = nil) -> AXWindowNumberIdentity? {
+        if let error = error { budget?.noteRequiredReadFailure(error) } else { budget?.truncated = true }
+        readFailure(reason, error?.rawValue ?? 0)
+        return nil
+    }
+    guard budget?.ready() != false else { return failed(.deadline) }
+    guard let getWindow = axWindowNumberFunction else { return failed(.symbol) }
+    var pid: pid_t = 0
+    let pidError = AXUIElementGetPid(element, &pid)
+    guard pidError == .success, pid > 0 else { return failed(.process, pidError) }
+    let (roleError, rawRole) = axAttribute(element, kAXRoleAttribute, budget: budget)
+    guard roleError == .success, rawRole as? String == kAXWindowRole else {
+        return failed(.role, roleError)
+    }
+    guard budget?.ready() != false else { return failed(.deadline) }
+    var windowId: CGWindowID = 0
+    let error = getWindow(element, &windowId)
+    guard error == .success, windowId > 0 else { return failed(.number, error) }
+    guard budget?.ready() != false else { return failed(.deadline) }
+    return AXWindowNumberIdentity(pid: pid, windowId: windowId)
+}
+
+func axWindowBindingMatches(_ element: AXUIElement, expected: WindowIdentity, budget: ScanBudget? = nil) -> Bool {
+    let identity = AXWindowNumberIdentity(pid: expected.pid, windowId: expected.windowId)
+    guard axWindowNumberIdentity(element, budget: budget) == identity,
+          axRect(element, budget: budget).map({ expected.bounds.matchesAX($0) }) == true else { return false }
+    return axWindowNumberIdentity(element, budget: budget) == identity
+}
+
 func axWindow(_ window: WindowIdentity, budget: ScanBudget? = nil) -> AXUIElement? {
     let app = AXUIElementCreateApplication(window.pid)
     // More than 32 windows cannot establish uniqueness with a bounded read.
@@ -830,12 +926,23 @@ func axWindow(_ window: WindowIdentity, budget: ScanBudget? = nil) -> AXUIElemen
     budget?.note(error)
     guard error == .success, count >= 0, count <= 32 else { if count > 32 { budget?.truncated = true }; return nil }
     guard let windows = axElements(app, attribute: kAXWindowsAttribute, limit: 32, requireComplete: true, budget: budget) else { return nil }
-    let matching = windows.filter { element in
-        var pid: pid_t = 0
-        return AXUIElementGetPid(element, &pid) == .success && pid == window.pid
-            && axRect(element, budget: budget).map { window.bounds.matchesAX($0) } == true
+    var unidentifiedCount = 0
+    var readFailureCount = 0
+    var firstReadFailure = "none"
+    var firstReadError: Int32 = 0
+    let matched = selectExactAXWindow(windows, expected: window,
+        identity: { axWindowNumberIdentity($0, budget: budget, readFailure: { reason, error in
+            readFailureCount += 1
+            if readFailureCount == 1 { firstReadFailure = reason.rawValue; firstReadError = error }
+        }) }, bounds: { axRect($0, budget: budget) },
+        unidentified: { unidentifiedCount += 1; budget?.truncated = true })
+    if matched == nil { budget?.truncated = true }
+    if unidentifiedCount > 0 || matched == nil {
+        // Aggregate failure stages only: no PID, window ID, titles, coordinates
+        // or AX content. One event per bounded (at most 32-window) selection.
+        axWindowIdentityLogger.notice("selection windows=\(windows.count, privacy: .public) unidentified=\(unidentifiedCount, privacy: .public) readFailures=\(readFailureCount, privacy: .public) firstReadFailure=\(firstReadFailure, privacy: .public) firstAXError=\(firstReadError, privacy: .public) matched=\(matched != nil, privacy: .public)")
     }
-    return matching.count == 1 ? matching[0] : nil
+    return matched
 }
 
 func candidateInfo(_ element: AXUIElement, path: [Int], window: WindowIdentity, budget: ScanBudget? = nil,
@@ -1260,10 +1367,6 @@ func cgWindows(display: Rect? = nil, budget: ScanBudget? = nil) throws -> [Windo
     return windows
 }
 
-func ambiguousCGWindow(_ window: WindowIdentity, windows: [WindowIdentity]) -> Bool {
-    windows.filter { $0.pid == window.pid && $0.layer == 0 && $0.bounds == window.bounds }.count != 1
-}
-
 func targets(_ request: TargetsRequest) throws {
     try requireTrust()
     _ = AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), 0.15)
@@ -1272,7 +1375,7 @@ func targets(_ request: TargetsRequest) throws {
     var targets: [[String: Any]] = []
     for window in windows {
         var candidates: [Candidate] = []
-        if window.valid, !ambiguousCGWindow(window, windows: windows), budget.ready(), let element = axWindow(window, budget: budget) {
+        if window.valid, budget.ready(), let element = axWindow(window, budget: budget) {
             scanCandidates(element, path: [], window: window, budget: budget, result: &candidates)
         }
         var value = window.json
@@ -1287,8 +1390,11 @@ func revalidateWindow(_ expected: WindowIdentity, requireUniqueAXWindow: Bool = 
     let windows = try cgWindows()
     guard let actual = windows.first(where: { $0.windowId == expected.windowId }), actual.pid == expected.pid,
           actual.layer == expected.layer, actual.bounds == expected.bounds, actual.title == expected.title,
-          actual.processStartedAt == expected.processStartedAt, (!requireUniqueAXWindow || !ambiguousCGWindow(actual, windows: windows)) else {
+          actual.processStartedAt == expected.processStartedAt else {
         throw HelperError(code: "target_changed", message: "The target window identity changed.")
+    }
+    if requireUniqueAXWindow, axWindow(actual) == nil {
+        throw HelperError(code: "target_changed", message: "Cannot bind the exact AX window ID.")
     }
 }
 
@@ -1390,12 +1496,13 @@ func windowTargets(_ request: WindowRequest) throws {
     var candidates: [Candidate] = []
     // Only the approved window's tree is traversed. Other applications' z-order
     // does not occlude a desktop-independent window screenshot or its AX actions.
-    let windows = try cgWindows()
     var matchedWindow: AXUIElement?
+    var matchedAXRoot: AXUIElement?
     var scopePath: [Int]?
     var summaryNativeContext = true
-    if !ambiguousCGWindow(window, windows: windows), let element = axWindow(window, budget: budget) {
+    if let element = axWindow(window, budget: budget) {
         axWindowMatched = true
+        matchedAXRoot = element
         if let scope = request.scope {
             guard let region = nativeObservationScope(element, scope: scope, window: window, budget: budget) else {
                 throw HelperError(code: "target_changed", message: "The observation anchor or scope changed.")
@@ -1425,6 +1532,9 @@ func windowTargets(_ request: WindowRequest) throws {
     else { tree.truncated = true }
     receipt["axTree"] = tree.text
     receipt["axTreeTruncated"] = tree.truncated
+    if let root = matchedAXRoot, !axWindowBindingMatches(root, expected: window) {
+        throw HelperError(code: "target_changed", message: "The observed AX window ID changed.")
+    }
     try revalidateWindow(window, requireUniqueAXWindow: request.scope != nil)
     emit(receipt)
 }
@@ -1444,8 +1554,8 @@ func waitForValue<T>(seconds: Double, _ start: (@escaping (Result<T, HelperError
 }
 
 @available(macOS 14.0, *)
-func captureWindowImage(_ expected: WindowIdentity) throws -> CGImage {
-    let content: SCShareableContent = try waitForValue(seconds: 4) { complete in
+func windowCaptureContent(timeout: Double = 4) throws -> SCShareableContent {
+    return try waitForValue(seconds: timeout) { complete in
         SCShareableContent.getExcludingDesktopWindows(true, onScreenWindowsOnly: true) { content, error in
             guard error == nil, let content = content else {
                 complete(.failure(HelperError(code: "window_capture_failed", message: "Cannot resolve the approved capture window.")))
@@ -1454,6 +1564,10 @@ func captureWindowImage(_ expected: WindowIdentity) throws -> CGImage {
             complete(.success(content))
         }
     }
+}
+
+@available(macOS 14.0, *)
+func captureWindowSource(_ expected: WindowIdentity, content: SCShareableContent) throws -> SCWindow {
     let matching = content.windows.filter { $0.windowID == expected.windowId }
     guard matching.count == 1, let selected = matching.first, selected.owningApplication?.processID == expected.pid,
           selected.windowLayer == expected.layer, selected.isOnScreen,
@@ -1461,6 +1575,107 @@ func captureWindowImage(_ expected: WindowIdentity) throws -> CGImage {
         throw HelperError(code: "target_changed", message: "The approved ScreenCaptureKit window identity changed.")
     }
     try revalidateWindow(expected, requireUniqueAXWindow: false)
+    return selected
+}
+
+func windowCapturePixelSize(bounds: Rect, pointPixelScale: Double) -> (width: Int, height: Int)? {
+    guard bounds.valid, pointPixelScale.isFinite, pointPixelScale > 0 else { return nil }
+    let scale = min(pointPixelScale, 2048 / max(bounds.width, bounds.height))
+    return (max(1, Int((bounds.width * scale).rounded())), max(1, Int((bounds.height * scale).rounded())))
+}
+
+struct WindowCaptureDisplay: Equatable {
+    let displayId: UInt32
+    let bounds: Rect
+}
+
+struct WindowCaptureIncludedPlan {
+    let display: WindowCaptureDisplay
+    let windowIDs: [UInt32]
+    let sourceRect: CGRect
+    let width: Int
+    let height: Int
+}
+
+// A display-bound whitelist can preserve a complete target only when that target
+// is contained by one unambiguous display. Never crop a partially offscreen or
+// cross-display target to make this optimization fit.
+func windowCaptureIncludedPlan(target: WindowIdentity, pointer: WindowIdentity,
+                               displays: [WindowCaptureDisplay], pointPixelScale: Double) -> WindowCaptureIncludedPlan? {
+    guard target.valid, validCapturePointer(pointer, target: target),
+          let size = windowCapturePixelSize(bounds: target.bounds, pointPixelScale: pointPixelScale) else { return nil }
+    let matches = displays.filter { $0.displayId > 0 && $0.bounds.valid && $0.bounds.contains(target.bounds) }
+    guard matches.count == 1, let display = matches.first,
+          displays.filter({ $0.displayId == display.displayId }).count == 1 else { return nil }
+    return WindowCaptureIncludedPlan(display: display, windowIDs: [target.windowId, pointer.windowId],
+        sourceRect: target.bounds.cg.offsetBy(dx: -display.bounds.x, dy: -display.bounds.y),
+        width: size.width, height: size.height)
+}
+
+@available(macOS 14.2, *)
+func includedWindowCaptureConfiguration(_ plan: WindowCaptureIncludedPlan) -> SCStreamConfiguration {
+    let configuration = SCStreamConfiguration()
+    configuration.sourceRect = plan.sourceRect
+    configuration.width = plan.width
+    configuration.height = plan.height
+    configuration.scalesToFit = true
+    configuration.includeChildWindows = false
+    configuration.ignoreShadowsDisplay = true
+    configuration.ignoreGlobalClipDisplay = true
+    configuration.shouldBeOpaque = false
+    configuration.showsCursor = false
+    configuration.capturesAudio = false
+    if #available(macOS 15.0, *) {
+        configuration.captureMicrophone = false
+        configuration.showMouseClicks = false
+    }
+    return configuration
+}
+
+func revalidateCaptureDisplay(_ expected: WindowCaptureDisplay) throws {
+    guard CGDisplayIsOnline(expected.displayId) != 0, CGDisplayBounds(expected.displayId) == expected.bounds.cg else {
+        throw HelperError(code: "target_changed", message: "The approved capture display geometry changed.")
+    }
+}
+
+@available(macOS 14.2, *)
+func captureIncludedWindowImage(target: WindowIdentity, pointer: WindowIdentity, content: SCShareableContent,
+                                plan: WindowCaptureIncludedPlan, timeout: Double) throws -> CGImage {
+    guard plan.windowIDs == [target.windowId, pointer.windowId] else { throw invalidRequest() }
+    let targetSource = try captureWindowSource(target, content: content)
+    let pointerSource = try captureWindowSource(pointer, content: content)
+    let displays = content.displays.filter { $0.displayID == plan.display.displayId && $0.frame == plan.display.bounds.cg }
+    guard displays.count == 1, let display = displays.first else { throw invalidRequest() }
+    try revalidateCaptureDisplay(plan.display)
+    // Only these two verified surfaces participate. Desktop, Dock, menu bar,
+    // unrelated windows and implicit child windows are not capture inputs.
+    let filter = SCContentFilter(display: display, including: [targetSource, pointerSource])
+    filter.includeMenuBar = false
+    if #available(macOS 15.2, *) {
+        let included = filter.includedWindows.map { $0.windowID }
+        guard included.count == 2, Set(included) == Set(plan.windowIDs) else { throw invalidRequest() }
+    }
+    let configuration = includedWindowCaptureConfiguration(plan)
+    let transparentBackground = CGColor(gray: 0, alpha: 0)
+    configuration.backgroundColor = transparentBackground
+    return try waitForValue(seconds: timeout) { complete in
+        SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration) { image, error in
+            withExtendedLifetime(transparentBackground) {
+                guard error == nil, let image = image, image.width == plan.width, image.height == plan.height else {
+                    complete(.failure(HelperError(code: "window_capture_failed", message: "Cannot capture the approved window whitelist.")))
+                    return
+                }
+                complete(.success(image))
+            }
+        }
+    }
+}
+
+@available(macOS 14.0, *)
+func captureWindowImage(_ expected: WindowIdentity, content: SCShareableContent,
+                        pixelWidth: Int? = nil, pixelHeight: Int? = nil, timeout: Double = 8,
+                        transparent: Bool = false) throws -> CGImage {
+    let selected = try captureWindowSource(expected, content: content)
     let filter = SCContentFilter(desktopIndependentWindow: selected)
     // Independent windows default to their entire surface, with no display crop.
     guard abs(filter.contentRect.width - expected.bounds.width) <= 0.5,
@@ -1468,42 +1683,228 @@ func captureWindowImage(_ expected: WindowIdentity) throws -> CGImage {
           filter.pointPixelScale.isFinite, filter.pointPixelScale > 0 else {
         throw HelperError(code: "window_capture_failed", message: "Cannot map the full approved window surface.")
     }
-    let scale = min(Double(filter.pointPixelScale), 2048 / max(expected.bounds.width, expected.bounds.height))
+    guard let size = windowCapturePixelSize(bounds: expected.bounds, pointPixelScale: Double(filter.pointPixelScale)) else { throw invalidRequest() }
     let configuration = SCStreamConfiguration()
-    configuration.width = max(1, Int((expected.bounds.width * scale).rounded()))
-    configuration.height = max(1, Int((expected.bounds.height * scale).rounded()))
+    configuration.width = pixelWidth ?? size.width
+    configuration.height = pixelHeight ?? size.height
     configuration.scalesToFit = true
     configuration.showsCursor = false
     configuration.capturesAudio = false
+    if #available(macOS 15.0, *) {
+        configuration.captureMicrophone = false
+        configuration.showMouseClicks = false
+    }
     configuration.ignoreShadowsSingleWindow = true
     configuration.ignoreGlobalClipSingleWindow = true
+    let transparentBackground = CGColor(gray: 0, alpha: 0)
+    if transparent {
+        configuration.backgroundColor = transparentBackground
+        configuration.shouldBeOpaque = false
+    }
     if #available(macOS 14.2, *) { configuration.includeChildWindows = false }
-    return try waitForValue(seconds: 8) { complete in
+    return try waitForValue(seconds: timeout) { complete in
         SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration) { image, error in
-            guard error == nil, let image = image, image.width == configuration.width, image.height == configuration.height else {
-                complete(.failure(HelperError(code: "window_capture_failed", message: "Cannot capture the full approved window surface.")))
-                return
+            // SCStreamConfiguration.backgroundColor is an unsafe, non-retaining
+            // reference. Keep it alive through the asynchronous native callback.
+            withExtendedLifetime(transparentBackground) {
+                guard error == nil, let image = image, image.width == configuration.width, image.height == configuration.height else {
+                    complete(.failure(HelperError(code: "window_capture_failed", message: "Cannot capture the full approved window surface.")))
+                    return
+                }
+                complete(.success(image))
             }
-            complete(.success(image))
         }
     }
 }
 
-func windowCapture(_ request: WindowRequest) throws {
+// Pure geometry/composition: reuse native cursor pixels, never reconstruct its
+// path, theme, hotspot or size in the renderer. Global window bounds use a
+// downward Y axis, while the bitmap drawing context uses upward Y coordinates.
+func windowCapturePointerPlacement(target: Rect, pointer: Rect, width: Int, height: Int) -> CGRect? {
+    guard target.valid, pointer.valid, target.contains(pointer), pointer.width <= 128, pointer.height <= 128,
+          width > 0, height > 0, width <= 2048, height <= 2048 else { return nil }
+    let scaleX = Double(width) / target.width, scaleY = Double(height) / target.height
+    return CGRect(x: (pointer.x - target.x) * scaleX,
+        y: Double(height) - (pointer.y - target.y + pointer.height) * scaleY,
+        width: pointer.width * scaleX, height: pointer.height * scaleY)
+}
+
+func windowCapturePointerHasTransparency(_ image: CGImage) -> Bool {
+    guard image.width > 0, image.height > 0, image.width <= 512, image.height <= 512,
+          [.first, .last, .premultipliedFirst, .premultipliedLast].contains(image.alphaInfo),
+          let colorSpace = CGColorSpace(name: CGColorSpace.sRGB),
+          let context = CGContext(data: nil, width: image.width, height: image.height, bitsPerComponent: 8,
+            bytesPerRow: image.width * 4, space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue) else { return false }
+    context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+    guard let bytes = context.data?.assumingMemoryBound(to: UInt8.self) else { return false }
+    var transparent = false, visible = false
+    for index in 0..<(image.width * image.height) {
+        let alpha = bytes[index * 4 + 3]
+        transparent = transparent || alpha < 255
+        visible = visible || alpha > 0
+    }
+    return transparent && visible
+}
+
+func windowCaptureComposite(_ target: CGImage, targetBounds: Rect, pointer: CGImage, pointerBounds: Rect) -> CGImage? {
+    guard let destination = windowCapturePointerPlacement(target: targetBounds, pointer: pointerBounds,
+        width: target.width, height: target.height), windowCapturePointerHasTransparency(pointer),
+          let colorSpace = target.colorSpace, colorSpace.model == .rgb,
+          let context = CGContext(data: nil, width: target.width, height: target.height, bitsPerComponent: 8,
+            bytesPerRow: target.width * 4, space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue) else { return nil }
+    context.draw(target, in: CGRect(x: 0, y: 0, width: target.width, height: target.height))
+    context.interpolationQuality = .high
+    context.draw(pointer, in: destination)
+    return context.makeImage()
+}
+
+func revalidateCapturePointer(_ pointer: WindowIdentity, target: WindowIdentity,
+                              parentPID: Int32, parentStartedAt: Int64) throws {
+    guard validCapturePointer(pointer, target: target), parentPID > 1, getppid() == parentPID,
+          processStart(parentPID) == parentStartedAt else { throw invalidRequest() }
+    var info = proc_bsdinfo()
+    let size = Int32(MemoryLayout<proc_bsdinfo>.size)
+    guard proc_pidinfo(pointer.pid, PROC_PIDTBSDINFO, 0, &info, size) == size,
+          info.pbi_pid == UInt32(pointer.pid), info.pbi_ppid == UInt32(parentPID),
+          processStart(pointer.pid) == pointer.processStartedAt else { throw invalidRequest() }
+    try revalidateWindow(pointer, requireUniqueAXWindow: false)
+}
+
+enum WindowCaptureMethod: String {
+    case includedWindows = "included-windows"
+    case compositedWindows = "composited-windows"
+    case independentWindow = "independent-window"
+}
+
+func windowCaptureAllowsIndependentRetry(_ error: HelperError) -> Bool {
+    // A transient capture failure may retry exact surfaces. An identity failure
+    // must survive even when the window briefly returns to its previous state.
+    return !error.unknown && (error.code == "window_capture_failed" || error.code == "window_capture_timeout")
+}
+
+func windowCaptureReceipt(window: WindowIdentity, png: Data, width: Int, height: Int,
+                          pointerRequested: Bool, method: WindowCaptureMethod) throws -> [String: Any] {
+    guard pointerRequested || method == .independentWindow else { throw invalidRequest() }
+    var receipt: [String: Any] = ["ok": true, "window": window.json, "pngBase64": png.base64EncodedString(), "width": width, "height": height]
+    if pointerRequested {
+        receipt["cursorIncluded"] = method != .independentWindow
+        receipt["captureMethod"] = method.rawValue
+    }
+    return receipt
+}
+
+func windowCaptureResult(_ request: WindowRequest) throws -> [String: Any] {
+    try validateWindowRequest(request, allowPointer: true)
     guard #available(macOS 14.0, *) else {
         throw HelperError(code: "window_capture_unavailable", message: "Independent window screenshots require macOS 14 or later.")
     }
     guard CGPreflightScreenCaptureAccess() else {
         throw HelperError(code: "screen_permission_denied", message: "Allow OmniFlow in macOS Screen Recording settings.", exitCode: 77)
     }
+    // Share one absolute budget across native whitelist capture and any safe
+    // fallback. Main's unchanged 15-second deadline retains encoding/IPC room.
+    let captureDeadline = DispatchTime.now().uptimeNanoseconds + 13_000_000_000
+    func remaining(_ maximum: Double, reserve: Double = 0.25) throws -> Double {
+        let current = DispatchTime.now().uptimeNanoseconds
+        guard current < captureDeadline else { throw HelperError(code: "window_capture_failed", message: "The screenshot deadline expired.") }
+        let seconds = Double(captureDeadline - current) / 1_000_000_000 - reserve
+        guard seconds > 0.05 else { throw HelperError(code: "window_capture_failed", message: "The screenshot deadline expired.") }
+        return min(maximum, seconds)
+    }
     let window = request.window
     try revalidateWindow(window, requireUniqueAXWindow: false)
-    let image = try captureWindowImage(window)
-    try revalidateWindow(window, requireUniqueAXWindow: false)
-    guard let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]), png.count <= 8 * 1024 * 1024 else {
+    var content = try windowCaptureContent(timeout: remaining(4))
+    var image: CGImage?
+    var independentBase: CGImage?
+    var method = WindowCaptureMethod.independentWindow
+    if #available(macOS 14.2, *), let pointer = request.pointerWindow {
+        let parentPID = getppid()
+        if let parentStartedAt = processStart(parentPID),
+           (try? revalidateCapturePointer(pointer, target: window, parentPID: parentPID, parentStartedAt: parentStartedAt)) != nil {
+            let targetSource = try captureWindowSource(window, content: content)
+            let targetFilter = SCContentFilter(desktopIndependentWindow: targetSource)
+            let displays = content.displays.map { WindowCaptureDisplay(displayId: $0.displayID,
+                bounds: Rect(x: $0.frame.minX, y: $0.frame.minY, width: $0.frame.width, height: $0.frame.height)) }
+            if let plan = windowCaptureIncludedPlan(target: window, pointer: pointer, displays: displays,
+                pointPixelScale: Double(targetFilter.pointPixelScale)) {
+                do {
+                    image = try captureIncludedWindowImage(target: window, pointer: pointer, content: content,
+                        plan: plan, timeout: remaining(3, reserve: 1.25))
+                } catch let error as HelperError {
+                    guard windowCaptureAllowsIndependentRetry(error) else { throw error }
+                    // No valid atomic image was accepted. Retry only while the
+                    // exact original pair still exists and the shared budget
+                    // permits a fresh, independently filtered capture.
+                    try revalidateWindow(window, requireUniqueAXWindow: false)
+                    try revalidateCapturePointer(pointer, target: window, parentPID: parentPID, parentStartedAt: parentStartedAt)
+                    content = try windowCaptureContent(timeout: remaining(2, reserve: 1))
+                    _ = try captureWindowSource(window, content: content)
+                    _ = try captureWindowSource(pointer, content: content)
+                }
+                if image != nil {
+                    // Keep post-success identity failures outside the retry
+                    // catch. A successful target frame must never be recaptured
+                    // to manufacture a second base or mask a changed target.
+                    try revalidateWindow(window, requireUniqueAXWindow: false)
+                    try revalidateCapturePointer(pointer, target: window, parentPID: parentPID, parentStartedAt: parentStartedAt)
+                    try revalidateCaptureDisplay(plan.display)
+                    method = .includedWindows
+                }
+            }
+        }
+    }
+    if image == nil {
+        let base = try captureWindowImage(window, content: content, timeout: remaining(8))
+        try revalidateWindow(window, requireUniqueAXWindow: false)
+        image = base
+        independentBase = base
+        if let pointer = request.pointerWindow {
+            // Compatibility for cross-display/offscreen targets: capture only
+            // the target and our bounded transparent sibling surface. A cursor
+            // failure preserves this valid base without widening capture scope.
+            do {
+                let pointerTimeout = try remaining(1.5, reserve: 0.5)
+                let parentPID = getppid()
+                guard let parentStartedAt = processStart(parentPID) else { throw invalidRequest() }
+                try revalidateCapturePointer(pointer, target: window, parentPID: parentPID, parentStartedAt: parentStartedAt)
+                guard let placement = windowCapturePointerPlacement(target: window.bounds, pointer: pointer.bounds,
+                    width: base.width, height: base.height) else { throw invalidRequest() }
+                let pointerWidth = max(1, Int(ceil(placement.width)))
+                let pointerHeight = max(1, Int(ceil(placement.height)))
+                guard pointerWidth <= 512, pointerHeight <= 512 else { throw invalidRequest() }
+                let pointerImage = try captureWindowImage(pointer, content: content, pixelWidth: pointerWidth,
+                    pixelHeight: pointerHeight, timeout: pointerTimeout, transparent: true)
+                try revalidateCapturePointer(pointer, target: window, parentPID: parentPID, parentStartedAt: parentStartedAt)
+                if DispatchTime.now().uptimeNanoseconds < captureDeadline,
+                   let combined = windowCaptureComposite(base, targetBounds: window.bounds,
+                    pointer: pointerImage, pointerBounds: pointer.bounds) {
+                    image = combined
+                    method = .compositedWindows
+                }
+            } catch { /* Preserve the independently validated target image. */ }
+        }
+    }
+    guard var canonicalImage = image else { throw invalidRequest() }
+    var png = NSBitmapImageRep(cgImage: canonicalImage).representation(using: .png, properties: [:])
+    if method == .compositedWindows, (png.map { $0.count > 8 * 1024 * 1024 } ?? true), let base = independentBase {
+        // The optional pointer must not invalidate an already captured base.
+        // Re-encode those retained pixels; never acquire the target again.
+        canonicalImage = base
+        method = .independentWindow
+        png = NSBitmapImageRep(cgImage: base).representation(using: .png, properties: [:])
+    }
+    guard let png = png, png.count <= 8 * 1024 * 1024 else {
         throw HelperError(code: "window_capture_failed", message: "The approved screenshot exceeds the PNG budget.")
     }
-    emit(["ok": true, "window": window.json, "pngBase64": png.base64EncodedString(), "width": image.width, "height": image.height], maximumBytes: 12 * 1024 * 1024)
+    try revalidateWindow(window, requireUniqueAXWindow: false)
+    return try windowCaptureReceipt(window: window, png: png, width: canonicalImage.width, height: canonicalImage.height,
+        pointerRequested: request.pointerWindow != nil, method: method)
+}
+
+func windowCapture(_ request: WindowRequest) throws {
+    emit(try windowCaptureResult(request), maximumBytes: 12 * 1024 * 1024)
 }
 
 let clickLogger = Logger(subsystem: "com.omniflow.agent.computer-use", category: "click")
@@ -1517,7 +1918,7 @@ func click(_ request: ClickRequest) throws {
     _ = AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), 0.15)
     let expected = request.target.window
     try revalidateWindow(expected)
-    guard let root = axWindow(expected) else { throw HelperError(code: "target_changed", message: "The public AX window match is not unique.") }
+    guard let root = axWindow(expected) else { throw HelperError(code: "target_changed", message: "Cannot bind the exact AX window ID.") }
     guard let element = resolveCandidatePath(root, path: request.target.candidate.path, readChildren: { parent, prefixCount in
         axElements(parent, attribute: kAXChildrenAttribute, limit: prefixCount, requireComplete: false)
     }) else { throw HelperError(code: "target_changed", message: "The AX element path changed.") }
@@ -1529,6 +1930,9 @@ func click(_ request: ClickRequest) throws {
         throw HelperError(code: "target_changed", message: "The AX element identity or action changed.")
     }
     try revalidateWindow(expected)
+    guard axWindowBindingMatches(root, expected: expected) else {
+        throw HelperError(code: "target_changed", message: "The action AX window ID changed.")
+    }
     _ = AXUIElementSetMessagingTimeout(element, 0.75)
     let frontmostBefore = NSWorkspace.shared.frontmostApplication?.processIdentifier
     let pointerBefore = NSEvent.mouseLocation

@@ -87,6 +87,16 @@ describe('Agent prompt assembler', () => {
     expect(prompt).toContain('发出 Tool 调用的同一轮');
     expect(prompt).toContain('不要为了过程说明额外空转一轮');
     expect(prompt).toContain('普通、连续的读取或查询不需要逐项播报');
+    expect(prompt).toContain('任务较长或持续多步骤执行时');
+    expect(prompt).toContain('一两句简短公开过程说明');
+    expect(prompt).toContain('已确认的进展和下一步');
+    expect(prompt).toContain('可能让用户久等的操作前');
+    expect(prompt).toContain('没有新进展时继续实际工作');
+    expect(prompt).toContain('不按固定时间轮播套话');
+    expect(prompt).toContain('过程说明与接下来的 Tool 调用在同一轮模型响应中输出');
+    expect(prompt).toContain('不要为生成进度说明发起额外模型请求');
+    expect(prompt).toContain('增加无 Tool 的空转轮次');
+    expect(prompt).toContain('把过程说明当作已执行结果');
     expect(prompt).toContain('Tool 失败后准备重试、改换路径');
     expect(prompt).toContain('不要展示详细内部推理或隐藏思维链');
     expect(prompt).toContain('不要预测尚未发生的成功');

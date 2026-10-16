@@ -20,6 +20,7 @@ const OPERATION_ICONS: Record<string, OutlineIconName> = {
   'computer.setText': 'edit',
   'computer.scroll': 'move',
   'computer.input': 'move',
+  'computer.menu': 'move',
   'file.rename': 'edit',
   'tag.update': 'tags',
   'file.move': 'move',
@@ -38,7 +39,7 @@ const OPERATION_ICONS: Record<string, OutlineIconName> = {
 };
 
 const IconSlot = styled.span`
-  width: 20px;
+  width: 16px;
   height: 20px;
   flex: none;
   display: inline-flex;

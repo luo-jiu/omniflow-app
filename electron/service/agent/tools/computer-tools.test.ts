@@ -1,8 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createAgentToolRegistry, type AgentToolExecutionContext } from '../agent-tool-registry';
+import { createAgentToolRegistry, type AgentToolExecutionContext, type AgentToolMainPreparationContext } from '../agent-tool-registry';
 import { getBuiltInAgentComputerTools, isBuiltinComputerHidePointerTool } from './computer-tools';
 
-vi.mock('../computer/agent-computer-service-runtime', () => ({ agentComputerRuntime: {} }));
+const runtime = vi.hoisted(() => ({
+  prepareWindows: vi.fn(), prepareObserve: vi.fn(), prepareClick: vi.fn(),
+  prepareSetText: vi.fn(), prepareScroll: vi.fn(), prepareInput: vi.fn(), prepareMenu: vi.fn(), menu: vi.fn(),
+}));
+vi.mock('../computer/agent-computer-service-runtime', () => ({ agentComputerRuntime: runtime }));
 
 function snapshot(platform = 'darwin') {
   const descriptor = Object.getOwnPropertyDescriptor(process, 'platform')!;
@@ -13,17 +17,27 @@ function snapshot(platform = 'darwin') {
 }
 const observationId = 'eaf4604e-5779-4a3c-8c3d-3eaf45c9aa68';
 const elementId = '43b39553-9a74-4ba1-a976-1a6738397275';
+const titledToolCases = [
+  { name: 'computer.windows', prepare: 'prepareWindows', input: { query: '文本编辑' } },
+  { name: 'computer.observe', prepare: 'prepareObserve', input: { mode: 'ax', focus: { observationId, elementId } } },
+  { name: 'computer.click', prepare: 'prepareClick', input: { observationId, elementId } },
+  { name: 'computer.setText', prepare: 'prepareSetText', input: { observationId, elementId, mode: 'replace', text: '测试正文' } },
+  { name: 'computer.scroll', prepare: 'prepareScroll', input: { observationId, elementId, direction: 'down', unit: 'page' } },
+  { name: 'computer.input', prepare: 'prepareInput', input: { observationId, operation: 'rightClick', point: { x: 10, y: 20 } } },
+  { name: 'computer.menu', prepare: 'prepareMenu', input: { observationId, elementId, operation: 'open' } },
+] as const;
 
 describe('built-in computer input contracts', () => {
   it('registers discovery and control only on macOS', () => {
-    expect(snapshot().list().map(tool => tool.name)).toEqual(['computer.windows', 'computer.observe', 'computer.click', 'computer.setText', 'computer.scroll', 'computer.input', 'computer.hidePointer']);
+    expect(snapshot().list().map(tool => tool.name)).toEqual(['computer.windows', 'computer.observe', 'computer.click', 'computer.setText', 'computer.scroll', 'computer.input', 'computer.menu', 'computer.hidePointer']);
     expect(snapshot('win32').list()).toEqual([]);
   });
   it('only accepts empty pointer cleanup input and requires the current-Run main closure', async () => {
     const tools = snapshot();
     const tool = tools.get('computer.hidePointer')!;
     expect(tools.validateInput(tool.name, {}).ok).toBe(true);
-    for (const input of [null, [], '', { runId: observationId }, { windowRef: elementId }, { ownerWebContentsId: 77 }, { all: true }]) {
+    for (const input of [null, [], '', { runId: observationId }, { windowRef: elementId }, { ownerWebContentsId: 77 }, { all: true },
+      { title: '' }, { title: '隐藏操作箭头' }]) {
       expect(tools.validateInput(tool.name, input).ok).toBe(false);
     }
     const signal = new AbortController().signal;
@@ -55,6 +69,36 @@ describe('built-in computer input contracts', () => {
     ]) expect(isBuiltinComputerHidePointerTool({ ...tool, ...changed })).toBe(false);
     expect(isBuiltinComputerHidePointerTool()).toBe(false);
   });
+  it('accepts an optional bounded step title for each host operation without making it required', () => {
+    const tools = snapshot();
+    for (const { name, input } of titledToolCases) {
+      expect(tools.validateInput(name, input).ok, `${name} without title`).toBe(true);
+      for (const title of ['', '验证关闭按钮', '查看当前选区', '窗'.repeat(80), '🪟'.repeat(80)]) {
+        expect(tools.validateInput(name, { ...input, title }).ok, `${name} valid title`).toBe(true);
+      }
+      for (const title of [null, 12, false, [], {}, '窗'.repeat(81), '🪟'.repeat(81)]) {
+        expect(tools.validateInput(name, { ...input, title }).ok, `${name} invalid title`).toBe(false);
+      }
+    }
+  });
+  it('removes only the display title before calling the real registered preparation hook', async () => {
+    const tools = snapshot();
+    const context = { appContext: { libraryId: 3, platform: 'darwin', selectedNodeIds: [] },
+      signal: new AbortController().signal } as unknown as AgentToolMainPreparationContext;
+    const prepared = { binding: { frozenTarget: true }, decision: { behavior: 'allow', risk: 'read' },
+      publicAction: { kind: 'computer.windows', version: 1, libraryId: 3 } };
+    for (const { name, prepare, input } of titledToolCases) {
+      const prepareRuntime = runtime[prepare].mockResolvedValue(prepared);
+      for (const title of [undefined, '', ' 验证关闭按钮 ']) {
+        const supplied = Object.freeze({ ...input, ...(title === undefined ? {} : { title }) });
+        expect(tools.validateInput(name, supplied).ok).toBe(true);
+        expect(await tools.get(name)!.prepareMain!(supplied, undefined, context)).toBe(prepared);
+        expect(prepareRuntime).toHaveBeenLastCalledWith(input, context);
+        expect(prepareRuntime.mock.lastCall![0]).not.toHaveProperty('title');
+        expect(supplied).toEqual({ ...input, ...(title === undefined ? {} : { title }) });
+      }
+    }
+  });
   it('accepts either element identity or coordinates and rejects ambiguous or partial input', () => {
     const tools = snapshot();
     for (const input of [{ observationId, elementId }, { observationId, x: 0, y: 2047 }]) {
@@ -66,6 +110,28 @@ describe('built-in computer input contracts', () => {
       { observationId, x: 2048, y: 2 }, { observationId, elementId, pid: 100 }]) {
       expect(tools.validateInput('computer.click', input).ok).toBe(false);
     }
+  });
+  it('exposes menu observation and forwards only main-owned menu preparation and commit settlement', async () => {
+    const tools = snapshot();
+    for (const mode of ['ax', 'both', 'screenshot']) expect(tools.validateInput('computer.observe', { scope: 'menu', mode }).ok).toBe(true);
+    for (const invalid of [{ scope: 'other' }, { scope: 'menu', focus: { observationId, elementId } },
+      { scope: 'menu', operation: 'press' }, { scope: 'menu', includeChanges: false }]) {
+      expect(tools.validateInput('computer.observe', invalid).ok).toBe(false);
+    }
+    for (const operation of ['open', 'press', 'cancel']) expect(tools.validateInput('computer.menu', { observationId, elementId, operation }).ok).toBe(true);
+    for (const invalid of [{ observationId, elementId, operation: 'hover' }, { observationId, elementId, operation: 'press', itemId: 'native' },
+      { observationId, elementId, operation: 'press', x: 10 }, { observationId, operation: 'press' }]) {
+      expect(tools.validateInput('computer.menu', invalid).ok).toBe(false);
+    }
+    const preparation = { marker: 'main-preparation' } as unknown as AgentToolExecutionContext['preparation'];
+    const commitSettlement = { begin: vi.fn(), settle: vi.fn() };
+    const signal = new AbortController().signal;
+    const context: AgentToolExecutionContext = { appContext: { libraryId: 3, platform: 'darwin', selectedNodeIds: [] },
+      signal, preparation, commitSettlement, onProgress: vi.fn() };
+    runtime.menu.mockResolvedValueOnce({ ok: true });
+    await tools.get('computer.menu')!.execute!({ forged: 'model-input' }, context);
+    expect(runtime.menu).toHaveBeenCalledWith(preparation, signal, commitSettlement);
+    await expect(tools.get('computer.menu')!.execute!({}, { ...context, preparation: undefined })).rejects.toThrow(/已批准/);
   });
   it('allows a discovered reference or legacy exact labels without mixing selectors', () => {
     const tools = snapshot();
@@ -120,12 +186,23 @@ describe('built-in computer input contracts', () => {
     const point = { x: 0, y: 2047 };
     const endPoint = { x: 100, y: 20 };
     for (const input of [
+      { observationId, operation: 'click', point },
+      { observationId, operation: 'typeText', text: '中文🌟\r\n\t' },
+      { observationId, operation: 'typeText', text: '🌟'.repeat(4096) },
+      { observationId, operation: 'scroll', point, deltaX: 0, deltaY: -1000 },
       { observationId, operation: 'shortcut', shortcut: { key: 'a', modifiers: ['command'] } },
       { observationId, operation: 'shortcut', shortcut: { key: 'escape', modifiers: [] } },
       { observationId, operation: 'rightClick', point }, { observationId, operation: 'doubleClick', point },
       { observationId, operation: 'drag', point, endPoint, durationMs: 100 },
     ]) expect(tools.validateInput('computer.input', input).ok).toBe(true);
     for (const input of [
+      { observationId, operation: 'click', point, text: 'must not leak' },
+      { observationId, operation: 'typeText', text: '' },
+      { observationId, operation: 'typeText', text: 'x'.repeat(4097) },
+      { observationId, operation: 'typeText', text: 'x', point },
+      { observationId, operation: 'scroll', point, deltaX: 0, deltaY: 0 },
+      { observationId, operation: 'scroll', point, deltaX: 0, deltaY: -1001 },
+      { observationId, operation: 'scroll', point, deltaX: 0, deltaY: -1, text: 'x' },
       { observationId, operation: 'shortcut', shortcut: { key: 'A', modifiers: ['cmd'] } },
       { observationId, operation: 'shortcut', shortcut: { key: 'a', modifiers: [] } },
       { observationId, operation: 'shortcut', shortcut: { key: 'a', modifiers: ['shift', 'option'] } },
@@ -162,8 +239,11 @@ describe('built-in computer input contracts', () => {
     const entries = Object.entries(payload);
     for (const [operation, allowedMask] of [['shortcut', 1], ['rightClick', 2], ['doubleClick', 2], ['drag', 14]] as const) {
       for (let mask = 0; mask < 16; mask += 1) {
-        const input = { observationId, operation, ...Object.fromEntries(entries.filter((_, index) => mask & (1 << index))) };
-        expect(tools.validateInput('computer.input', input).ok, `${operation} payload ${mask}`).toBe(mask === allowedMask);
+        for (const title of [undefined, '', '验证关闭按钮']) {
+          const input = { observationId, operation, ...Object.fromEntries(entries.filter((_, index) => mask & (1 << index))),
+            ...(title === undefined ? {} : { title }) };
+          expect(tools.validateInput('computer.input', input).ok, `${operation} payload ${mask}, title ${String(title)}`).toBe(mask === allowedMask);
+        }
       }
     }
   });

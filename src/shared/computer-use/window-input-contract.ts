@@ -1,4 +1,4 @@
-export const WINDOW_INPUT_OPERATIONS = Object.freeze(['shortcut', 'rightClick', 'doubleClick', 'drag'] as const);
+export const WINDOW_INPUT_OPERATIONS = Object.freeze(['shortcut', 'rightClick', 'doubleClick', 'drag', 'click', 'typeText', 'scroll'] as const);
 export type WindowInputOperation = typeof WINDOW_INPUT_OPERATIONS[number];
 
 export const WINDOW_INPUT_MODIFIERS = Object.freeze(['command', 'shift', 'option', 'control'] as const);
@@ -17,6 +17,15 @@ export interface WindowInputPoint { x: number; y: number }
 export const WINDOW_INPUT_POINT_MAX = 2_047;
 export const WINDOW_INPUT_DRAG_MIN_DURATION_MS = 100;
 export const WINDOW_INPUT_DRAG_MAX_DURATION_MS = 1_000;
+export const WINDOW_INPUT_SCROLL_MAX_DELTA = 1_000;
+
+export function normalizeWindowInputScrollDelta(deltaX: unknown, deltaY: unknown): { deltaX: number; deltaY: number } {
+  if ([deltaX, deltaY].some(value => typeof value !== 'number' || !Number.isSafeInteger(value)
+    || Math.abs(value) > WINDOW_INPUT_SCROLL_MAX_DELTA) || deltaX === 0 && deltaY === 0) {
+    throw new Error('应用窗口滚动幅度无效');
+  }
+  return { deltaX: deltaX as number, deltaY: deltaY as number };
+}
 
 function strictFields(input: unknown, fields: readonly string[]): Record<string, unknown> {
   if (!input || typeof input !== 'object' || Array.isArray(input)

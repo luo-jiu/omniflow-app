@@ -18,10 +18,13 @@ describe('plugin Tool source presentation', () => {
     value.call.input = { pluginSource: source }; value.result = { ok: true, data: { pluginSource: source } };
     expect(buildAgentToolPresentation(value, 3).some(block => block.type === 'details' && block.title === '插件来源')).toBe(false);
   });
-  it('keeps plugin calls out of built-in read groups', () => {
+  it('groups adjacent plugin and built-in calls while preserving audited source', () => {
     const values = [activity(), { ...activity(), id: 'other', ordinal: 2, call: { id: 'other', name: 'file.stat', input: {} }, pluginSource: undefined }];
     const items = buildAgentTimelineItemsFromProjection([], prepareAgentTimelineProjection([], [], values));
-    expect(items.some(item => item.type === 'tool-activity' && item.activity.id === 'tool')).toBe(true);
-    expect(items.filter(item => item.type === 'tool-group').some(item => item.activities.some(child => child.id === 'tool'))).toBe(false);
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ type: 'tool-group', groupKind: 'tool-sequence', activities: values });
+    if (items[0].type !== 'tool-group') throw new Error('Expected a contiguous tool group');
+    expect(buildAgentToolPresentation(items[0].activities[0], 3)).toContainEqual(expect.objectContaining({ type: 'details', title: '插件来源' }));
+    expect(buildAgentToolPresentation(items[0].activities[1], 3).some(block => block.type === 'details' && block.title === '插件来源')).toBe(false);
   });
 });

@@ -22,6 +22,7 @@ vi.mock('electron', () => ({
 import {
   captureAgentComputerDisplay,
   captureAgentComputerWindow,
+  captureAgentComputerWindowWithPointer,
   clickAgentComputerPoint,
   setAgentComputerText,
   scrollAgentComputerControl,
@@ -1083,6 +1084,95 @@ describe('desktop-independent approved window screenshot', () => {
     expect(mocks.app.setAccessibilitySupportEnabled).not.toHaveBeenCalled();
     expect(mocks.getSources).not.toHaveBeenCalled();
     expect(mocks.getMediaAccessStatus).not.toHaveBeenCalled();
+  });
+});
+
+describe('native software-cursor screenshot', () => {
+  const pointerWindow: AgentComputerWindowIdentity = {
+    windowId: 123, pid: 456, processStartedAt: 1_700_000_000_000,
+    layer: 0, bounds: { x: -1000, y: 200, width: 36, height: 36 }, title: 'Cursor fixture',
+  };
+
+  it.each([0, 102])('requests only the bound target and its small native cursor at layer %s', async layer => {
+    const child = new HelperProcess();
+    mocks.spawn.mockReturnValue(child);
+    const pointer = { ...pointerWindow, layer };
+    const pending = captureAgentComputerWindowWithPointer(sharedWindow(), new AbortController().signal, pointer);
+    expect(child.stdin.end).toHaveBeenCalledWith(JSON.stringify({ window: point.target.window, pointerWindow: pointer }));
+    child.reply(captureReceipt({ cursorIncluded: true, captureMethod: 'included-windows' }));
+    await expect(pending).resolves.toEqual({ png: pngFixture, cursorIncluded: true, captureMethod: 'included-windows' });
+    expect(mocks.spawn).toHaveBeenCalledOnce();
+    expect(mocks.getSources).not.toHaveBeenCalled();
+    expect(mocks.getAllDisplays).not.toHaveBeenCalled();
+    expect(mocks.app.setAccessibilitySupportEnabled).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { cursorIncluded: false, captureMethod: 'independent-window' },
+    { cursorIncluded: true, captureMethod: 'composited-windows' },
+  ])('accepts the canonical native compatibility result: %j', async fields => {
+    const child = new HelperProcess();
+    mocks.spawn.mockReturnValue(child);
+    const pending = captureAgentComputerWindowWithPointer(point.target.window, new AbortController().signal, pointerWindow);
+    child.reply(captureReceipt(fields));
+    await expect(pending).resolves.toEqual({ png: pngFixture, ...fields });
+    expect(mocks.spawn).toHaveBeenCalledOnce();
+    expect(mocks.getSources).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {}, { cursorIncluded: true }, { captureMethod: 'included-windows' },
+    { cursorIncluded: true, captureMethod: 'independent-window' },
+    { cursorIncluded: false, captureMethod: 'included-windows' },
+    { cursorIncluded: false, captureMethod: 'composited-windows' },
+    { cursorIncluded: 1, captureMethod: 'included-windows' },
+    { cursorIncluded: true, captureMethod: 'display' },
+    { cursorIncluded: false, captureMethod: 'independent-window', cursorPngBase64: 'legacy secondary image' },
+  ])('rejects ambiguous native cursor composition metadata: %j', async fields => {
+    const child = new HelperProcess(); mocks.spawn.mockReturnValue(child);
+    const pending = captureAgentComputerWindowWithPointer(point.target.window, new AbortController().signal, pointerWindow);
+    child.reply(captureReceipt(fields));
+    await expect(pending).rejects.toMatchObject({ dispatchState: 'not-dispatched' });
+    expect(mocks.spawn).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    { windowId: point.target.window.windowId }, { pid: point.target.window.pid }, { processStartedAt: 0 },
+    { layer: 1 }, { layer: 101 }, { layer: 103 },
+    { bounds: { ...pointerWindow.bounds, width: 129 } },
+    { bounds: { ...pointerWindow.bounds, height: 129 } },
+    { bounds: { ...pointerWindow.bounds, x: display.bounds.x - 1 } },
+    { bounds: { ...pointerWindow.bounds, x: display.bounds.x + display.bounds.width - 35 } },
+  ])('rejects an unbound or oversized cursor before spawning: %j', async override => {
+    await expect(captureAgentComputerWindowWithPointer(point.target.window, new AbortController().signal,
+      { ...pointerWindow, ...override })).rejects.toMatchObject({ dispatchState: 'not-dispatched' });
+    expect(mocks.spawn).not.toHaveBeenCalled();
+    expect(mocks.getSources).not.toHaveBeenCalled();
+  });
+
+  it('keeps strict target validation for a valid canonical cursor image', async () => {
+    const child = new HelperProcess();
+    mocks.spawn.mockReturnValue(child);
+    const pending = captureAgentComputerWindowWithPointer(point.target.window, new AbortController().signal, pointerWindow);
+    child.reply(captureReceipt({ window: { ...point.target.window, pid: 1 }, cursorIncluded: true, captureMethod: 'included-windows' }));
+    await expect(pending).rejects.toMatchObject({ dispatchState: 'not-dispatched' });
+  });
+
+  it('does not accept a cursor capture through the target-only API', async () => {
+    await expect(windowHelperReceipt('capture', captureReceipt({ cursorIncluded: true, captureMethod: 'included-windows' })))
+      .rejects.toMatchObject({ dispatchState: 'not-dispatched' });
+  });
+
+  it('keeps the single-image response bound at 12 MiB including metadata', async () => {
+    const child = new HelperProcess();
+    mocks.spawn.mockReturnValue(child);
+    const pending = captureAgentComputerWindowWithPointer(point.target.window, new AbortController().signal, pointerWindow);
+    const rejection = expect(pending).rejects.toMatchObject({ dispatchState: 'not-dispatched' });
+    child.stdout.emit('data', Buffer.alloc(12 * 1024 * 1024, 32));
+    expect(child.kill).not.toHaveBeenCalled();
+    child.stdout.emit('data', Buffer.alloc(1, 32));
+    await rejection;
+    expect(child.kill).toHaveBeenCalledWith('SIGKILL');
   });
 });
 

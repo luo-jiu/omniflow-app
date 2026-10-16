@@ -258,16 +258,39 @@ func nativeTextRole(_ role: String, subrole: String?) -> Bool {
     return role == kAXTextAreaRole && !(subrole?.contains("Secure") ?? false)
 }
 
+// Only these exact native callbacks are consumed by our semantic/menu routes.
+// AppKit also exposes descriptive custom actions (including control-bearing
+// names). They are never invoked and must not revoke an unrelated AXPress or
+// AXShowMenu. Menu fingerprints compare this supported capability set, so a
+// supported callback's removal still invalidates the frozen observation.
+let supportedCandidateActionNames: Set<String> = [
+    kAXPressAction, kAXShowMenuAction, kAXPickAction, kAXCancelAction,
+    kAXIncrementAction, kAXDecrementAction,
+    "AXScrollUpByPage", "AXScrollDownByPage", "AXScrollLeftByPage", "AXScrollRightByPage",
+]
+
 func candidateActionNames(_ error: AXError, _ raw: CFArray?, budget: ScanBudget? = nil) -> Set<String>? {
     if let budget = budget, !budget.ready() { return nil }
     if error == .actionUnsupported { return [] }
     guard error == .success else { budget?.noteRequiredReadFailure(error); return nil }
-    guard let raw = raw, CFArrayGetCount(raw) <= 32, let names = raw as? [String],
-          names.allSatisfy({ !$0.isEmpty && validSemanticText($0, maximumBytes: 64) }) else {
+    guard let raw = raw, CFArrayGetCount(raw) <= 32, let names = raw as? [String] else {
         budget?.truncated = true
         return nil
     }
-    return Set(names)
+    // Preserve the old maximum aggregate (32 * 64 bytes), but let a bounded
+    // ignored custom action exceed the former per-name limit. Do not return a
+    // partial capability set when the complete array cannot be checked.
+    var bytes = 0
+    var result: Set<String> = []
+    for name in names {
+        if let budget = budget, !budget.ready() { return nil }
+        let size = name.utf8.prefix(2048 - bytes + 1).count
+        guard size <= 2048 - bytes else { budget?.truncated = true; return nil }
+        bytes += size
+        if supportedCandidateActionNames.contains(name) { result.insert(name) }
+        else if name.isEmpty || !validSemanticText(name, maximumBytes: 64) { budget?.truncated = true }
+    }
+    return result
 }
 
 func semanticSubrole(_ error: AXError, _ raw: CFTypeRef?, budget: ScanBudget? = nil) -> TextState? {

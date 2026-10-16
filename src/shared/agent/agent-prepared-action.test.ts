@@ -46,6 +46,28 @@ function computerInputAction(overrides: Record<string, unknown> = {}) {
 }
 
 describe('directed window input prepared actions', () => {
+  it('keeps generic click, private Unicode counts and pixel scroll exact without accepting text or mixed gesture fields', () => {
+    const { shortcut: _shortcut, ...identity } = computerInputAction(); void _shortcut;
+    const actions = [
+      { ...identity, operation: 'click', point: { x: 2047, y: 0 } },
+      { ...identity, operation: 'typeText', textLength: 4096, textBytes: 16384 },
+      { ...identity, operation: 'scroll', point: { x: 0, y: 2047 }, deltaX: 1000, deltaY: -1000 },
+    ];
+    for (const action of actions) {
+      expect(normalizeAgentPreparedActionPublic(action)).toEqual(action);
+      for (const extra of [{ text: 'private body' }, { shortcut: { key: 'a', modifiers: ['command'] } }, { nativeWindowId: 123 }]) {
+        expect(() => normalizeAgentPreparedActionPublic({ ...action, ...extra })).toThrow();
+      }
+    }
+    for (const fields of [{ textLength: 0, textBytes: 0 }, { textLength: 4097, textBytes: 4097 },
+      { textLength: 1, textBytes: 5 }, { textLength: 1.5, textBytes: 2 }]) {
+      expect(() => normalizeAgentPreparedActionPublic({ ...actions[1], ...fields })).toThrow();
+    }
+    for (const fields of [{ deltaX: 0, deltaY: 0 }, { deltaX: -1001, deltaY: 0 }, { deltaX: 0, deltaY: 0.5 }]) {
+      expect(() => normalizeAgentPreparedActionPublic({ ...actions[2], ...fields })).toThrow();
+    }
+  });
+
   it('preserves a separate immutable input grant and does not extend historical element grants', () => {
     const source = computerWindowObserveAction({ operations: ['press'], inputOperations: [...WINDOW_INPUT_OPERATIONS] });
     expect(normalizeAgentPreparedActionPublic(source)).toEqual(source);

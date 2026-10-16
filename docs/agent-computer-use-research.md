@@ -1,20 +1,26 @@
-# Agent 界面操作调研与轻量实现建议
+# Agent 界面操作调研与实现路线
 
-更新时间：2026-10-12
+更新时间：2026-10-16
 
-状态：本文保留实现前的源码与官方接口调研快照，并补充鼠标争用、窗口捕获范围和 AX 摘要的后续结论；2026-10-10 的公开实现复核见第 9 节，进一步后台输入研究与阶段方案见第 10 节。后续已实现 macOS AX-only / 按需单窗口截图、有界 AX 文本、窗口搜索、观察内元素标识、AXPress、有限原生文本替换 / 插入及语义滚动；2026-10-12 原生页子按钮后台滚动和 Finder 视图往返通过限定真机验收，同日新增窗口定向快捷键、右键、双击和有界拖拽，路线与依据见第 11 节，最新实现与证据以[内置应用窗口操作](agent-computer-use.md)为准。本文第 5～8 节保留实现前的接线建议；无上限 AX、任意软件通用 keyboard / 画布 / 手势协议仍是目标设计。旧全局鼠标版的记录不代表当前窗口限定实现。
+阶段状态：本阶段于2026-10-16收口为macOS开发预览，不再继续扩展功能或软件测试批次；遇明显问题再按应用复现与调整。本文保留公开源码 / SDK调研和当时方案，当前能力与限制以[内置应用窗口操作](agent-computer-use.md)为准，Codex已分发原生组件的后续静态分析见[原生光标研究](agent-computer-cursor-codex-research.md)。
+
+当前已接入AX-first / 按需单窗截图、有界AX与局部观察、窗口搜索 / elementId、AXPress / 原生文本 / 语义滚动、菜单上下文、原生光标，以及click / rightClick / doubleClick / drag / shortcut / typeText / scroll七种定向输入。generic directed-v1已不再限TextEdit精确版本名单，七操作共用sender / 焦点owner；新合成焦点仍限已证arm64条件，profile不等于兼容通过。真实内部Agent已验证限定文字、滚轮、菜单和选区闭环；复杂IDE仍有unknown / 升窗边界。最新回归focusCleanup=unconfirmed且没有连续桌面帧证明动态遮挡无闪现，保留为待观察项，详见[验证矩阵](frontend-validation-matrix.md)。
+
+阅读边界：第2～8节为初次调研 / 首版设计，第9～10节保留2026-10-10的公开实现复核与当时阶段路线，第11节为2026-10-12四动作起点；这些部分的“当前”“尚未”按各节日期理解，不能覆盖本节现状。历史全局鼠标版、后来的AX单窗版及新定向输入分别验收；公开仓库、Codex静态证据和OmniFlow实机结果互不替代。无上限AX、任意软件键盘 / 画布 / 跨窗手势与其他平台仍未实现 / 验收。
 
 适用范围：内置 Agent 的截图、可访问性观察、鼠标键盘输入，以及 Electron main / 平台驱动边界。
 
 ## 1. 结论
 
-可以自研一个较轻的实现，无需复制 Codex Agent，也无需先建设持续视频共享或远程桌面。最小闭环是：**读取目标窗口截图和可访问性树 → 模型选择控件或坐标 → 宿主执行一次动作 → 重新观察**。
+可以沿现有 Agent 自研独立桌面操作模块，基本闭环是：**读取目标窗口截图和可访问性树 → 模型选择控件或坐标 → 宿主执行一次动作 → 重新观察**。后续不再以轻量首版作为能力上限；光标呈现、窗口 / 菜单状态、定向输入与捕获分别演进。下文轻量首版建议保留为早期设计背景，原生研究及现行差异见[专题研究](agent-computer-cursor-codex-research.md)。
 
 建议复用 OmniFlow 的 Tool Registry、main prepare、Run capability snapshot、权限、ToolRun 和模型续轮，只新增平台观察与输入驱动。对于当前 macOS 环境，独立 Swift helper 调用系统接口是直接的选择；Windows 使用独立 UI Automation / SendInput adapter，不能由 macOS 调研推定已经支持。
 
 Codex 的开源仓库可以借鉴工具分发、配置和生命周期。实际桌面驱动通过安装包中的 `@oai/sky` 与 `Codex Computer Use.app` 提供；本机 Computer Use 插件标明 Proprietary，不能将其当作 Apache-2.0 仓库中的开源驱动移植。
 
-## 2. 本次证据范围
+## 2. 初次调研证据范围
+
+本节是早期源码 / 普通 JS 调研范围；2026-10-15 的原生二进制分析另列于[专题研究](agent-computer-cursor-codex-research.md)，不受本节“没有分析原生二进制”的历史限定。
 
 - 用户授权更新的 `project/codex` 已执行 `git pull --ff-only`，从 `2cc65cdd4c7c167f0c7252fcb5165d649c16aca0` 快进到 `2351d9e1b608e6f9d9a3699b71d7eb39ee41cfa4`；原有未跟踪文件保留。
 - OmniFlow 的判断来自本次工作树。已有其他任务的 Agent UI 未提交改动不属于本次调研变更。
@@ -59,11 +65,11 @@ Codex 的开源仓库可以借鉴工具分发、配置和生命周期。实际�
 
 上述 JS 不包含 macOS AX 树的原生序列化和事件注入实现。`skyshot.text` 在 JS 中是 opaque string，不能据此宣称 Codex 原生层具体用了哪一个 Apple 截图或事件 API。下一节的 API 是 OmniFlow 可以自行采用的实现方案。
 
-### 后台点击与屏幕共享图标
+### 后台点击与屏幕共享图标（初次调研）
 
 OpenAI 官方 [Computer use](https://learn.chatgpt.com/docs/computer-use) 与 [Use your computer with Codex](https://learn.chatgpt.com/use-cases/use-your-computer-with-codex) 明确说明 macOS 可在后台操作，用户可以继续在其他应用工作，并通过画中画查看当前操作；Windows 则使用前台鼠标/键盘。屏幕录制权限负责观察，辅助功能负责操作。菜单栏共享屏幕图标只证明系统正在提供捕获，不证明有第二只系统鼠标；光标/高亮可作为叠层反馈，不能由其外观推断私有输入驱动。
 
-公开 `CGEventPostToPid` 可向指定进程投递事件，但不足以保证所有 AppKit/Chromium 控件接受后台点击。公开 axcli recipe 涉及私有窗口位置接口及未文档化事件字段，当前不采用，也不以 Command 修饰键改变普通点击语义。Codex 原生驱动仍为专有组件，没有足够证据还原其通用坐标输入实现。
+公开 `CGEventPostToPid` 可向指定进程投递事件，但不足以保证所有 AppKit/Chromium 控件接受后台点击。公开 axcli recipe 涉及私有窗口位置接口及未文档化事件字段，当前不采用，也不以 Command 修饰键改变普通点击语义。初次调研时只有JS / 类型与公开接口证据，无法还原Codex通用坐标驱动；2026-10-15～16已另做有界原生静态分析并据此补齐部分路线，不能沿用本段当时的证据空白判断现状。
 
 OmniFlow 当前点击选择公开 AXPress，文本与滚动分别使用已确认可写的原生文本属性和控件真实声明的 AX 滚动动作；均绑定已观察控件，不发送 CGHID、不移动指针、不主动激活或 AXRaise，不支持的控件明确失败。Electron 30 的 Chromium 124 为 clickable AX 节点暴露 AXPress，再转发默认动作；画布/未暴露动作的控件不能据此点击，网页输入也不走当前原生文本路线。AX 操作可能改变目标页面内焦点，App 自身也可能请求前台，因此“所有应用完全不抢焦点”必须逐 App 验证，不能从 API 形式推定。
 
@@ -306,7 +312,7 @@ Peekaboo 的[语义滚动实现](https://github.com/openclaw/Peekaboo/blob/c02c2
 
 阶段 B 通常比通用画布输入更轻，可以继续复用现有 Run 授权、native helper、候选预算及提交结算；阶段 C / D 的主要成本是平台行为、接收者兼容和持续输入生命周期。任何阶段都改变用户真实应用状态，无法隔离用户与 Agent 同时操作同一个窗口；需要独立应用实例或桌面环境才属于进一步的状态隔离。
 
-B 的文本替换 / 插入与单次 page / step 滚动已在 2026-10-10 按独立模块接线；同日源码新增 fraction 的严格能力路线，最新状态以 [实施契约](agent-computer-use.md) 为准。上下文菜单及选中工具仍未实现。当前 elements 显式声明 `press / replaceText / insertText / scroll*Page / scroll*Step / scroll*Fraction` 的有限 operations，文本和滚动分别检查对应 ID 能力，不复用点击许可；showMenu 尚未纳入。私有坐标命中保留所有可操作候选，先选唯一叶节点再要求 press，不能穿透文本或滚动子控件点击父控件。文本限定已确认的非安全原生字段，检查 settable，保留 Unicode，不改变焦点或通过剪贴板模拟；网页输入暂留浏览器适配路线。page / step 每次只执行真实声明的一页或一步，不能把 scrollbar increment 称为一页。fraction 只为方向、可写 AXValue 及当前 Value / MinValue / MaxValue 全部确认的原生滚动条签发能力：一次沿对应方向移动实际数值范围的 10%，在端点截停，不表示一页或可视区域的 10%，也没有模型自定义幅度。三项数值保持私有并参与观察前后和派发前复验；旧十一项操作许可不包含 fraction，需新共享批准。已发送或未知结果不切换路线补发；本段是当前源码契约，不提供滚动已生效或后台无干扰的实测结论。
+B 的文本替换 / 插入与单次 page / step 滚动已在 2026-10-10 按独立模块接线；同日源码新增 fraction 的严格能力路线，最新状态以 [实施契约](agent-computer-use.md) 为准。截至该阶段，上下文菜单及独立选中工具尚未实现（当前菜单已另接入独立工具，双击 / 拖拽可形成选区，不等于独立选中协议）。当时 elements 显式声明 `press / replaceText / insertText / scroll*Page / scroll*Step / scroll*Fraction` 的有限 operations，文本和滚动分别检查对应 ID 能力，不复用点击许可；showMenu 尚未纳入。私有坐标命中保留所有可操作候选，先选唯一叶节点再要求 press，不能穿透文本或滚动子控件点击父控件。文本限定已确认的非安全原生字段，检查 settable，保留 Unicode，不改变焦点或通过剪贴板模拟；网页输入暂留浏览器适配路线。page / step 每次只执行真实声明的一页或一步，不能把 scrollbar increment 称为一页。fraction 只为方向、可写 AXValue 及当前 Value / MinValue / MaxValue 全部确认的原生滚动条签发能力：一次沿对应方向移动实际数值范围的 10%，在端点截停，不表示一页或可视区域的 10%，也没有模型自定义幅度。三项数值保持私有并参与观察前后和派发前复验；旧十一项操作许可不包含 fraction，需新共享批准。已发送或未知结果不切换路线补发；本段是该阶段的源码契约，不提供滚动已生效或后台无干扰的实测结论；后续页子按钮与像素滚轮各有独立验收，不改写旧AX page / step / fraction结果。
 
 当日 AA2 的真实标准 AppKit 滚动条已确认 AXValue 为数字且可写，但 AXMinValue / AXMaxValue 均返回 `attributeUnsupported (-25205)`，因此没有 fraction 候选，这个外部目标的 fraction 当前不可用。Apple 对 [NSScroller 自身 knob 位置](https://developer.apple.com/documentation/appkit/nsscroller/setfloatvalue%3Aknobproportion%3A)说明了 0…1，并推荐 doubleValue；这不是所有跨进程 AXScrollBar 的通用范围保证。本机 Apple `AccessibilityDefinitions.plist` 也把 AXScrollBar 的 min/max 标为非必需属性。网页 scrollbar 同样映射到 AXScrollBar，且数值范围可自定义，默认 0…100，见 [WAI-ARIA scrollbar](https://www.w3.org/TR/wai-aria-1.2/#scrollbar) 与 [Core AAM 映射](https://www.w3.org/TR/core-aam-1.2/#role-map-scrollbar)。当前不根据角色、几何、Identifier 前缀或应用框架猜 0…1，不为 fixture 补造范围来冒充外部滚动验收。
 
@@ -316,11 +322,11 @@ TextEdit 的 AC / AD 真实诊断已确认严格的 `native-text-identifier-v1` 
 
 随后 AE 的内部 Agent 真机验收通过 TextEdit 文本路线：Run `cf5e6e65-6208-456c-b981-521e362e00ff` 的初始截图 `70efc3aa-897a-45b9-9d04-d24cae0c583b` 保持 `candidateScanComplete=false`，但稳定候选给出 `textReady=true`，最终图像中的 `screenshotBounds={x:0,y:200,width:1172,height:764}` 可用于核对目标。中文、😀与两行文本替换（`9999549e-4114-42c0-ab67-89d0bcb05b86`）、插入 `＋插入🪟`（`827cb735-8085-48ef-a4f2-525451897f98`）和清空（`a2c7cbd2-6b3f-4f2f-b393-f438b36fd548`）均返回 dispatched / committed；逐张检查动作后截图，并用独立 CUA AX 复核插入与清空结果。三个动作的 endpoint 日志均为 `axError=0`、`targetFrontmostBefore=false`、`targetFrontmostAfter=false`、`frontmostChanged=false`、`pointerMoved=false`，支持该 TextEdit 场景在后台完成文本操作；这些起止点检查不证明回调全过程始终没有焦点变化，也不证明其他应用兼容。该批 TextEdit 替换、插入和清空通过，fraction 未通过，OmniFlow 自有 Electron 控件桥当时尚未实施；2026-10-11 当前实现与独立验收见实施契约。该批最终 lint、build 均通过，测试为 4522 项通过、7 项跳过、471 个文件。
 
-新动作沿用 prepare→单窗/控件/能力复验→一次提交→回执→observe；未知结果不能换路线补发。AXShowMenu 的 tracking 超时可能已打开菜单，不能认定未发送；当前 capture 排除 child windows，归属未确认的独立菜单不可自动纳入单窗授权。未来菜单阶段可先提供打开菜单，菜单观察与选择另做归属验收。当前共享卡已明确点击、文本输入和滚动范围；旧无 operations 的“查看与简单点击”许可仍只授予 press，后续新增动作不能静默扩权。
+新动作沿用 prepare→单窗/控件/能力复验→一次提交→回执→observe；未知结果不能换路线补发。AXShowMenu 的 tracking 超时可能已打开菜单，不能认定未发送；当前 capture 排除 child windows，归属未确认的独立菜单不可自动纳入单窗授权。当时计划在菜单阶段提供打开 / 观察 / 选择；当前已实施独立菜单工具，归属与验收见实施专题。当前共享卡已明确点击、文本输入和滚动范围；旧无 operations 的“查看与简单点击”许可仍只授予 press，后续新增动作不能静默扩权。
 
-目标不是只停留在 AXPress。多数基础操作应组合“公开 AX 语义动作 + 已验证应用的单窗定向事件 + 浏览器适配”：先补输入、滚动和上下文菜单，随后按应用扩展真正右键/双击，再补 Unicode 快捷键和拖拽。各工具显式报告当前控件支持的操作；不支持时说明缺口，不因换路由而暗中争用全局鼠标。
+目标不是只停留在 AXPress。多数基础操作应组合“公开 AX 语义动作 + 已验证应用的单窗定向事件 + 浏览器适配”：当时按输入、滚动、菜单再到右键 / 双击 / Unicode / 拖拽分批推进；这些有限路线现已接入，兼容与限制仍逐应用判断。各工具显式报告当前控件支持的操作；不支持时说明缺口，不因换路由而暗中争用全局鼠标。
 
-本节仅更新调研结论。固定版本源码已只读检查，没有执行第三方驱动；B 的文本及滚动实现与验收另见实施专题；B 其余部分与 C / D 是待实施、待真机验证的方向，不计入当前可用功能或已通过验收。
+本节仅更新调研结论。固定版本源码已只读检查，没有执行第三方驱动；B 的文本及滚动实现与验收另见实施专题；截至当时，B其余部分与C / D仍待实施；当前已实现的有限路线以顶部及实施专题为准，不能把研究计划本身计入已通过验收。
 
 ### 2026-10-12 外部后台滚动复核
 
@@ -334,9 +340,9 @@ TextEdit AR 真实声明 `AXScrollDownByPage`，驱动对同一控件发送相�
 
 2026-10-12 用户锁屏后只继续代码：已接入以有效原生控件 ID 为锚点的有限父区域观察，沿原共享窗口身份和扫描预算，不把局部完整升级为全窗完整或坐标权限；解锁后验证复杂窗口的实际收益。当时快捷键下一步优先研究有限语义 command / 第一方 owner adapter。读取菜单快捷键元数据可用于发现，但应用级 AXMenuItem 通常依赖当前 key window，AXPress 不能单独证明作用于获准窗口；CGEventPostToPid 也只证明进程路由，不能保证单窗消费或用户修饰键隔离。两者不作为旧操作的后台快捷键 fallback；后续独立工具实现见第 11 节，任意软件通用键盘仍未实现。
 
-## 11. 2026-10-12 窗口定向四动作实施
+## 11. 2026-10-12 窗口定向四动作实施（历史起点）
 
-新增 `computer.input@1`，在独立 `inputOperations` 批准与本次 `availableInputOperations` 交集内提供 shortcut / rightClick / doubleClick / drag。它不扩展旧 AXPress 的含义，也不把失败的 AX 操作转成像素重发。完整 both 观察提供同图像的指针坐标；全窗 ax 只允许快捷键，截图独立模式或局部 AX 观察不签发新输入能力。快捷键使用固定 ANSI key / modifier，字母数字要求 Command 或 Control，正文仍走私有文本工具；拖拽限定同窗不同起终点、100～1000ms 的直线。
+本节记录初始四操作版本；2026-10-16已新增click / typeText / scroll、generic receiver及七操作共用持久sender，现行契约见[后台定向输入](agent-computer-use.md#后台定向输入2026-10-12)。当时新增 `computer.input@1`，在独立 `inputOperations` 批准与本次 `availableInputOperations` 交集内提供 shortcut / rightClick / doubleClick / drag。它不扩展旧 AXPress 的含义，也不把失败的 AX 操作转成像素重发。完整 both 观察提供同图像的指针坐标；全窗 ax 只允许快捷键，截图独立模式或局部 AX 观察不签发新输入能力。快捷键使用固定 ANSI key / modifier，字母数字要求 Command 或 Control，正文仍走私有文本工具；拖拽限定同窗不同起终点、100～1000ms 的直线。
 
 独立 AppKit 夹具暴露了单纯公开 NSEvent / CGEvent 与 windowNumber / window hint 的限制：应用 sendEvent 收到事件，但重建出的 locationInWindow 位于窗口外，NSView 没有消费。固定 Peekaboo 的窗口路线提供私有 window-local setter 的参考；本轮自行通过 typed dlsym 解析 `CGEventSetWindowLocation`，按窗口左上原点 local points 设置同一条事件，不复制事件驱动，也不引入认证包、opaque CGEvent 内存偏移或 SkyLight 第二投递。NSEvent factory 的坐标仍按 AppKit 左下原点转换，两种空间不能混用。
 

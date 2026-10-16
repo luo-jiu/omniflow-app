@@ -84,6 +84,11 @@ describe('computer pointer plans from canonical host facts', () => {
     const stale = { ...pointer(), id: 'stale', ordinal: 4 };
     expect(buildAgentComputerPointerPlans([observation(), next, stale], 3).size).toBe(0);
   });
+  it.each([true, false])('never redraws a plan on a native-window PNG, cursorIncluded=%s', cursorIncluded => {
+    const source = observation();
+    Object.assign(source.result.data, { cursorPresentation: 'native-window', cursorIncluded });
+    expect(buildAgentComputerPointerPlans([source, pointer()], 3).size).toBe(0);
+  });
   it('does not invent image coordinates for shortcut or AX-only V3 click', () => {
     const shortcut = activity('computer.input', 2, { kind: 'computer.input', version: 1, ...identity, observationId, operation: 'shortcut', shortcut: { key: 'a', modifiers: ['command'] } });
     const semantic = activity('computer.click', 2, { kind: 'computer.click', version: 3, ...identity, observationId,

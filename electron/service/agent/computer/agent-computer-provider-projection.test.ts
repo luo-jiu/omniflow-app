@@ -30,6 +30,35 @@ function windowResult(): AgentToolResult {
 }
 
 describe('computer provider result projection', () => {
+  it.each([AGENT_COMPUTER_PROVIDER_RESULT_TOKENS, 2048])('retains exact menu items and scope under context budget %s', budget => {
+    const base = observationResult();
+    const result = { ...base, data: { ...base.data as Record<string, unknown>,
+      scope: { kind: 'menu' }, scopeScanComplete: true, candidateScanComplete: false, coordinateClickReady: false,
+      menuReady: true, menuOperations: ['open', 'press', 'cancel'], menuCapture: 'included',
+      elements: Array.from({ length: 128 }, (_, index) => ({ elementId: reference(index), role: 'AXMenuItem',
+        label: `菜单${index}${'中'.repeat(12)}`, menuOperations: index % 2 ? ['press'] : ['open', 'cancel'] })),
+    } };
+    const projection = projectAgentToolResultForProvider(result, budget, { mode: 'computer-observe' });
+    const data = JSON.parse(projection.content).data;
+    expect(data).toMatchObject({ scope: { kind: 'menu' }, scopeScanComplete: true, candidateScanComplete: false,
+      coordinateClickReady: false, menuReady: true, menuOperations: ['open', 'press', 'cancel'], menuCapture: 'included' });
+    expect(data.elements.length).toBeGreaterThan(0);
+    expect(data.elements).toEqual(result.data.elements.slice(0, data.elements.length));
+    expect(projection.estimatedTokens).toBeLessThanOrEqual(budget);
+    if (budget === 2048) expect(data.elementsTruncated).toBe(true);
+  });
+
+  it('rejects menu scopes that claim window-wide coordinate authority or native metadata', () => {
+    const base = observationResult();
+    for (const invalid of [{ candidateScanComplete: true }, { coordinateClickReady: true },
+      { scope: { kind: 'menu', nativeWindowId: 123 } }, { scope: { kind: 'menu', ancestorLevels: 0 } }]) {
+      const result = { ...base, data: { ...base.data as Record<string, unknown>, scope: { kind: 'menu' },
+        scopeScanComplete: true, candidateScanComplete: false, coordinateClickReady: false, ...invalid } };
+      expect(() => projectAgentToolResultForProvider(result, AGENT_COMPUTER_PROVIDER_RESULT_TOKENS,
+        { mode: 'computer-observe' })).toThrow('观察范围无效');
+    }
+  });
+
   it('keeps window-input grants separate from available operations under context reduction', () => {
     const base = observationResult();
     const result = { ...base, data: { ...base.data as Record<string, unknown>, inputReady: true,

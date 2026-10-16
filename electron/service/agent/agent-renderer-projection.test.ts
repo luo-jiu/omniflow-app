@@ -47,14 +47,15 @@ function activity(toolName = 'skill.activate'): AgentToolActivitySnapshot {
 }
 
 describe('Agent renderer projection', () => {
-  it.each(['observe', 'click', 'setText', 'scroll', 'input'] as const)('classifies initial computer.%s prepare only for display without inventing action, approval or success', operation => {
+  it.each(['windows', 'observe', 'click', 'setText', 'scroll', 'input'] as const)('classifies initial computer.%s prepare only for display without inventing action, approval or success', operation => {
     const name = `computer.${operation}`;
+    const read = operation === 'observe' || operation === 'windows';
     const prepareMain = vi.fn(async () => { throw new Error('must not prepare while projecting'); });
     const execute = vi.fn(async () => ({ ok: true }));
     const registry = createAgentToolRegistry([{ name, registrationId: `builtin:${name}@1`, executor: 'main',
-      risk: operation === 'observe' ? 'read' : 'write', description: name, inputSchema: { type: 'object' }, prepareMain, execute }]);
+      risk: read ? 'read' : 'write', description: name, inputSchema: { type: 'object' }, prepareMain, execute }]);
     const source: AgentToolActivitySnapshot = { ...activity(name), status: 'preparing', preparation: undefined, result: undefined,
-      finishedAt: undefined, permissionBehavior: operation === 'observe' ? 'allow' : 'ask' };
+      finishedAt: undefined, permissionBehavior: read ? 'allow' : 'ask' };
     const projected = projectAgentToolActivityForRenderer(source, toolName => registry.get(toolName));
     expect(projected.toolMetadata?.builtinComputerTool).toBe(operation);
     expect(projected).toMatchObject({ status: 'preparing', permissionBehavior: source.permissionBehavior });
@@ -66,9 +67,63 @@ describe('Agent renderer projection', () => {
     expect(execute).not.toHaveBeenCalled();
     expect(source.toolMetadata).toBeUndefined();
     for (const invalid of [{ ...registry.get(name)!, prepareMain: undefined },
-      { ...registry.get(name)!, risk: operation === 'observe' ? 'write' as const : 'read' as const }]) {
+      { ...registry.get(name)!, risk: read ? 'write' as const : 'read' as const }]) {
       expect(projectAgentToolActivityForRenderer(source, () => invalid).toolMetadata?.builtinComputerTool).toBeUndefined();
     }
+  });
+
+  it('marks window discovery only with exact built-in main provenance and its own canonical action', () => {
+    const prepareMain = vi.fn(async () => { throw new Error('must not prepare while projecting'); });
+    const execute = vi.fn(async () => ({ ok: true }));
+    const registry = createAgentToolRegistry([{ name: 'computer.windows', registrationId: 'builtin:computer.windows@1',
+      executor: 'main', risk: 'read', description: 'Window discovery', inputSchema: { type: 'object' }, prepareMain, execute }]);
+    const source: AgentToolActivitySnapshot = { ...activity('computer.windows'),
+      preparation: { preparedActionId: 'windows', snapshotHash: 'hash',
+        action: { kind: 'computer.windows', version: 1, libraryId: 3, query: 'QA' } } };
+    const tool = registry.get('computer.windows')!;
+    const project = (value: AgentToolActivitySnapshot) => projectAgentToolActivityForRenderer(value, name => registry.get(name));
+    expect(project(source).toolMetadata?.builtinComputerTool).toBe('windows');
+    const pluginSource = { pluginId: 'fake', pluginVersion: '1', packageFingerprint: 'a',
+      toolId: 'windows', registrationId: 'builtin:computer.windows@1' };
+    const initial: AgentToolActivitySnapshot = { ...source, status: 'preparing', preparation: undefined,
+      finishedAt: undefined, result: undefined };
+    for (const invalid of [{ ...tool, registrationId: 'builtin:computer.windows@2' },
+      { ...tool, executor: 'renderer' as const }, { ...tool, kind: 'control' as const },
+      { ...tool, risk: 'write' as const }, { ...tool, prepareMain: undefined },
+      { ...tool, pluginSource }, { ...tool, pluginOperation: 'rename' as const }]) {
+      for (const stage of [initial, source]) {
+        expect(projectAgentToolActivityForRenderer(stage, () => invalid).toolMetadata?.builtinComputerTool).toBeUndefined();
+      }
+    }
+    for (const stage of [initial, source]) {
+      expect(project({ ...stage, pluginSource }).toolMetadata?.builtinComputerTool).toBeUndefined();
+    }
+    for (const invalid of [{ ...source, preparation: undefined },
+      { ...source, preparation: { ...source.preparation!, action: TEXT_ACTION } },
+      { ...source, preparation: { ...source.preparation!, action: { kind: 'computer.windows', version: 1,
+        libraryId: 3, title: 'forged action title' } as never } }]) {
+      expect(project(invalid).toolMetadata?.builtinComputerTool).toBeUndefined();
+    }
+    expect(prepareMain).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+  });
+
+  it('marks menu actions only with trusted write registration and a matching sealed public action', () => {
+    const registry = createAgentToolRegistry([{ name: 'computer.menu', registrationId: 'builtin:computer.menu@1', executor: 'main', risk: 'write',
+      description: 'Window menu', inputSchema: { type: 'object' }, execute: async () => ({ ok: true }),
+      prepareMain: async () => { throw new Error('not used'); } }]);
+    const source: AgentToolActivitySnapshot = { ...activity('computer.menu'), preparation: { preparedActionId: 'menu', snapshotHash: 'hash', action: {
+      kind: 'computer.menu', version: 1, libraryId: 3, targetId: TEXT_ACTION.targetId, applicationLabel: 'QA', windowLabel: 'QA',
+      observationId: TEXT_ACTION.observationId, elementId: TEXT_ACTION.elementId, elementLabel: '更多操作', operation: 'open',
+    } } };
+    const tool = registry.get('computer.menu')!;
+    expect(projectAgentToolActivityForRenderer(source, () => tool).toolMetadata?.builtinComputerTool).toBe('menu');
+    for (const patch of [{ registrationId: 'plugin:computer.menu@1' }, { prepareMain: undefined }, { risk: 'read' as const },
+      { executor: 'renderer' as const }, { kind: 'control' as const }, { pluginOperation: 'rename' as const }]) {
+      expect(projectAgentToolActivityForRenderer(source, () => ({ ...tool, ...patch })).toolMetadata?.builtinComputerTool).toBeUndefined();
+    }
+    expect(projectAgentToolActivityForRenderer({ ...source, preparation: { ...source.preparation!, action: TEXT_ACTION } },
+      () => tool).toolMetadata?.builtinComputerTool).toBeUndefined();
   });
 
   it('marks a directed input only with exact built-in registration and matching prepared action', () => {
@@ -187,7 +242,8 @@ describe('Agent renderer projection', () => {
 
   it('removes legacy text bodies from activity, approval, progress and receipt without trusting old provenance', () => {
     const source = activity('computer.setText');
-    source.call.input = { observationId: TEXT_ACTION.observationId, elementId: TEXT_ACTION.elementId, mode: 'replace', text: TEXT_BODY };
+    source.call.input = { observationId: TEXT_ACTION.observationId, elementId: TEXT_ACTION.elementId, mode: 'replace',
+      text: TEXT_BODY, title: '更新测试草稿' };
     source.preparation = { preparedActionId: 'prepared', snapshotHash: 'hash', action: TEXT_ACTION };
     source.approval = { approvalId: 'approval', status: 'approved', preview: { title: TEXT_BODY, description: TEXT_BODY, risk: 'write' } };
     source.progress = { message: TEXT_BODY };
@@ -196,7 +252,7 @@ describe('Agent renderer projection', () => {
       nextAction: 'observe', retryAllowed: false, text: TEXT_BODY, textHash: 'private-text-hash' } };
     const projected = projectAgentToolActivityForRenderer(source, () => null);
     expect(projected.call.input).toEqual({ observationId: TEXT_ACTION.observationId, elementId: TEXT_ACTION.elementId,
-      mode: 'replace', textLength: 3, textBytes: 8 });
+      mode: 'replace', textLength: 3, textBytes: 8, title: '更新测试草稿' });
     expect(projected.progress).toEqual({ message: '正在输入文字' });
     expect(projected.result).toMatchObject({ ok: true, message: '已发送文字输入', data: { dispatchState: 'dispatched' } });
     expect(projected.toolMetadata).toBeUndefined();
@@ -207,7 +263,16 @@ describe('Agent renderer projection', () => {
       const output = projectAgentChatStreamEventForRenderer({ ...event, runId: source.runId, sessionId: source.sessionId } as AgentChatStreamEvent);
       expect(JSON.stringify(output)).not.toContain(TEXT_BODY);
       expect(JSON.stringify(output)).not.toContain('private-text-hash');
+      expect(JSON.stringify(output)).toContain('更新测试草稿');
     }
+    const session = { createdAt: source.createdAt, id: source.sessionId, lastMessagePreview: '', libraryId: 3,
+      messageCount: 0, messages: [], runs: [], title: '步骤标题恢复', toolActivities: [source], updatedAt: source.createdAt } satisfies AgentSessionSnapshot;
+    const restored = projectAgentSessionForRenderer(session);
+    expect(restored.toolActivities[0].call.input).toEqual(projected.call.input);
+    expect(JSON.stringify(restored)).not.toContain(TEXT_BODY);
+    expect(projectAgentSessionForRenderer(restored).toolActivities[0].call.input).toEqual(projected.call.input);
+    expect(projectAgentToolActivityForRenderer({ ...source, call: { ...source.call,
+      input: { ...(source.call.input as Record<string, unknown>), title: `输入 ${TEXT_BODY}` } } }).call.input).not.toHaveProperty('title');
     const getter = vi.fn(() => TEXT_BODY);
     const malformed = { ...source, call: { ...source.call, input: Object.defineProperty({ mode: 'replace' }, 'text', { get: getter }) },
       preparation: { ...source.preparation, action: { ...TEXT_ACTION, text: TEXT_BODY } } } as unknown as AgentToolActivitySnapshot;
@@ -270,6 +335,25 @@ describe('Agent renderer projection', () => {
     const event = { type: 'tool-completed', activity: source, call: source.call, result: source.result,
       runId: source.runId, sessionId: source.sessionId } as AgentChatStreamEvent;
     expect(projectAgentChatStreamEventForRenderer(event)).toEqual(event);
+  });
+
+  it('projects directed text activities and stream events to the sealed count-only contract', () => {
+    const source = activity('computer.input');
+    const { elementId: _element, mode: _mode, ...identity } = TEXT_ACTION; void _element; void _mode;
+    const action = { ...identity, kind: 'computer.input' as const, operation: 'typeText' as const };
+    source.call.input = { observationId: action.observationId, operation: 'typeText', text: TEXT_BODY, title: TEXT_BODY };
+    source.preparation = { preparedActionId: 'prepared', snapshotHash: 'a'.repeat(64), action };
+    source.progress = { message: TEXT_BODY };
+    source.result = { ok: true, message: TEXT_BODY, data: { ...identity, operation: 'computer.input', inputOperation: 'typeText',
+      operationId: source.id, dispatchState: 'dispatched', mutationCommitState: 'committed', inputMethod: 'CGEventPostToPid', releaseState: 'confirmed',
+      nextAction: 'observe', retryAllowed: false, text: TEXT_BODY } };
+    const projected = projectAgentToolActivityForRenderer(source);
+    expect(projected.call.input).toEqual({ observationId: action.observationId, operation: 'typeText', textLength: 3, textBytes: 8 });
+    for (const value of [projected, projectAgentChatStreamEventForRenderer({ type: 'tool-completed', activity: source, call: source.call,
+      result: source.result, runId: source.runId, sessionId: source.sessionId })]) {
+      expect(JSON.stringify(value)).not.toContain(TEXT_BODY);
+    }
+    expect(source.call.input).toHaveProperty('text', TEXT_BODY);
   });
 
   it('keeps only the stable Skill activation identity in Tool activities', () => {

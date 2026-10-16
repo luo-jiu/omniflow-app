@@ -1,13 +1,16 @@
 import { spawn } from 'node:child_process';
 import { normalizeWindowInputOperations, normalizeWindowInputShortcut, WINDOW_INPUT_OPERATIONS,
-  WINDOW_INPUT_DRAG_MIN_DURATION_MS, WINDOW_INPUT_DRAG_MAX_DURATION_MS,
+  WINDOW_INPUT_DRAG_MIN_DURATION_MS, WINDOW_INPUT_DRAG_MAX_DURATION_MS, normalizeWindowInputScrollDelta,
   type WindowInputOperation, type WindowInputShortcut, type WindowInputPoint } from '../../../src/shared/computer-use/window-input-contract';
 import { AgentComputerInputError, resolveAgentComputerHelperPath,
   type AgentComputerWindowIdentity } from './desktop-computer';
+import { validateComputerText } from '../../../src/shared/computer-use/computer-use-contract';
 
 export interface AgentComputerWindowInputStatus {
   ready: boolean;
   profile?: string;
+  /** Main/native-only receiver identity; never expose it as an observation field. */
+  focusToken?: string;
   operations: WindowInputOperation[];
   reason?: string;
 }
@@ -21,6 +24,10 @@ export interface AgentComputerWindowInputRequest {
   point?: WindowInputPoint;
   endPoint?: WindowInputPoint;
   durationMs?: number;
+  text?: string;
+  focusToken?: string;
+  deltaX?: number;
+  deltaY?: number;
 }
 
 export interface AgentComputerWindowInputReceipt {
@@ -29,6 +36,13 @@ export interface AgentComputerWindowInputReceipt {
   eventCount: number;
   /** Confirms the matching up was posted, not that the application consumed it. */
   releaseSent: true;
+}
+
+/** Reports a native post returning, never application consumption or a planned point. */
+export interface AgentComputerWindowInputPointerEvent {
+  phase: 'down' | 'move' | 'up';
+  point: WindowInputPoint;
+  sequence: number;
 }
 
 export class AgentComputerWindowInputError extends AgentComputerInputError {
@@ -41,7 +55,7 @@ export class AgentComputerWindowInputError extends AgentComputerInputError {
 
 // The native helper must prove the exact application and OS receiver gate again
 // before dispatch; this only validates its frozen protocol identifier.
-const profiles = new Set(['appkit-fixture-v1', 'textedit-415-25f84-v1']);
+const profiles = new Set(['appkit-fixture-v1', 'textedit-415-25f84-v1', 'directed-v1']);
 const refusalReasons = new Set([
   'unsupported_receiver', 'target_changed', 'accessibility_denied', 'target_frontmost', 'foreground_unknown',
   'focused_window_mismatch', 'focused_element_mismatch', 'user_input_active', 'transient_ui_active', 'cancelled', 'receiver_changed',
@@ -76,7 +90,8 @@ function boundedString(value: unknown, maximumBytes: number, allowEmpty = false)
   return value;
 }
 
-function windowIdentity(value: unknown): AgentComputerWindowIdentity {
+/** Main-platform protocol parser shared by one-shot and persistent input transports. */
+export function prepareAgentComputerWindowInputWindow(value: unknown): AgentComputerWindowIdentity {
   const source = fields(value, ['windowId', 'pid', 'processStartedAt', 'layer', 'bounds'], ['title', 'applicationLabel', 'windowLabel']);
   const bounds = fields(source.bounds, ['x', 'y', 'width', 'height']);
   if (Object.values(bounds).some(number => typeof number !== 'number' || !Number.isFinite(number))
@@ -98,6 +113,20 @@ function profile(value: unknown): string {
   return selected;
 }
 
+function focusToken(value: unknown): string {
+  if (typeof value !== 'string' || !/^[a-f0-9]{64}$/u.test(value)) throw new Error('invalid private focus token');
+  return value;
+}
+
+function unicodeTextEventCount(text: string): number {
+  let chunks = 0, units = 0;
+  for (const scalar of text) {
+    if (units + scalar.length > 20) { chunks += 1; units = 0; }
+    units += scalar.length;
+  }
+  return (chunks + (units ? 1 : 0)) * 2;
+}
+
 function point(value: unknown, window: AgentComputerWindowIdentity): WindowInputPoint {
   const selected = fields(value, ['x', 'y']);
   const bounds = window.bounds;
@@ -109,14 +138,25 @@ function point(value: unknown, window: AgentComputerWindowIdentity): WindowInput
   return { x: selected.x, y: selected.y };
 }
 
-function parseRequest(input: unknown): AgentComputerWindowInputRequest {
-  const base = fields(input, ['window', 'profile', 'operation'], ['shortcut', 'point', 'endPoint', 'durationMs']);
-  const window = windowIdentity(base.window);
+/** Main-platform protocol parser; never expose private input text to renderer callers. */
+export function prepareAgentComputerWindowInputRequest(input: unknown): AgentComputerWindowInputRequest {
+  const base = fields(input, ['window', 'profile', 'operation'], ['shortcut', 'point', 'endPoint', 'durationMs', 'text', 'focusToken', 'deltaX', 'deltaY']);
+  const window = prepareAgentComputerWindowInputWindow(base.window);
   const selected = profile(base.profile);
   if (typeof base.operation !== 'string' || !WINDOW_INPUT_OPERATIONS.includes(base.operation as WindowInputOperation)) throw new Error('invalid operation');
   if (base.operation === 'shortcut') {
     fields(input, ['window', 'profile', 'operation', 'shortcut']);
     return { window, profile: selected, operation: 'shortcut', shortcut: normalizeWindowInputShortcut(base.shortcut) };
+  }
+  if (base.operation === 'typeText') {
+    fields(input, ['window', 'profile', 'operation', 'text', 'focusToken']);
+    return { window, profile: selected, operation: 'typeText', text: validateComputerText(base.text, 'insert').text,
+      focusToken: focusToken(base.focusToken) };
+  }
+  if (base.operation === 'scroll') {
+    fields(input, ['window', 'profile', 'operation', 'point', 'deltaX', 'deltaY']);
+    return { window, profile: selected, operation: 'scroll', point: point(base.point, window),
+      ...normalizeWindowInputScrollDelta(base.deltaX, base.deltaY) };
   }
   if (base.operation === 'drag') {
     fields(input, ['window', 'profile', 'operation', 'point', 'endPoint', 'durationMs']);
@@ -127,19 +167,72 @@ function parseRequest(input: unknown): AgentComputerWindowInputRequest {
       durationMs: integer(base.durationMs, WINDOW_INPUT_DRAG_MIN_DURATION_MS, WINDOW_INPUT_DRAG_MAX_DURATION_MS) };
   }
   fields(input, ['window', 'profile', 'operation', 'point']);
-  return { window, profile: selected, operation: base.operation as 'rightClick' | 'doubleClick', point: point(base.point, window) };
+  return { window, profile: selected, operation: base.operation as 'click' | 'rightClick' | 'doubleClick', point: point(base.point, window) };
 }
 
 type InputHelperMode = '--window-input-check' | '--window-input';
 
+/** A separate, optional visual stream cannot authorize, stop or settle input. */
+export function pointerFeedback(request: AgentComputerWindowInputRequest, callback: (event: AgentComputerWindowInputPointerEvent) => void) {
+  const maximumEvents = request.operation === 'drag' ? Math.max(8, Math.floor(request.durationMs! / 32)) + 2
+    : request.operation === 'doubleClick' ? 4 : request.operation === 'rightClick' || request.operation === 'click' ? 2 : 0;
+  let active = true;
+  let pending = Buffer.alloc(0);
+  let totalBytes = 0;
+  let sequence = 0;
+  let presses = 0;
+  let pressed = false;
+  let current = request.point;
+  const samePoint = (left: WindowInputPoint, right?: WindowInputPoint) => left.x === right?.x && left.y === right?.y;
+  const stop = () => { active = false; pending = Buffer.alloc(0); };
+  return {
+    stop,
+    data(bytes: Buffer) {
+      if (!active) return;
+      totalBytes += bytes.length;
+      if (totalBytes > 16_384) { stop(); return; }
+      pending = Buffer.concat([pending, bytes]);
+      try {
+        let newline: number;
+        while ((newline = pending.indexOf(10)) >= 0) {
+          if (newline === 0 || newline > 256) throw new Error('invalid pointer frame');
+          const frame = pending.subarray(0, newline);
+          pending = pending.subarray(newline + 1);
+          const source = fields(JSON.parse(frame.toString('utf8')), ['phase', 'point', 'sequence']);
+          if (integer(source.sequence, 1, maximumEvents) !== sequence + 1) throw new Error('invalid pointer sequence');
+          const position = point(source.point, request.window);
+          const phase = source.phase;
+          if (phase === 'down') {
+            if (pressed || !samePoint(position, request.point) || ++presses > (request.operation === 'doubleClick' ? 2 : 1)) throw new Error('invalid pointer down');
+            pressed = true;
+          } else if (phase === 'move') {
+            if (!pressed || request.operation !== 'drag') throw new Error('invalid pointer move');
+          } else if (phase === 'up') {
+            if (!pressed || !samePoint(position, current)) throw new Error('invalid pointer up');
+            pressed = false;
+          } else throw new Error('invalid pointer phase');
+          current = position;
+          sequence += 1;
+          callback({ phase, point: position, sequence });
+          if (!active) return;
+        }
+        if (pending.length > 256) stop();
+      } catch { stop(); }
+    },
+  };
+}
+
 /** This runner intentionally leaves the AX helper's existing cancellation behavior alone. */
-async function runInputHelper(mode: InputHelperMode, input: unknown, signal: AbortSignal): Promise<{ code: number | null; receipt: unknown }> {
+async function runInputHelper(mode: InputHelperMode, input: unknown, signal: AbortSignal,
+  feedback?: ReturnType<typeof pointerFeedback>): Promise<{ code: number | null; receipt: unknown }> {
   signal.throwIfAborted();
   if (process.platform !== 'darwin') throw new AgentComputerWindowInputError('窗口输入目前仅支持 macOS', 'not-dispatched', 'not-required');
   const mutation = mode === '--window-input';
   return new Promise((resolve, reject) => {
     let child: ReturnType<typeof spawn>;
-    try { child = spawn(resolveAgentComputerHelperPath(), [mode], { shell: false, stdio: ['pipe', 'pipe', 'pipe'] }); }
+    try { child = spawn(resolveAgentComputerHelperPath(), [mode], { shell: false,
+      stdio: feedback ? ['pipe', 'pipe', 'pipe', 'pipe'] : ['pipe', 'pipe', 'pipe'],
+      ...(feedback ? { env: { ...process.env, OMNIFLOW_WINDOW_INPUT_POINTER_FD: '3' } } : {}) }); }
     catch { reject(new AgentComputerWindowInputError('窗口输入组件不可用，请重新构建或安装 OmniFlow', 'not-dispatched', 'not-required')); return; }
     let launched = false;
     let finished = false;
@@ -151,6 +244,7 @@ async function runInputHelper(mode: InputHelperMode, input: unknown, signal: Abo
     const settle = (error?: Error, result?: { code: number | null; receipt: unknown }) => {
       if (finished) return;
       finished = true;
+      feedback?.stop();
       clearTimeout(timer);
       clearTimeout(graceTimer);
       signal.removeEventListener('abort', cancel);
@@ -160,6 +254,7 @@ async function runInputHelper(mode: InputHelperMode, input: unknown, signal: Abo
     const stopGracefully = () => {
       if (terminating || finished) return;
       terminating = true;
+      feedback?.stop();
       clearTimeout(timer);
       // Native SIGTERM stops generation and posts the one matching up event.
       // An immediate SIGKILL could leave its synthetic button/key down.
@@ -180,7 +275,7 @@ async function runInputHelper(mode: InputHelperMode, input: unknown, signal: Abo
         settle(new AgentComputerWindowInputError('窗口输入检查超时，请重新观察', 'not-dispatched', 'not-required'));
         try { child.kill('SIGKILL'); } catch { /* Read only. */ }
       }
-    }, 5_000);
+    }, mutation && (input as AgentComputerWindowInputRequest).operation === 'typeText' ? 15_000 : 5_000);
     timer.unref();
     signal.addEventListener('abort', cancel, { once: true });
     child.once('spawn', () => { launched = true; });
@@ -202,6 +297,17 @@ async function runInputHelper(mode: InputHelperMode, input: unknown, signal: Abo
       } else output.push(bytes);
     });
     child.stderr!.resume();
+    const progress = child.stdio?.[3];
+    if (feedback && progress && 'on' in progress) {
+      // Keep the data listener through close, even after cancellation or bad
+      // telemetry, so a visual consumer can never stall native paired release.
+      progress.on('data', (bytes: Buffer) => {
+        if (signal.aborted || finished) feedback.stop();
+        feedback.data(bytes);
+      });
+      progress.on('error', feedback.stop);
+      progress.on('end', feedback.stop);
+    }
     child.stdin!.on('error', () => { /* The process close event supplies the authoritative receipt. */ });
     child.once('close', code => {
       if (finished) return;
@@ -218,7 +324,10 @@ async function runInputHelper(mode: InputHelperMode, input: unknown, signal: Abo
   });
 }
 
-function parseFailure(receipt: unknown): { dispatched: false | 'unknown'; code: string; releaseState: 'confirmed' | 'unconfirmed' | 'not-required' } {
+/** Exact native failure receipt, excluding transport framing such as requestId. */
+export function parseAgentComputerWindowInputFailure(receipt: unknown, request?: AgentComputerWindowInputRequest): { dispatched: false | 'unknown'; code: string; releaseState: 'confirmed' | 'unconfirmed' | 'not-required' } {
+  const maximumEvents = request?.operation === 'typeText' ? unicodeTextEventCount(request.text!)
+    : request?.operation === 'scroll' ? 1 : 256;
   const source = fields(receipt, ['ok', 'dispatched', 'error'], ['eventCount', 'releaseSent', 'method']);
   const error = fields(source.error, ['code', 'message']);
   const code = boundedString(error.code, 64);
@@ -228,63 +337,75 @@ function parseFailure(receipt: unknown): { dispatched: false | 'unknown'; code: 
   const hasRelease = ['eventCount', 'releaseSent', 'method'].some(key => key in source);
   if (hasRelease && (source.dispatched !== 'unknown' || source.method !== 'CGEventPostToPid'
     || typeof source.releaseSent !== 'boolean')) throw new Error('invalid failure release');
-  if (hasRelease) integer(source.eventCount, 1, 256);
+  if (hasRelease) integer(source.eventCount, 1, maximumEvents);
   return { dispatched: source.dispatched, code,
     releaseState: source.dispatched === false ? 'not-required' : hasRelease && source.releaseSent === true ? 'confirmed' : 'unconfirmed' };
+}
+
+/** Exact success receipt; a posted sequence does not prove application consumption. */
+export function parseAgentComputerWindowInputReceipt(receipt: unknown,
+  request: AgentComputerWindowInputRequest): AgentComputerWindowInputReceipt {
+  const source = fields(receipt, ['ok', 'dispatched', 'method', 'eventCount', 'releaseSent']);
+  const eventCount = integer(source.eventCount, request.operation === 'scroll' ? 1 : 2, request.operation === 'typeText' ? 1_024 : 256);
+  if (source.ok !== true || source.dispatched !== true || source.method !== 'CGEventPostToPid' || source.releaseSent !== true
+    || (request.operation === 'drag' ? eventCount < 10 || eventCount > 33
+      : request.operation === 'typeText' ? eventCount !== unicodeTextEventCount(request.text!)
+        : eventCount !== (request.operation === 'doubleClick' ? 4 : request.operation === 'scroll' ? 1 : 2))) throw new Error('invalid dispatch');
+  return { dispatched: true, method: 'CGEventPostToPid', eventCount, releaseSent: true };
 }
 
 /** Read-only readiness; the caller owns the single-window grant and freezes the returned profile. */
 export async function getAgentComputerWindowInputStatus(window: AgentComputerWindowIdentity, signal: AbortSignal): Promise<AgentComputerWindowInputStatus> {
   signal.throwIfAborted();
   let identity: AgentComputerWindowIdentity;
-  try { identity = windowIdentity(window); }
+  try { identity = prepareAgentComputerWindowInputWindow(window); }
   catch { throw new AgentComputerWindowInputError('窗口输入身份无效，请重新选择窗口', 'not-dispatched', 'not-required'); }
   const result = await runInputHelper('--window-input-check', { window: identity }, signal);
   signal.throwIfAborted();
   try {
     if (result.code !== 0) {
-      const failed = parseFailure(result.receipt);
+      const failed = parseAgentComputerWindowInputFailure(result.receipt);
       if (failed.dispatched === false && ['invalid_arguments', 'unsupported_receiver'].includes(failed.code)) {
         return { ready: false, operations: [], reason: 'unsupported_receiver' };
       }
       throw new Error('failed check');
     }
-    const source = fields(result.receipt, ['ok', 'ready', 'operations'], ['profile', 'reason']);
+    const source = fields(result.receipt, ['ok', 'ready', 'operations'], ['profile', 'reason', 'focusToken']);
     if (source.ok !== true || typeof source.ready !== 'boolean') throw new Error('invalid check');
     const reason = 'reason' in source ? boundedString(source.reason, 64) : undefined;
     if (reason && !refusalReasons.has(reason)) throw new Error('invalid reason');
     if (source.ready) {
       if (reason !== undefined) throw new Error('ready refusal');
-      return { ready: true, profile: profile(source.profile), operations: normalizeWindowInputOperations(source.operations) };
+      const operations = normalizeWindowInputOperations(source.operations);
+      if (!operations.includes('typeText') && 'focusToken' in source) throw new Error('unexpected private focus token');
+      return { ready: true, profile: profile(source.profile), operations,
+        ...(operations.includes('typeText') ? { focusToken: focusToken(source.focusToken) } : {}) };
     }
-    if ('profile' in source || !Array.isArray(source.operations) || source.operations.length !== 0
+    if ('profile' in source || 'focusToken' in source || !Array.isArray(source.operations) || source.operations.length !== 0
       || Reflect.ownKeys(source.operations).length !== 1) throw new Error('invalid unavailable check');
     return { ready: false, operations: [], ...(reason ? { reason } : {}) };
   } catch { throw new AgentComputerWindowInputError('窗口输入检查回执无效，请重新观察', 'not-dispatched', 'not-required'); }
 }
 
 /** One directed event sequence. Native revalidates the window, receiver and frozen profile before each dispatch. */
-export async function inputAgentComputerWindow(input: AgentComputerWindowInputRequest, signal: AbortSignal): Promise<AgentComputerWindowInputReceipt> {
+export async function inputAgentComputerWindow(input: AgentComputerWindowInputRequest, signal: AbortSignal,
+  onPointerEvent?: (event: AgentComputerWindowInputPointerEvent) => void): Promise<AgentComputerWindowInputReceipt> {
   signal.throwIfAborted();
   let request: AgentComputerWindowInputRequest;
-  try { request = parseRequest(input); }
+  try { request = prepareAgentComputerWindowInputRequest(input); }
   catch { throw new AgentComputerWindowInputError('窗口输入请求无效，请重新观察窗口', 'not-dispatched', 'not-required'); }
-  const result = await runInputHelper('--window-input', request, signal);
+  const result = await runInputHelper('--window-input', request, signal,
+    onPointerEvent ? pointerFeedback(request, onPointerEvent) : undefined);
   try {
     if (result.code !== 0 || (result.receipt as { ok?: unknown } | null)?.ok === false) {
-      const failure = parseFailure(result.receipt);
+      const failure = parseAgentComputerWindowInputFailure(result.receipt, request);
       throw new AgentComputerWindowInputError(failure.dispatched === false
         ? '窗口输入在派发前拒绝，请重新观察窗口'
         : failure.releaseState === 'confirmed' ? '窗口输入结果未知，对应抬键/抬鼠标事件已发送；请重新观察，勿重复操作'
           : '窗口输入结果未知，抬键/抬鼠标回执未确认；请重新观察，勿重复操作',
       failure.dispatched === false ? 'not-dispatched' : 'unknown', failure.releaseState);
     }
-    const source = fields(result.receipt, ['ok', 'dispatched', 'method', 'eventCount', 'releaseSent']);
-    const eventCount = integer(source.eventCount, 2, 256);
-    if (source.ok !== true || source.dispatched !== true || source.method !== 'CGEventPostToPid' || source.releaseSent !== true
-      || (request.operation === 'drag' ? eventCount < 10 || eventCount > 33
-        : eventCount !== (request.operation === 'doubleClick' ? 4 : 2))) throw new Error('invalid dispatch');
-    return { dispatched: true, method: 'CGEventPostToPid', eventCount, releaseSent: true };
+    return parseAgentComputerWindowInputReceipt(result.receipt, request);
   } catch (error) {
     if (error instanceof AgentComputerWindowInputError) throw error;
     throw new AgentComputerWindowInputError('窗口输入回执无效，抬键/抬鼠标回执未确认；请重新观察，勿重复操作', 'unknown', 'unconfirmed');

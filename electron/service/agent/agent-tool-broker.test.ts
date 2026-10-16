@@ -60,7 +60,7 @@ function brokerDeferred<T>() {
 }
 
 describe('Agent tool broker', () => {
-  it.each(['computer.setText', 'computer.scroll', 'computer.input'] as const)('preserves %s committed and unknown receipts after cancellation', async name => {
+  it.each(['computer.setText', 'computer.scroll', 'computer.input', 'computer.menu'] as const)('preserves %s committed and unknown receipts after cancellation', async name => {
     for (const state of ['dispatched', 'unknown'] as const) {
       const controller = new AbortController();
       const begun = brokerDeferred<void>();
@@ -84,7 +84,7 @@ describe('Agent tool broker', () => {
     }
   });
 
-  it.each(['computer.setText', 'computer.scroll', 'computer.input'] as const)('does not grant %s a settlement through spoofed or plugin operation sources', async name => {
+  it.each(['computer.setText', 'computer.scroll', 'computer.input', 'computer.menu'] as const)('does not grant %s a settlement through spoofed or plugin operation sources', async name => {
     for (const overrides of [{ kind: 'control' as const }, { name: 'file.rename' },
       { pluginOperation: 'rename' as const }, { pluginOperation: 'file-output' as const },
       { registrationId: `builtin:${name}@2` }, { prepareMain: undefined }]) {
@@ -149,7 +149,7 @@ describe('Agent tool broker', () => {
     expect(execute).toHaveBeenCalledWith('computer.click', {}, expect.objectContaining({ commitSettlement: expect.any(Object) }), 'builtin:computer.click@1');
   });
 
-  it.each(['computer.click', 'computer.input'])('retains the %s unknown input fallback when cancellation settlement expires without a helper receipt', async name => {
+  it.each(['computer.click', 'computer.input', 'computer.menu'])('retains the %s unknown input fallback when cancellation settlement expires without a helper receipt', async name => {
     vi.useFakeTimers();
     const completion = brokerDeferred<AgentToolResult>();
     try {
