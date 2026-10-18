@@ -1,3 +1,4 @@
+import type { ComponentProps } from 'react';
 import TestRenderer, { act } from 'react-test-renderer';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -5,9 +6,15 @@ import type {
   AgentAssistantItemSnapshot,
   AgentToolActivitySnapshot,
   AgentRunSnapshot,
+  AgentToolApprovalSnapshot,
+  AgentPresentationAction,
 } from '@/shared/agent/agent.types';
 import AgentTimeline from './AgentTimeline';
 import AgentMessageContent from './AgentMessageContent';
+import AgentToolActivityCard from './AgentToolActivityCard';
+import AgentToolActivityGroup from './AgentToolActivityGroup';
+
+const messageContentRenders = vi.hoisted(() => vi.fn());
 
 vi.mock('@douyinfe/semi-icons', () => ({
   IconAlertCircle: () => null,
@@ -15,7 +22,10 @@ vi.mock('@douyinfe/semi-icons', () => ({
 }));
 
 vi.mock('./AgentMessageContent', () => ({
-  default: ({ content }: { content: string }) => <div>{content}</div>,
+  default: ({ content }: { content: string }) => {
+    messageContentRenders(content);
+    return <div>{content}</div>;
+  },
 }));
 
 vi.mock('./AgentToolActivityCard', () => ({
@@ -75,6 +85,115 @@ function toolActivity(): AgentToolActivitySnapshot {
 
 afterEach(() => {
   renderers.splice(0).forEach(renderer => act(() => renderer.unmount()));
+  messageContentRenders.mockClear();
+});
+
+describe('AgentTimeline retained rendering', () => {
+  it('does not rebuild unchanged message children for parent layout updates', () => {
+    const props: ComponentProps<typeof AgentTimeline> = {
+      approvalBusyIds: new Set(), interactionBusyIds: new Set(), libraryId: 3,
+      ownerScope: null, onResolveApproval: vi.fn(), messages: [commentary()], runs: [], toolActivities: [],
+    };
+    const renderLayout = (phase: string) => <section data-layout-phase={phase}><AgentTimeline {...props} /></section>;
+    let renderer!: TestRenderer.ReactTestRenderer;
+    act(() => { renderer = TestRenderer.create(renderLayout('expanded')); });
+    renderers.push(renderer);
+    expect(messageContentRenders).toHaveBeenCalledOnce();
+    const message = renderer.root.findByType(AgentMessageContent);
+    messageContentRenders.mockClear();
+
+    for (const phase of ['tree-collapsing', 'agent-docking', 'tree-expanding', 'expanded']) {
+      act(() => renderer.update(renderLayout(phase)));
+      expect(renderer.root.findByType('section').props['data-layout-phase']).toBe(phase);
+    }
+    expect(messageContentRenders).not.toHaveBeenCalled();
+    expect(renderer.root.findByType(AgentMessageContent)).toBe(message);
+    expect(message.props.content).toBe(commentary().content);
+  });
+
+  it('refreshes changed messages, runs and tool snapshots while keeping other inputs stable', () => {
+    const run: AgentRunSnapshot = { id: 'run-1', sessionId: 'session-1', model: 'test', profileId: 'test',
+      reasoningEffort: 'medium', revision: 1, status: 'running', userPrompt: 'test',
+      createdAt: '2026-09-08T00:00:00Z', updatedAt: '2026-09-08T00:00:00Z' };
+    let props: ComponentProps<typeof AgentTimeline> = {
+      approvalBusyIds: new Set(), interactionBusyIds: new Set(), libraryId: 3,
+      ownerScope: null, onResolveApproval: vi.fn(), messages: [commentary()], runs: [run], toolActivities: [toolActivity()],
+    };
+    let renderer!: TestRenderer.ReactTestRenderer;
+    act(() => { renderer = TestRenderer.create(<AgentTimeline {...props} />); });
+    renderers.push(renderer);
+    const update = (patch: Partial<typeof props>) => {
+      props = { ...props, ...patch };
+      act(() => renderer.update(<AgentTimeline {...props} />));
+    };
+    update({ messages: [{ ...commentary(), content: '根据最新输入继续检查。' }] });
+    expect(renderer.root.findByType(AgentMessageContent).props.content).toBe('根据最新输入继续检查。');
+
+    const changedTool = { ...toolActivity(), revision: 2, result: { ok: true, message: '新的规范工具结果' } };
+    update({ toolActivities: [changedTool] });
+    expect(renderer.root.findByType(AgentToolActivityGroup).props.activities).toEqual([changedTool]);
+
+    update({ runs: [{ ...run, revision: 2, status: 'failed', error: '新的执行错误' }] });
+    expect(renderer.root.findByProps({ 'data-work-kind': 'run-status' })
+      .findByProps({ className: 'agent-work-item-content' }).children).toEqual(['新的执行错误']);
+  });
+
+  it.each(['approval', 'interaction', 'receipt'] as const)('refreshes %s busy state without new message or tool snapshots', kind => {
+    const activity: AgentToolActivitySnapshot = { ...toolActivity(), status: 'awaiting_approval', result: undefined,
+      approval: { approvalId: 'approval-1', status: 'pending', preview: { title: '允许读取', description: '读取文件', risk: 'read' } },
+      ...(kind === 'interaction' ? { interaction: { interactionId: 'interaction-1', status: 'pending' as const,
+        request: { kind: 'choice' as const, prompt: '选择下一步', options: [{ id: 'continue', label: '继续' }] } } } : {}),
+    };
+    const props: ComponentProps<typeof AgentTimeline> = {
+      approvalBusyIds: new Set(), interactionBusyIds: new Set(), receiptBusyIds: new Set(), libraryId: 3,
+      ownerScope: null, onResolveApproval: vi.fn(), messages: [], runs: [], toolActivities: [activity],
+    };
+    let renderer!: TestRenderer.ReactTestRenderer;
+    act(() => { renderer = TestRenderer.create(<AgentTimeline {...props} />); });
+    renderers.push(renderer);
+    const flag = `${kind}Busy`;
+    expect(Boolean(renderer.root.findByType(AgentToolActivityCard).props[flag])).toBe(false);
+    const busy = kind === 'approval' ? { approvalBusyIds: new Set(['approval-1']) }
+      : kind === 'interaction' ? { interactionBusyIds: new Set(['interaction-1']) }
+        : { receiptBusyIds: new Set(['tool-1']) };
+    act(() => renderer.update(<AgentTimeline {...props} {...busy} />));
+    expect(renderer.root.findByType(AgentToolActivityCard).props[flag]).toBe(true);
+    act(() => renderer.update(<AgentTimeline {...props} />));
+    expect(Boolean(renderer.root.findByType(AgentToolActivityCard).props[flag])).toBe(false);
+  });
+
+  it.each(['onResolveApproval', 'onAction', 'onToolExpand'] as const)(
+    'uses an updated %s callback with all other inputs unchanged', callbackName => {
+    const activity: AgentToolActivitySnapshot = { ...toolActivity(), status: 'awaiting_approval', result: undefined,
+      approval: { approvalId: 'approval-1', status: 'pending', preview: { title: '允许读取', description: '读取文件', risk: 'read' } },
+    };
+    const props: ComponentProps<typeof AgentTimeline> = {
+      approvalBusyIds: new Set(), interactionBusyIds: new Set(), libraryId: 3,
+      ownerScope: null, onResolveApproval: vi.fn(), onAction: vi.fn(), onToolExpand: vi.fn(),
+      messages: [], runs: [], toolActivities: [activity],
+    };
+    let renderer!: TestRenderer.ReactTestRenderer;
+    act(() => { renderer = TestRenderer.create(<AgentTimeline {...props} />); });
+    renderers.push(renderer);
+    const latest = vi.fn();
+    act(() => renderer.update(<AgentTimeline {...props} {...{ [callbackName]: latest }} />));
+    const approval: AgentToolApprovalSnapshot = { approvalId: 'approval-1', call: activity.call,
+      preview: activity.approval!.preview, runId: activity.runId, sessionId: activity.sessionId };
+    const action: AgentPresentationAction = { action: 'tree.revealNode', label: '定位文件', libraryId: 3, nodeId: 9 };
+    const card = renderer.root.findByType(AgentToolActivityCard);
+    act(() => {
+      if (callbackName === 'onResolveApproval') card.props.onResolveApproval(approval, true);
+      if (callbackName === 'onAction') card.props.onAction(action);
+      if (callbackName === 'onToolExpand') renderer.root.findByProps({ 'data-testid': 'tool-expand' }).props.onClick();
+    });
+    expect(latest).toHaveBeenCalledOnce();
+    if (callbackName === 'onResolveApproval') expect(latest).toHaveBeenCalledWith(approval, true);
+    if (callbackName === 'onAction') expect(latest).toHaveBeenCalledWith(action);
+    expect(props.onResolveApproval).not.toHaveBeenCalled();
+    expect(props.onAction).not.toHaveBeenCalled();
+    expect(props.onToolExpand).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe('AgentTimeline commentary presentation', () => {

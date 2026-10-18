@@ -51,13 +51,14 @@ describe('Retained workspace pane', () => {
     </RetainedWorkspacePane>;
     let view!: TestRenderer.ReactTestRenderer;
     act(() => { view = TestRenderer.create(render(true)); });
-    act(() => view.root.findByProps({ className: 'peek-more' }).props.onClick());
-    const rows = view.root.findAllByProps({ className: 'peek-row-reveal' });
+    const directory = () => view.root.findAllByType('aside').find(card => card.props['data-visible'] && !card.props['aria-hidden'])!;
+    act(() => directory().findByProps({ className: 'peek-more' }).props.onClick());
+    const rows = directory().findAllByProps({ className: 'peek-row-reveal' });
     expect(rows).toHaveLength(10);
     act(() => view.update(render(false)));
     act(() => view.update(render(true)));
-    expect(view.root.findAllByProps({ className: 'peek-row-reveal' })).toEqual(rows);
-    const toggle = view.root.findByProps({ className: 'peek-group-toggle' });
+    expect(directory().findAllByProps({ className: 'peek-row-reveal' })).toEqual(rows);
+    const toggle = directory().findByProps({ className: 'peek-group-toggle' });
     act(() => toggle.props.onClick());
     act(() => view.update(render(false)));
     act(() => view.update(render(true)));

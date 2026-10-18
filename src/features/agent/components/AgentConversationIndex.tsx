@@ -6,6 +6,7 @@ import type { AgentMessage, AgentRunSnapshot } from '@/shared/agent/agent.types'
 import { buildConversationIndex, indexMilestone, parseIndexMarks, resolveIndexPreviewTop } from '../agent-conversation-index';
 import { INDEX_BASE_WIDTH, INDEX_PEAK_WIDTH, INDEX_TICK_HEIGHT as TICK_HEIGHT, indexWaveColors, indexWaveStrength } from '../agent-index-wave';
 import { useAgentIndexWave } from '../hooks/useAgentIndexWave';
+import { AGENT_DIRECTORY_LAYOUT_MS } from '../agent-session-directory-layout';
 
 const INDEX_THRESHOLD = 5;
 
@@ -13,8 +14,9 @@ const Dial = styled.aside`
   position: absolute;
   z-index: 3;
   left: 4px;
+  transition: transform ${AGENT_DIRECTORY_LAYOUT_MS}ms cubic-bezier(0.22, 1, 0.36, 1);
   top: 50%;
-  transform: translateY(-50%);
+  transform: translate(var(--agent-directory-left-space, 0px), -50%);
   width: 44px;
   height: var(--dial-height);
   max-height: calc(100% - 100px);
@@ -69,6 +71,7 @@ const Dial = styled.aside`
   .dial-preview-footer button[aria-pressed='true'] { color: var(--dial-violet); }
   .dial-preview-footer button .app-outline-icon { color: inherit; }
   @media (prefers-reduced-motion: reduce) {
+    transition: none;
     .dial-stroke { transition: none; }
     .dial-preview { animation: none; transition: none; }
   }
@@ -197,7 +200,7 @@ export default function AgentConversationIndex({ messages, runs, scrollRef, stor
   const preview = hovered === null ? undefined : entries[hovered];
   const marked = preview ? Object.prototype.hasOwnProperty.call(marks, preview.id) : false;
   if (!showIndex) return null;
-  return <Dial ref={dialRef} aria-label="聊天索引" style={{ '--dial-height': `${Math.min(70, entries.length) * TICK_HEIGHT}px`,
+  return <Dial ref={dialRef} data-agent-layout-motion aria-label="聊天索引" style={{ '--dial-height': `${Math.min(70, entries.length) * TICK_HEIGHT}px`,
     '--preview-max-height': `${previewBounds.height}px`,
     '--preview-top': `${resolveIndexPreviewTop((hovered || 0) * TICK_HEIGHT + TICK_HEIGHT / 2 - railScroll, previewBounds)}px` } as React.CSSProperties}
     onMouseLeave={() => setHovered(null)} onBlur={event => {

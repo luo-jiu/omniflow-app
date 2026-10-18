@@ -3,6 +3,7 @@ import {
   AGENT_CHAT_INDEX_INSET,
   AGENT_CHAT_MAX_WIDTH,
   AGENT_DIRECTORY_BREAKPOINT,
+  AGENT_DIRECTORY_LEFT_MIN_WIDTH,
   AGENT_DIRECTORY_RESERVED_WIDTH,
   AGENT_DIRECTORY_WIDTH,
   clampAgentDirectoryBubbleTop,
@@ -13,6 +14,11 @@ describe('Agent session directory placement', () => {
   it('switches to a bubble before the pinned directory squeezes the full chat width', () => {
     expect(AGENT_DIRECTORY_BREAKPOINT - AGENT_CHAT_INDEX_INSET - AGENT_DIRECTORY_RESERVED_WIDTH - 8)
       .toBe(AGENT_CHAT_MAX_WIDTH);
+  });
+
+  it('reserves the minimum chat width and index gap beside a left directory', () => {
+    expect(AGENT_DIRECTORY_LEFT_MIN_WIDTH).toBe(1048);
+    expect(AGENT_DIRECTORY_LEFT_MIN_WIDTH).toBeLessThan(AGENT_DIRECTORY_BREAKPOINT);
   });
 
   it('keeps a dragged bubble inside the workspace after a height reduction', () => {

@@ -136,12 +136,13 @@ import {
   SidePanel,
   SidePanelFooter,
   SidePanelHeader,
-  SidePanelMotionProperty,
   SidePanelTree,
   SidebarCollapseIcon,
   TitlebarSidePanelToggleButton,
   TitlebarSidePanelToggleHost,
+  ToolbarSidePanelMotionProperty,
 } from './layout-styles';
+import { useSidePanelMotion } from './useSidePanelMotion';
 import {
   createBrowserSettingsTab,
   createEmptyBrowserTab,
@@ -253,6 +254,10 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   const [sidePanelWidth, setSidePanelWidth] = React.useState<number>(() => loadSidePanelWidth(libraryId));
   const [sidePanelCollapsed, setSidePanelCollapsed] = React.useState(false);
   const [sidePanelMotionSyncSignal, setSidePanelMotionSyncSignal] = React.useState(0);
+  const [sidePanelExpandRequest, setSidePanelExpandRequest] = React.useState<number | null>(null);
+  const sidePanelExpandRequestRef = React.useRef<number | null>(null);
+  const sidePanelExpandGenerationRef = React.useRef(0);
+  const [detailWrapperWidth, setDetailWrapperWidth] = React.useState(0);
   const [sidePanelResizing, setSidePanelResizing] = React.useState(false);
   const [sidePanelVisualWidth, setSidePanelVisualWidthState] = React.useState<number>(() => (
     loadSidePanelWidth(libraryId)
@@ -327,6 +332,9 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   } | null>(null);
   const latestBrowserResourcePanelWidthRef = React.useRef<number>(browserResourcePanelWidth);
   const detailWrapperRef = React.useRef<HTMLDivElement>(null);
+  const sidePanelMotion = useSidePanelMotion(
+    sidePanelRef, sidePanelCollapsed || sidePanelExpandRequest !== null, sidePanelMotionSyncSignal,
+  );
   const resizeMoveHandlerRef = React.useRef<((event: MouseEvent) => void) | null>(null);
   const resizeUpHandlerRef = React.useRef<(() => void) | null>(null);
   const browserResourcePanelResizeMoveHandlerRef = React.useRef<((event: MouseEvent) => void) | null>(null);
@@ -493,12 +501,27 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   }, [applySidePanelVisualWidthPreview]);
 
   const setSidePanelVisualWidth = React.useCallback((nextWidth: number) => {
-    const normalizedWidth = Math.min(maxSidePanelWidthRef.current, Math.max(0, Math.floor(nextWidth)));
+    const normalizedWidth = sidePanelExpandRequestRef.current !== null ? 0
+      : Math.min(maxSidePanelWidthRef.current, Math.max(0, Math.floor(nextWidth)));
     sidePanelVisualWidthRef.current = normalizedWidth;
     pendingSidePanelVisualWidthRef.current = normalizedWidth;
-    applySidePanelVisualWidthPreview(normalizedWidth);
+    // Start transitions with the React commit, after rendering the new layout.
+    // Imperative writes here let that render consume the animation's first frames.
     setSidePanelVisualWidthState(normalizedWidth);
-  }, [applySidePanelVisualWidthPreview]);
+  }, []);
+
+  const cancelSidePanelExpand = React.useCallback(() => {
+    sidePanelExpandRequestRef.current = null;
+    setSidePanelExpandRequest(null);
+  }, []);
+
+  const finishSidePanelExpand = React.useCallback((request: number) => {
+    if (sidePanelExpandRequestRef.current !== request || sidePanelCollapsedRef.current
+      || workspaceDisplayMode !== 'search-home') return;
+    cancelSidePanelExpand();
+    setSidePanelVisualWidth(latestPanelWidthRef.current);
+    setSidePanelMotionSyncSignal(current => current + 1);
+  }, [cancelSidePanelExpand, setSidePanelVisualWidth, workspaceDisplayMode]);
 
   React.useLayoutEffect(() => {
     const wrapper = detailWrapperRef.current;
@@ -506,6 +529,8 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     const updateLimit = () => {
       const width = wrapper.getBoundingClientRect().width;
       if (width <= 0) return;
+      setDetailWrapperWidth(width);
+      if (workspaceDisplayMode !== 'search-home') cancelSidePanelExpand();
       maxSidePanelWidthRef.current = getMaxSidePanelWidth(
         width,
         window.innerWidth,
@@ -519,28 +544,34 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     const observer = new ResizeObserver(updateLimit);
     observer.observe(wrapper);
     return () => observer.disconnect();
-  }, [setSidePanelVisualWidth, workspaceDisplayMode]);
+  }, [cancelSidePanelExpand, setSidePanelVisualWidth, workspaceDisplayMode]);
 
   const toggleSidePanelCollapsed = React.useCallback(() => {
     cleanupResizeListeners();
     setSidePanelResizing(false);
-    setSidePanelMotionSyncSignal((current) => current + 1);
-    setSidePanelCollapsed((current) => {
-      const nextCollapsed = !current;
-      sidePanelCollapsedRef.current = nextCollapsed;
-      if (nextCollapsed) {
-        setSidePanelVisualWidth(0);
-        return nextCollapsed;
-      }
-      const restoredWidth = Math.max(MIN_SIDE_PANEL_WIDTH, latestPanelWidthRef.current || sidePanelWidth);
-      setSidePanelWidth(restoredWidth);
-      latestPanelWidthRef.current = restoredWidth;
-      setSidePanelVisualWidth(restoredWidth);
-      return nextCollapsed;
-    });
-  }, [cleanupResizeListeners, setSidePanelVisualWidth, sidePanelWidth]);
+    const nextCollapsed = !sidePanelCollapsedRef.current;
+    sidePanelCollapsedRef.current = nextCollapsed;
+    setSidePanelCollapsed(nextCollapsed);
+    if (!nextCollapsed && workspaceDisplayMode === 'search-home') {
+      const request = ++sidePanelExpandGenerationRef.current;
+      sidePanelExpandRequestRef.current = request;
+      setSidePanelExpandRequest(request);
+    } else {
+      cancelSidePanelExpand();
+      setSidePanelMotionSyncSignal(current => current + 1);
+    }
+    if (nextCollapsed) {
+      setSidePanelVisualWidth(0);
+      return;
+    }
+    const restoredWidth = Math.max(MIN_SIDE_PANEL_WIDTH, latestPanelWidthRef.current || sidePanelWidth);
+    setSidePanelWidth(restoredWidth);
+    latestPanelWidthRef.current = restoredWidth;
+    setSidePanelVisualWidth(restoredWidth);
+  }, [cancelSidePanelExpand, cleanupResizeListeners, setSidePanelVisualWidth, sidePanelWidth, workspaceDisplayMode]);
 
   const setVideoWideMode = React.useCallback((enabled: boolean) => {
+    cancelSidePanelExpand();
     cleanupResizeListeners();
     setSidePanelResizing(false);
 
@@ -585,7 +616,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     setSidePanelWidth(restoredWidth);
     latestPanelWidthRef.current = restoredWidth;
     setSidePanelVisualWidth(restoredWidth);
-  }, [cleanupResizeListeners, setSidePanelVisualWidth]);
+  }, [cancelSidePanelExpand, cleanupResizeListeners, setSidePanelVisualWidth]);
 
   const libraryWorkspaceControls = React.useMemo(() => ({
     setVideoWideMode,
@@ -596,13 +627,14 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   }, [sidePanelCollapsed]);
 
   React.useEffect(() => {
+    cancelSidePanelExpand();
     const restored = loadSidePanelWidth(libraryId);
     latestPanelWidthRef.current = restored;
     setSidePanelWidth(restored);
     if (!sidePanelCollapsedRef.current) {
       setSidePanelVisualWidth(restored);
     }
-  }, [libraryId, setSidePanelVisualWidth]);
+  }, [cancelSidePanelExpand, libraryId, setSidePanelVisualWidth]);
 
   React.useEffect(() => {
     const restoredWidth = loadBrowserResourcePanelWidth(libraryId);
@@ -613,6 +645,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
 
   React.useEffect(() => {
     return () => {
+      sidePanelExpandRequestRef.current = null;
       cleanupResizeListeners();
     };
   }, [cleanupResizeListeners]);
@@ -646,6 +679,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
 
   const handleResizeMouseDown = React.useCallback((e: React.MouseEvent) => {
     e.preventDefault();
+    cancelSidePanelExpand();
     cleanupResizeListeners();
     setSidePanelResizing(true);
     setSidePanelCollapsed(false);
@@ -663,8 +697,9 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     };
 
     const onMouseUp = () => {
-      flushSidePanelVisualWidthPreview();
       const finalWidth = Math.min(maxSidePanelWidthRef.current, Math.floor(latestPanelWidthRef.current));
+      pendingSidePanelVisualWidthRef.current = finalWidth;
+      flushSidePanelVisualWidthPreview();
       setSidePanelVisualWidth(finalWidth);
       if (finalWidth > 0) {
         setSidePanelWidth(finalWidth);
@@ -680,6 +715,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     document.addEventListener("mousemove", onMouseMove);
     document.addEventListener("mouseup", onMouseUp);
   }, [
+    cancelSidePanelExpand,
     cleanupResizeListeners,
     flushSidePanelVisualWidthPreview,
     libraryId,
@@ -2557,14 +2593,48 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     ));
   };
 
+  const handleAgentOpenFileLink = React.useCallback((link: AgentFileLink) => {
+    const requestedLibrary = libraryId;
+    void (async () => {
+      try {
+        if (link.scope === 'local') {
+          setFileUrl(localPreviewUrl(link.path), link.path.split(/[\\/]/u).pop() || link.path, 'other', null, { tabTypeLabel: '本机' });
+        } else {
+          const node = await resolveAgentLibraryPath(requestedLibrary, link.path);
+          if (Number(window.location.hash.match(/libraries\/(\d+)/u)?.[1]) !== requestedLibrary) return;
+          cancelSidePanelExpand();
+          sidePanelCollapsedRef.current = false;
+          setSidePanelCollapsed(false);
+          setSidePanelVisualWidth(latestPanelWidthRef.current);
+          setSidePanelMotionSyncSignal(current => current + 1);
+          locateNodeInDirectoryTree({ libraryId: requestedLibrary, nodeId: node.id });
+          if (node.type === 'dir') return;
+          if (node.type === 'file') {
+            const url = await getFileLink(node.id, requestedLibrary);
+            if (Number(window.location.hash.match(/libraries\/(\d+)/u)?.[1]) !== requestedLibrary) return;
+            const name = node.ext && !node.name.endsWith(`.${node.ext}`) ? `${node.name}.${node.ext}` : node.name;
+            setFileUrl(url, name, resolvePreviewFileType(undefined, node.ext, name), node.id);
+          }
+        }
+        setBrowserModeOpen(false);
+        setWorkspaceDisplayMode('file-viewer');
+        void window.electronEmbeddedBrowser.deactivate();
+      } catch { Toast.error('无法打开文件：目标不存在或当前不可访问'); }
+    })();
+  }, [cancelSidePanelExpand, libraryId, setFileUrl, setSidePanelVisualWidth]);
+
+  const refreshAgentDirectory = React.useCallback((directoryId: number) => (
+    directorySidebarRef.current?.refreshNodeSubtree(directoryId)
+  ), []);
+
   const detailWrapperStyle = {
     '--side-panel-visual-width': `${sidePanelVisualWidth}px`,
   } as React.CSSProperties;
 
   return (
     <>
+      <ToolbarSidePanelMotionProperty />
       <LibraryWorkspaceControlsContext.Provider value={libraryWorkspaceControls}>
-        <SidePanelMotionProperty />
         <DetailWrapper
           ref={detailWrapperRef}
           className={sidePanelResizing ? 'is-side-panel-resizing' : ''}
@@ -3083,35 +3153,18 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
               active={workspaceDisplayMode === 'search-home'}
             >
               <AgentWorkspace
-                onOpenFileLink={(link: AgentFileLink) => {
-                  const requestedLibrary = libraryId;
-                  void (async () => {
-                    try {
-                      if (link.scope === 'local') {
-                        setFileUrl(localPreviewUrl(link.path), link.path.split(/[\\/]/u).pop() || link.path, 'other', null, { tabTypeLabel: '本机' });
-                      } else {
-                        const node = await resolveAgentLibraryPath(requestedLibrary, link.path);
-                        if (Number(window.location.hash.match(/libraries\/(\d+)/u)?.[1]) !== requestedLibrary) return;
-                        setSidePanelCollapsed(false);
-                        locateNodeInDirectoryTree({ libraryId: requestedLibrary, nodeId: node.id });
-                        if (node.type === 'dir') return;
-                        if (node.type === 'file') {
-                          const url = await getFileLink(node.id, requestedLibrary);
-                          if (Number(window.location.hash.match(/libraries\/(\d+)/u)?.[1]) !== requestedLibrary) return;
-                          const name = node.ext && !node.name.endsWith(`.${node.ext}`) ? `${node.name}.${node.ext}` : node.name;
-                          setFileUrl(url, name, resolvePreviewFileType(undefined, node.ext, name), node.id);
-                        }
-                      }
-                      setBrowserModeOpen(false);
-                      setWorkspaceDisplayMode('file-viewer');
-                      void window.electronEmbeddedBrowser.deactivate();
-                    } catch { Toast.error('无法打开文件：目标不存在或当前不可访问'); }
-                  })();
-                }}
+                sidePanelCollapsed={sidePanelCollapsed && sidePanelMotion.collapsed && !sidePanelMotion.pending}
+                layoutMotionPending={sidePanelMotion.pending}
+                sidePanelExpandRequest={sidePanelExpandRequest}
+                onSidePanelExpandReady={finishSidePanelExpand}
+                layoutTargetWidth={(sidePanelExpandRequest !== null || sidePanelMotion.pending)
+                  && !sidePanelResizing && detailWrapperWidth > 0
+                  ? detailWrapperWidth - Math.min(sidePanelWidth, getMaxSidePanelWidth(
+                    detailWrapperWidth, window.innerWidth, AGENT_WORKSPACE_MIN_WIDTH,
+                  )) : undefined}
+                onOpenFileLink={handleAgentOpenFileLink}
                 libraryId={libraryId}
-                onRefreshDirectory={(directoryId) => (
-                  directorySidebarRef.current?.refreshNodeSubtree(directoryId)
-                )}
+                onRefreshDirectory={refreshAgentDirectory}
                 ownerScope={agentOwnerScope}
                 rootNodeId={treeRootNodeId}
                 selectedTreeNode={selectedTreeNode}
@@ -3125,9 +3178,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                 libraryMediaProcessingRequest={libraryMediaProcessingRequest}
                 libraryId={libraryId}
                 mediaProcessingRequest={mediaProcessingRequest}
-                onRefreshDirectory={(directoryId) => (
-                  directorySidebarRef.current?.refreshNodeSubtree(directoryId)
-                )}
+                onRefreshDirectory={refreshAgentDirectory}
                 rootNodeId={treeRootNodeId}
                 selectedTreeNode={selectedTreeNode}
               />

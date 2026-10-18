@@ -201,7 +201,7 @@ interface AgentTimelineProps {
   toolActivities: AgentToolActivitySnapshot[];
 }
 
-export default function AgentTimeline({
+function AgentTimeline({
   receiptBusyIds,
   approvalBusyIds,
   interactionBusyIds,
@@ -392,3 +392,6 @@ export default function AgentTimeline({
     </Timeline>
   );
 }
+
+// Layout-only workspace updates must not rebuild the retained tool and message tree.
+export default React.memo(AgentTimeline);

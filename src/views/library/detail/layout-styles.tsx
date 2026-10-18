@@ -32,10 +32,10 @@ import {
   sidePanelIconButtonBaseStyles,
 } from './icon-button-styles';
 
-export const SidePanelMotionProperty = createGlobalStyle`
-  @property --side-panel-visual-width {
+export const ToolbarSidePanelMotionProperty = createGlobalStyle`
+  @property --toolbar-side-panel-width {
     syntax: '<length>';
-    inherits: true;
+    inherits: false;
     initial-value: ${DEFAULT_SIDE_PANEL_WIDTH}px;
   }
 `;
@@ -67,6 +67,7 @@ export const DetailWrapper = styled.div`
   overflow: hidden;
   background: transparent;
   position: relative;
+  /* These inherited values are static targets; only their local CSS consumers animate. */
   --side-panel-visual-width: ${DEFAULT_SIDE_PANEL_WIDTH}px;
   --side-panel-used-width: clamp(0px, var(--side-panel-visual-width), var(--side-panel-max-width, 80vw));
   --content-corner-radius: clamp(0px, var(--side-panel-used-width), 12px);
@@ -77,7 +78,6 @@ export const DetailWrapper = styled.div`
   --side-panel-toggle-guard-left: ${SIDE_PANEL_TOGGLE_LEFT - 6}px;
   --side-panel-transition-duration: ${SIDE_PANEL_COLLAPSE_ANIMATION_MS}ms;
   --side-panel-transition-easing: cubic-bezier(0.22, 1, 0.36, 1);
-  transition: --side-panel-visual-width var(--side-panel-transition-duration) var(--side-panel-transition-easing);
 
   /* One continuous sidebar surface also backs the content's rounded cutouts. */
   &::before {
@@ -85,6 +85,7 @@ export const DetailWrapper = styled.div`
     position: absolute;
     inset: 0 auto 0 0;
     width: calc(var(--side-panel-used-width) + var(--content-corner-radius));
+    transition: width var(--side-panel-transition-duration) var(--side-panel-transition-easing);
     pointer-events: none;
     background: color-mix(in srgb, var(--app-bg-sidebar) 72%, transparent);
     backdrop-filter: blur(18px) saturate(125%);
@@ -113,6 +114,9 @@ export const DetailWrapper = styled.div`
   }
 
   &.is-side-panel-resizing {
+    --side-panel-transition-duration: 0ms;
+  }
+  @media (prefers-reduced-motion: reduce) {
     --side-panel-transition-duration: 0ms;
   }
 `;
@@ -180,6 +184,7 @@ export const SidePanel = styled.div`
   position: relative;
   z-index: 0;
   width: var(--side-panel-used-width);
+  transition: width var(--side-panel-transition-duration) var(--side-panel-transition-easing);
   min-width: 0;
   max-width: var(--side-panel-max-width, 80vw);
   display: flex;
@@ -308,6 +313,9 @@ export const ContentArea = styled.div`
   background: var(--app-bg);
   border-top-left-radius: var(--content-corner-radius);
   border-bottom-left-radius: var(--content-corner-radius);
+  transition:
+    border-top-left-radius var(--side-panel-transition-duration) var(--side-panel-transition-easing),
+    border-bottom-left-radius var(--side-panel-transition-duration) var(--side-panel-transition-easing);
 `;
 
 const toolbarActionButtonStyles = css`
@@ -419,6 +427,8 @@ const toolbarBackButtonStyles = css`
 `;
 
 export const ContentToolbar = styled.div`
+  /* Animate width locally so platform safe-space changes still apply immediately. */
+  --toolbar-side-panel-width: var(--side-panel-visual-width);
   height: ${CONTENT_TOOLBAR_HEIGHT}px;
   flex-shrink: 0;
   background: var(--app-bg);
@@ -431,8 +441,11 @@ export const ContentToolbar = styled.div`
   padding: 0 7px;
   padding-left: max(
     7px,
-    calc(var(--content-toolbar-collapsed-safe-space) - var(--side-panel-visual-width))
+    calc(var(--content-toolbar-collapsed-safe-space) - var(--toolbar-side-panel-width))
   );
+  transition:
+    --toolbar-side-panel-width var(--side-panel-transition-duration) var(--side-panel-transition-easing),
+    border-top-left-radius var(--side-panel-transition-duration) var(--side-panel-transition-easing);
 
   html[data-platform="windows"] &.primary-content-toolbar {
     padding-right: calc(7px + var(--windows-caption-controls-width));
