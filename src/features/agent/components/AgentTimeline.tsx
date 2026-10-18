@@ -89,15 +89,17 @@ const LiveStatus = styled.div`
 const UserMessageBubble = styled.article`
   align-self: flex-end;
   max-width: min(760px, 84%);
-  padding: 11px 14px;
-  border: 1px solid color-mix(in srgb, var(--semi-color-primary) 42%, var(--app-border));
+  padding: 12px 16px;
+  border: 1px solid color-mix(in srgb, var(--semi-color-primary) 12%, var(--app-border));
   border-radius: 16px 16px 5px 16px;
-  background: color-mix(in srgb, var(--semi-color-primary) 16%, var(--app-bg-elevated));
+  background: color-mix(in srgb, var(--semi-color-primary) 4%, var(--app-bg-elevated));
   color: var(--app-text);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  -webkit-font-smoothing: antialiased;
   font-size: 14px;
-  line-height: 1.6;
+  font-weight: 400;
+  line-height: 1.7;
 `;
 
 const AssistantItemSurface = styled.article`
@@ -111,7 +113,7 @@ const AssistantItemSurface = styled.article`
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font-size: 14px;
-  line-height: 1.6;
+  line-height: 1.7;
 
   &[data-variant='conversation'] {
     width: 100%;
@@ -148,7 +150,7 @@ const AssistantItemSurface = styled.article`
     padding: 2px 0;
     color: var(--app-text);
     font-size: 14px;
-    line-height: 1.6;
+    line-height: 1.7;
   }
 
   &[data-work-kind='run-status'] {
