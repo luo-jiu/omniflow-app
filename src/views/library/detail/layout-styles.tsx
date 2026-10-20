@@ -77,7 +77,7 @@ export const DetailWrapper = styled.div`
   --side-panel-toggle-drag-after-left: ${SIDE_PANEL_TOGGLE_LEFT + SIDE_PANEL_TOGGLE_SIZE + 8}px;
   --side-panel-toggle-guard-left: ${SIDE_PANEL_TOGGLE_LEFT - 6}px;
   --side-panel-transition-duration: ${SIDE_PANEL_COLLAPSE_ANIMATION_MS}ms;
-  --side-panel-transition-easing: cubic-bezier(0.22, 1, 0.36, 1);
+  --side-panel-transition-easing: linear;
 
   /* One continuous sidebar surface also backs the content's rounded cutouts. */
   &::before {

@@ -36,8 +36,8 @@ import AgentTimeline from './components/AgentTimeline';
 import AgentSubmitButton from './components/AgentSubmitButton';
 import AgentPermissionControl from './components/AgentPermissionControl';
 import AgentSessionPeek from './components/AgentSessionPeek';
-import { useAgentLayoutMotion } from './hooks/useAgentLayoutMotion';
 import { useAgentComposerAutoHeight } from './hooks/useAgentComposerAutoHeight';
+import { useAgentComposerDockMetrics } from './hooks/useAgentComposerDockMetrics';
 import AgentSessionGroupEditor from './components/AgentSessionGroupEditor';
 import AgentSessionGroupPicker from './components/AgentSessionGroupPicker';
 import { useAgentSessionGroups } from './hooks/useAgentSessionGroups';
@@ -45,7 +45,6 @@ import {
   AGENT_CHAT_INDEX_INSET,
   AGENT_CHAT_MAX_WIDTH,
   AGENT_CHAT_MIN_WIDTH,
-  AGENT_DIRECTORY_BREAKPOINT,
   AGENT_DIRECTORY_BUBBLE_RESERVED_WIDTH,
   AGENT_DIRECTORY_LAYOUT_MS,
   AGENT_DIRECTORY_MARGIN,
@@ -105,6 +104,10 @@ const AgentRoot = styled.section`
     --agent-directory-right-space: ${AGENT_DIRECTORY_MARGIN}px;
     --agent-directory-column-right-space: ${AGENT_DIRECTORY_MARGIN}px;
   }
+  &:has([data-agent-session-directory][data-docked-left='true'][data-compact='true']) {
+    --agent-directory-left-space: ${AGENT_DIRECTORY_BUBBLE_RESERVED_WIDTH}px;
+    --agent-chat-index-inset: ${AGENT_CHAT_INDEX_INSET - AGENT_DIRECTORY_MARGIN}px;
+  }
 `;
 
 const AgentScroll = styled.div`
@@ -123,31 +126,32 @@ const AgentScroll = styled.div`
   &[data-directory-visible='true'] {
     transition: padding-left ${AGENT_DIRECTORY_LAYOUT_MS}ms cubic-bezier(0.22, 1, 0.36, 1),
       padding-right ${AGENT_DIRECTORY_LAYOUT_MS}ms cubic-bezier(0.22, 1, 0.36, 1);
-    padding-left: calc(${AGENT_CHAT_INDEX_INSET}px + var(--agent-directory-left-space, 0px));
+    padding-left: calc(var(--agent-chat-index-inset, ${AGENT_CHAT_INDEX_INSET}px) + var(--agent-directory-left-space, 0px));
     padding-right: var(--agent-directory-right-space, ${AGENT_DIRECTORY_RESERVED_WIDTH}px);
   }
+  &[data-layout-motion-pending='true'] { transition: none; }
 
   @media (prefers-reduced-motion: reduce) {
     &[data-directory-visible='true'] { transition: none; }
   }
 `;
 
-const agentColumnStyles = css`
-  /* Keep text width independent of the directory's animated reservation. */
-  --agent-column-width: min(${AGENT_CHAT_MAX_WIDTH}px, max(${AGENT_CHAT_MIN_WIDTH}px, calc(
-    100cqw - ${AGENT_CHAT_INDEX_INSET}px - var(--agent-directory-left-space, 0px)
+const agentColumnWidth = css`min(${AGENT_CHAT_MAX_WIDTH}px, max(${AGENT_CHAT_MIN_WIDTH}px, calc(
+    100cqw - var(--agent-chat-index-inset, ${AGENT_CHAT_INDEX_INSET}px) - var(--agent-directory-left-space, 0px)
     - var(--agent-directory-column-right-space, ${AGENT_DIRECTORY_BUBBLE_RESERVED_WIDTH}px)
     - var(--agent-scrollbar-width, 8px)
-  )));
-  width: var(--agent-column-width);
+  )))`;
+
+const agentColumnStyles = css`
+  /* Container units stay local instead of being inherited by the whole transcript. */
+  width: ${agentColumnWidth};
   max-width: none;
   min-width: ${AGENT_CHAT_MIN_WIDTH}px;
   flex-shrink: 0;
-  /* Pending sidebar motion can leave less room than the retained left directory needs.
-     Keep the column's right edge visible until that directory exits, then center it. */
+  /* Keep the right edge visible while directory reservations animate. */
   margin-inline: 0;
   align-self: flex-end;
-  margin-right: max(0px, calc((100% - var(--agent-column-width)) / 2));
+  margin-right: max(0px, calc((100% - ${agentColumnWidth}) / 2));
 `;
 
 const AgentContent = styled.div`
@@ -217,9 +221,10 @@ const ComposerFrame = styled.div`
   display: flex;
   flex-direction: column;
   padding: 0 var(--agent-directory-right-space, ${AGENT_DIRECTORY_RESERVED_WIDTH}px) 18px
-    calc(${AGENT_CHAT_INDEX_INSET}px + var(--agent-directory-left-space, 0px));
+    calc(var(--agent-chat-index-inset, ${AGENT_CHAT_INDEX_INSET}px) + var(--agent-directory-left-space, 0px));
   transition: padding-left ${AGENT_DIRECTORY_LAYOUT_MS}ms cubic-bezier(0.22, 1, 0.36, 1),
     padding-right ${AGENT_DIRECTORY_LAYOUT_MS}ms cubic-bezier(0.22, 1, 0.36, 1);
+  &[data-layout-motion-pending='true'] { transition: none; }
   @media (prefers-reduced-motion: reduce) { transition: none; }
   pointer-events: none;
 
@@ -328,11 +333,9 @@ type AgentWorkspaceProps = {
   ownerScope: AgentOwnerScope | null;
   rootNodeId: number | null;
   selectedTreeNode: SelectedTreeNode | null;
-  sidePanelCollapsed?: boolean;
   layoutMotionPending?: boolean;
+  layoutMeasurementPending?: boolean;
   layoutTargetWidth?: number;
-  sidePanelExpandRequest?: number | null;
-  onSidePanelExpandReady?: (request: number) => void;
 };
 
 function buildAppContext(
@@ -368,22 +371,12 @@ export default function AgentWorkspace({
   ownerScope,
   rootNodeId,
   selectedTreeNode,
-  sidePanelCollapsed = false,
   layoutMotionPending = false,
+  layoutMeasurementPending = layoutMotionPending,
   layoutTargetWidth,
-  sidePanelExpandRequest = null,
-  onSidePanelExpandReady,
 }: AgentWorkspaceProps) {
   const workspaceActive = React.useContext(WorkspaceVisibilityContext);
-  const layoutRootRef = React.useRef<HTMLElement>(null);
-  const waitForDirectoryBubble = layoutTargetWidth === undefined || layoutTargetWidth <= 0
-    || layoutTargetWidth > AGENT_DIRECTORY_BREAKPOINT;
-  useAgentLayoutMotion(layoutRootRef, workspaceActive ? sidePanelExpandRequest : null,
-    onSidePanelExpandReady, waitForDirectoryBubble);
-  const [directoryMovedRight, setDirectoryMovedRight] = React.useState(false);
-  React.useEffect(() => {
-    if (!sidePanelCollapsed) setDirectoryMovedRight(false);
-  }, [sidePanelCollapsed]);
+  const [directoryDockedLeft, setDirectoryDockedLeft] = React.useState(false);
   useAgentWorkspaceRendering({ active: workspaceActive, ownerScope, libraryId });
   const [aiServices, setAIServices] = React.useState<AIServiceSnapshot | null>(null);
   const [models, setModels] = React.useState<string[]>([]);
@@ -634,25 +627,19 @@ export default function AgentWorkspace({
   useAgentComposerAutoHeight({
     textareaRef,
     draft: session.draft,
-    enabled: !managerMode,
-    layoutMotionPending,
+    enabled: workspaceActive && !managerMode,
+    layoutMotionPending: layoutMeasurementPending,
     onHeightChange: setComposerHeight,
   });
 
-  React.useLayoutEffect(() => {
-    const frame = composerFrameRef.current;
-    if (!frame) return;
-    const measure = () => {
-      setComposerDockHeight(frame.getBoundingClientRect().height);
-      const scroll = scrollRef.current;
-      if (scroll) setScrollbarWidth(scroll.offsetWidth - scroll.clientWidth);
-    };
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(frame);
-    if (scrollRef.current) observer.observe(scrollRef.current);
-    return () => observer.disconnect();
-  }, [managerMode]);
+  useAgentComposerDockMetrics({
+    composerFrameRef,
+    scrollRef,
+    enabled: workspaceActive && !managerMode,
+    layoutMotionPending: layoutMeasurementPending,
+    onHeightChange: setComposerDockHeight,
+    onScrollbarWidth: setScrollbarWidth,
+  });
 
   React.useLayoutEffect(() => {
     const element = scrollRef.current;
@@ -1019,7 +1006,7 @@ export default function AgentWorkspace({
   }, [removeMemory]);
 
   return (
-    <AgentRoot ref={layoutRootRef} style={{
+    <AgentRoot style={{
       '--agent-dock-space': managerMode ? '18px' : `${composerDockHeight + 18}px`,
       '--agent-scrollbar-width': `${scrollbarWidth}px`,
     } as React.CSSProperties}>
@@ -1027,9 +1014,9 @@ export default function AgentWorkspace({
         key={sessionScopeKey}
         layoutMotionPending={layoutMotionPending}
         layoutTargetWidth={layoutTargetWidth}
-        dockLeft={sidePanelCollapsed && !directoryMovedRight}
-        onMoveRight={() => setDirectoryMovedRight(true)}
-        onMoveLeft={sidePanelCollapsed ? () => setDirectoryMovedRight(false) : undefined}
+        dockLeft={directoryDockedLeft}
+        onMoveRight={() => setDirectoryDockedLeft(false)}
+        onMoveLeft={() => setDirectoryDockedLeft(true)}
         sessions={sessions}
         total={groupDirectory.summary.total}
         activeSessionId={currentSessionId}
@@ -1061,6 +1048,7 @@ export default function AgentWorkspace({
         }}
       /> : null}
       <AgentScroll
+        data-layout-motion-pending={layoutMotionPending}
         data-agent-layout-motion
         data-directory-visible={!managerMode ? true : undefined}
         onWheel={event => {
@@ -1208,7 +1196,7 @@ export default function AgentWorkspace({
         messages={session.messages} runs={session.runs} scrollRef={scrollRef}
         onNavigate={() => { indexNavigationRef.current = true; computerScrollRef.current = false; shouldFollowScrollRef.current = false; }}
       /> : null}
-        {!managerMode ? <ComposerFrame ref={composerFrameRef} data-agent-layout-motion>
+        {!managerMode ? <ComposerFrame ref={composerFrameRef} data-agent-layout-motion data-layout-motion-pending={layoutMotionPending}>
           <Composer onDragOver={event => { if (event.dataTransfer.types.includes('Files')) event.preventDefault(); }}
             onDrop={event => { if (!sessionMutationBusy && event.dataTransfer.files.length) { event.preventDefault(); session.attachments.add(Array.from(event.dataTransfer.files)); } }}
             onSubmit={(event) => {

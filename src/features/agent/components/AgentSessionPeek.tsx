@@ -54,14 +54,22 @@ const Bubble = styled.button`
 
   opacity: 0;
   visibility: hidden;
-  transform: translateX(${AGENT_DIRECTORY_BUBBLE_WIDTH + AGENT_DIRECTORY_MARGIN}px);
+  transform: translateX(var(--agent-directory-bubble-hidden-x, ${AGENT_DIRECTORY_BUBBLE_WIDTH + AGENT_DIRECTORY_MARGIN}px));
+  &[data-side='left'] {
+    left: ${AGENT_DIRECTORY_MARGIN}px;
+    right: auto;
+    padding: 0 7px 0 0;
+    justify-content: flex-end;
+    border-radius: 4px 16px 16px 4px;
+    --agent-directory-bubble-hidden-x: -${AGENT_DIRECTORY_BUBBLE_WIDTH + AGENT_DIRECTORY_MARGIN}px;
+  }
   && { transition: transform 306ms ease, opacity 255ms ease, visibility 0s linear 306ms; }
   &[data-visible='true'] {
     opacity: 1;
     visibility: visible;
     transform: translateX(0);
     pointer-events: auto;
-    transition-delay: ${AGENT_DIRECTORY_SLIDE_MS}ms;
+    transition-delay: ${AGENT_DIRECTORY_SLIDE_MS}ms, ${AGENT_DIRECTORY_SLIDE_MS}ms, 0s;
   }
   &:active { cursor: grabbing; }
   &:focus-visible { outline: 2px solid var(--semi-color-focus-border); outline-offset: 2px; }
@@ -150,6 +158,12 @@ const Card = styled.aside`
     transition-duration: ${AGENT_DIRECTORY_SNAP_MS}ms, ${AGENT_DIRECTORY_SLIDE_MS}ms, ${AGENT_DIRECTORY_SLIDE_MS}ms, ${AGENT_DIRECTORY_SLIDE_MS}ms, 0s;
   }
   &[data-dragging='true'] { transition: none; }
+  &[data-layout-motion-pending='true'] {
+    transition:
+      transform ${AGENT_DIRECTORY_SLIDE_MS}ms cubic-bezier(0.22, 1, 0.36, 1),
+      opacity ${AGENT_DIRECTORY_SLIDE_MS}ms cubic-bezier(0.22, 1, 0.36, 1),
+      visibility 0s linear ${AGENT_DIRECTORY_SLIDE_MS}ms;
+  }
   &[data-visible='false'][data-snapping='true'] {
     transition: none;
   }
@@ -180,6 +194,8 @@ const viewportMode = (width: number) => width < AGENT_DIRECTORY_LEFT_MIN_WIDTH ?
   : width <= AGENT_DIRECTORY_BREAKPOINT ? 1 : 2;
 const rightPanelOrigin = (width: number) => Math.max(AGENT_DIRECTORY_MARGIN,
   width - AGENT_DIRECTORY_WIDTH - AGENT_DIRECTORY_MARGIN);
+const compactForSide = (side: DirectorySide, width: number) => width > 0 && (side === 'left'
+  ? width < AGENT_DIRECTORY_LEFT_MIN_WIDTH : width <= AGENT_DIRECTORY_BREAKPOINT);
 
 export default function AgentSessionPeek({ sessions, total, activeSessionId, loading, busy = false, onOpen, onManage, onNew, onMemories,
   directory, pages = EMPTY_GROUP_PAGES, currentGroupId = null, revealGroupId, storageKey, error,
@@ -247,24 +263,26 @@ export default function AgentSessionPeek({ sessions, total, activeSessionId, loa
   const drag = React.useRef<DirectoryDrag | null>(null);
   const movingTo = React.useRef<DirectorySide | null>(null);
   const focusAfterMove = React.useRef<DirectorySide | null>(null);
+  const focusBubbleAfterClose = React.useRef<DirectorySide | null>(null);
   const suppressClick = React.useRef(false);
   // The completion render must use live geometry before the frozen viewport state catches up.
   const layoutWidth = layoutMotionPending ? viewport.width : geometryRef.current.width;
-  const dockedLeft = dockLeft && (layoutWidth === 0 || layoutWidth >= AGENT_DIRECTORY_LEFT_MIN_WIDTH);
+  const dockedLeft = dockLeft;
   const responsiveWidth = layoutTargetWidth ?? layoutWidth;
-  const compact = !dockedLeft && responsiveWidth > 0 && responsiveWidth <= AGENT_DIRECTORY_BREAKPOINT;
+  const compact = compactForSide(dockedLeft ? 'left' : 'right', responsiveWidth);
   const bubbleTop = clampAgentDirectoryBubbleTop(preferredTop, viewport.height);
-  const cardTop = panelDrag?.top ?? (dockedLeft ? AGENT_DIRECTORY_MARGIN
+  const cardTop = panelDrag?.top ?? (dockedLeft && !compact ? AGENT_DIRECTORY_MARGIN
     : clampAgentDirectoryPanelPosition(0, preferredTop, viewport.width, viewport.height).top);
   const lastCardTop = React.useRef(cardTop);
   lastCardTop.current = cardTop;
   const visible = !compact || open;
-  const close = React.useCallback(() => {
-    if (!dockedLeft) setPreferredTop(lastCardTop.current);
+  const close = React.useCallback((restoreFocusSide: DirectorySide | null = null) => {
+    focusBubbleAfterClose.current = restoreFocusSide;
+    setPreferredTop(lastCardTop.current);
     setPanelTransfer(null);
     setSnapping(false);
     setOpen(false);
-  }, [dockedLeft]);
+  }, []);
   const publishGeometry = React.useCallback((next: { width: number; height: number }) => {
     // Pointer geometry stays live; React only needs width changes that switch the directory mode.
     geometryRef.current = next;
@@ -298,30 +316,39 @@ export default function AgentSessionPeek({ sessions, total, activeSessionId, loa
   }, [layoutMotionPending]);
 
   React.useLayoutEffect(() => {
+    focusBubbleAfterClose.current = null;
     if (movingTo.current === (dockedLeft ? 'left' : 'right')) {
       movingTo.current = null;
-      setOpen(!dockedLeft && compact);
+      setOpen(compact);
       return;
     }
     setOpen(false);
-    if (!dockLeft) setPreferredTop(lastCardTop.current);
     setPanelDrag(null);
     setPanelTransfer(null);
     setSnapping(false);
     drag.current = null;
     movingTo.current = null;
     focusAfterMove.current = null;
-  }, [compact, dockLeft, dockedLeft]);
+  }, [compact, dockedLeft]);
 
   React.useLayoutEffect(() => {
     if (workspaceActive && !layoutMotionPending) return;
     drag.current = null;
     movingTo.current = null;
     focusAfterMove.current = null;
+    focusBubbleAfterClose.current = null;
     setPanelDrag(null);
     setPanelTransfer(null);
     setSnapping(false);
   }, [layoutMotionPending, workspaceActive]);
+
+  React.useLayoutEffect(() => {
+    const side = focusBubbleAfterClose.current;
+    if (!side) return;
+    focusBubbleAfterClose.current = null;
+    if (!workspaceActive || layoutMotionPending || !compact || open || (side === 'left') !== dockedLeft) return;
+    bubbleRef.current?.focus({ preventScroll: true });
+  }, [compact, dockedLeft, layoutMotionPending, open, workspaceActive]);
 
   React.useLayoutEffect(() => {
     const outgoing = dockedLeft ? cardRef.current : leftCardRef.current;
@@ -333,14 +360,14 @@ export default function AgentSessionPeek({ sessions, total, activeSessionId, loa
 
   React.useLayoutEffect(() => {
     const side = focusAfterMove.current;
-    if (!side || (side === 'left' ? !dockedLeft : dockedLeft || !visible)) return;
+    if (!side || !visible || (side === 'left' ? !dockedLeft : dockedLeft)) return;
     focusAfterMove.current = null;
     (side === 'left' ? leftCardRef.current : cardRef.current)
       ?.querySelector<HTMLElement>('.peek-drag-label')?.focus({ preventScroll: true });
   }, [dockedLeft, visible]);
 
   React.useLayoutEffect(() => {
-    if (!panelTransfer || (panelTransfer.side === 'left' ? !dockedLeft : dockedLeft || !visible)) return;
+    if (!panelTransfer || !visible || (panelTransfer.side === 'left' ? !dockedLeft : dockedLeft)) return;
     const card = panelTransfer.side === 'left' ? leftCardRef.current : cardRef.current;
     const ownerWindow = layerRef.current?.ownerDocument.defaultView;
     if (!card || !ownerWindow) { setPanelTransfer(null); return; }
@@ -352,7 +379,7 @@ export default function AgentSessionPeek({ sessions, total, activeSessionId, loa
 
   React.useEffect(() => {
     const layer = layerRef.current;
-    if (!workspaceActive || !compact || !open || !layer) return;
+    if (!workspaceActive || layoutMotionPending || !compact || !open || !layer) return;
     const ownerDocument = layer.ownerDocument;
     const dismiss = (event: PointerEvent) => {
       if (!layer.contains(event.target as Node)) close();
@@ -360,8 +387,7 @@ export default function AgentSessionPeek({ sessions, total, activeSessionId, loa
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       event.preventDefault();
-      close();
-      bubbleRef.current?.focus();
+      close(dockedLeft ? 'left' : 'right');
     };
     ownerDocument.addEventListener('pointerdown', dismiss);
     ownerDocument.addEventListener('keydown', onKeyDown);
@@ -369,13 +395,13 @@ export default function AgentSessionPeek({ sessions, total, activeSessionId, loa
       ownerDocument.removeEventListener('pointerdown', dismiss);
       ownerDocument.removeEventListener('keydown', onKeyDown);
     };
-  }, [close, compact, open, workspaceActive]);
+  }, [close, compact, dockedLeft, layoutMotionPending, open, workspaceActive]);
 
-  const canMoveLeft = () => Boolean(onMoveLeft) && workspaceActive && !layoutMotionPending
-    && geometryRef.current.width >= AGENT_DIRECTORY_LEFT_MIN_WIDTH;
+  const canMoveLeft = () => Boolean(onMoveLeft) && workspaceActive && !layoutMotionPending;
   const moveDirectory = (side: DirectorySide) => {
     const onMove = side === 'left' ? onMoveLeft : onMoveRight;
-    if (!onMove || (side === 'left' && !canMoveLeft())) return;
+    if (!onMove || !workspaceActive || layoutMotionPending) return;
+    focusBubbleAfterClose.current = null;
     const focused = layerRef.current?.ownerDocument.activeElement;
     const outgoing = side === 'left' ? cardRef.current : leftCardRef.current;
     focusAfterMove.current = focused && outgoing?.contains(focused) ? side : null;
@@ -469,10 +495,13 @@ export default function AgentSessionPeek({ sessions, total, activeSessionId, loa
 
   const renderCard = (side: DirectorySide) => {
     const isLeft = side === 'left';
-    const surfaceVisible = isLeft ? dockedLeft : !dockedLeft && visible;
+    const selectedSide = isLeft === dockedLeft;
+    const surfaceVisible = selectedSide && visible;
+    // Keep outgoing list geometry stable until its scroll position has been handed off.
+    const floating = compactForSide(side, responsiveWidth);
     const surfaceDrag = panelDrag?.side === side ? panelDrag : null;
     const transfer = panelTransfer?.side === side ? panelTransfer : null;
-    const surfaceTop = surfaceDrag?.top ?? transfer?.top ?? (isLeft ? AGENT_DIRECTORY_MARGIN
+    const surfaceTop = surfaceDrag?.top ?? transfer?.top ?? (isLeft && !floating ? AGENT_DIRECTORY_MARGIN
       : clampAgentDirectoryPanelPosition(0, preferredTop, viewport.width, viewport.height).top);
     return <Card
       key={side}
@@ -483,18 +512,19 @@ export default function AgentSessionPeek({ sessions, total, activeSessionId, loa
       data-visible={surfaceVisible}
       aria-hidden={!surfaceVisible}
       {...(surfaceVisible ? {} : { inert: '' })}
-      role={!isLeft && compact ? 'dialog' : undefined}
+      role={floating ? 'dialog' : undefined}
       aria-label="会话目录"
       aria-busy={loading}
-      data-floating={!isLeft && compact}
+      data-floating={floating}
       data-dragging={Boolean(surfaceDrag || transfer)}
       data-snapping={snapping}
+      data-layout-motion-pending={layoutMotionPending}
       onTransitionEnd={event => {
         if (event.target === event.currentTarget && event.propertyName === 'transform') setSnapping(false);
       }}
       style={{
         top: surfaceTop,
-        '--agent-directory-height': transfer ? `${transfer.height}px` : isLeft ? 'calc(100% - 24px)' : `${AGENT_DIRECTORY_MAX_HEIGHT}px`,
+        '--agent-directory-height': transfer ? `${transfer.height}px` : isLeft && !floating ? 'calc(100% - 24px)' : `${AGENT_DIRECTORY_MAX_HEIGHT}px`,
         '--agent-directory-available-height': viewport.height > 0
           ? `${Math.max(0, viewport.height - surfaceTop - AGENT_DIRECTORY_MARGIN)}px`
           : 'calc(100% - 24px)',
@@ -558,7 +588,7 @@ export default function AgentSessionPeek({ sessions, total, activeSessionId, loa
           }}>会话目录</span>
         <span className="peek-count">{total} 个会话</span>
         {onCreateGroup ? <button className="peek-inline" type="button" title="新建会话组" aria-label="新建会话组" onClick={onCreateGroup}><OutlineIcon name="folder-plus" /></button> : null}
-        {!isLeft && compact ? <button className="peek-close" type="button" aria-label="收起会话目录" title="收起会话目录" onClick={close}><OutlineIcon name="forward" /></button> : null}
+        {floating ? <button className="peek-close" type="button" aria-label="收起会话目录" title="收起会话目录" onClick={() => close()}><OutlineIcon name={isLeft ? 'back' : 'forward'} /></button> : null}
       </div>
       {sessionList}
       <div className="peek-foot">
@@ -575,18 +605,19 @@ export default function AgentSessionPeek({ sessions, total, activeSessionId, loa
     <Bubble
       data-agent-layout-motion="bubble"
       ref={bubbleRef}
+      data-side={dockedLeft ? 'left' : 'right'}
       data-visible={compact && !open}
       aria-hidden={!compact || open}
       tabIndex={compact && !open ? 0 : -1}
       type="button"
       aria-label="会话目录"
-      aria-controls={cardId}
+      aria-controls={dockedLeft ? `${cardId}-left` : cardId}
       aria-expanded={compact && open}
       aria-haspopup="dialog"
       title="会话目录（可上下拖动）"
       style={{ top: bubbleTop }}
       onPointerDown={event => {
-        if (event.button !== 0 || !event.isPrimary) return;
+        if (event.button !== 0 || !event.isPrimary || !compact || open || !workspaceActive || layoutMotionPending) return;
         suppressClick.current = false;
         const top = clampAgentDirectoryBubbleTop(preferredTop, geometryRef.current.height);
         drag.current = { kind: 'bubble', pointerId: event.pointerId, startX: event.clientX, startY: event.clientY,
@@ -607,11 +638,13 @@ export default function AgentSessionPeek({ sessions, total, activeSessionId, loa
       }}
       onLostPointerCapture={settleDrag}
       onClick={() => {
+        if (!workspaceActive || layoutMotionPending || !compact) return;
         if (suppressClick.current) { suppressClick.current = false; return; }
         if (open) close();
         else { setPreferredTop(cardTop); setOpen(true); }
       }}
       onKeyDown={event => {
+        if (!workspaceActive || layoutMotionPending || !compact || open) return;
         const height = geometryRef.current.height;
         const top = clampAgentDirectoryBubbleTop(preferredTop, height);
         const next = event.key === 'ArrowUp' ? top - 20

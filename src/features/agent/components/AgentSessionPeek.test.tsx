@@ -39,10 +39,13 @@ function dockingView({ width = 1400, dockLeft = false, allowMoveLeft = true, pen
     }),
     cancelAnimationFrame: vi.fn((id: number) => frames.delete(id)),
   };
+  const listeners = new Map<string, (event: unknown) => void>();
   const ownerDocument = { activeElement: null as object | null, defaultView: ownerWindow,
-    addEventListener: vi.fn(), removeEventListener: vi.fn() };
+    addEventListener: vi.fn((type, callback) => listeners.set(type, callback)),
+    removeEventListener: vi.fn((type) => listeners.delete(type)) };
   const layer = { getBoundingClientRect: () => bounds, contains: () => true, ownerDocument };
-  const capture = { setPointerCapture: vi.fn(), hasPointerCapture: () => true, releasePointerCapture: vi.fn() };
+  const capture = { setPointerCapture: vi.fn(), hasPointerCapture: () => true, releasePointerCapture: vi.fn(),
+    focus: vi.fn(() => { ownerDocument.activeElement = capture; }) };
   const leftList = { scrollTop: 0 };
   const rightList = { scrollTop: 0 };
   const leftLabel = { focus: vi.fn(() => { ownerDocument.activeElement = leftLabel; }) };
@@ -52,7 +55,8 @@ function dockingView({ width = 1400, dockLeft = false, allowMoveLeft = true, pen
     querySelector: (selector: string) => selector === '.peek-list' ? side === 'left' ? leftList : rightList
       : selector === '.peek-drag-label' ? side === 'left' ? leftLabel : rightLabel : null,
     getBoundingClientRect: () => ({ left: bounds.left + (side === 'left' ? 12 : bounds.width - AGENT_DIRECTORY_WIDTH - 12),
-      top: bounds.top + 12, width: AGENT_DIRECTORY_WIDTH, height: side === 'left' ? bounds.height - 24 : AGENT_DIRECTORY_MAX_HEIGHT }),
+      top: bounds.top + 12, width: AGENT_DIRECTORY_WIDTH,
+      height: side === 'left' && bounds.width >= AGENT_DIRECTORY_LEFT_MIN_WIDTH ? bounds.height - 24 : AGENT_DIRECTORY_MAX_HEIGHT }),
   });
   const leftElement = cardElement('left');
   const rightElement = cardElement('right');
@@ -76,6 +80,7 @@ function dockingView({ width = 1400, dockLeft = false, allowMoveLeft = true, pen
   const event = { pointerId: 7, currentTarget: capture };
   return {
     renderer, card, head, event, onMoveLeft, onMoveRight, ownerWindow, frames, leftList, rightList, leftLabel, rightLabel,
+    capture, listeners, ownerDocument,
     update(patch: Partial<typeof props> & { active?: boolean }) {
       const { active: nextActive, ...nextProps } = patch;
       if (nextActive !== undefined) active = nextActive;
@@ -83,7 +88,7 @@ function dockingView({ width = 1400, dockLeft = false, allowMoveLeft = true, pen
       act(() => renderer.update(render()));
     },
     resize(nextWidth: number) { bounds = { ...bounds, width: nextWidth }; act(() => measure()); },
-    openRight() {
+    openBubble() {
       const bubble = renderer.root.findAllByType('button').find(button => button.props['aria-haspopup'] === 'dialog')!;
       act(() => bubble.props.onClick());
     },
@@ -250,104 +255,87 @@ describe('Agent session peek', () => {
     renderer.unmount();
   });
 
-  it('keeps the left directory full height after collapsing the tree and restores it after a narrow workspace', () => {
-    let bounds = { width: 1100, height: 800 };
-    let measure!: () => void;
-    vi.stubGlobal('ResizeObserver', class {
-      constructor(callback: () => void) { measure = callback; }
-      observe() {}
-      disconnect() {}
-    });
-    const layer = { getBoundingClientRect: () => bounds, contains: () => true,
-      ownerDocument: { addEventListener: vi.fn(), removeEventListener: vi.fn() } };
-    const onMoveRight = vi.fn();
-    const props = {
-      sessions: [{ id: 's1', title: '当前聊天' }] as AgentSessionSummary[], total: 1,
-      activeSessionId: 's1', loading: false,
-      onOpen: vi.fn(), onManage: vi.fn(), onNew: vi.fn(), onMemories: vi.fn(), onMoveRight,
-    };
-    let renderer!: TestRenderer.ReactTestRenderer;
+  it('keeps the selected left side while switching between its full-height card and compact bubble', () => {
+    const view = dockingView({ width: 1100, dockLeft: true });
+    const sessions = [{ id: 's1', title: '当前聊天' }] as AgentSessionSummary[];
+    const onOpen = vi.fn();
     try {
-      act(() => {
-        renderer = TestRenderer.create(<AgentSessionPeek {...props} />, {
-          createNodeMock: element => element.props['data-agent-session-directory'] ? layer : { querySelector: () => null },
-        });
-      });
-      const directory = renderer.root.findByProps({ 'data-agent-session-directory': true });
-      const card = directoryCard(renderer, 'left');
-      const rightCard = directoryCard(renderer, 'right');
-      const bubble = renderer.root.findAllByType('button').find(button => button.props['aria-haspopup'] === 'dialog')!;
-      expect(renderer.root.findAllByType('aside')).toHaveLength(2);
-      expectCardVisible(card, false);
-      expectCardVisible(rightCard, false);
-
-      act(() => renderer.update(<AgentSessionPeek {...props} dockLeft />));
+      view.update({ sessions, total: 1, onOpen });
+      const directory = view.renderer.root.findByProps({ 'data-agent-session-directory': true });
+      const card = view.card('left');
+      const rightCard = view.card('right');
+      const bubble = view.renderer.root.findByProps({ 'aria-haspopup': 'dialog' });
+      expect(view.renderer.root.findAllByType('aside')).toHaveLength(2);
       expect(directory.props['data-docked-left']).toBe(true);
       expect(directory.props['data-compact']).toBe(false);
+      expect(bubble.props['data-side']).toBe('left');
       expect(bubble.props['data-visible']).toBe(false);
       expectCardVisible(card, true);
       expectCardVisible(rightCard, false);
-      expect(card.props.style.top).toBe(12);
-      expect(card.props.style['--agent-directory-height']).toBe('calc(100% - 24px)');
-      expect(card.props.style['--agent-directory-available-height']).toBe('776px');
-      expect(card.props.style['--agent-directory-drag-x']).toBe('0px');
+      expect(card.props.style).toMatchObject({ top: 12, '--agent-directory-height': 'calc(100% - 24px)',
+        '--agent-directory-available-height': '776px', '--agent-directory-drag-x': '0px' });
       act(() => card.findByProps({ className: 'peek-open' }).props.onClick());
-      expect(props.onOpen).toHaveBeenCalledWith(props.sessions[0]);
-      expect(card.props['data-visible']).toBe(true);
+      expect(onOpen).toHaveBeenCalledWith(sessions[0]);
+      expectCardVisible(card, true);
 
-      bounds = { width: AGENT_DIRECTORY_LEFT_MIN_WIDTH - 1, height: 500 };
-      act(() => measure());
-      expect(directory.props['data-docked-left']).toBe(false);
+      view.resize(AGENT_DIRECTORY_LEFT_MIN_WIDTH - 1);
+      expect(directory.props['data-docked-left']).toBe(true);
+      expect(directory.props['data-compact']).toBe(true);
+      expect(bubble.props['data-side']).toBe('left');
       expect(bubble.props['data-visible']).toBe(true);
+      expect(bubble.props['aria-controls']).toBe(card.props.id);
       expectCardVisible(card, false);
       expectCardVisible(rightCard, false);
-      expect(rightCard.props.style['--agent-directory-height']).toBe(`${AGENT_DIRECTORY_MAX_HEIGHT}px`);
+      expect(card.props.style['--agent-directory-height']).toBe(`${AGENT_DIRECTORY_MAX_HEIGHT}px`);
+      view.openBubble();
+      expectCardVisible(card, true);
+      expect(card.props.role).toBe('dialog');
+      expect(card.props['aria-modal']).toBeUndefined();
+      act(() => card.findByProps({ className: 'peek-open' }).props.onClick());
+      expectCardVisible(card, false);
+      expect(bubble.props['data-visible']).toBe(true);
+      expect(onOpen).toHaveBeenCalledTimes(2);
 
-      bounds = { width: AGENT_DIRECTORY_LEFT_MIN_WIDTH, height: 500 };
-      act(() => measure());
+      view.resize(AGENT_DIRECTORY_LEFT_MIN_WIDTH);
       expect(directory.props['data-docked-left']).toBe(true);
-      expect(bubble.props['data-visible']).toBe(false);
+      expect(directory.props['data-compact']).toBe(false);
       expectCardVisible(card, true);
       expectCardVisible(rightCard, false);
-      expect(card.props.style.top).toBe(12);
       expect(card.props.style['--agent-directory-height']).toBe('calc(100% - 24px)');
-      expect(card.props.style['--agent-directory-available-height']).toBe('476px');
-      expect(onMoveRight).not.toHaveBeenCalled();
+      expect(view.onMoveRight).not.toHaveBeenCalled();
 
       const preventDefault = vi.fn();
       act(() => card.findByProps({ 'aria-label': '移动会话目录' }).props.onKeyDown({ key: 'ArrowRight', preventDefault }));
       expect(preventDefault).toHaveBeenCalledOnce();
-      expect(onMoveRight).toHaveBeenCalledOnce();
-      expect(directory.props['data-docked-left']).toBe(true);
-      act(() => renderer.update(<AgentSessionPeek {...props} dockLeft={false} />));
+      expect(view.onMoveRight).toHaveBeenCalledOnce();
+      view.update({ dockLeft: false });
       expect(directory.props['data-docked-left']).toBe(false);
       expect(directory.props['data-compact']).toBe(true);
+      expect(bubble.props['data-side']).toBe('right');
+      expect(bubble.props['aria-controls']).toBe(rightCard.props.id);
       expectCardVisible(card, false);
       expectCardVisible(rightCard, true);
-      expect(rightCard.props['data-snapping']).toBe(true);
-      expect(rightCard.props.style['--agent-directory-height']).toBe(`${AGENT_DIRECTORY_MAX_HEIGHT}px`);
-      expect(rightCard.props.style['--agent-directory-drag-x']).toBe('0px');
-      act(() => directoryCard(renderer).findByProps({ 'aria-label': '收起会话目录' }).props.onClick());
+      act(() => rightCard.findByProps({ 'aria-label': '收起会话目录' }).props.onClick());
       expectCardVisible(rightCard, false);
       expect(bubble.props['data-visible']).toBe(true);
-      expect(onMoveRight).toHaveBeenCalledOnce();
 
-      bounds = { width: 1400, height: 800 };
-      act(() => measure());
+      view.resize(1400);
       expectCardVisible(rightCard, true);
       expect(rightCard.props.style['--agent-directory-height']).toBe('480px');
-      expect(directoryCard(renderer, 'left')).toBe(card);
-      expect(directoryCard(renderer, 'right')).toBe(rightCard);
+      expect(view.card('left')).toBe(card);
+      expect(view.card('right')).toBe(rightCard);
     } finally {
-      if (renderer) act(() => renderer.unmount());
+      view.unmount();
       vi.unstubAllGlobals();
     }
   });
 
   it.each([
-    { direction: 'growing', initialWidth: 900, widths: [1000, 1100, 1250, 1400], initialDockLeft: false },
-    { direction: 'shrinking', initialWidth: 1400, widths: [1300, 1100, 1047, 1000], initialDockLeft: true },
-  ])('freezes the directory mode while layout is pending and the workspace is $direction', ({ initialWidth, widths, initialDockLeft }) => {
+    { side: 'right', direction: 'growing', initialWidth: 900, widths: [1000, 1100, 1250, 1400], dockLeft: false, initialCompact: true },
+    { side: 'right', direction: 'shrinking', initialWidth: 1400, widths: [1300, 1100, 1047, 900], dockLeft: false, initialCompact: false },
+    { side: 'left', direction: 'growing', initialWidth: 900, widths: [1000, 1048, 1100, 1400], dockLeft: true, initialCompact: true },
+    { side: 'left', direction: 'shrinking', initialWidth: 1400, widths: [1300, 1100, 1047, 1000], dockLeft: true, initialCompact: false },
+  ])('freezes the selected $side mode while layout is pending and the workspace is $direction', ({ initialWidth, widths, dockLeft, initialCompact }) => {
     let bounds = { width: initialWidth, height: 800 };
     let measure!: () => void;
     vi.stubGlobal('ResizeObserver', class {
@@ -367,43 +355,44 @@ describe('Agent session peek', () => {
       const directory = renderer.root.findByProps({ 'data-agent-session-directory': true });
       committedModes.push({ compact: directory.props['data-compact'], dockedLeft: directory.props['data-docked-left'] });
     };
-    const render = (dockLeft: boolean, pending = false) => <Profiler id="settling-directory" onRender={onRender}>
+    const render = (pending = false) => <Profiler id="settling-directory" onRender={onRender}>
       <AgentSessionPeek {...props} dockLeft={dockLeft} layoutMotionPending={pending} />
     </Profiler>;
     try {
       act(() => {
-        renderer = TestRenderer.create(render(initialDockLeft), {
+        renderer = TestRenderer.create(render(), {
           createNodeMock: element => element.props['data-agent-session-directory'] ? layer : { querySelector: () => null },
         });
       });
       const directory = renderer.root.findByProps({ 'data-agent-session-directory': true });
-      const bubble = renderer.root.findAllByType('button').find(button => button.props['aria-haspopup'] === 'dialog')!;
-      act(() => renderer.update(render(initialDockLeft, true)));
+      const bubble = renderer.root.findByProps({ 'aria-haspopup': 'dialog' });
+      act(() => renderer.update(render(true)));
       for (const width of widths) {
         bounds = { ...bounds, width };
         act(() => measure());
-        expect(directory.props['data-compact']).toBe(!initialDockLeft);
-        expect(directory.props['data-docked-left']).toBe(initialDockLeft);
-        expect(bubble.props['data-visible']).toBe(!initialDockLeft);
-        expectCardVisible(directoryCard(renderer, 'left'), initialDockLeft);
-        expectCardVisible(directoryCard(renderer, 'right'), false);
+        expect(directory.props['data-compact']).toBe(initialCompact);
+        expect(directory.props['data-docked-left']).toBe(dockLeft);
+        expect(bubble.props['data-side']).toBe(dockLeft ? 'left' : 'right');
+        expect(bubble.props['data-visible']).toBe(initialCompact);
+        expectCardVisible(directoryCard(renderer, 'left'), dockLeft && !initialCompact);
+        expectCardVisible(directoryCard(renderer, 'right'), !dockLeft && !initialCompact);
       }
 
       const measurementsBeforeCompletion = measureLayer.mock.calls.length;
       committedModes.length = 0;
-      act(() => renderer.update(render(!initialDockLeft)));
+      act(() => renderer.update(render()));
       expect(measureLayer).toHaveBeenCalledTimes(measurementsBeforeCompletion + 1);
       expect(committedModes.length).toBeGreaterThan(0);
-      expect(committedModes.every(mode => mode.compact === initialDockLeft && mode.dockedLeft === !initialDockLeft)).toBe(true);
-      expect(directory.props['data-compact']).toBe(initialDockLeft);
-      expect(directory.props['data-docked-left']).toBe(!initialDockLeft);
-      expect(bubble.props['data-visible']).toBe(initialDockLeft);
-      expectCardVisible(directoryCard(renderer, 'left'), !initialDockLeft);
-      expectCardVisible(directoryCard(renderer, 'right'), false);
-      if (initialDockLeft) {
+      expect(committedModes.every(mode => mode.compact === !initialCompact && mode.dockedLeft === dockLeft)).toBe(true);
+      expect(directory.props['data-compact']).toBe(!initialCompact);
+      expect(directory.props['data-docked-left']).toBe(dockLeft);
+      expect(bubble.props['data-visible']).toBe(!initialCompact);
+      expectCardVisible(directoryCard(renderer, 'left'), dockLeft && initialCompact);
+      expectCardVisible(directoryCard(renderer, 'right'), !dockLeft && initialCompact);
+      if (!initialCompact) {
         act(() => bubble.props.onClick());
-        expectCardVisible(directoryCard(renderer, 'right'), true);
-        expectCardVisible(directoryCard(renderer, 'left'), false);
+        expectCardVisible(directoryCard(renderer, dockLeft ? 'left' : 'right'), true);
+        expectCardVisible(directoryCard(renderer, dockLeft ? 'right' : 'left'), false);
       }
     } finally {
       if (renderer) act(() => renderer.unmount());
@@ -411,7 +400,10 @@ describe('Agent session peek', () => {
     }
   });
 
-  it('prepares the final compact shape before the tree expands and keeps it when the target width is released', () => {
+  it.each([
+    { side: 'left', dockLeft: true, targetWidth: 1000, widths: [1300, 1100, 1000] },
+    { side: 'right', dockLeft: false, targetWidth: 1100, widths: [1300, 1200, 1100] },
+  ])('prepares the selected $side compact shape before layout begins and keeps it when the target width is released', ({ side, dockLeft, targetWidth, widths }) => {
     let bounds = { width: 1400, height: 800 };
     let measure!: () => void;
     vi.stubGlobal('ResizeObserver', class {
@@ -428,12 +420,12 @@ describe('Agent session peek', () => {
     const onRender = () => {
       if (renderer) committedModes.push(renderer.root.findByProps({ 'data-agent-session-directory': true }).props['data-compact']);
     };
-    const render = (dockLeft: boolean, pending: boolean, targetWidth?: number) => <Profiler id="prepared-directory" onRender={onRender}>
-      <AgentSessionPeek {...props} dockLeft={dockLeft} layoutMotionPending={pending} layoutTargetWidth={targetWidth} />
+    const render = (pending: boolean, target?: number) => <Profiler id="prepared-directory" onRender={onRender}>
+      <AgentSessionPeek {...props} dockLeft={dockLeft} layoutMotionPending={pending} layoutTargetWidth={target} />
     </Profiler>;
     try {
       act(() => {
-        renderer = TestRenderer.create(render(true, false, 1100), {
+        renderer = TestRenderer.create(render(false), {
           createNodeMock: element => element.props['data-agent-session-directory'] ? layer : { querySelector: () => null },
         });
       });
@@ -442,23 +434,28 @@ describe('Agent session peek', () => {
       const rightCard = directoryCard(renderer, 'right');
       const bubble = renderer.root.findAllByType('button').find(button => button.props['aria-haspopup'] === 'dialog')!;
       expect(directory.props['data-compact']).toBe(false);
-      expectCardVisible(leftCard, true);
+      expectCardVisible(leftCard, dockLeft);
+      expectCardVisible(rightCard, !dockLeft);
       committedModes.length = 0;
 
-      act(() => renderer.update(render(false, false, 1100)));
+      act(() => renderer.update(render(false, targetWidth)));
       expect(directory.props['data-compact']).toBe(true);
       expectCardVisible(leftCard, false);
       expectCardVisible(rightCard, false);
       expect(bubble.props['data-visible']).toBe(true);
 
-      act(() => renderer.update(render(false, true, 1100)));
-      for (const width of [1300, 1200, 1100]) {
+      expect(directory.props['data-docked-left']).toBe(dockLeft);
+      expect(bubble.props['data-side']).toBe(side);
+      act(() => renderer.update(render(true, targetWidth)));
+      for (const width of widths) {
         bounds = { ...bounds, width };
         act(() => measure());
         expect(directory.props['data-compact']).toBe(true);
       }
-      act(() => renderer.update(render(false, false)));
+      act(() => renderer.update(render(false)));
       expect(directory.props['data-compact']).toBe(true);
+      expect(directory.props['data-docked-left']).toBe(dockLeft);
+      expectCardVisible(leftCard, false);
       expectCardVisible(rightCard, false);
       expect(bubble.props['data-visible']).toBe(true);
       expect(committedModes.length).toBeGreaterThan(0);
@@ -677,7 +674,7 @@ describe('Agent session peek', () => {
     'returns an opened compact directory left once through %s and starts from its release geometry', finish => {
       const view = dockingView({ width: 1100 });
       try {
-        view.openRight();
+        view.openBubble();
         expectCardVisible(view.card('right'), true);
         expect(view.renderer.root.findByProps({ 'data-agent-session-directory': true }).props['data-compact']).toBe(true);
         view.startDrag('right');
@@ -724,15 +721,13 @@ describe('Agent session peek', () => {
   );
 
   it.each([
-    { reason: 'below the 1048px left docking minimum', width: AGENT_DIRECTORY_LEFT_MIN_WIDTH - 1, open: true },
-    { reason: 'the tree has not been collapsed', width: 1400, allowMoveLeft: false },
+    { reason: 'no left movement callback is provided', width: 1400, allowMoveLeft: false },
     { reason: 'a tree layout transition is pending', width: 1400, pending: true },
     { reason: 'the Agent workspace is inactive', width: 1400, active: false },
     { reason: 'the right directory is hidden behind its bubble', width: 1100 },
-  ])('keeps the right directory on its side when $reason', ({ open, ...options }) => {
+  ])('keeps the right directory on its side when $reason', (options) => {
     const view = dockingView(options);
     try {
-      if (open) view.openRight();
       const preventDefault = vi.fn();
       act(() => view.card('right').findByProps({ 'aria-label': '移动会话目录' }).props.onKeyDown({ key: 'ArrowLeft', preventDefault }));
       view.startDrag('right');
@@ -748,11 +743,11 @@ describe('Agent session peek', () => {
     }
   });
 
-  it.each([AGENT_DIRECTORY_LEFT_MIN_WIDTH, AGENT_DIRECTORY_BREAKPOINT])(
+  it.each([900, AGENT_DIRECTORY_LEFT_MIN_WIDTH, AGENT_DIRECTORY_BREAKPOINT])(
     'supports ArrowLeft at compact width %i and transfers focus and scroll position both ways', width => {
       const view = dockingView({ width });
       try {
-        view.openRight();
+        view.openBubble();
         view.rightList.scrollTop = 75;
         view.focus('right');
         const preventLeft = vi.fn();
@@ -782,21 +777,77 @@ describe('Agent session peek', () => {
     },
   );
 
-  it('uses the current measured width when deciding whether a visible right directory can return left', () => {
+  it.each([
+    { width: 900, sourceHeight: '480px', sourceFloating: true },
+    { width: 1100, sourceHeight: 'calc(100% - 24px)', sourceFloating: false },
+  ])('preserves the outgoing left card height at width $width while transferring its scroll position right', ({ width, sourceHeight, sourceFloating }) => {
+    const view = dockingView({ width, dockLeft: true });
+    try {
+      if (sourceFloating) view.openBubble();
+      const leftCard = view.card('left');
+      const rightCard = view.card('right');
+      expectCardVisible(leftCard, true);
+      expect(leftCard.props.style['--agent-directory-height']).toBe(sourceHeight);
+      view.leftList.scrollTop = 512;
+      view.focus('left');
+
+      act(() => leftCard.findByProps({ 'aria-label': '移动会话目录' }).props.onKeyDown({ key: 'ArrowRight', preventDefault: vi.fn() }));
+      expect(view.onMoveRight).toHaveBeenCalledOnce();
+      view.update({ dockLeft: false });
+
+      expectCardVisible(leftCard, false);
+      expect(leftCard.props['data-floating']).toBe(sourceFloating);
+      expect(leftCard.props.style['--agent-directory-height']).toBe(sourceHeight);
+      expectCardVisible(rightCard, true);
+      expect(rightCard.props['data-floating']).toBe(true);
+      expect(rightCard.props.style['--agent-directory-height']).toBe('480px');
+      expect(view.leftList.scrollTop).toBe(512);
+      expect(view.rightList.scrollTop).toBe(512);
+      expect(view.rightLabel.focus).toHaveBeenCalledWith({ preventScroll: true });
+    } finally {
+      view.unmount();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('allows both drag directions below the left full-height threshold and retains the selected-side bubble', () => {
     const view = dockingView({ width: 1400 });
     try {
       view.resize(AGENT_DIRECTORY_LEFT_MIN_WIDTH - 1);
-      view.openRight();
-      view.startDrag('right');
-      view.drag('right', -200);
-      view.finish('right');
-      expect(view.onMoveLeft).not.toHaveBeenCalled();
-
-      view.resize(AGENT_DIRECTORY_LEFT_MIN_WIDTH);
+      view.openBubble();
       view.startDrag('right');
       view.drag('right', -200);
       view.finish('right');
       expect(view.onMoveLeft).toHaveBeenCalledOnce();
+      view.update({ dockLeft: true });
+      expectCardVisible(view.card('left'), true);
+      expectCardVisible(view.card('right'), false);
+      view.flushTransfer();
+      expect(view.card('left').props.style['--agent-directory-height']).toBe('480px');
+      expect(view.renderer.root.findByProps({ 'data-agent-session-directory': true }).props['data-docked-left']).toBe(true);
+      const bubble = view.renderer.root.findByProps({ 'aria-haspopup': 'dialog' });
+      expect(bubble.props['data-side']).toBe('left');
+      act(() => view.card('left').findByProps({ 'aria-label': '收起会话目录' }).props.onClick());
+      expectCardVisible(view.card('left'), false);
+      expect(bubble.props['data-visible']).toBe(true);
+      view.openBubble();
+
+      view.startDrag('left');
+      view.drag('left', 149);
+      view.finish('left');
+      expect(view.onMoveRight).not.toHaveBeenCalled();
+      view.startDrag('left');
+      view.drag('left', 150);
+      view.finish('left');
+      expect(view.onMoveRight).toHaveBeenCalledOnce();
+      view.update({ dockLeft: false });
+      expectCardVisible(view.card('left'), false);
+      expectCardVisible(view.card('right'), true);
+      view.flushTransfer();
+      act(() => view.card('right').findByProps({ 'aria-label': '收起会话目录' }).props.onClick());
+      expectCardVisible(view.card('right'), false);
+      expect(bubble.props['data-side']).toBe('right');
+      expect(bubble.props['data-visible']).toBe(true);
     } finally {
       view.unmount();
       vi.unstubAllGlobals();
@@ -823,33 +874,70 @@ describe('Agent session peek', () => {
     }
   });
 
-  it.each(['pending', 'inactive'] as const)('cancels an unfinished right drag when the workspace becomes %s', end => {
-    const view = dockingView();
-    try {
-      view.startDrag('right');
-      view.drag('right', -200);
-      expect(view.card('right').props['data-dragging']).toBe(true);
-      view.update(end === 'pending' ? { layoutMotionPending: true } : { active: false });
-      expect(view.card('right').props['data-dragging']).toBe(false);
-      view.finish('right');
-      view.finish('right', 'onLostPointerCapture');
-      expect(view.onMoveLeft).not.toHaveBeenCalled();
-      expect(view.frames.size).toBe(0);
+  it.each((['left', 'right'] as const).flatMap(side =>
+    (['pending', 'inactive'] as const).map(end => ({ side, end }))))(
+    'cancels an unfinished compact $side drag when the workspace becomes $end', ({ side, end }) => {
+      const view = dockingView({ width: 900, dockLeft: side === 'left' });
+      const onMove = side === 'left' ? view.onMoveRight : view.onMoveLeft;
+      try {
+        view.openBubble();
+        view.startDrag(side);
+        view.drag(side, side === 'left' ? 200 : -200);
+        expect(view.card(side).props['data-dragging']).toBe(true);
+        view.update(end === 'pending' ? { layoutMotionPending: true } : { active: false });
+        expect(view.card(side).props['data-dragging']).toBe(false);
+        view.finish(side);
+        view.finish(side, 'onLostPointerCapture');
+        expect(onMove).not.toHaveBeenCalled();
+        expect(view.frames.size).toBe(0);
 
-      view.update({ layoutMotionPending: false, active: true });
-      view.startDrag('right');
-      view.drag('right', -200);
-      view.finish('right');
-      expect(view.onMoveLeft).toHaveBeenCalledOnce();
-    } finally {
-      view.unmount();
-      vi.unstubAllGlobals();
-    }
-  });
+        view.update({ layoutMotionPending: false, active: true });
+        view.startDrag(side);
+        view.drag(side, side === 'left' ? 200 : -200);
+        view.finish(side);
+        expect(onMove).toHaveBeenCalledOnce();
+      } finally {
+        view.unmount();
+        vi.unstubAllGlobals();
+      }
+    },
+  );
 
-  it('discards a pending drag transfer when keyboard docking reverses twice before its first frame', () => {
-    const view = dockingView();
+  it.each((['left', 'right'] as const).flatMap(side =>
+    (['pending', 'inactive'] as const).map(block => ({ side, block }))))(
+    'ignores compact $side bubble input while the workspace is $block', ({ side, block }) => {
+      const view = dockingView({ width: 900, dockLeft: side === 'left', pending: block === 'pending', active: block !== 'inactive' });
+      try {
+        const bubble = view.renderer.root.findByProps({ 'aria-haspopup': 'dialog' });
+        const preventDefault = vi.fn();
+        expect(bubble.props['data-side']).toBe(side);
+        act(() => bubble.props.onPointerDown({ ...view.event, button: 0, isPrimary: true, clientX: 400, clientY: 100 }));
+        act(() => bubble.props.onPointerMove({ pointerId: 7, clientX: 400, clientY: 300 }));
+        act(() => bubble.props.onPointerUp(view.event));
+        act(() => bubble.props.onKeyDown({ key: 'End', preventDefault }));
+        view.openBubble();
+        expect(view.capture.setPointerCapture).not.toHaveBeenCalled();
+        expect(preventDefault).not.toHaveBeenCalled();
+        expect(bubble.props.style.top).toBe(12);
+        expect(bubble.props['data-visible']).toBe(true);
+        expectCardVisible(view.card(side), false);
+        expect(view.onMoveLeft).not.toHaveBeenCalled();
+        expect(view.onMoveRight).not.toHaveBeenCalled();
+
+        view.update({ layoutMotionPending: false, active: true });
+        view.openBubble();
+        expectCardVisible(view.card(side), true);
+      } finally {
+        view.unmount();
+        vi.unstubAllGlobals();
+      }
+    },
+  );
+
+  it.each([900, 1400])('discards a pending drag transfer at width %i when keyboard docking reverses twice before its first frame', width => {
+    const view = dockingView({ width });
     try {
+      if (width < AGENT_DIRECTORY_LEFT_MIN_WIDTH) view.openBubble();
       view.startDrag('right');
       view.drag('right', -200, 100);
       view.finish('right');
@@ -869,8 +957,8 @@ describe('Agent session peek', () => {
       view.update({ dockLeft: true });
       expectCardVisible(view.card('left'), true);
       expect(view.card('left').props['data-dragging']).toBe(false);
-      expect(view.card('left').props.style).toMatchObject({ top: 12,
-        '--agent-directory-height': 'calc(100% - 24px)', '--agent-directory-drag-x': '0px' });
+      expect(view.card('left').props.style).toMatchObject({ top: width < AGENT_DIRECTORY_LEFT_MIN_WIDTH ? 112 : 12,
+        '--agent-directory-height': width < AGENT_DIRECTORY_LEFT_MIN_WIDTH ? '480px' : 'calc(100% - 24px)', '--agent-directory-drag-x': '0px' });
       expect(view.ownerWindow.requestAnimationFrame).toHaveBeenCalledOnce();
       expect(view.onMoveLeft).toHaveBeenCalledTimes(2);
       expect(view.onMoveRight).toHaveBeenCalledOnce();
@@ -915,7 +1003,91 @@ describe('Agent session peek', () => {
     }
   });
 
-  it('drags the compact bubble vertically without opening it and clamps it when resized', () => {
+  it('closes an incoming compact left card before its transfer frame and reopens it without stale geometry', () => {
+    const view = dockingView({ width: 900 });
+    try {
+      view.openBubble();
+      view.startDrag('right');
+      view.drag('right', -200, 100);
+      view.finish('right');
+      view.update({ dockLeft: true });
+      const frameId = [...view.frames.keys()][0];
+      expect(view.card('left').props['data-dragging']).toBe(true);
+      act(() => view.card('left').findByProps({ 'aria-label': '收起会话目录' }).props.onClick());
+      expectCardVisible(view.card('left'), false);
+      expect(view.ownerWindow.cancelAnimationFrame).toHaveBeenCalledWith(frameId);
+      expect(view.frames.size).toBe(0);
+      const bubble = view.renderer.root.findByProps({ 'aria-haspopup': 'dialog' });
+      expect(bubble.props['data-side']).toBe('left');
+      expect(bubble.props['data-visible']).toBe(true);
+      view.openBubble();
+      expectCardVisible(view.card('left'), true);
+      expect(view.card('left').props['data-dragging']).toBe(false);
+      expect(view.card('left').props.style).toMatchObject({ top: 112,
+        '--agent-directory-height': '480px', '--agent-directory-drag-x': '0px' });
+      expect(view.ownerWindow.requestAnimationFrame).toHaveBeenCalledOnce();
+    } finally {
+      view.unmount();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it.each(['left', 'right'] as const)('restores focus to the %s bubble only after its visible close state commits', side => {
+    const view = dockingView({ width: 900, dockLeft: side === 'left' });
+    try {
+      const bubble = view.renderer.root.findByProps({ 'aria-haspopup': 'dialog' });
+      view.openBubble();
+      expect(bubble.props['data-visible']).toBe(false);
+      view.capture.focus.mockImplementation(() => {
+        expect(bubble.props['data-visible']).toBe(true);
+        expect(bubble.props['aria-hidden']).toBe(false);
+        expect(bubble.props.tabIndex).toBe(0);
+        expectCardVisible(view.card(side), false);
+        view.ownerDocument.activeElement = view.capture;
+      });
+      const preventDefault = vi.fn();
+      act(() => {
+        view.listeners.get('keydown')?.({ key: 'Escape', preventDefault });
+        expect(view.capture.focus).not.toHaveBeenCalled();
+      });
+      expect(preventDefault).toHaveBeenCalledOnce();
+      expect(view.capture.focus).toHaveBeenCalledOnce();
+      expect(view.capture.focus).toHaveBeenCalledWith({ preventScroll: true });
+      expect(view.ownerDocument.activeElement).toBe(view.capture);
+    } finally {
+      view.unmount();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it.each(['pending', 'inactive', 'side-change', 'resize'] as const)(
+    'discards Escape focus restoration when closing shares a commit with %s', end => {
+      const view = dockingView({ width: 900, dockLeft: true });
+      try {
+        view.openBubble();
+        act(() => {
+          view.listeners.get('keydown')?.({ key: 'Escape', preventDefault: vi.fn() });
+          if (end === 'pending') view.update({ layoutMotionPending: true });
+          else if (end === 'inactive') view.update({ active: false });
+          else if (end === 'side-change') view.update({ dockLeft: false });
+          else view.resize(1400);
+        });
+        expect(view.capture.focus).not.toHaveBeenCalled();
+
+        view.update({ layoutMotionPending: false, active: true, dockLeft: true });
+        view.resize(900);
+        expect(view.capture.focus).not.toHaveBeenCalled();
+        view.openBubble();
+        act(() => view.listeners.get('keydown')?.({ key: 'Escape', preventDefault: vi.fn() }));
+        expect(view.capture.focus).toHaveBeenCalledOnce();
+      } finally {
+        view.unmount();
+        vi.unstubAllGlobals();
+      }
+    },
+  );
+
+  it.each(['left', 'right'] as const)('drags the compact %s bubble vertically without opening it and clamps it when resized', side => {
     let bounds = { width: 900, height: 600 };
     let measure!: () => void;
     const disconnect = vi.fn();
@@ -935,12 +1107,14 @@ describe('Agent session peek', () => {
     try {
       act(() => {
         renderer = TestRenderer.create(<AgentSessionPeek sessions={[]} total={0} activeSessionId={null}
-          loading={false} onOpen={vi.fn()} onManage={vi.fn()} onNew={vi.fn()} onMemories={vi.fn()} />, {
+          loading={false} onOpen={vi.fn()} onManage={vi.fn()} onNew={vi.fn()} onMemories={vi.fn()} dockLeft={side === 'left'} />, {
           createNodeMock: element => element.props['data-agent-session-directory'] ? layer : target,
         });
       });
       const bubble = renderer.root.findAllByType('button').find(button => button.props['aria-haspopup'] === 'dialog')!;
-      const card = directoryCard(renderer);
+      const card = directoryCard(renderer, side);
+      expect(bubble.props['data-side']).toBe(side);
+      expect(bubble.props['aria-controls']).toBe(card.props.id);
       expect(bubble.props['data-visible']).toBe(true);
       expect(card.props['data-visible']).toBe(false);
       expect(card.props.hidden).toBeUndefined();
@@ -955,6 +1129,10 @@ describe('Agent session peek', () => {
 
       act(() => bubble.props.onClick());
       expect(card.props['data-visible']).toBe(true);
+      expectCardVisible(directoryCard(renderer, side === 'left' ? 'right' : 'left'), false);
+      expect(card.props.role).toBe('dialog');
+      expect(card.props['aria-modal']).toBeUndefined();
+      expect(card.props.style['--agent-directory-height']).toBe('480px');
       expect(card.props.style.top).toBe(448);
 
       bounds = { width: 900, height: 300 };
@@ -979,10 +1157,10 @@ describe('Agent session peek', () => {
       expect(bubble.props['data-visible']).toBe(false);
       expect(card.props['data-visible']).toBe(true);
       expect(card.props.style.top).toBe(12);
-      bounds = { width: 1265, height: 600 };
+      bounds = { width: side === 'left' ? AGENT_DIRECTORY_LEFT_MIN_WIDTH : AGENT_DIRECTORY_BREAKPOINT + 1, height: 600 };
       act(() => measure());
       expect(card.props['data-visible']).toBe(true);
-      bounds = { width: AGENT_DIRECTORY_BREAKPOINT, height: 600 };
+      bounds = { width: side === 'left' ? AGENT_DIRECTORY_LEFT_MIN_WIDTH - 1 : AGENT_DIRECTORY_BREAKPOINT, height: 600 };
       act(() => measure());
       expect(card.props['data-visible']).toBe(false);
     } finally {
