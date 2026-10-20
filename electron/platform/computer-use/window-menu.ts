@@ -23,12 +23,14 @@ export type AgentComputerMenuPointer = {
   /** Native AX ancestry proof; private to the menu and indicator owners. */
   menuSurface?: AgentComputerWindowIdentity;
 } | { available: false; reason: string };
+/** Native preparation only. Main must dismiss the exact still-current owner request. */
+export interface AgentComputerAssociatedMenuCancel { associatedCancelWindowId: number }
 export interface AgentComputerMenuSessionLease {
   observe(signal: AbortSignal): Promise<AgentComputerMenuObservation>;
   resolvePointer(request: { observationId: string; itemId: string; operation: AgentComputerMenuOperation },
     signal: AbortSignal): Promise<AgentComputerMenuPointer>;
   action(request: { observationId: string; itemId: string; operation: AgentComputerMenuOperation },
-    signal: AbortSignal, onDispatched?: () => void): Promise<void>;
+    signal: AbortSignal, onDispatched?: () => void): Promise<void | AgentComputerAssociatedMenuCancel>;
   capture(request: { observationId: string; pointerWindow?: AgentComputerWindowIdentity }, signal: AbortSignal): Promise<AgentComputerMenuCapture>;
   /** Reuses this native process while keeping the frozen ordinary-window scope. */
   captureWindow(request: { pointerWindow?: AgentComputerWindowIdentity }, signal: AbortSignal): Promise<AgentComputerWindowCapture>;
@@ -99,15 +101,25 @@ function containsPoint(bounds: AgentComputerRect, point: { x: number; y: number 
   return point.x >= bounds.x && point.x < bounds.x + bounds.width
     && point.y >= bounds.y && point.y < bounds.y + bounds.height;
 }
+function containsRect(bounds: AgentComputerRect, inner: AgentComputerRect): boolean {
+  return inner.x >= bounds.x && inner.y >= bounds.y
+    && inner.x + inner.width <= bounds.x + bounds.width && inner.y + inner.height <= bounds.y + bounds.height;
+}
 function sameSurface(a: AgentComputerWindowIdentity, b: AgentComputerWindowIdentity): boolean {
   return a.windowId === b.windowId && a.pid === b.pid && a.processStartedAt === b.processStartedAt
     && a.layer === b.layer && a.title === b.title && sameRect(a.bounds, b.bounds);
+}
+function sameAssociatedSurface(actual: AgentComputerWindowIdentity, expected: AgentComputerWindowIdentity): boolean {
+  return actual.windowId === expected.windowId && actual.pid === expected.pid && actual.processStartedAt === expected.processStartedAt
+    && actual.layer === expected.layer && (expected.title === undefined || actual.title === expected.title)
+    && sameRect(actual.bounds, expected.bounds);
 }
 function operation(value: unknown): AgentComputerMenuOperation {
   if (value !== 'open' && value !== 'press' && value !== 'cancel') throw new Error('invalid menu operation');
   return value;
 }
-function observation(value: Record<string, unknown>, target: AgentComputerWindowIdentity): AgentComputerMenuObservation {
+function observation(value: Record<string, unknown>, target: AgentComputerWindowIdentity,
+  associatedWindow?: AgentComputerWindowIdentity): AgentComputerMenuObservation {
   const source = fields(value, ['ok', 'requestId', 'observationId', 'items', 'axTree', 'truncated', 'menus']);
   if (!Array.isArray(source.items) || source.items.length > 128 || !Array.isArray(source.menus)
     || source.menus.length > 32 || typeof source.truncated !== 'boolean') throw new Error('invalid menu observation');
@@ -126,7 +138,9 @@ function observation(value: Record<string, unknown>, target: AgentComputerWindow
     const bounds = rect(menu.bounds);
     if (!('surface' in menu)) return { bounds };
     const surface = windowIdentity(menu.surface, true);
-    if (surface.layer !== 101 || surface.pid !== target.pid || surface.processStartedAt !== target.processStartedAt
+    if (associatedWindow && surface.windowId === associatedWindow.windowId) {
+      if (!sameAssociatedSurface(surface, associatedWindow) || !containsRect(surface.bounds, bounds)) throw new Error('unrelated associated menu surface');
+    } else if (surface.layer !== 101 || surface.pid !== target.pid || surface.processStartedAt !== target.processStartedAt
       || surface.windowId === target.windowId || !sameRect(bounds, surface.bounds)) throw new Error('unrelated menu surface');
     return { bounds, surface };
   });
@@ -148,7 +162,9 @@ function pointerResult(value: Record<string, unknown>, current: AgentComputerMen
   if (!containsPoint(item.bounds, point)) throw new Error('pointer outside item');
   const menuSurface = source.menuSurface === undefined ? undefined : windowIdentity(source.menuSurface, true);
   if (menuSurface) {
-    if (!current.menus.some(menu => menu.surface && sameSurface(menu.surface, menuSurface))
+    // The visual indicator currently supports only native popup surfaces.
+    // A first-party AX overlay lease must not broaden that separate contract.
+    if (menuSurface.layer !== 101 || !current.menus.some(menu => menu.surface && sameSurface(menu.surface, menuSurface))
       || !containsPoint(menuSurface.bounds, point)) throw new Error('unrelated pointer menu');
   } else if (['AXMenu', 'AXMenuItem', 'AXMenuBarItem'].includes(item.role) || !containsPoint(target.bounds, point)) {
     throw new Error('missing pointer menu');
@@ -188,12 +204,21 @@ function captureResult(value: Record<string, unknown>, current: AgentComputerMen
     cursorIncluded: source.cursorIncluded };
 }
 
-/** A Run-owned AX reference session. It neither activates an app nor posts global input. */
+/**
+ * A Run-owned AX reference session. It neither activates an app nor posts global input.
+ * associatedInput is a main-owned first-party overlay identity, frozen for this
+ * lease only; request replacement must close this lease before observing again.
+ */
 export async function createAgentComputerMenuSession(input: AgentComputerWindowIdentity,
-  startupSignal: AbortSignal): Promise<AgentComputerMenuSessionLease> {
+  startupSignal: AbortSignal, associatedInput?: AgentComputerWindowIdentity): Promise<AgentComputerMenuSessionLease> {
   startupSignal.throwIfAborted();
   if (process.platform !== 'darwin') throw new Error('应用菜单操作目前仅支持 macOS');
   const target = windowIdentity(input);
+  const associatedWindow = associatedInput === undefined ? undefined : windowIdentity(associatedInput);
+  if (associatedWindow && (associatedWindow.windowId === target.windowId || associatedWindow.pid !== target.pid
+    || associatedWindow.processStartedAt !== target.processStartedAt || !containsRect(target.bounds, associatedWindow.bounds))) {
+    throw new AgentComputerInputError('关联菜单窗口身份无效', 'not-dispatched');
+  }
   const child = spawn(resolveAgentComputerHelperPath(), ['--window-menu-session'], { shell: false, stdio: ['pipe', 'pipe', 'pipe'] });
   const emitters: EventEmitter[] = [child, child.stdin, child.stdout, child.stderr];
   let started = false; let stopping = false; let finished = false; let sequence = 0;
@@ -286,10 +311,14 @@ export async function createAgentComputerMenuSession(input: AgentComputerWindowI
           if (source.dispatched !== false && source.dispatched !== 'unknown'
             || source.dispatched === false && pending?.dispatched) throw new Error('invalid failure receipt');
           if (pending?.command !== 'captureWindow') snapshot = undefined;
-          settlePending(new AgentComputerInputError(`菜单操作未完成（${error.code}），请重新观察窗口`,
+          settlePending(new AgentComputerInputError(error.code === 'menu_cancel_unavailable'
+            ? '当前菜单不支持安全取消，请重新观察菜单' : `菜单操作未完成（${error.code}），请重新观察窗口`,
             source.dispatched === 'unknown' ? 'unknown' : 'not-dispatched'));
         } else if (source.ok === true) {
-          if (pending?.command === 'action' && !pending.dispatched) throw new Error('missing dispatch acknowledgement');
+          if (pending?.command === 'action') {
+            const ownerCancel = 'associatedCancelWindowId' in source;
+            if (ownerCancel ? pending.dispatched : !pending.dispatched) throw new Error('invalid action acknowledgement');
+          }
           settlePending(undefined, source);
         }
         else throw new Error('invalid menu response');
@@ -311,7 +340,7 @@ export async function createAgentComputerMenuSession(input: AgentComputerWindowI
   for (const stream of emitters) stream.on('error', onError);
   child.once('exit', onExit); child.once('close', onExit);
   startupSignal.addEventListener('abort', cancelStartup, { once: true });
-  try { child.stdin.write(`${JSON.stringify({ window: target })}\n`); } catch { fail('菜单会话初始化失败'); }
+  try { child.stdin.write(`${JSON.stringify({ window: target, ...(associatedWindow ? { associatedWindow } : {}) })}\n`); } catch { fail('菜单会话初始化失败'); }
   if (startupSignal.aborted) close();
   try { await startup; }
   catch (error) {
@@ -359,7 +388,7 @@ export async function createAgentComputerMenuSession(input: AgentComputerWindowI
     async observe(signal) {
       snapshot = undefined;
       const result = await request('observe', {}, signal);
-      try { snapshot = observation(result, target); return structuredClone(snapshot); }
+      try { snapshot = observation(result, target, associatedWindow); return structuredClone(snapshot); }
       catch { close(); throw new AgentComputerInputError('菜单观察回执无效', 'not-dispatched'); }
     },
     async resolvePointer(input, signal) {
@@ -377,13 +406,20 @@ export async function createAgentComputerMenuSession(input: AgentComputerWindowI
     async action(input, signal, onDispatched) {
       const source = fields(input, ['observationId', 'itemId', 'operation']);
       const selected = { observationId: token(source.observationId), itemId: token(source.itemId), operation: operation(source.operation) };
-      if (!snapshot || snapshot.observationId !== selected.observationId
-        || !snapshot.items.some(item => item.itemId === selected.itemId && item.operations.includes(selected.operation))) {
+      const item = snapshot?.items.find(item => item.itemId === selected.itemId && item.operations.includes(selected.operation));
+      if (!snapshot || snapshot.observationId !== selected.observationId || !item) {
         throw new AgentComputerInputError('菜单项已失效或未声明此操作，请重新观察', 'not-dispatched');
       }
       signal.throwIfAborted(); snapshot = undefined;
       const result = await request('action', selected, signal, onDispatched);
       try {
+        if ('associatedCancelWindowId' in result) {
+          fields(result, ['ok', 'requestId', 'associatedCancelWindowId']);
+          const associatedCancelWindowId = integer(result.associatedCancelWindowId, 1, 0xffffffff);
+          if (selected.operation !== 'cancel' || item.role !== 'AXMenu' || !associatedWindow
+            || associatedCancelWindowId !== associatedWindow.windowId) throw new Error('invalid associated menu cancellation');
+          return { associatedCancelWindowId };
+        }
         fields(result, ['ok', 'requestId', 'dispatched']);
         if (result.dispatched !== true) throw new Error('invalid action receipt');
       } catch { close(); throw new AgentComputerInputError('菜单操作回执无效，请重新观察而不要重试', 'unknown'); }

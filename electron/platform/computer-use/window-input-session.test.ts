@@ -50,6 +50,21 @@ beforeEach(async () => {
 afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); Object.defineProperty(process, 'platform', platform); });
 
 describe('persistent directed window input transport', () => {
+  it('transports an explicitly associated right-click handoff without changing its frozen session window', async () => {
+    const { child, lease } = await setup();
+    const completionWindow = { ...window, windowId: 82 };
+    const input = { ...request, operation: 'rightClick' as const, completionWindow };
+    const pending = lease.input(input, signal());
+    expect(JSON.parse(child.stdin.write.mock.calls.at(-1)![0])).toEqual({ requestId: '1', command: 'input', request: input });
+    child.reply({ ...success(), completionWindowId: 82 });
+    await expect(pending).resolves.toMatchObject({ dispatched: true, releaseSent: true, completionWindowId: 82 });
+    const next = lease.input(request, signal());
+    expect(JSON.parse(child.stdin.write.mock.calls.at(-1)![0]).request).toEqual(request);
+    child.reply(success('2')); await next;
+    child.stop(); await expect(lease.closed).resolves.toBe(true);
+    expect(mocks.spawn).toHaveBeenCalledOnce();
+  });
+
   it('spawns one fixed native session and reuses it with monotonic request IDs', async () => {
     const { child, lease } = await setup();
     expect(mocks.spawn).toHaveBeenCalledWith('/native/omniflow-click', ['--window-input-session'],

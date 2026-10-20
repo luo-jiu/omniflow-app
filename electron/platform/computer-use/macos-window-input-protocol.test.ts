@@ -65,6 +65,46 @@ for modifiers in [["shift", "command"], ["command", "command"], ["ctrl"], ["cont
 for key in ["A", "Enter", "left", "", "é", "f1", "constructor", "__proto__"] { check(!WindowInputShortcut(key: key, modifiers: []).valid) }
 let window = WindowIdentity(windowId: 1, pid: 123, processStartedAt: 999, layer: 0,
     bounds: Rect(x: -100, y: 40, width: 760, height: 460), title: "QA")
+for profile in ["directed-v1", "appkit-fixture-v1", "textedit-415-25f84-v1"] {
+    for foreground in [false, true] {
+        for keyboard in [false, true] {
+            check(windowInputRequiresFocusedWindow(profile: profile, targetIsForeground: foreground,
+                requiresFocusedElement: keyboard) == (profile != "directed-v1" || foreground || keyboard),
+                "Foreground pointers require the exact focused native window, not merely the same PID")
+        }
+    }
+}
+for inherited in [false, true] {
+    for command in [false, true] {
+        for protected in [false, true] {
+            let route = windowInputDispatchFocusRoute(targetIsForeground: true, inheritedFocus: inherited,
+                commandClick: command, protectedFocus: protected)
+            check(route == .foreground && route != .safe && route != .command,
+                "Real foreground input never synthesizes focus or Command, including a retained owner")
+        }
+    }
+}
+check(windowInputDispatchFocusRoute(targetIsForeground: false, inheritedFocus: true, commandClick: false, protectedFocus: true) == .alreadyFocused)
+check(windowInputDispatchFocusRoute(targetIsForeground: false, inheritedFocus: false, commandClick: true, protectedFocus: true) == .command)
+check(windowInputDispatchFocusRoute(targetIsForeground: false, inheritedFocus: false, commandClick: false, protectedFocus: true) == .safe)
+check(windowInputDispatchFocusRoute(targetIsForeground: false, inheritedFocus: false, commandClick: false, protectedFocus: false) == .plain)
+do {
+    var owner = WindowInputFocusPreventerPolicy(targetPID: 10, servicePID: 99, auxiliaryPID: 40, currentFocusPID: 10)
+    check(owner.allowsForegroundPassthrough(actualFocusPID: 10))
+    check(!owner.allowsForegroundPassthrough(actualFocusPID: nil))
+    check(!owner.allowsForegroundPassthrough(actualFocusPID: 20))
+    owner.currentFocusPID = 20
+    check(!owner.allowsForegroundPassthrough(actualFocusPID: 10), "Workspace foreground cannot replace the owner tracker")
+    owner.currentFocusPID = 10
+    owner.pending = WindowInputFocusPending(thiefPID: 10, originalTargetPID: 20)
+    check(!owner.allowsForegroundPassthrough(actualFocusPID: 10), "A pending keyboard reroute cannot enter foreground input")
+    owner.pending = nil; owner.releaseFailed = true
+    check(!owner.allowsForegroundPassthrough(actualFocusPID: 10))
+    let fresh = WindowInputFocusSession(window: window)
+    try fresh.requireForegroundPassthrough()
+    check(fresh.snapshot.state == .inactive && fresh.snapshot.postedCount == 0,
+        "Foreground readiness must not create a focus owner, tap or synthetic focus event")
+}
 let fixtureFocusToken = String(repeating: "a", count: 64)
 let focusParents = [1: 0, 2: 1, 3: 1]
 let focusChildren = [0: [1], 1: [2, 3]]
@@ -126,6 +166,74 @@ check((try? parseWindowInputRequest(input("shortcut", extra: ["shortcut": ["key"
 check((try? parseWindowInputRequest(input("rightClick", extra: ["point": ["x": -99, "y": 41]]))) != nil)
 check((try? parseWindowInputRequest(input("doubleClick", extra: ["point": ["x": -99, "y": 41]]))) != nil)
 check((try? parseWindowInputRequest(input("click", extra: ["point": ["x": -99, "y": 41]]))) != nil)
+let completionWindow = WindowIdentity(windowId: 2, pid: window.pid, processStartedAt: window.processStartedAt, layer: 0,
+    bounds: Rect(x: -90, y: 60, width: 700, height: 400), title: nil)
+let associatedRightClick = try parseWindowInputRequest(input("rightClick", extra: ["profile": "directed-v1",
+    "point": ["x": -99, "y": 41], "completionWindow": completionWindow.json]))
+check(associatedRightClick.completionWindow?.windowId == 2 && associatedRightClick.window.windowId == 1)
+for operation in ["click", "doubleClick", "scroll", "typeText", "shortcut", "drag"] {
+    check((try? parseWindowInputRequest(input(operation, extra: ["profile": "directed-v1", "point": ["x": -99, "y": 41],
+        "completionWindow": completionWindow.json]))) == nil)
+}
+check((try? parseWindowInputRequest(input("rightClick", extra: ["point": ["x": -99, "y": 41], "completionWindow": completionWindow.json]))) == nil)
+for changed in [
+    WindowIdentity(windowId: 1, pid: window.pid, processStartedAt: window.processStartedAt, layer: 0, bounds: completionWindow.bounds, title: nil),
+    WindowIdentity(windowId: 2, pid: window.pid + 1, processStartedAt: window.processStartedAt, layer: 0, bounds: completionWindow.bounds, title: nil),
+    WindowIdentity(windowId: 2, pid: window.pid, processStartedAt: window.processStartedAt! + 1, layer: 0, bounds: completionWindow.bounds, title: nil),
+    WindowIdentity(windowId: 2, pid: window.pid, processStartedAt: window.processStartedAt, layer: 102, bounds: completionWindow.bounds, title: nil),
+    WindowIdentity(windowId: 2, pid: window.pid, processStartedAt: window.processStartedAt, layer: 0, bounds: Rect(x: -101, y: 60, width: 700, height: 400), title: nil)
+] {
+    check((try? parseWindowInputRequest(input("rightClick", extra: ["profile": "directed-v1", "point": ["x": -99, "y": 41],
+        "completionWindow": changed.json]))) == nil, "No other process, original window, raised surface or expanded capture bounds can become a completion")
+    check(!windowInputCompletionSurfaceMatches(changed, expected: completionWindow))
+}
+check(windowInputCompletionSurfaceMatches(completionWindow, expected: completionWindow))
+for operation in WindowInputOperation.allCases {
+    for count in 0...3 {
+        check(windowInputCompletionPhaseAllowed(operation: operation, postedEventCount: count) == (operation == .rightClick && (1...2).contains(count)),
+            "Only the original right-up and completion, never another press, can accept a handoff")
+    }
+}
+// A foreground classification is deliberately insufficient without the
+// independent exact completion receiver/focus proof. Exercise all operation,
+// phase, process, profile, association and proof combinations.
+for profile in ["directed-v1", "appkit-fixture-v1", "textedit-415-25f84-v1", "unknown"] {
+    for operation in WindowInputOperation.allCases {
+        for count in 0...3 {
+            for current in [nil, 0, 10, window.pid, window.pid + 1] as [Int32?] {
+                for bound in [false, true] {
+                    let route = windowInputForegroundCheck(profile: profile, operation: operation, postedEventCount: count,
+                        originalForegroundPID: 10, targetPID: window.pid, currentForegroundPID: current, completionBound: bound)
+                    let original = current == 10
+                    let candidate = !original && current == window.pid && profile == "directed-v1" && bound
+                        && operation == .rightClick && (1...2).contains(count)
+                    check(route == (original ? .original : candidate ? .completionRequired : .rejected))
+                    for verified in [false, true] {
+                        check(windowInputForegroundAllowed(route, completionVerified: verified) == (original || candidate && verified),
+                            "No pre-down, unrelated app, legacy profile or unproved same-PID window may bypass foreground admission")
+                    }
+                }
+            }
+        }
+    }
+}
+for (original, target, current) in [(Int32(0), window.pid, Int32(0)), (Int32(10), Int32(0), Int32(10)),
+                                   (Int32(-1), window.pid, window.pid), (window.pid, window.pid, window.pid + 1)] {
+    check(windowInputForegroundCheck(profile: "directed-v1", operation: .rightClick, postedEventCount: 1,
+        originalForegroundPID: original, targetPID: target, currentForegroundPID: current, completionBound: true) == .rejected)
+}
+do {
+    typealias Node = (pid: Int32, role: String, parent: Int?)
+    let nodes: [Int: Node] = [0: (window.pid, "AXWindow", nil), 1: (window.pid, "AXMenu", 0), 2: (window.pid, "AXMenuItem", 1),
+        3: (window.pid, "AXWindow", 0), 4: (window.pid, "AXMenuItem", 3), 5: (window.pid + 1, "AXMenuItem", 1),
+        6: (window.pid, "AXSheet", 0), 7: (window.pid, "AXMenuItem", 6), 8: (window.pid, "AXGroup", 8),
+        10: (window.pid, "AXApplication", 0), 11: (window.pid, "AXPopover", 0), 12: (window.pid, "AXSecureTextField", 1)]
+    func belongs(_ element: Int) -> Bool {
+        windowInputCompletionFocusBelongsToWindow(element, root: 0, pid: window.pid, equal: ==, read: { nodes[$0] })
+    }
+    check(belongs(0) && belongs(1) && belongs(2))
+    for bad in [3, 4, 5, 6, 7, 8, 9, 10, 11, 12] { check(!belongs(bad), "Sibling windows, foreign PID, sheets, secure/popover/app roots, cycles and missing ancestry are not the associated overlay") }
+}
 for operation in ["click", "rightClick", "doubleClick"] {
     for extra in [[:], ["point": ["x": 660, "y": 41]], ["point": ["x": -99, "y": 500]],
         ["point": ["x": -99, "y": true]], ["point": ["x": -99, "y": 41, "extra": 1]],
@@ -404,6 +512,133 @@ check(clickEvents.count == 2 && clickEvents[0].event.type == .leftMouseDown && c
 check(pressNumber(clickEvents[0].event) == pressNumber(clickEvents[1].event))
 check(pressNumber(clickEvents[0].release!) == pressNumber(clickEvents[1].event))
 check(clickEvents.allSatisfy { $0.event.getIntegerValueField(.mouseEventClickState) == 1 })
+do {
+    let events = try prepareWindowInputEvents(associatedRightClick, source: source)
+    var sent: [CGEvent] = []
+    let result = try runDirectedInputSequence(events.map { DirectedInputStep(event: $0.event, delayBeforeMs: $0.delayBeforeMs,
+        release: $0.release, completesRelease: $0.completesRelease) }, wait: { _ in }, validate: {
+            if !sent.isEmpty { check(windowInputCompletionPhaseAllowed(operation: .rightClick, postedEventCount: sent.count)) }
+        }, canRelease: { true }, post: { sent.append($0) })
+    check(result.releaseSent && result.eventCount == 2 && sent.map { $0.type } == [.rightMouseDown, .rightMouseUp])
+    check(sent.allSatisfy { $0.getIntegerValueField(CGEventField(rawValue: 51)!) == Int64(window.windowId) },
+        "The completion surface never replaces the original receiver of down, normal up or cleanup")
+    check(pressNumber(sent[0]) == pressNumber(sent[1]))
+    check(windowInputSuccessReceipt(result)["completionWindowId"] == nil)
+    let receipt = windowInputSuccessReceipt(DirectedInputResult(eventCount: 2, releaseSent: true, completionWindowId: 2))
+    check(receipt["completionWindowId"] as? UInt32 == 2 && receipt["releaseSent"] as? Bool == true)
+    sent = []
+    do {
+        _ = try runDirectedInputSequence(events.map { DirectedInputStep(event: $0.event, delayBeforeMs: $0.delayBeforeMs,
+            release: $0.release, completesRelease: $0.completesRelease) }, wait: { _ in }, validate: {
+                if !sent.isEmpty { throw windowInputError("focused_window_mismatch") }
+            }, canRelease: { true }, post: { sent.append($0) })
+        fatalError("A different popup must not complete the right click")
+    } catch let error as WindowInputExecutionError {
+        check(error.eventCount == 2 && error.releaseSent && error.completedStepCount == 1)
+        check(sent.map { $0.type } == [.rightMouseDown, .rightMouseUp] && pressNumber(sent[0]) == pressNumber(sent[1]))
+        check(sent[1].getIntegerValueField(CGEventField(rawValue: 51)!) == Int64(window.windowId))
+        check(windowInputFailureReceipt(error)["dispatched"] as? String == "unknown")
+    }
+}
+do {
+    let events = try prepareWindowInputEvents(associatedRightClick, source: source)
+    let steps = events.map { DirectedInputStep(event: $0.event, delayBeforeMs: $0.delayBeforeMs,
+        release: $0.release, completesRelease: $0.completesRelease) }
+    // Use real prepared CG events and the production sequence runner. Only the
+    // independently verified focus/CG facts and physical input are injected;
+    // nothing is posted to macOS by this harness.
+    func sequence(_ label: String, before: Int32? = 10, afterDown: Int32? = window.pid,
+        afterUp: Int32? = window.pid, bound: Bool = true, proof: Bool = true,
+        physicalCheck: Int = 0, finalSwitch: Int32? = nil, expectedSteps: Int = 2,
+        success: Bool = true, expectedCompletion: Bool = true) throws {
+        var sent: [CGEvent] = []
+        var observedCompletion: UInt32?
+        do {
+            let result = try runDirectedInputSequence(steps, wait: { _ in }, validate: {
+                let count = sent.count
+                let current = count == 0 ? before : count == 1 ? afterDown : afterUp
+                let route = windowInputForegroundCheck(profile: associatedRightClick.profile, operation: associatedRightClick.operation,
+                    postedEventCount: count, originalForegroundPID: 10, targetPID: window.pid,
+                    currentForegroundPID: current, completionBound: bound)
+                guard route != .rejected else { throw windowInputError("target_changed") }
+                if count == 1 && physicalCheck == 1 {
+                    check(route == .completionRequired, "The new target-frontmost route must check ordinary keys before AX")
+                    throw windowInputError("user_input_active")
+                }
+                let verified = count > 0 && proof
+                guard windowInputForegroundAllowed(route, completionVerified: verified) else { throw windowInputError("target_changed") }
+                if verified { observedCompletion = completionWindow.windowId }
+                if route == .completionRequired, let finalSwitch = finalSwitch {
+                    let finalRoute = windowInputForegroundCheck(profile: associatedRightClick.profile, operation: associatedRightClick.operation,
+                        postedEventCount: count, originalForegroundPID: 10, targetPID: window.pid,
+                        currentForegroundPID: finalSwitch, completionBound: bound)
+                    guard windowInputForegroundAllowed(finalRoute, completionVerified: verified) else { throw windowInputError("target_changed") }
+                }
+                if count == 1 && physicalCheck == 2 {
+                    check(route == .completionRequired, "The target-frontmost route must also check ordinary keys after AX")
+                    throw windowInputError("user_input_active")
+                }
+            }, canRelease: { true }, post: { sent.append($0) })
+            check(success && result.eventCount == 2 && result.releaseSent, label)
+            let receipt = windowInputSuccessReceipt(DirectedInputResult(eventCount: result.eventCount,
+                releaseSent: result.releaseSent, completionWindowId: observedCompletion))
+            check((receipt["completionWindowId"] as? UInt32) == (expectedCompletion ? completionWindow.windowId : nil),
+                "Only an actually observed completion receiver may be acknowledged")
+        } catch let error as WindowInputExecutionError {
+            check(!success && expectedSteps > 0 && error.completedStepCount == expectedSteps && error.eventCount == 2 && error.releaseSent, label)
+            check(windowInputFailureReceipt(error)["dispatched"] as? String == "unknown")
+            check(windowInputFailureReceipt(error)["completionWindowId"] == nil, "Failed completion never fabricates success proof")
+        } catch let error as HelperError {
+            check(!success && expectedSteps == 0 && error.code == "target_changed" && sent.isEmpty, label)
+        }
+        check(sent.count == (expectedSteps == 0 ? 0 : 2), "No replay or extra release: \(label)")
+        if !sent.isEmpty {
+            check(sent.map { $0.type } == [.rightMouseDown, .rightMouseUp] && pressNumber(sent[0]) == pressNumber(sent[1]), label)
+            check(sent.allSatisfy { $0.getIntegerValueField(CGEventField(rawValue: 51)!) == Int64(window.windowId)
+                && $0.getIntegerValueField(CGEventField(rawValue: 91)!) == Int64(window.windowId)
+                && $0.getIntegerValueField(CGEventField(rawValue: 92)!) == Int64(window.windowId) },
+                "Both normal and cleanup up stay bound to the original main window")
+        }
+    }
+    try sequence("exact new overlay may complete its original right-up")
+    try sequence("unchanged original foreground retains existing behavior", afterDown: 10, afterUp: 10,
+        bound: false, proof: false, expectedCompletion: false)
+    try sequence("returning to the original foreground keeps only the observed overlay proof", afterUp: 10)
+    try sequence("a target takeover before down cannot authorize a press", before: window.pid, expectedSteps: 0, success: false)
+    try sequence("another app after down receives only original cleanup", afterDown: window.pid + 1, expectedSteps: 1, success: false)
+    try sequence("unknown foreground after down receives only original cleanup", afterDown: nil, expectedSteps: 1, success: false)
+    try sequence("unbound same-PID overlay is not a completion", bound: false, expectedSteps: 1, success: false)
+    try sequence("wrong same-PID window or failed CG/AX focus proof", proof: false, expectedSteps: 1, success: false)
+    try sequence("ordinary key activity before AX ends the original press", physicalCheck: 1, expectedSteps: 1, success: false)
+    try sequence("ordinary key activity after AX ends the original press", physicalCheck: 2, expectedSteps: 1, success: false)
+    try sequence("a third-app switch during AX verification is still refused", finalSwitch: window.pid + 1, expectedSteps: 1, success: false)
+    try sequence("a third-app switch after normal up has no second cleanup", afterUp: window.pid + 1, expectedSteps: 2, success: false)
+}
+do {
+    let route = windowInputDispatchFocusRoute(targetIsForeground: true, inheritedFocus: false, commandClick: false, protectedFocus: true)
+    let request = try parseWindowInputRequest(input("doubleClick", extra: ["profile": "directed-v1", "point": ["x": -99, "y": 41]]))
+    let events = try prepareWindowInputEvents(request, source: source, inactiveCommandClick: route == .command)
+    let steps = events.map { DirectedInputStep(event: $0.event, delayBeforeMs: $0.delayBeforeMs,
+        release: $0.release, completesRelease: $0.completesRelease) }
+    var sent: [CGEvent] = []
+    let result = try runDirectedInputSequence(steps, wait: { _ in }, validate: {}, canRelease: { true }, post: { sent.append($0) })
+    check(result.eventCount == 4 && result.releaseSent && sent.count == 4)
+    check(sent.map { $0.type } == [.leftMouseDown, .leftMouseUp, .leftMouseDown, .leftMouseUp])
+    check(sent.map { $0.getIntegerValueField(.mouseEventClickState) } == [1, 1, 2, 2])
+    check(sent.allSatisfy { $0.flags.isEmpty && $0.getIntegerValueField(CGEventField(rawValue: 51)!) == Int64(window.windowId) })
+    for reason in ["target_changed", "focused_window_mismatch", "user_input_active", "cancelled"] {
+        sent = []
+        do {
+            _ = try runDirectedInputSequence(steps, wait: { _ in }, validate: {
+                if !sent.isEmpty { throw windowInputError(reason) }
+            }, canRelease: { true }, post: { sent.append($0) })
+            fatalError("Changed foreground state did not stop the double click")
+        } catch let error as WindowInputExecutionError {
+            check(error.releaseSent && error.eventCount == 2 && sent.map { $0.type } == [.leftMouseDown, .leftMouseUp],
+                "Interrupt after down releases only its original up and never starts the second click")
+        }
+    }
+}
 for text in ["中文🌟\t\n\r e\u{301}", String(repeating: "a", count: 19) + "🌟z", String(repeating: "🪟", count: 4096)] {
     let chunks = windowInputUnicodeChunks(text)
     check(chunks.flatMap { $0 } == Array(text.utf16) && chunks.allSatisfy { !$0.isEmpty && $0.count <= 20 })

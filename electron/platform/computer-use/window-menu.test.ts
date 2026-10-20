@@ -30,9 +30,9 @@ function windowCaptureReceipt(requestId = '1', override: Record<string, unknown>
   png.writeUInt32BE(13, 8); png.write('IHDR', 12); png.writeUInt32BE(800, 16); png.writeUInt32BE(600, 20);
   return { ok: true, requestId, window, width: 800, height: 600, pngBase64: png.toString('base64'), ...override };
 }
-async function setup(startupSignal = signal()) {
+async function setup(startupSignal = signal(), associatedWindow?: AgentComputerWindowIdentity) {
   const child = new Child(); mocks.spawn.mockReturnValueOnce(child);
-  const promise = createAgentComputerMenuSession(window, startupSignal);
+  const promise = createAgentComputerMenuSession(window, startupSignal, associatedWindow);
   child.reply({ ok: true, ready: true });
   const lease = await promise;
   return { child, lease };
@@ -49,6 +49,130 @@ beforeEach(() => {
 afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); Object.defineProperty(process, 'platform', platform); });
 
 describe('native menu reference session', () => {
+  const associatedWindow: AgentComputerWindowIdentity = { ...window, windowId: 82,
+    bounds: { x: -800, y: 125, width: 800, height: 575 } };
+  it.each([
+    { ...associatedWindow, windowId: window.windowId },
+    { ...associatedWindow, pid: 1 },
+    { ...associatedWindow, processStartedAt: window.processStartedAt + 1 },
+    { ...associatedWindow, layer: 101 },
+    { ...associatedWindow, bounds: { ...associatedWindow.bounds, x: -801 } },
+  ])('rejects an unrelated associated menu window before spawn: %j', async associated => {
+    await expect(createAgentComputerMenuSession(window, signal(), associated)).rejects.toThrow();
+    expect(mocks.spawn).not.toHaveBeenCalled();
+  });
+  it('freezes one explicit associated surface without granting native pointer elevation', async () => {
+    const { child, lease } = await setup(signal(), associatedWindow);
+    expect(JSON.parse(child.stdin.write.mock.calls[0][0])).toEqual({ window, associatedWindow });
+    const bounds = { x: -750, y: 200, width: 180, height: 220 };
+    const pending = lease.observe(signal());
+    child.reply({ ...snapshot(), items: [{ itemId: 'item-1', role: 'AXMenuItem', label: '属性',
+      bounds: { ...bounds, height: 30 }, operations: ['press'] }], menus: [{ bounds, surface: associatedWindow }] });
+    await expect(pending).resolves.toMatchObject({ menus: [{ bounds, surface: associatedWindow }] });
+    const pointer = lease.resolvePointer({ observationId: 'observation-1', itemId: 'item-1', operation: 'press' }, signal());
+    child.reply({ ok: true, requestId: '2', available: false, reason: 'menu_pointer_unavailable' });
+    await expect(pointer).resolves.toMatchObject({ available: false });
+    const captured = lease.capture({ observationId: 'observation-1' }, signal());
+    const receipt: Record<string, unknown> = windowCaptureReceipt('3'); delete receipt.window;
+    child.reply({ ...receipt, available: true, observationId: 'observation-1', bounds: window.bounds,
+      captureMethod: 'included-windows', captureScope: 'window-menus', cursorIncluded: false });
+    await expect(captured).resolves.toMatchObject({ available: true, menuCapture: 'included', bounds: window.bounds });
+    const action = lease.action({ observationId: 'observation-1', itemId: 'item-1', operation: 'press' }, signal());
+    child.reply({ ok: true, requestId: '4', event: 'dispatched' }); child.reply({ ok: true, requestId: '4', dispatched: true });
+    await action; child.emit('close', 0);
+  });
+  it('allows native title resolution only when the associated startup title was omitted', async () => {
+    const untitled = { ...associatedWindow }; delete untitled.title;
+    const { child, lease } = await setup(signal(), untitled);
+    const pending = lease.observe(signal());
+    child.reply({ ...snapshot(), menus: [{ bounds: { x: -750, y: 200, width: 100, height: 200 },
+      surface: { ...associatedWindow, title: 'Native overlay' } }] });
+    await expect(pending).resolves.toMatchObject({ menus: [{ surface: { title: 'Native overlay' } }] });
+    child.emit('close', 0);
+  });
+  it.each(['window', 'process', 'start', 'geometry', 'layer', 'title', 'outside-menu'])('rejects an altered associated surface: %s', async change => {
+    const { child, lease } = await setup(signal(), associatedWindow);
+    const pending = lease.observe(signal());
+    const surface = { ...associatedWindow, ...(change === 'window' ? { windowId: 83 } : {}),
+      ...(change === 'process' ? { pid: 1 } : {}), ...(change === 'start' ? { processStartedAt: 1 } : {}),
+      ...(change === 'geometry' ? { bounds: { ...associatedWindow.bounds, width: 799 } } : {}),
+      ...(change === 'layer' ? { layer: 101 } : {}), ...(change === 'title' ? { title: 'Changed' } : {}) };
+    child.reply({ ...snapshot(), menus: [{ bounds: { x: change === 'outside-menu' ? -801 : -750,
+      y: 200, width: 100, height: 200 }, surface }] });
+    await expect(pending).rejects.toThrow('回执无效'); expect(child.kill).toHaveBeenCalled(); child.emit('close', 0);
+  });
+  it('rejects an associated overlay receipt as an elevated pointer surface', async () => {
+    const { child, lease } = await setup(signal(), associatedWindow);
+    const bounds = { x: -750, y: 200, width: 100, height: 30 };
+    const pending = lease.observe(signal());
+    child.reply({ ...snapshot(), items: [{ itemId: 'item-1', role: 'AXMenuItem', label: '属性', bounds, operations: ['press'] }],
+      menus: [{ bounds, surface: associatedWindow }] }); await pending;
+    const pointer = lease.resolvePointer({ observationId: 'observation-1', itemId: 'item-1', operation: 'press' }, signal());
+    child.reply({ ok: true, requestId: '2', available: true, observationId: 'observation-1', itemId: 'item-1',
+      point: { x: -700, y: 215 }, menuSurface: associatedWindow });
+    await expect(pointer).rejects.toThrow('回执无效'); child.emit('close', 0);
+  });
+  it('prepares an associated owner cancellation without an AX dispatch acknowledgement', async () => {
+    const { child, lease } = await setup(signal(), associatedWindow);
+    const observing = lease.observe(signal());
+    child.reply({ ...snapshot(), items: [{ itemId: 'item-1', role: 'AXMenu', label: '上下文菜单',
+      bounds: { x: -750, y: 200, width: 100, height: 200 }, operations: ['cancel'] }] }); await observing;
+    const onDispatched = vi.fn();
+    const request = { observationId: 'observation-1', itemId: 'item-1', operation: 'cancel' as const };
+    const cancelling = lease.action(request, signal(), onDispatched);
+    child.reply({ ok: true, requestId: '2', associatedCancelWindowId: associatedWindow.windowId });
+    await expect(cancelling).resolves.toEqual({ associatedCancelWindowId: associatedWindow.windowId });
+    expect(onDispatched).not.toHaveBeenCalled();
+    await expect(lease.action(request, signal())).rejects.toMatchObject({ dispatchState: 'not-dispatched' });
+    expect(child.kill).not.toHaveBeenCalled(); child.emit('close', 0);
+  });
+  it.each(['foreign', 'missing-association', 'press', 'menu-item', 'menu-bar', 'extra-field', 'after-ack',
+    'zero', 'fraction', 'overflow', 'string', 'null'])('rejects an unsafe owner-cancel marker: %s', async problem => {
+    const { child, lease } = await setup(signal(), problem === 'missing-association' ? undefined : associatedWindow);
+    const operation = problem === 'press' ? 'press' : 'cancel';
+    const observing = lease.observe(signal());
+    child.reply({ ...snapshot(), items: [{ itemId: 'item-1', role: problem === 'menu-item' ? 'AXMenuItem'
+      : problem === 'menu-bar' ? 'AXMenuBarItem' : 'AXMenu', label: '上下文菜单',
+    bounds: { x: -750, y: 200, width: 100, height: 200 }, operations: [operation] }] }); await observing;
+    const cancelling = lease.action({ observationId: 'observation-1', itemId: 'item-1', operation }, signal());
+    if (problem === 'after-ack') child.reply({ ok: true, requestId: '2', event: 'dispatched' });
+    const marker = problem === 'foreign' ? 83 : problem === 'zero' ? 0 : problem === 'fraction' ? 82.5
+      : problem === 'overflow' ? 0x100000000 : problem === 'string' ? '82' : problem === 'null' ? null : 82;
+    child.reply({ ok: true, requestId: '2', associatedCancelWindowId: marker,
+      ...(problem === 'extra-field' ? { dispatched: true } : {}) });
+    await expect(cancelling).rejects.toMatchObject({ dispatchState: 'unknown' });
+    expect(child.kill).toHaveBeenCalled(); child.emit('close', 0);
+  });
+  it('keeps ordinary native AX cancellation on the original acknowledged dispatch route', async () => {
+    const { child, lease } = await setup();
+    const observing = lease.observe(signal());
+    child.reply({ ...snapshot(), items: [{ itemId: 'item-1', role: 'AXMenu', label: '菜单',
+      bounds: { x: 10, y: 200, width: 100, height: 200 }, operations: ['cancel'] }] }); await observing;
+    const onDispatched = vi.fn();
+    const cancelling = lease.action({ observationId: 'observation-1', itemId: 'item-1', operation: 'cancel' }, signal(), onDispatched);
+    child.reply({ ok: true, requestId: '2', event: 'dispatched' }); child.reply({ ok: true, requestId: '2', dispatched: true });
+    await expect(cancelling).resolves.toBeUndefined(); expect(onDispatched).toHaveBeenCalledOnce(); child.emit('close', 0);
+  });
+  it('settles a cancelled owner preparation as unknown and discards its late marker', async () => {
+    const { child, lease } = await setup(signal(), associatedWindow);
+    const observing = lease.observe(signal());
+    child.reply({ ...snapshot(), items: [{ itemId: 'item-1', role: 'AXMenu', label: '上下文菜单',
+      bounds: { x: -750, y: 200, width: 100, height: 200 }, operations: ['cancel'] }] }); await observing;
+    const controller = new AbortController(); const onDispatched = vi.fn();
+    const cancelling = lease.action({ observationId: 'observation-1', itemId: 'item-1', operation: 'cancel' }, controller.signal, onDispatched);
+    const rejection = expect(cancelling).rejects.toMatchObject({ dispatchState: 'unknown' });
+    controller.abort(); await rejection;
+    child.reply({ ok: true, requestId: '2', associatedCancelWindowId: associatedWindow.windowId });
+    expect(onDispatched).not.toHaveBeenCalled(); child.emit('close', 0);
+  });
+  it('reports a refused unsafe cancellation without implying dispatch', async () => {
+    const { child, lease } = await observed();
+    const pending = lease.action({ observationId: 'observation-1', itemId: 'item-1', operation: 'open' }, signal());
+    child.reply({ ok: false, requestId: '2', dispatched: false,
+      error: { code: 'menu_cancel_unavailable', message: 'unavailable' } });
+    await expect(pending).rejects.toMatchObject({ dispatchState: 'not-dispatched', message: '当前菜单不支持安全取消，请重新观察菜单' });
+    child.emit('close', 0);
+  });
   it('captures the frozen ordinary window on the existing process without requiring or consuming menu IDs', async () => {
     const { child, lease } = await setup();
     const first = lease.captureWindow({}, signal());

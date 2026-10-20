@@ -42,8 +42,14 @@ struct WindowInputRequest: Decodable {
     let deltaX: Int?
     let deltaY: Int?
     let focusToken: String?
+    // Main-only, one-request association. It never becomes an input receiver.
+    let completionWindow: WindowIdentity?
     var valid: Bool {
         guard window.valid, !profile.isEmpty, validSemanticText(profile, maximumBytes: 64) else { return false }
+        if let completionWindow {
+            guard profile == "directed-v1", operation == .rightClick,
+                  windowInputCompletionIdentityAllowed(completionWindow, original: window) else { return false }
+        }
         switch operation {
         case .shortcut:
             return point == nil && endPoint == nil && durationMs == nil && shortcut?.valid == true
@@ -70,6 +76,17 @@ struct WindowInputRequest: Decodable {
         }
     }
     var requiresFocusedElement: Bool { operation == .shortcut || operation == .typeText }
+}
+
+func windowInputCompletionIdentityAllowed(_ completion: WindowIdentity, original: WindowIdentity) -> Bool {
+    completion.valid && completion.pid == original.pid && completion.processStartedAt == original.processStartedAt
+        && completion.windowId != original.windowId && completion.layer == 0 && original.bounds.contains(completion.bounds)
+}
+
+func windowInputCompletionSurfaceMatches(_ actual: WindowIdentity, expected: WindowIdentity) -> Bool {
+    actual.windowId == expected.windowId && actual.pid == expected.pid
+        && actual.processStartedAt == expected.processStartedAt && actual.layer == expected.layer && actual.bounds == expected.bounds
+        && (expected.title == nil || actual.title == expected.title)
 }
 
 let windowInputModifierOrder = ["command", "shift", "option", "control"]
@@ -102,7 +119,7 @@ func windowInputFlags(_ modifiers: [String]) -> CGEventFlags {
 func parseWindowInputRequest(_ data: Data) throws -> WindowInputRequest {
     // Escaped astral text can occupy twelve JSON bytes per Unicode scalar.
     let (_, object) = try parseInput(data, maximumBytes: 64 * 1024)
-    _ = try fields(object, required: ["window", "profile", "operation"], optional: ["point", "endPoint", "shortcut", "durationMs", "text", "deltaX", "deltaY", "focusToken"])
+    _ = try fields(object, required: ["window", "profile", "operation"], optional: ["point", "endPoint", "shortcut", "durationMs", "text", "deltaX", "deltaY", "focusToken", "completionWindow"])
     let operationFields: [String]
     switch object["operation"] as? String {
     case "shortcut": operationFields = ["shortcut"]
@@ -112,10 +129,15 @@ func parseWindowInputRequest(_ data: Data) throws -> WindowInputRequest {
     case "scroll": operationFields = ["point", "deltaX", "deltaY"]
     default: throw invalidRequest()
     }
-    _ = try fields(object, required: Set(["window", "profile", "operation"] + operationFields))
+    _ = try fields(object, required: Set(["window", "profile", "operation"] + operationFields),
+        optional: object["operation"] as? String == "rightClick" ? ["completionWindow"] : [])
     _ = try fields(object["window"], required: ["windowId", "pid", "processStartedAt", "layer", "bounds"], optional: ["title"])
     let window = object["window"] as! [String: Any]
     try validateRectFields(window["bounds"])
+    if let completion = object["completionWindow"] {
+        let completion = try fields(completion, required: ["windowId", "pid", "processStartedAt", "layer", "bounds"], optional: ["title"])
+        try validateRectFields(completion["bounds"])
+    }
     for key in ["point", "endPoint"] where object[key] != nil { _ = try fields(object[key], required: ["x", "y"]) }
     if let shortcut = object["shortcut"] { _ = try fields(shortcut, required: ["key", "modifiers"]) }
     guard let request = try? JSONDecoder().decode(WindowInputRequest.self, from: data), request.valid else { throw invalidRequest() }
@@ -225,6 +247,43 @@ struct WindowInputReceiver {
     let foregroundPID: Int32
     let focusedElement: AXUIElement?
     let targetHasKeyboardFocus: Bool
+}
+
+// An already active app needs no synthetic activation. Its focused native
+// window must still be the exact granted receiver, including pointer actions.
+func windowInputRequiresFocusedWindow(profile: String, targetIsForeground: Bool, requiresFocusedElement: Bool) -> Bool {
+    profile != "directed-v1" || targetIsForeground || requiresFocusedElement
+}
+
+enum WindowInputForegroundCheck { case original, completionRequired, rejected }
+
+// This only classifies a possible handoff. completionRequired is not admission:
+// the exact newly opened CG/AX receiver and its complete focus ancestry must
+// still be proved before the original right-up can be sent.
+func windowInputForegroundCheck(profile: String, operation: WindowInputOperation, postedEventCount: Int,
+    originalForegroundPID: Int32, targetPID: Int32, currentForegroundPID: Int32?, completionBound: Bool) -> WindowInputForegroundCheck {
+    guard originalForegroundPID > 0, targetPID > 0 else { return .rejected }
+    if currentForegroundPID == originalForegroundPID { return .original }
+    guard profile == "directed-v1", originalForegroundPID != targetPID, currentForegroundPID == targetPID, completionBound,
+          windowInputCompletionPhaseAllowed(operation: operation, postedEventCount: postedEventCount) else { return .rejected }
+    return .completionRequired
+}
+
+func windowInputForegroundAllowed(_ check: WindowInputForegroundCheck, completionVerified: Bool) -> Bool {
+    switch check {
+    case .original: return true
+    case .completionRequired: return completionVerified
+    case .rejected: return false
+    }
+}
+
+enum WindowInputDispatchFocusRoute: String { case foreground, alreadyFocused, command, safe, plain }
+func windowInputDispatchFocusRoute(targetIsForeground: Bool, inheritedFocus: Bool,
+                                  commandClick: Bool, protectedFocus: Bool) -> WindowInputDispatchFocusRoute {
+    if targetIsForeground { return .foreground }
+    if inheritedFocus { return .alreadyFocused }
+    if commandClick { return .command }
+    return protectedFocus ? .safe : .plain
 }
 
 enum WindowInputCommandClickClassification: String {
@@ -553,6 +612,35 @@ func windowInputTransientError(_ stage: WindowInputTransientStage? = nil) -> Hel
     return windowInputError("transient_ui_active")
 }
 
+enum WindowInputFocusCheck: String { case originalGeometry, originalReceiver, completionReceiver }
+private var windowInputFocusDiagnosticCount = 0
+func windowInputFocusedWindowError(_ check: WindowInputFocusCheck) -> HelperError {
+    if windowInputFocusDiagnosticCount < 8 {
+        windowInputFocusDiagnosticCount += 1
+        windowInputLogger.notice("focusCheck=\(check.rawValue, privacy: .public)")
+    }
+    return windowInputError("focused_window_mismatch")
+}
+
+enum WindowInputTargetCheck: String {
+    case inheritedFocus, deadlineBefore, originalProcess, originalWindow, foreground
+    case completionBeforeDown, completionReceiverChanged, deadlineAfter
+    case commandProof, commandIdentity, commandWindow, commandDeadline
+}
+private var windowInputTargetDiagnosticCount = 0
+func logWindowInputTargetCheck(_ check: WindowInputTargetCheck, postedEventCount: Int,
+    completionBound: Bool, completionPhase: Bool, expectedForegroundPID: Int32,
+    sampledForeground: Bool = false, currentForegroundPID: Int32? = nil, completionVisible: Bool? = nil) {
+    guard windowInputTargetDiagnosticCount < 8 else { return }
+    windowInputTargetDiagnosticCount += 1
+    // Reuse only values already read by the guard. No diagnostic AX/CG read,
+    // UI text, or window content is added to the input path.
+    let frontChanged = sampledForeground ? String(currentForegroundPID != expectedForegroundPID) : "unknown"
+    let visible = completionVisible.map { String($0) } ?? "unknown"
+    let detail = "guard=\(check.rawValue) postedEventCount=\(postedEventCount) completionBound=\(completionBound) completionPhase=\(completionPhase) completionVisible=\(visible) frontSampled=\(sampledForeground) frontKnown=\(currentForegroundPID != nil) frontChanged=\(frontChanged) expectedForegroundPID=\(expectedForegroundPID) currentForegroundPID=\(currentForegroundPID ?? 0)"
+    windowInputLogger.notice("targetCheck=\(detail, privacy: .public)")
+}
+
 func requireWindowInputNotModal(_ root: AXUIElement, diagnosticStage: WindowInputTransientStage? = nil) throws {
     let (modalError, modalRaw) = axAttribute(root, kAXModalAttribute)
     if modalError == .success {
@@ -586,6 +674,36 @@ func requireWindowInputTransientFree(_ root: AXUIElement) throws {
 
 enum WindowInputFocusedChainState: Equatable { case ordinary, transient, unknown }
 
+// A menu inside the one associated first-party window may take focus only
+// after this request's original right-down. Prove the complete ancestry rather
+// than waiving every menu-like role in the application's focus chain.
+func windowInputCompletionFocusBelongsToWindow<Node>(_ element: Node, root: Node, pid: Int32,
+    equal: (Node, Node) -> Bool, read: (Node) -> (pid: Int32, role: String, parent: Node?)?, maximumDepth: Int = 32) -> Bool {
+    var current = element, visited: [Node] = []
+    for _ in 0...maximumDepth {
+        guard !visited.contains(where: { equal($0, current) }), let node = read(current), node.pid == pid else { return false }
+        if equal(current, root) { return node.role == kAXWindowRole }
+        guard ![kAXWindowRole, kAXApplicationRole, kAXSheetRole, "AXPopover"].contains(node.role),
+              !node.role.contains("Secure"), let parent = node.parent else { return false }
+        visited.append(current); current = parent
+    }
+    return false
+}
+
+struct WindowInputCompletionReceiver {
+    let window: WindowIdentity
+    let root: AXUIElement
+}
+
+func requireWindowInputCompletionReceiver(_ expected: WindowIdentity, focused: AXUIElement) throws -> WindowInputCompletionReceiver {
+    guard processStart(expected.pid) == expected.processStartedAt,
+          try cgWindows().contains(where: { windowInputCompletionSurfaceMatches($0, expected: expected) }),
+          axWindowBindingMatches(focused, expected: expected) else { throw windowInputFocusedWindowError(.completionReceiver) }
+    try requireWindowInputNotModal(focused)
+    try requireWindowInputNoSheets(focused)
+    return WindowInputCompletionReceiver(window: expected, root: focused)
+}
+
 // This is a transient hint, not a keyboard receiver binding. Incomplete IDE
 // parent links must not turn an unrelated ordinary focus into a pointer gate.
 func windowInputFocusedChainState<Node>(_ element: Node, equal: (Node, Node) -> Bool,
@@ -609,21 +727,36 @@ func windowInputFocusedChainState<Node>(_ element: Node, equal: (Node, Node) -> 
 // checks the current receiver and independent transient surfaces without
 // traversing or granting any other window. This is deliberately not a claim of
 // universal absence: an application can hide its own custom popup from AX/CG.
-func requireGenericWindowInputTransientFree(_ root: AXUIElement, application: AXUIElement, window: WindowIdentity) throws {
+func requireGenericWindowInputTransientFree(_ root: AXUIElement, application: AXUIElement, window: WindowIdentity,
+                                           completion: WindowInputCompletionReceiver? = nil) throws {
     try requireWindowInputNotModal(root, diagnosticStage: .targetModal)
     try requireWindowInputNoSheets(root, diagnosticStage: .targetSheets)
     // A popup can be attached below a deeply nested editor or be an independent
     // menu window. Its focused ancestry and same-process raised CG surface do
     // not require scanning the unrelated project tree.
     guard let focusedWindow = windowInputAXElement(application, attribute: kAXFocusedWindowAttribute) else {
-        throw windowInputError("focused_window_mismatch")
+        throw windowInputFocusedWindowError(completion == nil ? .originalReceiver : .completionReceiver)
     }
     let (windowRoleError, windowRoleRaw) = axAttribute(focusedWindow, kAXRoleAttribute)
     guard windowRoleError == .success, windowRoleRaw as? String == kAXWindowRole else { throw windowInputTransientError(.focusedWindowRole) }
     try requireWindowInputNotModal(focusedWindow, diagnosticStage: .focusedWindowModal)
     if !CFEqual(focusedWindow, root) { try requireWindowInputNoSheets(focusedWindow, diagnosticStage: .focusedWindowSheets) }
-    if let focus = windowInputAXElement(application, attribute: kAXFocusedUIElementAttribute) {
+    let focusedElement = windowInputAXElement(application, attribute: kAXFocusedUIElementAttribute)
+    if completion != nil && focusedElement == nil { throw windowInputTransientError(.focusChain) }
+    if let focus = focusedElement {
         let budget = ScanBudget(deadline: DispatchTime.now().uptimeNanoseconds + 150_000_000)
+        let belongsToCompletion = completion.map { completion in
+            CFEqual(focusedWindow, completion.root) && windowInputCompletionFocusBelongsToWindow(focus, root: completion.root, pid: window.pid,
+                equal: { CFEqual($0, $1) }, read: { element in
+                    guard budget.ready() else { return nil }
+                    var pid: pid_t = 0
+                    guard AXUIElementGetPid(element, &pid) == .success, pid == window.pid else { return nil }
+                    let (error, raw) = axAttribute(element, kAXRoleAttribute, budget: budget)
+                    guard error == .success, let role = raw as? String, validSemanticText(role, maximumBytes: 64), budget.ready() else { return nil }
+                    return (pid, role, CFEqual(element, completion.root) ? nil : windowInputAXElement(element, attribute: kAXParentAttribute))
+                })
+        } ?? false
+        if completion != nil && !belongsToCompletion { throw windowInputTransientError(.focusChain) }
         let state = windowInputFocusedChainState(focus, equal: { CFEqual($0, $1) }, role: { element in
             guard budget.ready() else { return nil }
             var pid: pid_t = 0
@@ -635,20 +768,28 @@ func requireGenericWindowInputTransientFree(_ root: AXUIElement, application: AX
             guard budget.ready() else { return nil }
             return windowInputAXElement(element, attribute: kAXParentAttribute)
         })
-        guard state != .transient else { throw windowInputTransientError(.focusChain) }
+        guard belongsToCompletion || state != .transient else { throw windowInputTransientError(.focusChain) }
     }
     // Unknown focus ancestry does not authorize a different receiver: pointer
     // events still carry only the exact frozen target window's native hints.
     // Keyboard operations retain their separate complete focus/window checks.
     let windows = try cgWindows()
-    guard !windows.contains(where: { $0.pid == window.pid && $0.windowId != window.windowId && $0.layer > window.layer }) else {
+    if let completion {
+        guard CFEqual(focusedWindow, completion.root), axWindowBindingMatches(completion.root, expected: completion.window),
+              windows.contains(where: { windowInputCompletionSurfaceMatches($0, expected: completion.window) }) else { throw windowInputFocusedWindowError(.completionReceiver) }
+    }
+    guard !windows.contains(where: { entry in
+        entry.pid == window.pid && entry.windowId != window.windowId && entry.layer > window.layer
+            && !(completion.map { windowInputCompletionSurfaceMatches(entry, expected: $0.window) } ?? false)
+    }) else {
         throw windowInputTransientError(.raisedSurface)
     }
 }
 
-func requireWindowInputTransientFree(_ receiver: WindowInputReceiver, window: WindowIdentity) throws {
+func requireWindowInputTransientFree(_ receiver: WindowInputReceiver, window: WindowIdentity,
+                                    completion: WindowInputCompletionReceiver? = nil) throws {
     if receiver.profile == "directed-v1" {
-        try requireGenericWindowInputTransientFree(receiver.window, application: receiver.application, window: window)
+        try requireGenericWindowInputTransientFree(receiver.window, application: receiver.application, window: window, completion: completion)
     } else { try requireWindowInputTransientFree(receiver.window) }
 }
 
@@ -669,16 +810,18 @@ func requireWindowInputReceiver(_ window: WindowIdentity, expectedProfile: Strin
     guard let foregroundPID = NSWorkspace.shared.frontmostApplication?.processIdentifier, foregroundPID > 0 else {
         throw windowInputError("foreground_unknown")
     }
-    guard foregroundPID != window.pid else { throw windowInputError("target_frontmost") }
-    guard !windowInputPhysicalInputActive(includeOrdinaryKeys: requireFocusedElement) else { throw windowInputError("user_input_active") }
+    // Legacy calibrated profiles retain their background-only contract.
+    guard foregroundPID != window.pid || profile == "directed-v1" else { throw windowInputError("target_frontmost") }
+    guard !windowInputPhysicalInputActive(includeOrdinaryKeys: foregroundPID == window.pid || requireFocusedElement) else { throw windowInputError("user_input_active") }
     let application = AXUIElementCreateApplication(window.pid)
     _ = AXUIElementSetMessagingTimeout(application, 0.15)
     guard let root = axWindow(window), let focusedWindow = windowInputAXElement(application, attribute: kAXFocusedWindowAttribute) else {
-        throw windowInputError("focused_window_mismatch")
+        throw windowInputFocusedWindowError(.originalReceiver)
     }
     let targetHasKeyboardFocus = CFEqual(root, focusedWindow)
-    guard profile == "directed-v1" && !requireFocusedElement || targetHasKeyboardFocus else {
-        throw windowInputError("focused_window_mismatch")
+    guard !windowInputRequiresFocusedWindow(profile: profile, targetIsForeground: foregroundPID == window.pid,
+        requiresFocusedElement: requireFocusedElement) || targetHasKeyboardFocus else {
+        throw windowInputFocusedWindowError(.originalReceiver)
     }
     _ = AXUIElementSetMessagingTimeout(root, 0.15)
     // Sheets and menus can consume input in another native surface. Never extend
@@ -826,6 +969,13 @@ struct DirectedInputStep<Event> {
 struct DirectedInputResult {
     let eventCount: Int
     let releaseSent: Bool
+    // Only a physical focus handoff was observed. Main must validate its new
+    // trusted overlay promotion before treating the association as authorized.
+    var completionWindowId: UInt32? = nil
+}
+
+func windowInputCompletionPhaseAllowed(operation: WindowInputOperation, postedEventCount: Int) -> Bool {
+    operation == .rightClick && (1...2).contains(postedEventCount)
 }
 
 func runDirectedInputSequence<Event>(_ steps: [DirectedInputStep<Event>],
@@ -1112,6 +1262,11 @@ func executeWindowInput(_ request: WindowInputRequest, pointerFeedback: WindowIn
     guard windowInputCancelled == 0 else { throw windowInputError("cancelled") }
     let receiver = try requireWindowInputReceiver(request.window, expectedProfile: request.profile, requireFocusedElement: request.requiresFocusedElement)
     guard windowInputProfileOperations(receiver.profile).contains(request.operation) else { throw windowInputError("unsupported_receiver") }
+    if let completion = request.completionWindow {
+        // A pre-existing visible popup is not this right-down's newly opened
+        // context. Hidden IDs come only from the main-owned overlay controller.
+        guard !((try cgWindows()).contains { $0.windowId == completion.windowId }) else { throw windowInputError("target_changed") }
+    }
     if request.operation == .typeText {
         guard let expected = request.focusToken, windowInputFocusToken(receiver, window: request.window) == expected else {
             throw windowInputError("focused_element_mismatch")
@@ -1122,42 +1277,99 @@ func executeWindowInput(_ request: WindowInputRequest, pointerFeedback: WindowIn
     // This route is frozen before allocating or posting anything. A retained
     // perceived focus uses unmodified mouse flags. A valid narrow Command
     // proof remains the cheaper route; a failed fresh proof never upgrades it.
-    let inheritedFocus = focusSession?.hasPerceivedFocus == true
-    let commandClick = inheritedFocus ? nil : windowInputCommandClickTarget(receiver, request: request)
-    let protectedFocus = request.profile == "directed-v1" && commandClick == nil
+    let targetIsForeground = receiver.foregroundPID == request.window.pid
+    let checksOrdinaryKeys = targetIsForeground || request.requiresFocusedElement
+    if targetIsForeground { try focusSession?.requireForegroundPassthrough() }
+    let inheritedFocus = !targetIsForeground && focusSession?.hasPerceivedFocus == true
+    let commandClick = targetIsForeground || inheritedFocus ? nil : windowInputCommandClickTarget(receiver, request: request)
+    let protectedFocus = !targetIsForeground && request.profile == "directed-v1" && commandClick == nil
         && [.click, .rightClick, .doubleClick, .drag, .scroll].contains(request.operation) && focusSession != nil
-    let focusRoute = inheritedFocus ? "alreadyFocused" : commandClick != nil ? "command" : protectedFocus ? "safe" : "plain"
-    windowInputLogger.notice("focusRoute=\(focusRoute, privacy: .public)")
+    let focusRoute = windowInputDispatchFocusRoute(targetIsForeground: targetIsForeground, inheritedFocus: inheritedFocus,
+        commandClick: commandClick != nil, protectedFocus: protectedFocus)
+    windowInputLogger.notice("focusRoute=\(focusRoute.rawValue, privacy: .public)")
     if request.profile == "directed-v1", request.operation == .click {
         logWindowInputActivationAvailability(receiver, window: request.window)
     }
     // Every event, including every possible release, is constructed before any
     // post. Allocation failure can therefore never leave a button/key held down.
-    let events = try prepareWindowInputEvents(request, source: source, inactiveCommandClick: commandClick != nil)
+    let events = try prepareWindowInputEvents(request, source: source, inactiveCommandClick: focusRoute == .command)
     var postedFirstEvent = false
+    var postedEventCount = 0
+    var completionReceiver: WindowInputCompletionReceiver?
     let pointerBefore = NSEvent.mouseLocation
-    let maximumDurationMs = request.operation == .typeText ? 12_000 : (request.durationMs ?? 100) + (protectedFocus ? 3500 : 1800)
+    let maximumDurationMs = request.operation == .typeText ? 12_000 : (request.durationMs ?? 100) + (focusRoute == .safe ? 3500 : 1800)
     let maximumDeadline = DispatchTime.now().uptimeNanoseconds + UInt64(maximumDurationMs) * 1_000_000
+    func noteTargetCheck(_ check: WindowInputTargetCheck, sampledForeground: Bool = false,
+        currentForegroundPID: Int32? = nil, completionVisible: Bool? = nil) {
+        logWindowInputTargetCheck(check, postedEventCount: postedEventCount,
+            completionBound: request.completionWindow != nil,
+            completionPhase: windowInputCompletionPhaseAllowed(operation: request.operation, postedEventCount: postedEventCount),
+            expectedForegroundPID: receiver.foregroundPID, sampledForeground: sampledForeground,
+            currentForegroundPID: currentForegroundPID, completionVisible: completionVisible)
+    }
+    func targetChanged(_ check: WindowInputTargetCheck) -> HelperError {
+        noteTargetCheck(check)
+        return windowInputError("target_changed")
+    }
     func ongoingGuard() throws {
         try lifetimeGuard()
         try focusSession?.requireHealthy()
-        if inheritedFocus, focusSession?.hasPerceivedFocus != true { throw windowInputError("target_changed") }
+        if focusRoute == .alreadyFocused, focusSession?.hasPerceivedFocus != true { throw targetChanged(.inheritedFocus) }
         guard windowInputCancelled == 0 else { throw windowInputError("cancelled") }
-        guard DispatchTime.now().uptimeNanoseconds < maximumDeadline else { throw windowInputError("target_changed") }
-        guard processStart(request.window.pid) == request.window.processStartedAt else { throw windowInputError("target_changed") }
-        try revalidateWindow(request.window)
+        guard DispatchTime.now().uptimeNanoseconds < maximumDeadline else { throw targetChanged(.deadlineBefore) }
+        guard processStart(request.window.pid) == request.window.processStartedAt else { throw targetChanged(.originalProcess) }
+        do { try revalidateWindow(request.window) }
+        catch { noteTargetCheck(.originalWindow); throw error }
         guard windowInputReceiverProfile(request.window.pid) == request.profile else { throw windowInputError("receiver_changed") }
         windowInputMainRunLoopService.service(until: maximumDeadline)
         try lifetimeGuard(); try focusSession?.requireHealthy()
-        guard NSWorkspace.shared.frontmostApplication?.processIdentifier == receiver.foregroundPID else { throw windowInputError("target_changed") }
-        guard !windowInputPhysicalInputActive(includeOrdinaryKeys: request.requiresFocusedElement) else { throw windowInputError("user_input_active") }
-        guard axRect(receiver.window).map({ request.window.bounds.matchesAX($0) }) == true else { throw windowInputError("focused_window_mismatch") }
-        if request.profile != "directed-v1" || request.requiresFocusedElement {
-            guard let focused = windowInputAXElement(receiver.application, attribute: kAXFocusedWindowAttribute), CFEqual(focused, receiver.window) else {
-                throw windowInputError("focused_window_mismatch")
+        let currentForegroundPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        let foregroundCheck = windowInputForegroundCheck(profile: request.profile, operation: request.operation,
+            postedEventCount: postedEventCount, originalForegroundPID: receiver.foregroundPID, targetPID: request.window.pid,
+            currentForegroundPID: currentForegroundPID, completionBound: request.completionWindow != nil)
+        guard foregroundCheck != .rejected else {
+            noteTargetCheck(.foreground, sampledForeground: true, currentForegroundPID: currentForegroundPID)
+            throw windowInputError("target_changed")
+        }
+        if targetIsForeground { try focusSession?.requireForegroundPassthrough() }
+        // A background right-click may make only its own associated menu truly
+        // active. Ordinary physical keys must then gate both remaining checks.
+        let checksCurrentOrdinaryKeys = checksOrdinaryKeys || foregroundCheck == .completionRequired
+        guard !windowInputPhysicalInputActive(includeOrdinaryKeys: checksCurrentOrdinaryKeys) else { throw windowInputError("user_input_active") }
+        guard axRect(receiver.window).map({ request.window.bounds.matchesAX($0) }) == true else { throw windowInputFocusedWindowError(.originalGeometry) }
+        var currentCompletion: WindowInputCompletionReceiver?
+        if let completion = request.completionWindow {
+            if !windowInputCompletionPhaseAllowed(operation: request.operation, postedEventCount: postedEventCount) {
+                guard postedEventCount == 0 else { throw targetChanged(.completionBeforeDown) }
+                let completionVisible = (try cgWindows()).contains { $0.windowId == completion.windowId }
+                guard !completionVisible else {
+                    noteTargetCheck(.completionBeforeDown, completionVisible: completionVisible)
+                    throw windowInputError("target_changed")
+                }
+            } else {
+                guard let focused = windowInputAXElement(receiver.application, attribute: kAXFocusedWindowAttribute) else {
+                    throw windowInputFocusedWindowError(.completionReceiver)
+                }
+                if !CFEqual(focused, receiver.window) {
+                    let current = try requireWindowInputCompletionReceiver(completion, focused: focused)
+                    if let previous = completionReceiver, !CFEqual(previous.root, current.root) { throw targetChanged(.completionReceiverChanged) }
+                    currentCompletion = current
+                } else if completionReceiver != nil { throw windowInputFocusedWindowError(.completionReceiver) }
             }
         }
-        try requireWindowInputTransientFree(receiver, window: request.window)
+        if windowInputRequiresFocusedWindow(profile: request.profile, targetIsForeground: targetIsForeground,
+            requiresFocusedElement: request.requiresFocusedElement) {
+            guard let focused = windowInputAXElement(receiver.application, attribute: kAXFocusedWindowAttribute),
+                  CFEqual(focused, currentCompletion?.root ?? receiver.window) else {
+                throw windowInputFocusedWindowError(currentCompletion == nil ? .originalReceiver : .completionReceiver)
+            }
+        }
+        try requireWindowInputTransientFree(receiver, window: request.window, completion: currentCompletion)
+        guard windowInputForegroundAllowed(foregroundCheck, completionVerified: currentCompletion != nil) else {
+            noteTargetCheck(.foreground, sampledForeground: true, currentForegroundPID: currentForegroundPID)
+            throw windowInputError("target_changed")
+        }
+        if let currentCompletion { completionReceiver = currentCompletion }
         if request.requiresFocusedElement {
             guard let element = windowInputAXElement(receiver.application, attribute: kAXFocusedUIElementAttribute),
                   windowInputElementBelongsToWindow(element, root: receiver.window, pid: request.window.pid) else { throw windowInputError("focused_element_mismatch") }
@@ -1169,23 +1381,38 @@ func executeWindowInput(_ request: WindowInputRequest, pointerFeedback: WindowIn
             }
         }
         guard windowInputCancelled == 0 else { throw windowInputError("cancelled") }
-        guard DispatchTime.now().uptimeNanoseconds < maximumDeadline else { throw windowInputError("target_changed") }
-        guard !windowInputPhysicalInputActive(includeOrdinaryKeys: request.requiresFocusedElement) else { throw windowInputError("user_input_active") }
+        guard DispatchTime.now().uptimeNanoseconds < maximumDeadline else { throw targetChanged(.deadlineAfter) }
+        if foregroundCheck == .completionRequired {
+            // AX verification may take time. A user switch to any third app
+            // still revokes this exception immediately; it never follows focus.
+            let finalForegroundPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
+            let finalCheck = windowInputForegroundCheck(profile: request.profile, operation: request.operation,
+                postedEventCount: postedEventCount, originalForegroundPID: receiver.foregroundPID, targetPID: request.window.pid,
+                currentForegroundPID: finalForegroundPID, completionBound: request.completionWindow != nil)
+            guard windowInputForegroundAllowed(finalCheck, completionVerified: currentCompletion != nil) else {
+                noteTargetCheck(.foreground, sampledForeground: true, currentForegroundPID: finalForegroundPID)
+                throw windowInputError("target_changed")
+            }
+        }
+        guard !windowInputPhysicalInputActive(includeOrdinaryKeys: checksCurrentOrdinaryKeys) else { throw windowInputError("user_input_active") }
         try lifetimeGuard()
         if !postedFirstEvent, commandClick != nil {
-            try requireWindowInputCommandClickProof(commandClick, fresh: {
-                windowInputCommandClickTarget(receiver, request: request, phase: .firstPost)
-            }, equal: { CFEqual($0, $1) })
+            do {
+                try requireWindowInputCommandClickProof(commandClick, fresh: {
+                    windowInputCommandClickTarget(receiver, request: request, phase: .firstPost)
+                }, equal: { CFEqual($0, $1) })
+            } catch { noteTargetCheck(.commandProof); throw error }
             guard processStart(request.window.pid) == request.window.processStartedAt,
-                  NSWorkspace.shared.frontmostApplication?.processIdentifier == receiver.foregroundPID else { throw windowInputError("target_changed") }
-            try revalidateWindow(request.window)
+                  NSWorkspace.shared.frontmostApplication?.processIdentifier == receiver.foregroundPID else { throw targetChanged(.commandIdentity) }
+            do { try revalidateWindow(request.window) }
+            catch { noteTargetCheck(.commandWindow); throw error }
             try requireWindowInputTransientFree(receiver, window: request.window)
-            guard windowInputCancelled == 0, DispatchTime.now().uptimeNanoseconds < maximumDeadline else { throw windowInputError("target_changed") }
-            guard !windowInputPhysicalInputActive(includeOrdinaryKeys: request.requiresFocusedElement) else { throw windowInputError("user_input_active") }
+            guard windowInputCancelled == 0, DispatchTime.now().uptimeNanoseconds < maximumDeadline else { throw targetChanged(.commandDeadline) }
+            guard !windowInputPhysicalInputActive(includeOrdinaryKeys: checksOrdinaryKeys) else { throw windowInputError("user_input_active") }
             try lifetimeGuard()
         }
     }
-    if protectedFocus && !inheritedFocus {
+    if focusRoute == .safe {
         try ongoingGuard()
         try focusSession?.enforce(foregroundPID: receiver.foregroundPID, lifetimeGuard: {
             try lifetimeGuard()
@@ -1221,6 +1448,7 @@ func executeWindowInput(_ request: WindowInputRequest, pointerFeedback: WindowIn
         }, post: { event in
             postWindowInputEvent(event, feedback: pointerFeedback, post: { $0.postToPid(request.window.pid) })
             postedFirstEvent = true
+            postedEventCount += 1
         })
     } catch let error as WindowInputExecutionError {
         windowInputLogger.notice("operation=\(request.operation.rawValue, privacy: .public) interrupted=true code=\(error.code, privacy: .public) eventCount=\(error.eventCount, privacy: .public) posted=true releaseSent=\(error.releaseSent, privacy: .public) failurePhase=\(error.failurePhase.rawValue, privacy: .public) completedStepCount=\(error.completedStepCount, privacy: .public)")
@@ -1229,11 +1457,14 @@ func executeWindowInput(_ request: WindowInputRequest, pointerFeedback: WindowIn
     let frontmostAfter = NSWorkspace.shared.frontmostApplication?.processIdentifier
     let pointerAfter = NSEvent.mouseLocation
     windowInputLogger.notice("operation=\(request.operation.rawValue, privacy: .public) posted=true releaseSent=\(result.releaseSent, privacy: .public) targetFrontmostAfter=\(frontmostAfter == request.window.pid, privacy: .public) frontmostChanged=\(frontmostAfter != receiver.foregroundPID, privacy: .public) pointerMoved=\(pointerBefore != pointerAfter, privacy: .public)")
-    return result
+    return DirectedInputResult(eventCount: result.eventCount, releaseSent: result.releaseSent,
+        completionWindowId: completionReceiver?.window.windowId)
 }
 
 func windowInputSuccessReceipt(_ result: DirectedInputResult) -> [String: Any] {
-    ["ok": true, "dispatched": true, "method": "CGEventPostToPid", "eventCount": result.eventCount, "releaseSent": result.releaseSent]
+    var receipt: [String: Any] = ["ok": true, "dispatched": true, "method": "CGEventPostToPid", "eventCount": result.eventCount, "releaseSent": result.releaseSent]
+    if let completion = result.completionWindowId { receipt["completionWindowId"] = completion }
+    return receipt
 }
 
 func windowInputFailureReceipt(_ error: Error) -> [String: Any] {

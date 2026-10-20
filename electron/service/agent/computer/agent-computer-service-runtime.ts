@@ -3,7 +3,7 @@ import { captureAgentComputerWindow, captureAgentComputerWindowWithPointer, clic
   requestAgentComputerClickPermission, statusAgentComputerClick, setAgentComputerText, scrollAgentComputerControl,
   getAgentComputerWindowInputStatus, inputAgentComputerWindow, showAgentComputerWindowIndicator } from '../../../platform/computer-use';
 import { getAgentAttachmentStore } from '../agent-attachment-runtime';
-import { createAgentComputerRuntime } from './agent-computer-runtime';
+import { createAgentComputerRuntime, type AgentComputerRuntimeDependencies } from './agent-computer-runtime';
 import { agentRenderingLeases } from './agent-computer-rendering-service-runtime';
 import { agentFirstPartyControls } from './agent-first-party-controls';
 import type { AgentComputerWindowIndicatorLease, AgentComputerWindowIndicatorRequest } from '../../../platform/computer-use/window-indicator';
@@ -12,6 +12,12 @@ import { createAgentComputerMenuSession } from '../../../platform/computer-use/w
 import { createAgentComputerWindowInputSession } from '../../../platform/computer-use/window-input-session';
 
 let getAccentColor: () => string | undefined = () => undefined;
+let associatedMenu: AgentComputerRuntimeDependencies['associatedMenu'];
+
+/** Main owns both the IPC request projection and the child-window controller. */
+export function configureAgentComputerAssociatedMenu(provider: NonNullable<AgentComputerRuntimeDependencies['associatedMenu']>): void {
+  associatedMenu = provider;
+}
 
 /** Binds a read-only projection of main's existing validated appearance cache. */
 export function configureAgentComputerAppearance(readAccentColor: () => string | undefined): void {
@@ -58,6 +64,10 @@ export const agentComputerRuntime = createAgentComputerRuntime({
   input: inputAgentComputerWindow,
   inputSession: createAgentComputerWindowInputSession,
   menuSession: createAgentComputerMenuSession,
+  associatedMenu: {
+    current: (window, identity) => associatedMenu?.current(window, identity),
+    prepareCompletion: (window, identity) => associatedMenu?.prepareCompletion(window, identity),
+  },
   indicatePointer,
   clickStatus: statusAgentComputerClick,
   requestClickPermission: requestAgentComputerClickPermission,

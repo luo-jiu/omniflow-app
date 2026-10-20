@@ -243,6 +243,12 @@ struct WindowInputFocusPreventerPolicy {
     var pending: WindowInputFocusPending?
     var releaseFailed = false
 
+    // Frontmost metadata alone cannot retire a pending keyboard reroute from
+    // an earlier background action. Never clear/rewrite that state to proceed.
+    func allowsForegroundPassthrough(actualFocusPID: Int32?) -> Bool {
+        actualFocusPID == targetPID && currentFocusPID == targetPID && pending == nil && !releaseFailed
+    }
+
     mutating func process(_ event: WindowInputFocusEvent) -> WindowInputFocusDecision {
         guard event.type == 21 else { return WindowInputFocusDecision() }
         switch event.notification {
@@ -596,6 +602,15 @@ final class WindowInputFocusOwner {
         lock.lock(); defer { lock.unlock() }
         return !unsafe && !stopped && !closing && belief.perceivedFocus && tapThread?.isHealthy == true
     }
+    func requireForegroundPassthrough() throws {
+        try requireHealthy()
+        let actualFocusPID = spi.keyFocusPID()
+        lock.lock()
+        let allowed = !unsafe && !stopped && !closing && temporary == nil
+            && policy.allowsForegroundPassthrough(actualFocusPID: actualFocusPID)
+        lock.unlock()
+        guard allowed else { throw windowInputError("target_changed") }
+    }
     var snapshot: WindowInputFocusSnapshot {
         lock.lock(); defer { lock.unlock() }
         let state: WindowInputFocusState
@@ -894,6 +909,11 @@ final class WindowInputFocusSession {
     var hasPerceivedFocus: Bool { owner?.hasPerceivedFocus == true }
     func requireHealthy() throws {
         guard !initializationUnconfirmed else { throw windowInputError("unsupported_receiver") }; try owner?.requireHealthy()
+    }
+    func requireForegroundPassthrough() throws {
+        try requireHealthy()
+        // A fresh foreground session never constructs an owner or installs taps.
+        try owner?.requireForegroundPassthrough()
     }
     func enforce(foregroundPID: Int32, lifetimeGuard: () throws -> Void) throws {
         try requireHealthy()

@@ -216,7 +216,7 @@ export async function createAgentComputerWindowInputSession(input: AgentComputer
           continue;
         }
         if (stoppedFocusState !== undefined) throw new Error('response after stopped receipt');
-        const source = fields(result, ['requestId', 'ok'], ['dispatched', 'method', 'eventCount', 'releaseSent', 'error', 'type', 'focusPosted', 'focusState']);
+        const source = fields(result, ['requestId', 'ok'], ['dispatched', 'method', 'eventCount', 'releaseSent', 'error', 'type', 'focusPosted', 'focusState', 'completionWindowId']);
         if (typeof source.requestId !== 'string') throw new Error('invalid request id');
         if (closeId && source.requestId === closeId) {
           fields(source, ['requestId', 'ok', 'type']);

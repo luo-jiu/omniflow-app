@@ -28,6 +28,8 @@ export interface AgentComputerWindowInputRequest {
   focusToken?: string;
   deltaX?: number;
   deltaY?: number;
+  /** Main-only association for a newly opened right-click overlay; never an input receiver. */
+  completionWindow?: AgentComputerWindowIdentity;
 }
 
 export interface AgentComputerWindowInputReceipt {
@@ -36,6 +38,8 @@ export interface AgentComputerWindowInputReceipt {
   eventCount: number;
   /** Confirms the matching up was posted, not that the application consumed it. */
   releaseSent: true;
+  /** Observed focus handoff only; runtime must verify the trusted overlay promotion. */
+  completionWindowId?: number;
 }
 
 /** Reports a native post returning, never application consumption or a planned point. */
@@ -140,7 +144,7 @@ function point(value: unknown, window: AgentComputerWindowIdentity): WindowInput
 
 /** Main-platform protocol parser; never expose private input text to renderer callers. */
 export function prepareAgentComputerWindowInputRequest(input: unknown): AgentComputerWindowInputRequest {
-  const base = fields(input, ['window', 'profile', 'operation'], ['shortcut', 'point', 'endPoint', 'durationMs', 'text', 'focusToken', 'deltaX', 'deltaY']);
+  const base = fields(input, ['window', 'profile', 'operation'], ['shortcut', 'point', 'endPoint', 'durationMs', 'text', 'focusToken', 'deltaX', 'deltaY', 'completionWindow']);
   const window = prepareAgentComputerWindowInputWindow(base.window);
   const selected = profile(base.profile);
   if (typeof base.operation !== 'string' || !WINDOW_INPUT_OPERATIONS.includes(base.operation as WindowInputOperation)) throw new Error('invalid operation');
@@ -166,8 +170,18 @@ export function prepareAgentComputerWindowInputRequest(input: unknown): AgentCom
     return { window, profile: selected, operation: 'drag', point: start, endPoint: end,
       durationMs: integer(base.durationMs, WINDOW_INPUT_DRAG_MIN_DURATION_MS, WINDOW_INPUT_DRAG_MAX_DURATION_MS) };
   }
-  fields(input, ['window', 'profile', 'operation', 'point']);
-  return { window, profile: selected, operation: base.operation as 'click' | 'rightClick' | 'doubleClick', point: point(base.point, window) };
+  fields(input, ['window', 'profile', 'operation', 'point'], base.operation === 'rightClick' ? ['completionWindow'] : []);
+  let completionWindow: AgentComputerWindowIdentity | undefined;
+  if ('completionWindow' in base) {
+    completionWindow = prepareAgentComputerWindowInputWindow(base.completionWindow);
+    const bounds = completionWindow.bounds;
+    if (selected !== 'directed-v1' || completionWindow.pid !== window.pid || completionWindow.processStartedAt !== window.processStartedAt
+      || completionWindow.windowId === window.windowId || bounds.x < window.bounds.x || bounds.y < window.bounds.y
+      || bounds.x + bounds.width > window.bounds.x + window.bounds.width
+      || bounds.y + bounds.height > window.bounds.y + window.bounds.height) throw new Error('invalid completion window');
+  }
+  return { window, profile: selected, operation: base.operation as 'click' | 'rightClick' | 'doubleClick', point: point(base.point, window),
+    ...(completionWindow ? { completionWindow } : {}) };
 }
 
 type InputHelperMode = '--window-input-check' | '--window-input';
@@ -345,13 +359,20 @@ export function parseAgentComputerWindowInputFailure(receipt: unknown, request?:
 /** Exact success receipt; a posted sequence does not prove application consumption. */
 export function parseAgentComputerWindowInputReceipt(receipt: unknown,
   request: AgentComputerWindowInputRequest): AgentComputerWindowInputReceipt {
-  const source = fields(receipt, ['ok', 'dispatched', 'method', 'eventCount', 'releaseSent']);
+  const source = fields(receipt, ['ok', 'dispatched', 'method', 'eventCount', 'releaseSent'], ['completionWindowId']);
   const eventCount = integer(source.eventCount, request.operation === 'scroll' ? 1 : 2, request.operation === 'typeText' ? 1_024 : 256);
   if (source.ok !== true || source.dispatched !== true || source.method !== 'CGEventPostToPid' || source.releaseSent !== true
     || (request.operation === 'drag' ? eventCount < 10 || eventCount > 33
       : request.operation === 'typeText' ? eventCount !== unicodeTextEventCount(request.text!)
         : eventCount !== (request.operation === 'doubleClick' ? 4 : request.operation === 'scroll' ? 1 : 2))) throw new Error('invalid dispatch');
-  return { dispatched: true, method: 'CGEventPostToPid', eventCount, releaseSent: true };
+  let completionWindowId: number | undefined;
+  if ('completionWindowId' in source) {
+    completionWindowId = integer(source.completionWindowId, 1, 0xffffffff);
+    if (request.profile !== 'directed-v1' || request.operation !== 'rightClick'
+      || request.completionWindow?.windowId !== completionWindowId) throw new Error('unbound completion window');
+  }
+  return { dispatched: true, method: 'CGEventPostToPid', eventCount, releaseSent: true,
+    ...(completionWindowId ? { completionWindowId } : {}) };
 }
 
 /** Read-only readiness; the caller owns the single-window grant and freezes the returned profile. */

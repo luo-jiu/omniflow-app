@@ -1,8 +1,8 @@
 # 内置 Agent 应用窗口操作
 
-更新时间：2026-10-16
+更新时间：2026-10-19
 
-适用范围：macOS 内置 Agent 的 `computer.windows@1` / `computer.observe@1` / `computer.click@1` / `computer.setText@1` / `computer.scroll@1` / `computer.input@1` / `computer.menu@1` / `computer.hidePointer@1`、Electron main 和原生窗口捕获 / AX 语义及后台定向输入 helper。
+适用范围：macOS 内置 Agent 的 `computer.windows@1` / `computer.observe@1` / `computer.click@1` / `computer.setText@1` / `computer.scroll@1` / `computer.input@1` / `computer.menu@1` / `computer.hidePointer@1`、Electron main 和原生窗口捕获 / AX 语义及定向输入 helper。
 
 ## 当前能力与阶段结论
 
@@ -23,6 +23,44 @@ Agent 优先读取本 Run 获准单窗的 AX，必要时截图，再执行一次
 两条输入路线都不设置系统鼠标位置，没有 CGHID 全局事件或 Agent 主动置前后备；合成焦点保护另有受限旧前台恢复与外来点击兼容。目标应用仍可能自行升窗，用户并行工作、切回或收起浮层均属正常使用，不能凭后续输入活动将最初升窗归因于用户。当前不承诺持续零抢焦点；出现明显问题时保留精确应用 / Run、动作阶段、后置观察、释放及焦点清理，先判断是否真实消费，再决定后续动作，已发送或 unknown 不重放。
 
 重启 Electron main 后才会注册新工具，renderer 刷新不足。需选择支持图片的模型；非视觉模型只保留无图像 windows 与 hidePointer，Windows / Linux 不注册本组工具。目标清单只列当前 Space 中 on-screen 普通 layer-0 窗口，包括被遮挡的后台窗口；最小化、隐藏或离开 Space 的目标不可用于新观察 / 输入。macOS 14 以下拒绝独立窗口截图；进程身份使用 libproc 启动时间，不以开发进程可能为空的 launchDate 判断。开发 Electron、启动宿主和发行包的 TCC 权限归属分别核对，实际拒绝时不移除预检或退回整屏。测试仅用开发版及非第一个资料库，优先 Win / ID3 与本机 macOS MinIO。
+
+## 前台窗口与操作自身（2026-10-19）
+
+用户在 OmniFlow 内选中“文档”目录后要求双击展开，旧原生 readiness 因 `foregroundPID == targetPID` 返回 `target_frontmost`，双击未发送。这是定向输入的前台覆盖缺口，不是禁止 Agent 操作自身；AXPress 等语义动作原本不受这条输入禁令约束。沿用已有 Codex 研究中“目标已是前台则直接发送、后台才保护焦点”的分支依据，不新增目录专用控制桥。
+
+generic `directed-v1` 现允许真实前台目标，七种输入仍复用原窗口与原发送会话。前台必须确认 AXFocusedWindow 精确等于获准窗口，不能只凭同 PID；每次发送前重新验证原前台、原窗口、临时表面、取消及物理键鼠。前台鼠标也检测当前按下的普通键，避免在用户持续按键时点击迁移同窗焦点；这不是输入空闲时段的保证。用户切窗或窗口焦点变化即中止，已 down 时只按原绑定尝试唯一配对释放，不继续第二次点击、不自动重放。
+
+前台走 `foreground` 直接路线，不附加 Command、不创建 synthetic focus 或新的焦点 owner / tap。若本 Run 已保留后台 owner，必须确认其健康、真实键盘焦点与 tracker 均为目标，且无 pending reroute、临时恢复或释放失败；不会清空旧状态来放行。旧固定 TextEdit / 夹具 profile 保持后台限定。共享、观察、审批、输入结算和未知清理门禁不变；这也不代表任意应用前台操作或用户并行输入均已验收。当前测试和真实内部 Agent 证据见[前台自控验证](frontend-validation-matrix.md#前台窗口与自身目录双击2026-10-19)。
+
+开发版 / Win3 / gpt-6.1-sol high 的真实内部 Agent Run `0ae3d901-ac32-44c9-bc36-cd1d72df74af` 已走 `focusRoute=foreground`，一次双击四事件派发与释放确认；前后原图及后置 AX 子行确认“文档”展开，未用箭头或领域工具替代。该轮 `focusPosted=false / focusCleanup=inactive`，未创建合成焦点 owner，派发前后系统指针采样未变。此前有键鼠活动和 raisedSurface 首发前拒绝，具体浮层来源尚未定位，仍保留兼容边界；不以成功一轮覆盖它们或宣称连续无干扰。
+
+## 自身右键 Overlay 关联（2026-10-19）
+
+目录右键继续走原 `openOverlay('directory-context-menu')` 和原目录组件的结果处理，不新增按标签执行业务命令的旁路。main 从 Overlay IPC 唯一 `currentRequest` 读取当前请求、原 sender mainFrame 和 host 窗口代；只把获准 OmniFlow 主窗自身打开的目录菜单关联到原共享。关联使用 `getMediaSourceId()` 的原生窗口编号，不把 macOS NSView handle 当作 CGWindowID。请求替换、更新、关闭、原 frame / host 导航或崩溃及窗口身份 / 几何变化使旧观察失效；资料库切换仍由原目录 owner 取消请求，main 不另存资料库状态。
+
+一次 `directed-v1` 右键可在首发前封存 idle、隐藏的自有 Overlay。down 前仍要求原接收窗口；down 后仅允许这一个精确窗口接手焦点，以完成原窗口已经构造好的配对 up，不将 Overlay 变成通用输入接收者。菜单正常打开使原目标应用成为真实前台时，仅在精确 CG / AX 接收窗、焦点祖先与临时表面验证通过后允许这次有限收尾，两次物理输入检查均包含普通键，AX 读取后再次确认前台；任何第三应用或同 PID 其他窗口仍拒绝。进程代、原窗口、物理输入、临时表面与取消守卫继续复验。原生成功回执如包含窗口交接，runtime 还须确认该次新 promotion 确为原 mainFrame 的目录菜单，才结算 dispatched；其他情况保留 unknown、禁止重放。此例外不承诺应用永不升窗。
+
+菜单 helper 可冻结这一关联窗口为第二个精确 AX 根，复用真实父子路径、指纹和 AX action 校验，不扫描同 PID 的任意兄弟窗。通用 ContextMenu 提供 menu / menuitem、禁用、分隔线与真实子菜单可见状态语义，仍由原点击 / Popover owner 执行动作。可用操作以本次 AX 声明为准；ARIA 本身不证明 hover 子菜单可由 AXPress 展开，也不伪造 AXCancel。关联 Overlay 菜单的光标位置解析暂返回不可用，先收起旧图案再执行有效 AX 操作；不会因菜单名称将满窗透明 Overlay 提升为原生 popup 图层。
+
+Electron 的该关联根存在 Chromium AX 桥：AXChildren 经多层 AXGroup 到 AXWebArea，但 WebArea 的 AXParent 直接指向同一 AXWindow。仅在精确关联根允许这一种反向跳层，跳过的前缀必须全为同 PID、同 AXWindow 的 AXGroup，完整 AXChildren 每边仍要求完整且唯一匹配。普通窗口和应用菜单根不使用此例外；观察、截图与动作共用相同路径证明，不能用父节点跳层放行兄弟窗口或伪造子路径。
+
+该自有菜单的整体取消复用原 Overlay 请求 owner。开发版 Electron30.5.1 使用的 [Chromium124](https://github.com/chromium/chromium/blob/124.0.6367.243/content/browser/accessibility/browser_accessibility_cocoa.mm#L2579) 虽为菜单宣告 AXCancel，但动作分派没有 Cancel 分支，不能将其成功返回当作关闭。native 只在精确关联根、已声明 cancel、唯一最外层 AXMenu 及原路径证明全部有效时返回私有 `associatedCancelWindowId`，消费观察，不发 AX 动作或 dispatched ACK；它只是准备证明。唯一性须由完整的关联子树扫描证明，取消前再次有界重扫；关联扫描因时间、节点、深度、children 或菜单限额不完整时不授取消，不能按截断后的数组数量认定唯一。普通主窗或菜单栏扫描不完整不替代这一独立证明。runtime 继续核对本次菜单租约、精确关联和取消信号，再由 provider 按冻结 token 调用原请求取消流程；只有 owner 确认后才结算 dispatched。更换请求、旧 token、其他菜单根或子菜单不能借此关闭当前请求。普通 AppKit 菜单仍走原 AX 动作，不按业务标签执行、不发全局 Escape，也不新增 renderer 执行 IPC。
+
+菜单图片继续输出单张 canonical PNG。ScreenCaptureKit 仅包含原主窗、当前精确关联 Overlay 和可用的可信光标；实际菜单 AX bounds 与整窗透明 surface bounds 分开，裁切不扩大到整个显示器，图片前后及发布前均复验。此例外不改变外部 AppKit 菜单层 101 的原范围，也不授权普通输入操作其他窗口。
+
+开发版 / Win3 / gpt-6.1-sol high 的内部 Agent Run `411d7b2d-153b-4d9f-b6af-49e5a313b12e` 已验证自身前台右键正常2事件、菜单8个业务项与规范原图、取消后业务菜单根和菜单项消失，以及原文件保留。该轮 focusRoute=foreground / focusPosted=false / focusCleanup=inactive，没有后台合成焦点释放场景；不能据此宣称后台持续无干扰、二级 hover 菜单或任意软件兼容。精确前后回执与仍保留的边界见[修复验证](frontend-validation-matrix.md#自身右键-overlay-修复验证2026-10-19)。
+
+同环境的后台补验 Run `d97aa361-5f5d-4cc3-a595-985b49f98326` 实际走 focusRoute=safe，右键正常完成、菜单读取 / 原图 / 取消闭环通过，结束 focusCleanup=released。菜单打开后目标确实成为真实前台；后置主窗readiness仍因raisedSurface拒绝新输入，没有继续派发。因此本次解决的是右键回执、菜单观察与取消缺口，不承诺全程不升窗或所有后续输入均可用，也没有移除临时表面守卫。
+
+### 修复前证据
+
+用户在真实内部 Agent 中要求通过右键删除当前选中的测试文件，菜单确实显示，但右键回执 unknown，随后菜单观察没有找到业务菜单。本轮按用户要求仅定位，不修实现、不重放、不继续删除；完整 Run 与证据见[右键诊断](frontend-validation-matrix.md#自身右键-overlay-诊断2026-10-19)。此前前台目录双击通过，不代表这条跨窗口菜单流程已通过。
+
+两个缺口分开处理：原生 rightClick 已发送正常 down，在正常 up 前以 `focused_window_mismatch` 中断，随后向原绑定补唯一配对 up，因此回执为 unknown / commit_unknown、释放 confirmed。该错误码同时用于原窗几何及 focusedWindow 检查，现有日志未记录实际失配分支与窗口ID，不能仅据错误码断言是用户切窗。源码中目录右键经 `openOverlay('directory-context-menu')` 打开独立子 BrowserWindow，controller 的 `showSpec()` 会 show / focus，故“正常打开菜单触发原窗校验失配”是有源码支持的主要候选，尚缺精确原窗 / overlay / focusedWindow 对照。
+
+观察缺口已能由当前边界解释：菜单 helper 扫描原获准主窗、原生应用菜单栏及可证明的 AXMenu 根，不遍历兄弟 AXWindows。自有右键菜单在独立 React Overlay，外层 role=presentation，菜单及菜单项是普通 div，未声明 menu / menuitem；当前没有该表面的关联授权、AX 发现和截图闭环。本次同一个菜单 helper 在右键之前已存在，前后三次均 notificationRoots=0 / menus=0，不能归因于本轮监听创建过晚。`no_menu` 来自截图时没有已验证菜单表面，不是屏幕没有菜单；本次菜单 AX 观察均 partial，只返回菜单栏等入口，没有删除项。
+
+以上为修复前诊断，不能作为新实现的验收结论。后续内部 Agent 已通过真实右键、业务菜单 AX / 图片和无破坏取消；结果记录在验证矩阵，不以纯协议测试代替实际效果，业务选择及二级菜单不由该轮证明。
 
 ## 应用菜单与多级菜单（2026-10-15）
 
@@ -135,7 +173,7 @@ main 捕获返回唯一 canonical `png`、实际 `cursorIncluded` 和私有 `cap
 
 修饰键仅 command / shift / option / control，最多四项并按固定顺序去重，不猜测键名、大小写或别名。裸字母 / 数字及仅 shift / option 的可打印快捷键拒绝，不能逐字符经公开快捷键记录绕过私有文字审计。七操作字段严格互斥，未知字段拒绝。point 是图片左上角起算的 0～2047 整数像素，main 再核对实际图片宽高，以冻结窗口几何映射到全局 points，包含 Retina、归一化比例与负窗口原点；坐标映射不读取系统指针、不跨窗口或跨应用拖放。原生诊断可只读采样物理指针，但不以它计算动作位置。
 
-原生路线以私有 `CGEventSetWindowLocation` 设置目标窗口局部位置、写窗口ID，再由公开 `CGEventPostToPid` 每个事件只投递一次；滚轮另写51字段，鼠标写91/92，并显式写左右按钮0/1与 Codex 实际构造使用的子类型3。不能依赖 NSEvent→CGEvent 自动补齐按钮；3不属于公开SDK命名值，不推定其语义或跨系统稳定性。不使用私有额外派发、应用置前、全局事件或失败补发。目标应用处于前台、用户按住修饰键或鼠标、receiver 漂移或目标有可确认的临时窗口时拒绝；普通物理按键另拦 shortcut / typeText。键盘要求实际 focusedWindow 等于获准窗，typeText 在整个序列冻结具体焦点控件；generic 指针不因同 PID 另一普通窗持有键盘焦点而拒绝，仍只绑定原 windowID，不读取或授权那一窗。
+原生路线以私有 `CGEventSetWindowLocation` 设置目标窗口局部位置、写窗口ID，再由公开 `CGEventPostToPid` 每个事件只投递一次；滚轮另写51字段，鼠标写91/92，并显式写左右按钮0/1与 Codex 实际构造使用的子类型3。不能依赖 NSEvent→CGEvent 自动补齐按钮；3不属于公开SDK命名值，不推定其语义或跨系统稳定性。不使用私有额外派发、应用置前、全局事件或失败补发。用户按住修饰键或鼠标、receiver 漂移或目标有可确认的临时窗口时拒绝；普通物理按键另拦 shortcut / typeText 及 generic 前台鼠标。2026-10-19 起 generic 前台走直接路线，旧固定 profile 仍拒绝前台；键盘与前台指针要求实际 focusedWindow 等于获准窗，typeText 在整个序列冻结具体焦点控件。仅 generic 后台指针不因同 PID 另一普通窗持有键盘焦点而拒绝，仍只绑定原 windowID，不读取或授权那一窗。
 
 鼠标按压使用非零编号，同次 down、dragged、up 及取消清理 up 保持匹配；双击的两次按压编号分别不同。每个 helper 随机选取起始编号以减少重复，不承诺跨进程全局唯一。编号配对不改变 receiver 守卫、单次 `CGEventPostToPid` 路线或派发 / 释放回执语义，也不能据此宣称目标已消费拖拽。
 

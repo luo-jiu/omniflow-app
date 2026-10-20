@@ -1,6 +1,6 @@
 # Overlay 窗口架构与迁移规范
 
-更新时间：2026-10-13
+更新时间：2026-10-19
 
 适用范围：`omniflow-app` 的跨 renderer 浮层子系统(overlay BrowserWindow),及其承载的弹框 / 右键菜单 / 气泡等迁移流程。
 
@@ -9,6 +9,10 @@
 2026-10-13 当前契约：外部获准窗口上的无尾杆主题色圆角箭头与柔光由 main-only `window-indicator.ts` / 固定原生 helper 承接，不使用交互 `overlay BrowserWindow`。helper 采用 `.accessory`、borderless `NSPanel(.nonactivatingPanel)`、普通 `.normal` / layer 0、no-key / main 和点击穿透；不调用 `finishLaunching()`，以有界自身 AppKit 事件泵维持窗口。透明注册后复验位于目标上方，夹层须元数据完整且与整个表面无交集，再绘制并随遮挡。已知同窗 `orderChanged` 仅可清空绘制并 orderOut、复验后重排同一面板，150ms / 滚动一秒 4 次上限；身份、元数据、前台或非普通夹层异常及超限均关闭。原 main runtime 持有当前 Run 的视觉租约，1 秒心跳、2.5 秒失联关闭，同窗更新须透明复验与严格 ACK。900ms lead-in 后保留窗口，仍按原授权复验目标、owner、最新观察和能力再输入。`computer.hidePointer` 只收视觉，保留共享和观察，不放权其他动作；结束 / 取消 / 换窗 / 目标或不可恢复层级失效均有界清理，跨 Run pending 退出和未知关闭门禁仍不可绕过，迟到 exit 不解除门禁。原生箭身 / 描边 / blur 同比 0.75、可见箭身约 16pt，原整数 35×35 / 小数至多 36×36 安全表面、精确尖端、四向镜像及完整原窗包含保留。没有可见标签或拖拽轨迹；独立目标截图继续使用 desktopIndependentWindow 与 showsCursor=false，另一 helper 的 NSPanel 不自然采入，本轮不改显示器捕获。不新增 overlay 请求、renderer 执行入口或业务 owner。main 只在启动 / update 从既有可信外观缓存读取 accent.default，不走交互 overlay 订阅或新增主题 owner；静止图案不保证即时改色。聊天缩略图仅显示原 PNG，大图才使用有界内部 SVG（原 PNG image 加三个固定路径）显示 0.75、约 16px 的可信计划指针，不接受任意 SVG；Semi width / height 缩放、控件、Esc 与焦点恢复保留。上一轮圆角样式漏验比例与放大锯齿，不作为本轮通过证据，本轮范围见矩阵；外部窗口层级 / 生命周期未新验；历史 R 保留，drag 未通过。下述交互弹框接管鼠标、绑定自有主窗口，不适用于外部指示器；完整生命周期与冻结目标约束见[鼠标意图指示器](agent-computer-use.md#鼠标意图指示器2026-10-12)。
 
 ## 1. 背景与动机
+
+2026-10-19 Computer Use 的自身目录菜单关联：请求身份仍由 `overlayWindowIpc.ts` 的 `currentRequest / queue` 唯一持有。其 main-only 只读投影包含请求代数、原 sender frame 与 host 代；Agent runtime 仅关联获准主窗当前的 `directory-context-menu`。controller 的显示恢复 spec 不成为第二套授权 owner，不新增 renderer 执行 IPC。原 sender / host 导航、崩溃、关闭及请求更新撤销旧引用；切库由目录组件既有取消生命周期处理。精确关联的 AX 观察 / 截图和一次右键的配对释放交接见[自身右键 Overlay 关联](agent-computer-use.md#自身右键-overlay-关联2026-10-19)，它不放行同 PID 其他窗口。目录菜单 ARIA 与普通点击仍由通用 ContextMenu / 原业务 owner 持有，hover 子菜单不因声明 role 就被视为已验证的 AX 打开能力。
+
+同一 main-only access 另提供按原请求 token 精确取消的入口，复用既有 cleanup、cancel 结果、dismiss 与队列推进；它不接受 renderer 命令。Computer Use 仅在 native 对完整关联子树证明唯一最外层菜单、动作前重扫仍一致，并由 runtime / provider 再次核对租约、请求及 frame 后使用，不能只因同 PID、截断后仅一项或存在 Overlay 就调用。该入口补足当前 Chromium 宣告但不执行的 AXCancel；普通菜单选择仍由真实 AXPress 和原 renderer 业务 owner 处理。
 
 嵌入浏览器通过 `targetWindow.contentView.addChildView(WebContentsView)` 挂载(见 `electron/service/embeddedBrowserMainController.ts`)。`WebContentsView` 是 OS 级原生视图,绘制在 renderer DOM 之上。
 

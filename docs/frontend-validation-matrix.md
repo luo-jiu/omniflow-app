@@ -1,5 +1,61 @@
 # 前端验证矩阵
 
+2026-10-20阶段提交沿用各节已有验证，按用户要求不重跑全量检查；历史“未提交”描述指对应测试发生时点。
+
+## 自身右键 Overlay 修复验证（2026-10-19）
+
+修复范围与权限边界见[自身菜单关联](agent-computer-use.md#自身右键-overlay-关联2026-10-19)。仅复用已有开发 Vite / Electron，Win / ID3、本机 MinIO、gpt-6.1-sol high / 完全访问；不执行删除或重命名，不新起 GUI 夹具，不提交。
+
+自动化阶段：全量 lint、TypeScript、`npm test` **513 文件 / 6381 项通过**（3 文件 / 7 项沿用跳过）及 `npm run build` 通过，arm64 / x86_64 universal helper 已重建。日志 `/tmp/omniflow-overlay-{lint,typecheck,all-tests,build,native-build}-20261019.log`。覆盖精确关联窗口协议、一次右键收尾、非关联拒绝、请求更新 / 导航 / host 替换撤销、截图期间换请求丢图、成功选择合法关闭菜单，以及原生释放；独立只读 review 未发现确定阻断。二级 hover 菜单与实际软件消费不由这些测试证明。
+
+首轮真实 Composer `SELF_MENU_OVERLAY_20261019`：Session `42ab8f14-72cf-4f97-a473-2eedd8a07b02` / Run `0aae3697-973a-4b20-9aca-e7572b3d51b2`，21:16:09.500～21:17:02.672。右键确实打开“xxx.txt”的 React Overlay；父 CUA 观察到真实 AXMenu（含 Cancel）及重命名、属性、下载等业务项。但内部 Agent rightClick 仍 unknown / release confirmed，菜单观察仍只有六项菜单栏等入口、partial、no_menu；**本轮没有通过修复验收**。native helper30718 走 safe 路线，在 down 后 beforeStep / completedStepCount=1 以 target_changed 中断，补原绑定 up；不能把两事件写成正常完整序列，清理最后 released。菜单helper30806 仍 menus=0，当时尚未分类关联失效位置；未重放右键、未选择业务项。证据 `/tmp/omniflow-overlay-e2e-20261019/first-{run,tools}.json`，不能以用户正常切回应用解释观察缺口或将屏幕菜单出现等同工具成功。
+
+诊断轮 `SELF_MENU_DIAG_20261019` / Run `65bbb2e7-8d7b-4f02-8aa4-cd194e80d0e3`，21:27:49.966～21:28:27.850，同一 Session。右键仍 unknown / release confirmed，helper35655 在 safe 路线 down 后 target_changed；菜单helper35763 的 chain=3 / menus=0。main 的有界临时诊断证明 prepareCompletion、current 及 valid 全部通过，主窗722 / Overlay723 的原生编号、frame、bounds、owner 及新 promotion 均匹配，排除本轮 provider guard 拒绝。只读 AX 元数据进一步定位：Overlay 的 AXWindow→四层 AXGroup→AXWebArea 路径中，WebArea.AXParent 直接指向精确 Overlay AXWindow，严格父链因此提前剪枝。已按专题补精确 Chromium 桥及56项专项，临时 main/provider 日志接线已移除；下一轮须验证内部 Agent 实际菜单图片及取消，不能以纯协议通过代替。证据同目录 `diag-{run,tools}.json` 与 `/tmp/omniflow-associated-ax-metadata-20261019.json`。
+
+Chromium 桥实测 `SELF_MENU_BRIDGE_20261019` / Run `16beef77-b54a-4dc0-869a-384d1876411d`，21:40:15.378～21:41:55.216，同一 Session。菜单 helper42778 已读到15项 / 1菜单，包括8个业务菜单项；`scope=menu / both` 的 canonical PNG `01f1ecb7-35d7-4c31-b54c-a7f49176c4fc`（2048×1291、menuCapture=included）实含“xxx.txt”菜单，观察缺口通过。右键 helper42716 仍 unknown / release confirmed，新增固定诊断精确命中 `targetCheck=foreground / postedEventCount=1 / completionBound=true / completionPhase=true`，原前台828变为目标38646；因此是菜单正常show/focus使应用升前台后先触发前台守卫，尚未进入焦点交接例外。该证据不能归因用户切窗；收尾13ms后focusCleanup=released。
+
+本轮cancel仅返回AX动作dispatched / committed，后置菜单AX仍15项 / 1菜单，父CUA独立确认Overlay仍显示，**取消尚未通过**。后置普通主窗图按契约不采Overlay，不能拿其缺少菜单证明关闭。对应 Electron30.5.1 / Chromium124.0.6367.243源码会对菜单宣告AXCancel，但`accessibilityPerformAction`无Cancel分支，不产生Escape或DOM取消事件；仅加React监听不能修复。后续补精确owner取消须有native最外层关联菜单私有证明，再复用原请求token取消，不能根据标签或“存在关联”直接关闭。该轮证据同目录 `bridge-*`，包括规范图片、回执、固定原生日志与修正后的findings；不会把AX回执成功冒充业务效果。
+
+后续实现已补原请求 token 的 owner 取消，以及正常右键 down 后目标自身升前台时的精确窗口交接收尾。独立 review 另发现截断扫描不能证明菜单唯一，现要求原始关联子树完整和动作前重新完整扫描，两次均为同对象 / 路径 / 指纹的唯一最外层菜单；普通主窗 / 菜单栏 partial 不影响该独立证明。关联 partial、未扫描的第二 portal、各限额、未知节点 / 链 / 指纹及重扫后新增 sibling 均撤销取消证明，72项菜单专项通过，复核未发现新确定问题。
+
+最终检查：全量 lint 与 `npm run build` 通过，universal helper 已按最终源码重建。全量首次 **511 文件 / 6428 项通过**，另两项原生 Swift 编译在30秒预算内未正常完成（status=null）；停止并发构建后串行复验这两文件，**2项均通过**，合计513文件 / 6430项通过，3文件 / 7项沿用跳过。没有为通过而放宽测试期限或生产守卫。日志 `/tmp/omniflow-overlay-owner-final-{lint,tests,build}-20261019.log` 与 `/tmp/omniflow-overlay-owner-native-recheck-20261019.log`。真实内部 Agent 的最终结果另记，不能用这些门禁替代实际菜单关闭验收。
+
+最终真实 Composer `SELF_MENU_OWNER_20261019` **通过自身前台右键→读取菜单与截图→取消→后置核对**。同一 Session / Run `411d7b2d-153b-4d9f-b6af-49e5a313b12e`，22:08:42.766～22:09:52.329 completed。唯一 rightClick(110,236) 为 dispatched / committed、正常2事件、releaseState=confirmed；helper56846记录 focusRoute=foreground、focusPosted=false / inactive，指针及前台前后采样未变。没有创建后台合成焦点 owner；22:09:52.347（终态后18ms）的 focusCleanup=inactive 不能写成 released，也不证明后台分支已验收。
+
+菜单观察15项 / 1根 / 8业务项，canonical PNG `a2b4d7d2-f7ea-456d-a713-a1cde46660bc`（2048×1291、menuCapture=included）确有业务菜单；cancel一次 dispatched / committed，后置菜单观察仅6通用入口、业务根及8项均消失，native同样 menus=0，menuCapture=unavailable/no_menu。后置主窗 inputReady=true，原图及父CUA独立AX确认 xxx.txt仍在且选中；关闭结论来自菜单后置状态和原owner取消契约，不是主窗图缺Overlay。普通根仍partial，不能据此宣称整个应用AX完整；原生日志也未直接标记私有owner分支，不伪造这类运行时证明。证据同目录 `owner-*`。父CUA从发送后至终态保持暂停，收尾采样无native helper残留，仅原Vite6525 / main49820。未操作业务菜单项、未修改文件、未提交。
+
+后台补验 `SELF_MENU_BACKGROUND_20261019` / Run `d97aa361-5f5d-4cc3-a595-985b49f98326`，22:16:17.523～22:17:41.219 completed，同一 Session。发送后父CUA只将已有WebStorm请求Raise一次并随即暂停；紧接的NSWorkspace采样仍是Electron，因此不以该覆盖操作本身证明后台。实际输入helper59863在22:16:45.511明确记录 **focusRoute=safe**，随后 activationRoute=windowNotificationOnly；45.930正常rightClick两事件 dispatched / committed / release confirmed，focusPosted=true / retained。该次 targetFrontmostAfter=true / frontmostChanged=true，验证了后台起步后菜单使目标升前台时的精确收尾，**不能写成全程后台无干扰**；前后系统指针采样未变，不等于连续无移动证明。
+
+该轮菜单仍15项 / 1根 / 8业务项，规范菜单图 `1d09d252-c044-4cc0-87d1-4c90a672c7ed`（2048×1291）确有业务菜单；cancel一次成功，后置菜单6入口 / menus=0 / no_menu，文件保留。22:17:41.273（终态后54ms）**focusCleanup=released**，settle=confirmed / settleReleased=true / tapJoined=true / unrestored=false，没有借用前台轮inactive充当清理成功。后置主窗两个readiness探测命中raisedSurface，inputReady=false；这是仍保留的临时表面兼容边界，不能写成本轮所有后续输入可用，未继续派发或放宽守卫。证据同目录 `background-*`，收尾采样无native helper残留，未新起开发入口或提交。
+
+## 自身右键 Overlay 诊断（2026-10-19）
+
+用户截图显示右键菜单已出现，但内部 Agent 右键返回 unknown，后续看不到业务菜单；按用户要求只读定位，留待下次修复。开发版 / Win3 / full-access / gpt-6.1-sol high，Session `42ab8f14-72cf-4f97-a473-2eedd8a07b02`，Run `ade99987-d7a4-4cfc-a34a-01091f656ba0`，18:11:00.681～18:11:53.596 completed。未重放右键、未执行删除、未操作GUI或重启开发版，未修改生产实现或提交。
+
+输入：ordinal4 / ToolRun `192d01c3-dea3-4af1-bb44-e64a0a317466`，rightClick(94,197)，18:11:30.870～18:11:32.023，unknown / commit_unknown、releaseState=confirmed。实际 helper72032 18:11:31.889 `focusRoute=foreground`；31.971 `interrupted=true / code=focused_window_mismatch / eventCount=2 / releaseSent=true / failurePhase=beforeStep / completedStepCount=1`。只完成正常 down，第二事件前检查失败后补原配对 up；两事件不能写成正常 down/up 全流程成功。focusPosted=false / focusState=inactive，18:11:53.550 focusCleanup=inactive，无新合成焦点 owner。
+
+观察：ordinal2在18:11:18已创建菜单观察，右键之后ordinal5 / 6在18:11:35 / 45继续观察；三次 native menu helper 均PID71997，`notificationRoots=0 / items=6 / menus=0`，`failures=chain=2,fingerprint_node_bounds=5`，scopeScanComplete=false / axTreeTruncated=true。六项均为 Apple、Electron、Edit、View、Window 菜单栏入口及一个匿名 Context menu 按钮，未包含测试文件业务菜单或删除项。最后both返回menuCapture=unavailable / imageUnavailableReason=no_menu，没有生成后置菜单图片；不是“截图证明菜单不存在”，也不能将partial菜单观察当完整空树。本轮不支持“helper监听晚启动导致漏通知”的归因。
+
+源码关联：`directory-tree/index.tsx:2084` 打开 `directory-context-menu` Overlay；`overlayWindowController.ts:141` 的 showSpec() show并focus独立子BrowserWindow；Overlay适配外层role=presentation，ContextMenu / menu-item为普通div。菜单helper的observationRoots仅覆盖原窗及可信原生菜单上下文，不遍历兄弟AXWindows，因而未覆盖这类React菜单。输入的主要候选原因是正常Overlay出现使原主窗校验失配，但同错误码也可由原窗几何不匹配触发；缺少失败分支、当时focusedWindow与Overlay精确ID映射，不将它写成已证窗口因果。系统ViewBridge token不能当CGWindowID。
+
+后续待办与不可绕过边界见[自身菜单关联及修复前证据](agent-computer-use.md#自身右键-overlay-关联2026-10-19)。本节仅记录修复前诊断，当时未运行测试 / 构建，也没有修复验收结论。回执、精简回执、原生日志、已有原图及系统焦点辅助日志保留于 `/tmp/omniflow-context-menu-diagnosis-20261019/`，不依赖临时文件作为唯一交接记录。
+
+## 前台窗口与自身目录双击（2026-10-19）
+
+用户在开发版 OmniFlow 前台选中“文档”后让内部 Agent 双击，旧 readiness 的 `target_frontmost` 在发送前拒绝。现仅为 generic `directed-v1` 补前台直接路线，要求精确 AXFocusedWindow；不附 Command、不创建新焦点 owner / tap。已有 owner 必须确认真实焦点与 tracker 收敛且无 pending reroute / 临时恢复 / 释放失败，每事件保留物理输入、窗口、前台及取消检查，前台鼠标也检查当前普通键。旧固定 profile 后台限定与原配对释放不变，详细契约见[前台自控](agent-computer-use.md#前台窗口与操作自身2026-10-19)。
+
+自动化：全量 lint 通过；`npm test` 为 **511 文件 / 6297 项通过**，3 文件 / 7 项沿用跳过；`npm run build` 通过并重编译 arm64 / x86_64 universal helper。日志 `/tmp/omniflow-foreground-input-{lint,all-tests,build}-20261019.log`。无 GUI 原生 harness 覆盖前台精确窗口矩阵、前台优先路由、fresh session 不创建 owner / tap、已有 owner 的 pending / 焦点不一致拒绝、双击四事件与中断后唯一配对释放；这不等于实际前台派发或应用消费通过。独立只读 review 未发现阻断问题。
+
+真实 Composer 首轮 `SELF_FOREGROUND_DOUBLECLICK_20261019`：Win3 / full-access / gpt-6.1-sol high，Session `42ab8f14-72cf-4f97-a473-2eedd8a07b02` / Run `dbd47d41-1313-483e-b375-78ed812f6eab`，17:53:35.799～17:54:06.373 completed。两次 observe 均 inputReady=true，提供 doubleClick；唯一 doubleClick 首发前被 user_input_active 拒绝，无派发 / 释放 / focusRoute 回执，前后目录 value=0。未重复双击或用箭头替代，不能记作展开成功、前台路线通过或 focusCleanup=released。原始图、回执与有界原生日志保留于 `/tmp/omniflow-foreground-e2e-20261019/`；父 CUA 提交后暂停，未要求用户停止正常使用电脑。
+
+同一 Session 后续两轮仍未派发：`SELF_DOUBLECLICK_RETRY_20261019` / Run `a5fb5d01-25c8-459d-b091-f99c53f7a5c3`，17:56:43.113～17:56:59.750，只返回 inputReady=false 及通用提示，不能硬归因键鼠活动；`SELF_FOREGROUND_READY_20261019` / Run `7ee8587b-2432-432d-87cd-eaffb0cf4114`，17:58:58.295～17:59:13.253，在用户明确保持开发版前台且不键鼠后，观察提示 transient_ui_active，原生两次 `transientStage=raisedSurface`，没有 input 调用。原判断将同 PID 的任何更高层 CG 窗口全应用拒绝，不核对动作点或 AX 类型；这是一项待定位的兼容边界，不能直接移除来验收。
+
+另做只读 CG / AX 采样：主窗1181及66×20的6100小窗属于同一开发版进程；6100为精确 AXWindow / AXDialog、AXModal=false、单按钮，与共享提示条位置一致。用户18:04:49～50短暂切前台时，两窗仍均layer0，所以尚未证明它就是此前的 raisedSurface。AX role 读取失败与 CG raised 判断属于不同路径，不能直接归因。该采样没有发送点击，未按标题、尺寸或 `_NS:8` 建白名单，未放宽未知浮层 / 菜单保护。完整样本见同目录 `window-inventory.swift` 与 `surface-samples.log`；后续需记录真正命中候选的精确身份再决定修复。
+
+最后一次真实 Composer `SELF_DOUBLECLICK_FINAL_20261019` **通过前台自控目录双击验收**：Run `0ae3d901-ac32-44c9-bc36-cd1d72df74af`，18:06:19.534～18:06:52.719 completed，observe → doubleClick → observe → hidePointer。唯一输入 operationId `09022c14-d12d-4d71-89df-06e1b551a223`，坐标(64,115)，dispatched / committed、eventCount=4、releaseState=confirmed。实际 universal helper PID71350于18:06:37.592记录 `focusRoute=foreground`，随后 `targetFrontmostAfter=true / frontmostChanged=false / pointerMoved=false`；这是发送前后采样，不代表整个Run的连续无干扰证明。
+
+前后原始 canonical PNG 和后置 AX 子行确认：“文档”从收起无子项变为展开，出现“提示词”及多个文件子项；目录AX行value仍为0，不能拿该value冒充展开状态。cursorIncluded=false→true。`focusPosted=false / focusState=inactive`，18:06:52.676 `focusCleanup=inactive`，本轮未创建合成焦点 owner；hidePointer关闭确认，不能把inactive写成旧owner已released。证据为同目录 `final-` 前缀的Run/Tool回执、两张PNG及精确进程原生日志。没有使用箭头、领域工具或父CUA替代双击，没有重放已发送动作；前几轮首发前拒绝及raisedSurface来源未定位的边界继续保留，本次成功不覆盖它们。未启动额外开发实例，未提交代码。
+
 ## Computer Use 阶段收口（2026-10-16）
 
 本批按用户要求结束扩展开发，先整理文档并分批提交。当前执行契约以[电脑操作专题](agent-computer-use.md)为准，Codex 静态依据、推断与差异见[光标研究](agent-computer-cursor-codex-research.md)。下文按日期保留验证原始结论；旧版本的四种输入、TextEdit 限定、移动升102、截图二次叠画及“尚未提交”等描述只代表对应记录时点，不覆盖当前实现。

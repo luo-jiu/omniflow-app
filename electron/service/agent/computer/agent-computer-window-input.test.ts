@@ -74,6 +74,23 @@ function fixture() {
 }
 
 describe('Agent window input lifecycle', () => {
+  it.each([true, false])('settles a native right-click handoff only when the fresh Overlay promotion is trusted (%s)', async trusted => {
+    const f = fixture();
+    f.inputStatus.mockResolvedValue({ ready: true, profile: 'directed-v1', operations: [...WINDOW_INPUT_OPERATIONS] });
+    const completionWindow = { ...f.window, windowId: 25 };
+    const validate = vi.fn(() => trusted);
+    f.dependencies.associatedMenu = { current: () => undefined, prepareCompletion: () => ({ window: completionWindow, validate }) };
+    f.input.mockResolvedValue({ dispatched: true, method: 'CGEventPostToPid', eventCount: 2, releaseSent: true, completionWindowId: 25 });
+    const seen = await f.observe();
+    const prepared = await f.prepare({ operation: 'rightClick', point: { x: 100, y: 200 } }, seen.observationId);
+    expect(JSON.stringify(prepared)).not.toContain('completionWindow');
+    const result = await f.runtime.input(prepared, f.controller.signal, f.commit);
+    expect(f.input).toHaveBeenCalledWith(expect.objectContaining({ completionWindow }), f.controller.signal);
+    expect(validate).toHaveBeenCalledWith(25);
+    expect(result).toMatchObject({ ok: trusted, data: { dispatchState: trusted ? 'dispatched' : 'unknown', releaseState: 'confirmed', retryAllowed: false } });
+    expect(JSON.stringify(result)).not.toContain('completionWindow');
+    expect(f.input).toHaveBeenCalledOnce();
+  });
   async function observeRun(f: ReturnType<typeof fixture>, owner: AgentToolMainPreparationIdentity) {
     const prepared = await f.runtime.prepareObserve({ mode: 'both' }, f.context(owner));
     const result = await f.runtime.observe(f.execution(prepared, owner), f.controller.signal);

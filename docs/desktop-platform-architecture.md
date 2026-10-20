@@ -1,6 +1,6 @@
 # 桌面平台适配架构
 
-更新时间：2026-10-16
+更新时间：2026-10-19
 
 适用范围：`omniflow-app` 的 macOS、Windows 和 Linux 宿主差异，包含主窗口配置、renderer 平台识别、标题栏安全区、平台专属系统能力及分平台构建验证。
 
@@ -20,9 +20,13 @@
 
 菜单由 `window-menu.ts` / `macos-window-menu.swift` 独立持续会话持有，RunShare 唯一拥有；菜单AX根可通过当前同应用通知独立于普通窗，父子链 / 代数 / 原生对象复验。只有精确证明的菜单表面加入主窗的受控截图 union；普通捕获复用同 Run / 同窗活跃 menu lease，仍只采原窗及获准普通光标，不复用菜单扩边。菜单能力、视觉表面和输入授权分开；空菜单 partial 不证明关闭，helper退出不证明菜单已关。详见[菜单契约](agent-computer-use.md#应用菜单与多级菜单2026-10-15)。
 
+OmniFlow 自身目录菜单另由 `agent-computer-overlay.ts` 读取 Overlay IPC 原请求 owner 的 main-only 投影，将当前精确子窗冻结为菜单 helper 的第二 AX 根；请求 / frame / host 代或几何变化撤销。一次右键仅在正常 down 后允许该隐藏子窗的精确焦点交接以完成原配对 up，native 回执仍需 main 的新 promotion 复验，不泛化同 PID 授权。截图只加这一关联 surface，菜单真实 AX bounds 与全窗透明 surface 分开；普通输入与菜单光标层序没有因此扩权。当前 Chromium 未处理自定义菜单的 AXCancel，取消须经完整关联子树及动作前唯一性证明，再由原请求 token 的 owner 确认；准备证明不算派发。详见[自身菜单关联](agent-computer-use.md#自身右键-overlay-关联2026-10-19)。
+
 OmniFlow 自有 Agent 输入 / 对话区另走有限第一方 owner 桥，复用 React 草稿 / 滚动 owner，固定可信 mainFrame 注册与回执，不用任意 selector、脚本、CDP 或系统键鼠。可见工作区、active Run 与获准自有目标观察共用 WebContents 绘制引用计数，临时关闭该窗 backgroundThrottling，最后引用归零有250ms收尾；导航 / crash / owner释放清理，不改全局默认或第三方App，不保证 compositor 最后帧。固定 `--parent-activity` 诊断只读布尔活动状态，不授能力。
 
 限定内部 Agent 已验证 AppKit 混合输入、Unicode / 像素滚轮和部分真实软件闭环；WebStorm已有结构面板往返，仍含unknown与目标成为前台的兼容限制。最新层级修正后 AppKit 的四次输入及规范图回归成功，但 focusCleanup=unconfirmed；连续桌面帧遮挡尚未确认，不以单窗截图或较早released的Run覆盖。当前173项专项、全量lint / 6206项测试 / build通过不替代这些实机边界。后续复现遵守测试启动器单实例 / 进程总量 / 父退出 / 总时限监督，复用已有开发入口，禁止递归启动；不为排查偶发问题自动扩大功能范围。
+
+2026-10-19 补上 generic 真实前台路线，包含 OmniFlow 自身窗口：精确 AXFocusedWindow 必须等于获准窗口，每事件复验原前台与窗口；前台鼠标也检测当前按下的普通键。该路线不附 Command、不创建合成焦点 owner / tap；已有后台 owner 只有在真实焦点与 tracker 收敛、无 pending reroute / 临时恢复 / 释放失败时才可复用，不改写状态放行。旧固定 profile 仍限后台，原配对释放和未知清理门禁保留。依据、兼容范围与实机结果见[前台自控](agent-computer-use.md#前台窗口与操作自身2026-10-19)。
 
 ## 1. 当前结论
 

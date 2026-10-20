@@ -81,8 +81,19 @@ interface RunShare {
   permissionRequested: boolean;
   observation?: Observation;
   releaseRendering?: () => void;
-  menuSession?: { lease: AgentComputerMenuSessionLease; windowKey: string };
+  menuSession?: { lease: AgentComputerMenuSessionLease; windowKey: string; association?: AgentComputerAssociatedMenu };
   inputSession?: { lease: AgentComputerWindowInputSessionLease; windowKey: string };
+}
+/** Main-only projection of the existing Overlay request owner, never a renderer capability. */
+export interface AgentComputerAssociatedMenu {
+  key: string;
+  window: AgentComputerWindowIdentity;
+  valid(): boolean;
+  dismiss?(): boolean;
+}
+export interface AgentComputerMenuCompletion {
+  window: AgentComputerWindowIdentity;
+  validate(completionWindowId?: number): boolean;
 }
 export interface AgentComputerRuntimeDependencies {
   windows(signal: AbortSignal): Promise<{ windows: AgentComputerSharedWindow[]; truncated: boolean }>;
@@ -98,7 +109,12 @@ export interface AgentComputerRuntimeDependencies {
   input?(request: AgentComputerWindowInputRequest, signal: AbortSignal,
     onPointerEvent?: (event: AgentComputerWindowInputPointerEvent) => void): Promise<AgentComputerWindowInputReceipt>;
   inputSession?(window: AgentComputerSharedWindow, signal: AbortSignal): Promise<AgentComputerWindowInputSessionLease>;
-  menuSession?(window: AgentComputerSharedWindow, signal: AbortSignal): Promise<AgentComputerMenuSessionLease>;
+  menuSession?(window: AgentComputerSharedWindow, signal: AbortSignal,
+    associatedWindow?: AgentComputerWindowIdentity): Promise<AgentComputerMenuSessionLease>;
+  associatedMenu?: {
+    current(window: AgentComputerSharedWindow, identity: AgentToolMainPreparationIdentity): AgentComputerAssociatedMenu | undefined;
+    prepareCompletion(window: AgentComputerSharedWindow, identity: AgentToolMainPreparationIdentity): AgentComputerMenuCompletion | undefined;
+  };
   indicatePointer?(request: AgentComputerWindowIndicatorRequest, signal: AbortSignal): Promise<AgentComputerWindowIndicatorLease>;
   clickStatus(signal: AbortSignal): Promise<{ available: boolean }>;
   requestClickPermission(signal: AbortSignal): Promise<void>;
@@ -405,10 +421,24 @@ export function createAgentComputerRuntime(dependencies: AgentComputerRuntimeDep
     if (share.observation?.menu) share.observation = undefined;
     if (session) void trackMenuClose(session.lease);
   }
+  function menuAssociationMatches(share: RunShare, window: AgentComputerSharedWindow,
+    identity: AgentToolMainPreparationIdentity): boolean {
+    const session = share.menuSession;
+    const current = dependencies.associatedMenu?.current(window, identity);
+    return !!session && session.association?.key === current?.key
+      && (!session.association || session.association.valid());
+  }
+  function requireMenuAssociation(share: RunShare, window: AgentComputerSharedWindow,
+    identity: AgentToolMainPreparationIdentity): void {
+    if (!menuAssociationMatches(share, window, identity)) {
+      closeMenuSession(share);
+      throw new Error('关联菜单请求已变化，请重新观察菜单');
+    }
+  }
   async function menuSessionFor(share: RunShare, window: AgentComputerSharedWindow,
-    signal: AbortSignal): Promise<AgentComputerMenuSessionLease> {
+    identity: AgentToolMainPreparationIdentity, signal: AbortSignal): Promise<AgentComputerMenuSessionLease> {
     if (!dependencies.menuSession) throw new Error('当前平台未提供关联菜单操作');
-    if (share.menuSession?.windowKey !== windowKey(window)) closeMenuSession(share);
+    if (share.menuSession?.windowKey !== windowKey(window) || !menuAssociationMatches(share, window, identity)) closeMenuSession(share);
     await Promise.all(closingMenus);
     signal.throwIfAborted();
     if (!share.active || unconfirmedMenuClose) throw new Error('关联菜单会话已结束或关闭未确认，不能继续菜单操作');
@@ -417,13 +447,17 @@ export function createAgentComputerRuntime(dependencies: AgentComputerRuntimeDep
     const opening = new Promise<void>(resolve => { finishOpening = resolve; });
     openingMenus.add(opening);
     try {
-      const lease = await dependencies.menuSession(window, signal);
-      if (signal.aborted || !share.active) {
+      const association = dependencies.associatedMenu?.current(window, identity);
+      if (association && !association.valid()) throw new Error('关联菜单请求已变化，请重新观察菜单');
+      const lease = association ? await dependencies.menuSession(window, signal, association.window)
+        : await dependencies.menuSession(window, signal);
+      if (signal.aborted || !share.active || association && !association.valid()
+        || association?.key !== dependencies.associatedMenu?.current(window, identity)?.key) {
         await trackMenuClose(lease);
         signal.throwIfAborted();
         throw new Error('窗口共享已结束');
       }
-      share.menuSession = { lease, windowKey: windowKey(window) };
+      share.menuSession = { lease, windowKey: windowKey(window), ...(association ? { association } : {}) };
       void lease.closed.then(confirmed => {
         if (!confirmed) unconfirmedMenuClose = true;
         if (share.menuSession?.lease === lease) {
@@ -838,11 +872,13 @@ export function createAgentComputerRuntime(dependencies: AgentComputerRuntimeDep
   }
   async function observeMenu(preparation: AgentToolMainPreparedExecution, share: RunShare,
     window: AgentComputerSharedWindow, mode: ObservationMode, capturedAt: number, signal: AbortSignal): Promise<AgentToolResult> {
-    const session = await menuSessionFor(share, window, signal);
+    const session = await menuSessionFor(share, window, preparation.identity, signal);
     try {
+      requireMenuAssociation(share, window, preparation.identity);
       const native = await session.observe(signal);
       signal.throwIfAborted();
       if (!share.active || share.menuSession?.lease !== session) throw new Error('关联菜单会话已结束');
+      requireMenuAssociation(share, window, preparation.identity);
       let capture: Awaited<ReturnType<AgentComputerMenuSessionLease['capture']>> | undefined;
       if (mode !== 'ax') {
         const pointer = activeIndicators.get(share);
@@ -852,12 +888,14 @@ export function createAgentComputerRuntime(dependencies: AgentComputerRuntimeDep
           try { pointerWindow = await pointer.lease.snapshot(); } catch { signal.throwIfAborted(); }
         }
         if (!share.active) throw new Error('窗口共享已结束');
+        requireMenuAssociation(share, window, preparation.identity);
         capture = await session.capture({ observationId: native.observationId,
           ...(pointerWindow && activeIndicators.get(share) === pointer && pointer?.lease?.shown ? { pointerWindow } : {}) }, signal);
       }
       await boundWindow(preparation, signal);
       signal.throwIfAborted();
       if (!share.active || share.menuSession?.lease !== session) throw new Error('关联菜单会话已结束');
+      requireMenuAssociation(share, window, preparation.identity);
       const menuElements = mode === 'screenshot' ? [] : native.items.map(item => ({ elementId: crypto.randomUUID(), item: structuredClone(item) }));
       const observation: Observation = { id: crypto.randomUUID(), targetId: share.targetId, window,
         operations: [], inputOperations: [], availableInputOperations: [], mode, capturedAt, consumed: false,
@@ -871,6 +909,7 @@ export function createAgentComputerRuntime(dependencies: AgentComputerRuntimeDep
       const publish = (attachment?: AgentAttachment): AgentToolResult => {
         signal.throwIfAborted();
         if (!share.active || share.menuSession?.lease !== session) throw new Error('关联菜单会话已结束');
+        requireMenuAssociation(share, window, preparation.identity);
         share.observation = observation;
         share.window = window;
         share.observationCount += 1;
@@ -920,6 +959,7 @@ export function createAgentComputerRuntime(dependencies: AgentComputerRuntimeDep
     const observation = observationFor(context.preparationIdentity, input.observationId);
     const share = shareFor(context.preparationIdentity);
     const element = observation.menu?.elements.find(item => item.elementId === input.elementId);
+    if (share) requireMenuAssociation(share, observation.window, context.preparationIdentity);
     if (!share || !observation.menu || !element || share.menuSession?.lease !== observation.menu.session
       || !share.menuOperations.includes(input.operation) || !element.item.operations.includes(input.operation)) {
       throw new Error('菜单项不属于本次有效观察或未声明此操作，请重新观察关联菜单');
@@ -946,6 +986,7 @@ export function createAgentComputerRuntime(dependencies: AgentComputerRuntimeDep
         throw new Error('菜单操作与当前共享窗口或菜单项身份不匹配');
       }
       const menuSession = observation.menu.session;
+      requireMenuAssociation(share, observation.window, preparation.identity);
       const request = { observationId: observation.menu.nativeObservationId, itemId: element.item.itemId, operation: action.operation };
       if (JSON.stringify(preparation.binding.menu) !== JSON.stringify({ nativeObservationId: request.observationId,
         itemId: request.itemId, operation: request.operation })) throw new Error('菜单操作与已准备的私有绑定不匹配');
@@ -991,14 +1032,38 @@ export function createAgentComputerRuntime(dependencies: AgentComputerRuntimeDep
         if (observationFor(preparation.identity, action.observationId) !== observation || share.menuSession?.lease !== menuSession) {
           throw new Error('菜单观察已变化，请重新观察关联菜单');
         }
+        requireMenuAssociation(share, observation.window, preparation.identity);
+        const association = share.menuSession?.association;
         // The native acknowledgement can be lost after AX dispatch. Reserve the
         // unknown settlement before IPC, never infer non-dispatch from a missing ACK.
         commit.begin(receipt('unknown'));
         observation.consumed = true;
         let result: AgentToolResult;
-        try { await menuSession.action(request, signal, () => undefined); result = receipt('dispatched'); }
+        let preparedOwnerCancel = false;
+        try {
+          const nativeReceipt = await menuSession.action(request, signal, () => undefined);
+          if (nativeReceipt !== undefined) {
+            preparedOwnerCancel = true;
+            // Chromium exposes AXCancel for web menus without implementing it.
+            // The native marker only prepares a cancel; the exact live request
+            // owner must confirm dismissal before this can count as dispatched.
+            signal.throwIfAborted();
+            if (!nativeReceipt || typeof nativeReceipt !== 'object' || Object.keys(nativeReceipt).length !== 1
+              || !Object.prototype.hasOwnProperty.call(nativeReceipt, 'associatedCancelWindowId')
+              || !Number.isSafeInteger(nativeReceipt.associatedCancelWindowId) || nativeReceipt.associatedCancelWindowId <= 0
+              || request.operation !== 'cancel' || !association || nativeReceipt.associatedCancelWindowId !== association.window.windowId
+              || !share.active || share.menuSession?.lease !== menuSession || share.menuSession.association !== association
+              || !menuAssociationMatches(share, observation.window, preparation.identity) || !association.dismiss?.()) {
+              throw new Error('关联菜单取消未获得当前请求 owner 的确认');
+            }
+          }
+          // A successful action may legitimately close its associated request.
+          // Do not revalidate the now-closed owner after that acknowledgement.
+          result = receipt('dispatched');
+        }
         catch (error) {
-          const state = error instanceof AgentComputerInputError && error.dispatchState === 'not-dispatched' ? 'not-dispatched' : 'unknown';
+          const state = !preparedOwnerCancel && error instanceof AgentComputerInputError
+            && error.dispatchState === 'not-dispatched' ? 'not-dispatched' : 'unknown';
           result = receipt(state);
           if (state === 'unknown') closeMenuSession(share);
         }
@@ -1062,7 +1127,8 @@ export function createAgentComputerRuntime(dependencies: AgentComputerRuntimeDep
       share.observation = undefined;
       await boundWindow(preparation, signal);
       if (!share.active) throw new Error('窗口共享已结束');
-      if (share.menuSession && share.menuSession.windowKey !== windowKey(window)) closeMenuSession(share);
+      if (share.menuSession && (share.menuSession.windowKey !== windowKey(window)
+        || !menuAssociationMatches(share, window, identity))) closeMenuSession(share);
       await syncPointerTarget(share, window, signal);
       keepShareRendering(share, window, identity.ownerWebContentsId, signal);
       let accessibilityAvailable = false;
@@ -1527,6 +1593,9 @@ export function createAgentComputerRuntime(dependencies: AgentComputerRuntimeDep
         }
         await boundWindow(preparation, signal);
         if (observationFor(preparation.identity, action.observationId) !== observation) throw new Error('窗口观察已变化，后台输入未发送');
+        const completion = request.profile === 'directed-v1' && request.operation === 'rightClick'
+          ? dependencies.associatedMenu?.prepareCompletion(observation.window, preparation.identity) : undefined;
+        const dispatchRequest = completion ? { ...request, completionWindow: completion.window } : request;
         commit.begin(receipt('unknown', 'unconfirmed'));
         observation.consumed = true;
         let result: AgentToolResult;
@@ -1541,10 +1610,14 @@ export function createAgentComputerRuntime(dependencies: AgentComputerRuntimeDep
               try { visual.lease.pointerEvent?.({ phase: event.phase, point: event.point }); }
               catch { visual.stop(); }
             } : undefined;
-          const sent = session ? onPointerEvent ? await session.input(request, signal, onPointerEvent) : await session.input(request, signal)
-            : onPointerEvent ? await dependencies.input!(request, signal, onPointerEvent)
-              : await dependencies.input!(request, signal);
-          result = receipt('dispatched', 'confirmed', sent.eventCount);
+          const sent = session ? onPointerEvent ? await session.input(dispatchRequest, signal, onPointerEvent) : await session.input(dispatchRequest, signal)
+            : onPointerEvent ? await dependencies.input!(dispatchRequest, signal, onPointerEvent)
+              : await dependencies.input!(dispatchRequest, signal);
+          // A native focus handoff proves only the paired sequence. The main
+          // request owner must independently confirm this exact fresh menu.
+          const trustedCompletion = completion ? completion.validate(sent.completionWindowId)
+            : sent.completionWindowId === undefined;
+          result = receipt(trustedCompletion ? 'dispatched' : 'unknown', 'confirmed', sent.eventCount);
         } catch (error) {
           const state = error instanceof AgentComputerInputError && error.dispatchState === 'not-dispatched' ? 'not-dispatched' : 'unknown';
           const releaseState = error instanceof AgentComputerWindowInputError ? error.releaseState : state === 'not-dispatched' ? 'not-required' : 'unconfirmed';

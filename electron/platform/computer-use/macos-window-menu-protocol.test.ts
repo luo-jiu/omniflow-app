@@ -347,6 +347,162 @@ check(state.consume("third", now: 301))
 check(!state.consume("third", now: 302))
 
 let target = WindowIdentity(windowId: 1, pid: 10, processStartedAt: 20, layer: 0, bounds: rootBounds, title: "Fixture")
+let associated = WindowIdentity(windowId: 8, pid: 10, processStartedAt: 20, layer: 0,
+    bounds: Rect(x: 100, y: 120, width: 600, height: 380), title: "Overlay")
+let associatedMenuBounds = Rect(x: 200, y: 200, width: 100, height: 150)
+check(validWindowMenuAssociatedWindow(associated, target: target))
+check(windowMenuAssociatedSurface(bounds: associatedMenuBounds, target: target,
+    associated: associated, windows: [target, associated])?.windowId == 8)
+check(windowMenuAssociatedSurface(bounds: associatedMenuBounds, target: target,
+    associated: associated, windows: [target]) == nil)
+check(windowMenuAssociatedSurface(bounds: associatedMenuBounds, target: target,
+    associated: associated, windows: [associated, associated]) == nil)
+check(windowMenuAssociatedSurface(bounds: Rect(x: 99, y: 200, width: 100, height: 100), target: target,
+    associated: associated, windows: [associated]) == nil)
+for altered in [WindowIdentity(windowId: 1, pid: 10, processStartedAt: 20, layer: 0, bounds: associated.bounds, title: "Overlay"),
+                WindowIdentity(windowId: 8, pid: 11, processStartedAt: 20, layer: 0, bounds: associated.bounds, title: "Overlay"),
+                WindowIdentity(windowId: 8, pid: 10, processStartedAt: 21, layer: 0, bounds: associated.bounds, title: "Overlay"),
+                WindowIdentity(windowId: 8, pid: 10, processStartedAt: 20, layer: 101, bounds: associated.bounds, title: "Overlay"),
+                WindowIdentity(windowId: 8, pid: 10, processStartedAt: 20, layer: 0, bounds: Rect(x: 99, y: 120, width: 600, height: 380), title: "Overlay")] {
+    check(!validWindowMenuAssociatedWindow(altered, target: target))
+    check((try? parseWindowMenuStartup(json(["window": target.json, "associatedWindow": altered.json]))) == nil)
+}
+check((try? parseWindowMenuStartup(json(["window": target.json])))?.associatedWindow == nil)
+check((try? parseWindowMenuStartup(json(["window": target.json, "associatedWindow": associated.json])))?.associatedWindow?.windowId == 8)
+check((try? parseWindowMenuStartup(json(["window": target.json, "associatedWindow": NSNull()]))) == nil)
+check((try? parseWindowMenuStartup(json(["window": target.json, "associatedWindow": associated.json, "windows": []]))) == nil)
+check((try? parseWindowMenuStartup(Data("{\"window\":{},\"associatedWindow\":{},\"associatedWindow\":{}}".utf8))) == nil)
+let untitledAssociation = WindowIdentity(windowId: associated.windowId, pid: associated.pid,
+    processStartedAt: associated.processStartedAt, layer: 0, bounds: associated.bounds, title: nil)
+check(resolveWindowMenuAssociatedWindow(untitledAssociation, target: target, windows: [associated])?.title == "Overlay")
+check(resolveWindowMenuAssociatedWindow(associated, target: target, windows: [WindowIdentity(windowId: 8, pid: 10,
+    processStartedAt: 20, layer: 0, bounds: associated.bounds, title: "Changed")]) == nil)
+// This is explicitly a separate root. A menu whose AXWindow points back to
+// the main window cannot be imported through the overlay's ancestry proof.
+roles[80] = kAXWindowRole; roles[81] = kAXGroupRole; roles[82] = kAXMenuRole; roles[83] = kAXMenuItemRole
+parents[81] = 80; parents[82] = 81; parents[83] = 82
+owners[81] = 80; owners[82] = 80; owners[83] = 80
+check(windowMenuAncestry([80, 81, 82, 83], root: 80, pid: 10, equal: { $0 == $1 }, read: read))
+check(!windowMenuAncestry([80, 81, 82, 83], root: 0, pid: 10, equal: { $0 == $1 }, read: read))
+owners[83] = 0
+check(!windowMenuAncestry([80, 81, 82, 83], root: 80, pid: 10, equal: { $0 == $1 }, read: read))
+owners[83] = 80
+// Electron's exact overlay AXWindow has native view AXGroups in its children
+// path, while Chromium's WebArea reports the same AXWindow as AXParent.
+roles[100] = kAXWindowRole; roles[101] = kAXGroupRole; roles[102] = kAXGroupRole
+roles[103] = "AXWebArea"; roles[104] = kAXGroupRole; roles[105] = kAXMenuRole; roles[106] = kAXMenuItemRole
+parents[101] = 100; parents[102] = 101; parents[103] = 100; parents[104] = 103; parents[105] = 104; parents[106] = 105
+for id in 101...106 { owners[id] = 100 }
+forward[100] = [101]; forward[101] = [102]; forward[102] = [103]; forward[103] = [104]; forward[104] = [105]; forward[105] = [106]
+let bridgeChain = [100, 101, 102, 103, 104, 105, 106]
+func associatedBridge(_ chain: [Int] = bridgeChain, root: Int = 100) -> Bool {
+    windowMenuAssociatedAncestry(chain, root: root, pid: 10, equal: ==, read: read,
+        linked: { parent, child in forward[parent]?.filter { $0 == child }.count == 1 })
+}
+check(associatedBridge())
+let ownerCancelMenu = fingerprint(role: kAXMenuRole, actions: [kAXCancelAction], bounds: associatedMenuBounds)
+func associatedCancel(_ operation: WindowMenuOperation = .cancel, origin: WindowMenuRootOrigin = .associatedWindow,
+                      selected: WindowMenuFingerprint = ownerCancelMenu, ancestorRoles: [String] = [],
+                      complete: Bool = true, unique: Bool = true, bound: WindowIdentity? = associated) -> UInt32? {
+    windowMenuAssociatedCancelWindowID(operation: operation, origin: origin, fingerprint: selected,
+        ancestorRoles: ancestorRoles, associatedScanComplete: complete, uniqueOutermostMenu: unique, target: target, associated: bound)
+}
+check(associatedCancel() == 8)
+for origin in [WindowMenuRootOrigin.window, .menuBar, .applicationChild(0), .focusedMenu, .openedMenu,
+               .openedWindowMenu, .notifiedMenu] { check(associatedCancel(origin: origin) == nil) }
+for operation in [WindowMenuOperation.open, .press] { check(associatedCancel(operation) == nil) }
+for role in [kAXMenuItemRole, kAXMenuBarItemRole, kAXGroupRole] {
+    check(associatedCancel(selected: fingerprint(role: role, actions: [kAXCancelAction], bounds: associatedMenuBounds)) == nil)
+}
+check(associatedCancel(selected: fingerprint(role: kAXMenuRole, actions: [], bounds: associatedMenuBounds)) == nil)
+check(associatedCancel(ancestorRoles: [kAXMenuRole, kAXMenuItemRole]) == nil)
+check(associatedCancel(complete: false) == nil)
+check(associatedCancel(unique: false) == nil)
+check(associatedCancel(bound: nil) == nil)
+check(associatedCancel(bound: target) == nil)
+check(associatedCancel(bound: WindowIdentity(windowId: 8, pid: 11, processStartedAt: 20,
+    layer: 0, bounds: associated.bounds, title: "Overlay")) == nil)
+check(associatedCancel(selected: fingerprint(role: kAXMenuRole, actions: [kAXCancelAction],
+    bounds: Rect(x: 99, y: 200, width: 100, height: 100))) == nil)
+
+// Association completeness is independent of the ordinary/menu-bar scan. A
+// single retained menu is not unique when an unknown edge or limit hid a portal
+// sibling, and action preparation must prove the current entire subtree again.
+var scanRoles = [200: kAXWindowRole, 201: kAXGroupRole, 202: kAXMenuRole, 203: kAXMenuItemRole]
+var scanChildren = [200: [201], 201: [202], 202: [203], 203: []]
+var unreadableNode: Int? = nil, unreadableChildren: Int? = nil, unreadableFingerprint: Int? = nil
+var invalidChainNode: Int? = nil, scanReady = true
+func associatedScan(_ maximumNodes: Int = 512, depth: Int = maximumAXPathDepth,
+                    menus: Int = 8, items: Int = 128) -> WindowMenuAssociatedScan<Int> {
+    windowMenuScanAssociatedMenus(root: 200, maximumNodes: maximumNodes, maximumDepth: depth,
+        maximumMenus: menus, maximumItems: items, ready: { scanReady }, equal: ==,
+        read: { id in
+            guard id != unreadableNode, let role = scanRoles[id] else { return nil }
+            return WindowMenuAncestryNode(element: id, pid: 10, role: role, parent: nil, window: 200)
+        }, validChain: { chain in !chain.contains(where: { $0 == invalidChainNode }) },
+        children: { id in id == unreadableChildren ? nil : scanChildren[id] },
+        fingerprint: { id in
+            guard id != unreadableFingerprint, let role = scanRoles[id] else { return nil }
+            return fingerprint(role: role, actions: role == kAXMenuRole ? [kAXCancelAction] : [kAXPressAction], bounds: associatedMenuBounds)
+        })
+}
+func scanProvesUnique(_ scan: WindowMenuAssociatedScan<Int>, selected: Int = 202) -> Bool {
+    let outer = scan.menus.filter { $0.ancestorMenuCount == 0 }
+    return scan.complete && outer.count == 1 && outer[0].element == selected
+}
+let completeAssociation = associatedScan()
+check(completeAssociation.complete && scanProvesUnique(completeAssociation))
+check(completeAssociation.menus.first?.path == [0, 0])
+// Deliberately reject a different root's ancestry without contaminating the
+// already complete explicit association proof.
+let unrelatedRootComplete = windowMenuAncestry([0, 2], root: 0, pid: 10, equal: ==, read: read)
+check(!unrelatedRootComplete && scanProvesUnique(completeAssociation))
+unreadableNode = 203; check(!associatedScan().complete); unreadableNode = nil
+invalidChainNode = 203; check(!associatedScan().complete); invalidChainNode = nil
+unreadableChildren = 201; check(!associatedScan().complete); unreadableChildren = nil
+unreadableFingerprint = 202; check(!associatedScan().complete); unreadableFingerprint = nil
+unreadableFingerprint = 203; check(!associatedScan().complete); unreadableFingerprint = nil
+scanRoles[203] = "AXUnknown"; check(!associatedScan().complete); scanRoles[203] = kAXMenuItemRole
+scanReady = false; check(!associatedScan().complete); scanReady = true
+check(!associatedScan(2).complete)
+check(!associatedScan(depth: 1).complete)
+check(!associatedScan(items: 1).complete)
+scanChildren[201] = [202, 204]; scanRoles[204] = kAXMenuRole; scanChildren[204] = []
+let withSecondPortal = associatedScan()
+check(withSecondPortal.complete && withSecondPortal.menus.count == 2 && !scanProvesUnique(withSecondPortal))
+check(scanProvesUnique(completeAssociation) && !scanProvesUnique(associatedScan()))
+check(!associatedScan(menus: 1).complete)
+// A failed later sibling read must not make the first already scanned menu
+// look unique. This is the regression for an incomplete association traversal.
+unreadableNode = 204
+let hiddenSecondPortal = associatedScan()
+check(!hiddenSecondPortal.complete && hiddenSecondPortal.menus.count == 1 && !scanProvesUnique(hiddenSecondPortal))
+unreadableNode = nil
+unreadableChildren = 201; check(!scanProvesUnique(associatedScan())); unreadableChildren = nil
+scanChildren[201] = Array(repeating: 202, count: 65)
+check(!associatedScan().complete)
+scanChildren[201] = [202, 202]; check(!associatedScan().complete)
+scanChildren[201] = [202]; scanChildren[203] = [204]
+let nestedAssociation = associatedScan()
+check(nestedAssociation.complete && nestedAssociation.menus.count == 2 && scanProvesUnique(nestedAssociation))
+check(nestedAssociation.menus.last?.ancestorMenuCount == 1 && !scanProvesUnique(nestedAssociation, selected: 204))
+scanChildren[203] = []
+check(associatedScan().complete && scanProvesUnique(associatedScan()))
+check(!windowMenuAncestry(bridgeChain, root: 100, pid: 10, equal: ==, read: read))
+check(!associatedBridge(root: 0))
+check(!associatedBridge([100, 102, 103, 104, 105, 106]))
+forward[102] = [999]; check(!associatedBridge()); forward[102] = [103]
+forward[102] = [103, 103]; check(!associatedBridge()); forward[102] = [103]
+roles[102] = kAXToolbarRole; check(!associatedBridge()); roles[102] = kAXGroupRole
+owners[102] = 99; check(!associatedBridge()); owners[102] = 100
+owners[102] = nil; check(!associatedBridge()); owners[102] = 100
+owners[103] = 99; check(!associatedBridge()); owners[103] = 100
+pids[102] = 20; check(!associatedBridge()); pids[102] = nil
+parents[103] = 99; check(!associatedBridge()); parents[103] = 100
+roles[103] = kAXGroupRole; check(!associatedBridge()); roles[103] = "AXWebArea"
+parents[106] = 100; check(!associatedBridge()); parents[106] = 105
+check(!associatedBridge([100, 101, 102, 103, 104, 105, 104]))
+check(associatedBridge())
 let menuBounds = Rect(x: 650, y: 450, width: 200, height: 100)
 func surface(id: UInt32 = 2, pid: Int32 = 10, started: Int64 = 20, layer: Int32 = 101, bounds: Rect = menuBounds) -> WindowIdentity {
     WindowIdentity(windowId: id, pid: pid, processStartedAt: started, layer: layer, bounds: bounds, title: nil)

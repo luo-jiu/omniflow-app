@@ -204,6 +204,48 @@ describe('directed window input adapter', () => {
     expect(mocks.getSources).not.toHaveBeenCalled();
   });
 
+  it('keeps the main-only right-click completion association and its observed handoff separate from the receiver', async () => {
+    const child = new HelperProcess(); mocks.spawn.mockReturnValue(child);
+    const completionWindow = { ...window, windowId: 82 };
+    const input = { ...request, profile: 'directed-v1', completionWindow };
+    const pending = inputAgentComputerWindow(input, new AbortController().signal);
+    expect(JSON.parse(child.stdin.end.mock.calls[0][0])).toEqual(input);
+    child.reply({ ...success, completionWindowId: 82 });
+    await expect(pending).resolves.toEqual({ dispatched: true, method: 'CGEventPostToPid', eventCount: 2,
+      releaseSent: true, completionWindowId: 82 });
+    expect(mocks.spawn).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    { profile: 'appkit-fixture-v1' }, { operation: 'click' }, { operation: 'doubleClick' },
+    { completionWindow: { ...window, windowId: window.windowId } },
+    { completionWindow: { ...window, windowId: 82, pid: window.pid + 1 } },
+    { completionWindow: { ...window, windowId: 82, processStartedAt: window.processStartedAt! + 1 } },
+    { completionWindow: { ...window, windowId: 82, layer: 102 } },
+    { completionWindow: { ...window, windowId: 82, bounds: { ...window.bounds, x: window.bounds.x - 1 } } },
+    { completionWindow: undefined },
+  ])('rejects an unbound or inapplicable completion association before spawning %j', async changed => {
+    const input = { ...request, profile: 'directed-v1', completionWindow: { ...window, windowId: 82 }, ...changed };
+    await expect(inputAgentComputerWindow(input as AgentComputerWindowInputRequest, new AbortController().signal))
+      .rejects.toMatchObject({ dispatchState: 'not-dispatched', releaseState: 'not-required' });
+    expect(mocks.spawn).not.toHaveBeenCalled();
+  });
+
+  it.each([82, 0, -1, '82'])('refuses unsolicited completion receipt %j without admitting another receiver', async completionWindowId => {
+    const child = new HelperProcess(); mocks.spawn.mockReturnValue(child);
+    const pending = inputAgentComputerWindow({ ...request, profile: 'directed-v1' }, new AbortController().signal);
+    child.reply({ ...success, completionWindowId });
+    await expect(pending).rejects.toMatchObject({ dispatchState: 'unknown', releaseState: 'unconfirmed' });
+  });
+
+  it('refuses a handoff receipt for a different completion window', async () => {
+    const child = new HelperProcess(); mocks.spawn.mockReturnValue(child);
+    const pending = inputAgentComputerWindow({ ...request, profile: 'directed-v1', completionWindow: { ...window, windowId: 82 } },
+      new AbortController().signal);
+    child.reply({ ...success, completionWindowId: 83 });
+    await expect(pending).rejects.toMatchObject({ dispatchState: 'unknown', releaseState: 'unconfirmed' });
+  });
+
   it('normalizes a finite shortcut without clipboard, focus or arbitrary text', async () => {
     const child = new HelperProcess(); mocks.spawn.mockReturnValue(child);
     const input = { window, profile: request.profile, operation: 'shortcut', shortcut: { key: 'a', modifiers: ['shift', 'command', 'command'] } };

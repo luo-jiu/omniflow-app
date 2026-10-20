@@ -17,7 +17,7 @@ vi.mock('../agent-attachment-runtime', () => ({ getAgentAttachmentStore: vi.fn()
 vi.mock('./agent-computer-runtime', () => ({ createAgentComputerRuntime: mocks.create.mockReturnValue({ releaseRun: mocks.release }) }));
 vi.mock('./agent-computer-rendering-service-runtime', () => ({ agentRenderingLeases: { keepOwnerRendering: vi.fn(), keepApprovedWindowRendering: vi.fn() } }));
 vi.mock('./agent-first-party-controls', () => ({ agentFirstPartyControls: { releaseRun: mocks.releaseFirstParty } }));
-import { configureAgentComputerAppearance, releaseAgentComputerRun } from './agent-computer-service-runtime';
+import { configureAgentComputerAppearance, configureAgentComputerAssociatedMenu, releaseAgentComputerRun } from './agent-computer-service-runtime';
 
 const runtimeDependencies = mocks.create.mock.calls[0][0] as AgentComputerRuntimeDependencies;
 const indicatePointer = runtimeDependencies.indicatePointer!;
@@ -95,6 +95,22 @@ describe('Agent pointer appearance projection', () => {
 });
 
 describe('Agent computer Run cleanup', () => {
+  it('reads the main-owned overlay provider after runtime construction without copying its capability', () => {
+    const window = { ...request.window, applicationLabel: 'OmniFlow', windowLabel: 'Main' };
+    const identity = { ownerWebContentsId: 1 } as Parameters<NonNullable<AgentComputerRuntimeDependencies['associatedMenu']>['current']>[1];
+    const association = { key: 'menu', window: request.window, valid: vi.fn(() => true) };
+    const completion = { window: request.window, validate: vi.fn(() => true) };
+    const provider = { current: vi.fn(() => association), prepareCompletion: vi.fn(() => completion) };
+    configureAgentComputerAssociatedMenu(provider);
+    expect(runtimeDependencies.associatedMenu!.current(window, identity)).toBe(association);
+    expect(runtimeDependencies.associatedMenu!.prepareCompletion(window, identity)).toBe(completion);
+    expect(provider.current).toHaveBeenCalledWith(window, identity);
+    expect(provider.prepareCompletion).toHaveBeenCalledWith(window, identity);
+    configureAgentComputerAssociatedMenu({ current: () => undefined, prepareCompletion: () => undefined });
+    expect(runtimeDependencies.associatedMenu!.current(window, identity)).toBeUndefined();
+    expect(runtimeDependencies.associatedMenu!.prepareCompletion(window, identity)).toBeUndefined();
+  });
+
   it('wires the persistent input factory into the production runtime without replacing its signal or close receipt', async () => {
     const signal = new AbortController().signal;
     const target = { ...request.window, applicationLabel: 'QA', windowLabel: 'QA' };

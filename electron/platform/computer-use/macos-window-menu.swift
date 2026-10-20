@@ -11,6 +11,44 @@ import os
 // application's menu bar and current menus as separate accessibility roots.
 enum WindowMenuOperation: String, Decodable, CaseIterable { case open, press, cancel }
 
+// The main process may freeze one first-party overlay window into a menu
+// lease. This is not a same-PID window search or a caller-controlled AX root.
+struct WindowMenuStartup: Decodable {
+    let window: WindowIdentity
+    let associatedWindow: WindowIdentity?
+}
+
+func validWindowMenuAssociatedWindow(_ associated: WindowIdentity, target: WindowIdentity) -> Bool {
+    target.valid && associated.valid && associated.windowId != target.windowId
+        && associated.pid == target.pid && associated.processStartedAt == target.processStartedAt
+        && target.bounds.contains(associated.bounds)
+}
+
+// BrowserWindow supplies its exact native ID and geometry, but can omit a
+// title. Freeze the native title once, then use the complete CG identity for
+// all later validation and ScreenCaptureKit source matching.
+func resolveWindowMenuAssociatedWindow(_ associated: WindowIdentity, target: WindowIdentity,
+                                      windows: [WindowIdentity]) -> WindowIdentity? {
+    guard validWindowMenuAssociatedWindow(associated, target: target) else { return nil }
+    let matches = windows.filter { $0.windowId == associated.windowId && $0.pid == associated.pid
+        && $0.processStartedAt == associated.processStartedAt && $0.layer == associated.layer
+        && $0.bounds == associated.bounds && (associated.title == nil || $0.title == associated.title) }
+    return matches.count == 1 ? matches[0] : nil
+}
+
+func parseWindowMenuStartup(_ data: Data) throws -> WindowMenuStartup {
+    let (_, object) = try parseInput(data)
+    _ = try fields(object, required: ["window"], optional: ["associatedWindow"])
+    for key in ["window", "associatedWindow"] where object[key] != nil {
+        let identity = try fields(object[key], required: ["windowId", "pid", "processStartedAt", "layer", "bounds"], optional: ["title"])
+        if let title = identity["title"], !(title is String) { throw invalidRequest() }
+        try validateRectFields(identity["bounds"])
+    }
+    guard let request = try? JSONDecoder().decode(WindowMenuStartup.self, from: data), request.window.valid,
+          request.associatedWindow.map({ validWindowMenuAssociatedWindow($0, target: request.window) }) != false else { throw invalidRequest() }
+    return request
+}
+
 struct WindowMenuCommand: Decodable {
     let requestId: String
     let command: String
@@ -107,6 +145,79 @@ struct WindowMenuFingerprint: Equatable {
 func windowMenuFingerprintChainMatches<Element>(_ observed: [(Element, WindowMenuFingerprint)],
                                                 read: (Element) -> WindowMenuFingerprint?) -> Bool {
     observed.allSatisfy { read($0.0) == $0.1 }
+}
+
+struct WindowMenuAssociatedScannedMenu<Element> {
+    let element: Element
+    let path: [Int]
+    let fingerprint: WindowMenuFingerprint
+    let ancestorMenuCount: Int
+}
+
+struct WindowMenuAssociatedScan<Element> {
+    let complete: Bool
+    let menus: [WindowMenuAssociatedScannedMenu<Element>]
+}
+
+private struct WindowMenuAssociatedScanEntry<Element> {
+    let element: Element
+    let chain: [Element]
+    let path: [Int]
+    let ancestorMenuCount: Int
+}
+
+// Completeness belongs to this single explicit root. A partial menu-bar or
+// ordinary-window scan cannot grant or revoke this separate cancellation proof.
+// Unknown nodes/edges and all limits fail closed, including a second portal
+// menu beyond a truncated child prefix.
+func windowMenuScanAssociatedMenus<Element>(root: Element,
+                                            maximumNodes: Int = 512, maximumDepth: Int = maximumAXPathDepth,
+                                            maximumMenus: Int = 8, maximumItems: Int = 128,
+                                            ready: () -> Bool, equal: (Element, Element) -> Bool,
+                                            read: (Element) -> WindowMenuAncestryNode<Element>?,
+                                            validChain: ([Element]) -> Bool,
+                                            children: (Element) -> [Element]?,
+                                            fingerprint: (Element) -> WindowMenuFingerprint?) -> WindowMenuAssociatedScan<Element> {
+    var menus: [WindowMenuAssociatedScannedMenu<Element>] = []
+    func incomplete() -> WindowMenuAssociatedScan<Element> { WindowMenuAssociatedScan(complete: false, menus: menus) }
+    guard maximumNodes > 0, maximumNodes <= 512, maximumDepth >= 0, maximumDepth <= maximumAXPathDepth,
+          maximumMenus > 0, maximumMenus <= 8, maximumItems >= 0, maximumItems <= 128 else { return incomplete() }
+    var pending = [WindowMenuAssociatedScanEntry(element: root, chain: [root], path: [], ancestorMenuCount: 0)]
+    var visited: [Element] = [], head = 0, itemCount = 0
+    while head < pending.count {
+        guard ready(), head < maximumNodes else { return incomplete() }
+        let entry = pending[head]; head += 1
+        guard !visited.contains(where: { equal($0, entry.element) }), validChain(entry.chain),
+              let node = read(entry.element), !node.role.isEmpty, node.role != "AXUnknown" else { return incomplete() }
+        visited.append(entry.element)
+        var ancestorMenuCount = entry.ancestorMenuCount
+        if node.role == kAXMenuRole || node.role == kAXMenuItemRole || node.role == kAXMenuBarItemRole {
+            itemCount += 1
+            guard itemCount <= maximumItems else { return incomplete() }
+        }
+        if node.role == kAXMenuRole {
+            guard menus.count < maximumMenus, let current = fingerprint(entry.element),
+                  current.role == kAXMenuRole else { return incomplete() }
+            menus.append(WindowMenuAssociatedScannedMenu(element: entry.element, path: entry.path,
+                fingerprint: current, ancestorMenuCount: ancestorMenuCount))
+            ancestorMenuCount += 1
+        } else if node.role == kAXMenuItemRole || node.role == kAXMenuBarItemRole {
+            guard let current = fingerprint(entry.element),
+                  current.role == node.role else { return incomplete() }
+        }
+        guard ready(), let currentChildren = children(entry.element), currentChildren.count <= 64 else { return incomplete() }
+        if entry.path.count >= maximumDepth {
+            guard currentChildren.isEmpty else { return incomplete() }
+            continue
+        }
+        for (index, child) in currentChildren.enumerated() {
+            guard pending.count < maximumNodes else { return incomplete() }
+            pending.append(WindowMenuAssociatedScanEntry(element: child, chain: entry.chain + [child],
+                path: entry.path + [index], ancestorMenuCount: ancestorMenuCount))
+        }
+    }
+    guard ready() else { return incomplete() }
+    return WindowMenuAssociatedScan(complete: true, menus: menus)
 }
 
 let windowMenuApplicationRoles: Set<String> = [kAXMenuRole, kAXMenuItemRole, kAXMenuBarRole, kAXMenuBarItemRole]
@@ -234,6 +345,39 @@ func windowMenuAncestry<Element>(_ chain: [Element], root: Element, pid: Int32,
     return true
 }
 
+// Chromium's native NSView wrappers expose a WebArea through AXChildren while
+// that WebArea's AXParent names the AXWindow directly. Only the explicitly
+// frozen first-party overlay root uses this proof. It keeps every real child
+// edge and permits exactly that WebArea -> same root reverse edge, with a
+// prefix consisting entirely of same-window AXGroups.
+func windowMenuAssociatedAncestry<Element>(_ chain: [Element], root: Element, pid: Int32,
+                                          equal: (Element, Element) -> Bool,
+                                          read: (Element) -> WindowMenuAncestryNode<Element>?,
+                                          linked: (Element, Element) -> Bool) -> Bool {
+    guard !chain.isEmpty, chain.count <= maximumAXPathDepth + 1, equal(chain[0], root) else { return false }
+    var prefix: [WindowMenuAncestryNode<Element>] = []
+    for (index, element) in chain.enumerated() {
+        guard let node = read(element), node.pid == pid, !node.role.isEmpty,
+              !node.role.contains("Secure"), node.role != kAXMenuBarRole,
+              node.role != kAXApplicationRole else { return false }
+        if index == 0 { guard node.role == kAXWindowRole else { return false } }
+        else {
+            guard node.role != kAXWindowRole, node.role != kAXSheetRole, node.role != kAXDrawerRole,
+                  let parent = node.parent, !chain.prefix(index).contains(where: { equal($0, element) }),
+                  linked(chain[index - 1], element) else { return false }
+            if !equal(parent, chain[index - 1]) {
+                guard node.role == "AXWebArea", index > 1, equal(parent, root),
+                      node.window.map({ equal($0, root) }) == true,
+                      prefix.dropFirst().allSatisfy({ $0.role == kAXGroupRole && $0.pid == pid
+                          && $0.window.map({ equal($0, root) }) == true }) else { return false }
+            }
+        }
+        if let window = node.window, !equal(window, root) { return false }
+        prefix.append(node)
+    }
+    return true
+}
+
 func windowMenuValidateBoundPath<Element>(_ path: [Int], chain: [Element], root: Element, pid: Int32,
                                          equal: (Element, Element) -> Bool,
                                          read: (Element) -> WindowMenuAncestryNode<Element>?,
@@ -330,6 +474,18 @@ func windowMenuSurface(bounds: Rect, target: WindowIdentity, windows: [WindowIde
     return matches.count == 1 ? matches[0] : nil
 }
 
+// Only a menu proved under the explicitly frozen AXWindow may use this route.
+// Its AX menu bounds can be smaller than the full transparent overlay surface.
+func windowMenuAssociatedSurface(bounds: Rect, target: WindowIdentity, associated: WindowIdentity,
+                                 windows: [WindowIdentity]) -> WindowIdentity? {
+    guard validWindowMenuAssociatedWindow(associated, target: target), bounds.valid,
+          associated.bounds.contains(bounds) else { return nil }
+    let matches = windows.filter { $0.windowId == associated.windowId && $0.pid == associated.pid
+        && $0.processStartedAt == associated.processStartedAt && $0.layer == associated.layer
+        && $0.bounds == associated.bounds && $0.title == associated.title }
+    return matches.count == 1 ? matches[0] : nil
+}
+
 // Finder includes a non-AXWindow entry in AXWindows. Only actual AXWindow
 // rectangles exclude ordinary surfaces; known other roles are not windows.
 // An unreadable identity or an actual window with unknown geometry still blocks
@@ -390,7 +546,21 @@ func revalidateWindowMenuPointer(_ pointer: WindowIdentity, target: WindowIdenti
     }
 }
 
-enum WindowMenuRootOrigin { case window, menuBar, applicationChild(Int), focusedMenu, openedMenu, openedWindowMenu, notifiedMenu }
+enum WindowMenuRootOrigin { case window, associatedWindow, menuBar, applicationChild(Int), focusedMenu, openedMenu, openedWindowMenu, notifiedMenu }
+
+// Chromium can advertise AXCancel on a DOM menu while its implementation
+// performs no cancellation. Main may finish only this exact top-level overlay
+// request through its existing owner; this receipt never claims AX dispatch.
+func windowMenuAssociatedCancelWindowID(operation: WindowMenuOperation?, origin: WindowMenuRootOrigin,
+                                        fingerprint: WindowMenuFingerprint, ancestorRoles: [String],
+                                        associatedScanComplete: Bool, uniqueOutermostMenu: Bool, target: WindowIdentity,
+                                        associated: WindowIdentity?) -> UInt32? {
+    guard operation == .cancel, case .associatedWindow = origin, fingerprint.role == kAXMenuRole,
+          fingerprint.operations.contains(.cancel),
+          !ancestorRoles.contains(kAXMenuRole), associatedScanComplete, uniqueOutermostMenu, let associated = associated,
+          validWindowMenuAssociatedWindow(associated, target: target), associated.bounds.contains(fingerprint.bounds) else { return nil }
+    return associated.windowId
+}
 
 struct WindowMenuRoot {
     let origin: WindowMenuRootOrigin
@@ -437,6 +607,8 @@ private let windowMenuLogger = Logger(subsystem: "com.omniflow.agent.computer-us
 final class WindowMenuSession {
     let window: WindowIdentity
     let root: AXUIElement
+    let associatedWindow: WindowIdentity?
+    let associatedRoot: AXUIElement?
     let application: AXUIElement
     let parentPID: Int32
     let parentStartedAt: Int64
@@ -445,6 +617,7 @@ final class WindowMenuSession {
     private var registrations: [(AXUIElement, CFString)] = []
     private var items: [String: WindowMenuBoundItem] = [:]
     private var menus: [WindowMenuBoundSurface] = []
+    private var associatedScan: WindowMenuAssociatedScan<AXUIElement>?
     private var openedMenus: [AXUIElement] = []
     // Fixed reason codes only: never log labels, AX values or application identity.
     private var readFailures: [String: Int] = [:]
@@ -454,13 +627,20 @@ final class WindowMenuSession {
         return nil
     }
 
-    init(window: WindowIdentity, parentPID: Int32, parentStartedAt: Int64) throws {
+    init(window: WindowIdentity, associatedWindow: WindowIdentity? = nil, parentPID: Int32, parentStartedAt: Int64) throws {
         self.window = window; self.parentPID = parentPID; self.parentStartedAt = parentStartedAt
         try requireTrust()
         guard AXUIElementSetMessagingTimeout(AXUIElementCreateSystemWide(), 0.15) == .success else { throw invalidRequest() }
         try revalidateWindow(window)
         guard let root = axWindow(window) else { throw windowMenuError("target_changed") }
         self.root = root
+        if let associatedWindow = associatedWindow {
+            guard let current = resolveWindowMenuAssociatedWindow(associatedWindow, target: window, windows: try cgWindows()) else { throw windowMenuError("associated_window_changed") }
+            try revalidateWindow(current)
+            guard let associatedRoot = axWindow(current), !CFEqual(associatedRoot, root) else { throw windowMenuError("associated_window_changed") }
+            self.associatedWindow = current
+            self.associatedRoot = associatedRoot
+        } else { self.associatedWindow = nil; associatedRoot = nil }
         application = AXUIElementCreateApplication(window.pid)
         var created: AXObserver?
         guard AXObserverCreate(window.pid, { _, element, notification, context in
@@ -480,6 +660,10 @@ final class WindowMenuSession {
             let notification = name as CFString
             if AXObserverAddNotification(created, element, notification, context) == .success { registrations.append((element, notification)) }
         }
+        if let associatedRoot = associatedRoot,
+           AXObserverAddNotification(created, associatedRoot, kAXUIElementDestroyedNotification as CFString, context) == .success {
+            registrations.append((associatedRoot, kAXUIElementDestroyedNotification as CFString))
+        }
         CFRunLoopAddSource(CFRunLoopGetCurrent(), AXObserverGetRunLoopSource(created), .defaultMode)
     }
     deinit { shutdownObserver() }
@@ -489,7 +673,7 @@ final class WindowMenuSession {
         for (element, name) in registrations { AXObserverRemoveNotification(observer, element, name) }
         registrations = []; self.observer = nil
     }
-    func invalidate() { generation.invalidate(); items.removeAll(); menus.removeAll() }
+    func invalidate() { generation.invalidate(); items.removeAll(); menus.removeAll(); associatedScan = nil }
     private func notification(_ element: AXUIElement, _ name: String) {
         invalidate()
         if name == kAXMenuOpenedNotification {
@@ -507,6 +691,10 @@ final class WindowMenuSession {
         guard parentAlive() else { throw windowMenuError("cancelled") }
         try revalidateWindow(window)
         guard let current = axWindow(window), CFEqual(current, root) else { throw windowMenuError("target_changed") }
+        if let associatedWindow = associatedWindow, let associatedRoot = associatedRoot {
+            try revalidateWindow(associatedWindow)
+            guard let current = axWindow(associatedWindow), CFEqual(current, associatedRoot) else { throw windowMenuError("associated_window_changed") }
+        }
     }
     func pumpNotifications() { _ = RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.001)) }
 
@@ -525,7 +713,8 @@ final class WindowMenuSession {
             guard error == .success, let raw = raw, CFGetTypeID(raw) == AXUIElementGetTypeID() else { return rejected("node_parent", error: error) }
             return (raw as! AXUIElement)
         }
-        let parent = CFEqual(element, root) || CFEqual(element, application) ? nil : related(kAXParentAttribute, required: true)
+        let parent = CFEqual(element, root) || associatedRoot.map({ CFEqual(element, $0) }) == true
+            || CFEqual(element, application) ? nil : related(kAXParentAttribute, required: true)
         let (windowError, rawWindow) = axAttribute(element, kAXWindowAttribute, budget: budget)
         var owner: AXUIElement?
         if windowError == .success {
@@ -632,6 +821,8 @@ final class WindowMenuSession {
     private func validMenuRoot(_ selected: WindowMenuRoot, budget: ScanBudget? = nil) -> Bool {
         switch selected.origin {
         case .window: return CFEqual(selected.element, root) && selected.ancestry.count == 1
+        case .associatedWindow:
+            return associatedRoot.map({ CFEqual(selected.element, $0) }) == true && selected.ancestry.count == 1
         case .notifiedMenu:
             guard selected.ancestry.count == 1, CFEqual(selected.element, selected.selector),
                   let current = windowMenuTopNotifiedRoot(selected.element, notifications: openedMenus, pid: window.pid,
@@ -679,6 +870,12 @@ final class WindowMenuSession {
         if case .window = selected.origin {
             return windowMenuAncestry(chain, root: root, pid: window.pid, equal: { CFEqual($0, $1) }, read: { node($0, budget: budget) })
         }
+        if case .associatedWindow = selected.origin {
+            guard let associatedRoot = associatedRoot else { return false }
+            return windowMenuAssociatedAncestry(chain, root: associatedRoot, pid: window.pid,
+                equal: { CFEqual($0, $1) }, read: { node($0, budget: budget) },
+                linked: { applicationLinked($0, $1, "", budget: budget) })
+        }
         let complete = selected.ancestry + chain.dropFirst()
         if case .openedWindowMenu = selected.origin {
             return windowMenuOpenedWindowAncestry(complete, root: root, pid: window.pid,
@@ -702,6 +899,10 @@ final class WindowMenuSession {
     }
     private func observationRoots(budget: ScanBudget) -> [WindowMenuRoot] {
         var roots = [WindowMenuRoot(origin: .window, element: root, selector: root, ancestry: [root], ancestorFingerprints: [])]
+        if let associatedRoot = associatedRoot {
+            roots.append(WindowMenuRoot(origin: .associatedWindow, element: associatedRoot, selector: associatedRoot,
+                ancestry: [associatedRoot], ancestorFingerprints: []))
+        }
         func add(_ element: AXUIElement, origin: WindowMenuRootOrigin, selector: AXUIElement? = nil) {
             guard roots.count < 12, !roots.contains(where: { CFEqual($0.element, element) }),
                   let chain = applicationChain(element, budget: budget) else { return }
@@ -754,6 +955,30 @@ final class WindowMenuSession {
             role: { node($0, budget: budget)?.role }, bounds: { axRect($0, budget: budget) })
     }
 
+    private func scanAssociatedMenus(deadline: UInt64) throws -> WindowMenuAssociatedScan<AXUIElement>? {
+        guard let associatedRoot = associatedRoot, let associatedWindow = associatedWindow else { return nil }
+        try validateRoot()
+        let epoch = generation.value
+        let budget = ScanBudget(deadline: deadline)
+        let selected = WindowMenuRoot(origin: .associatedWindow, element: associatedRoot, selector: associatedRoot,
+            ancestry: [associatedRoot], ancestorFingerprints: [])
+        var checks = 0
+        let result = windowMenuScanAssociatedMenus(root: associatedRoot, ready: {
+            checks += 1
+            if checks % 16 == 1 { self.pumpNotifications() }
+            return budget.ready() && self.parentAlive() && self.generation.value == epoch
+        }, equal: { CFEqual($0, $1) }, read: { self.node($0, budget: budget) },
+        validChain: { self.validChain($0, selected: selected, budget: budget) },
+        children: { axElements($0, attribute: kAXChildrenAttribute, limit: 64, requireComplete: true, budget: budget) },
+        fingerprint: {
+            guard let current = self.fingerprint($0, budget: budget), associatedWindow.bounds.contains(current.bounds) else { return nil }
+            return current
+        })
+        pumpNotifications(); try validateRoot()
+        guard generation.value == epoch else { throw windowMenuError("menu_changed") }
+        return result
+    }
+
     func observe(requestId: String) throws -> [String: Any] {
         readFailures.removeAll(keepingCapacity: true)
         defer {
@@ -762,7 +987,11 @@ final class WindowMenuSession {
         }
         invalidate(); pumpNotifications(); try validateRoot()
         let epoch = generation.value
-        let budget = ScanBudget(deadline: DispatchTime.now().uptimeNanoseconds + 2_500_000_000)
+        let deadline = DispatchTime.now().uptimeNanoseconds + 2_500_000_000
+        // Prove this small explicit subtree first. The remaining ordinary/app
+        // scan shares the deadline but cannot contaminate its completeness.
+        let associatedProof = try scanAssociatedMenus(deadline: deadline)
+        let budget = ScanBudget(deadline: deadline)
         let windows = try cgWindows()
         let ordinaryBounds = ordinaryWindowBounds(budget: budget)
         struct Entry { let element: AXUIElement; let chain: [AXUIElement]; let path: [Int]; let ancestors: [(AXUIElement, WindowMenuFingerprint)]; let selected: WindowMenuRoot }
@@ -787,10 +1016,17 @@ final class WindowMenuSession {
                 guard let menu = fingerprint(entry.element, budget: budget) else { continue }
                 guard foundMenus.count < 8 else { budget.truncated = true; continue }
                 ancestors.append((entry.element, menu))
-                foundMenus.append(WindowMenuBoundSurface(element: entry.element, chain: entry.chain, path: entry.path,
-                    root: entry.selected, fingerprint: menu, menuFingerprints: ancestors, surface: ordinaryBounds.flatMap {
+                let surface: WindowIdentity?
+                if case .associatedWindow = entry.selected.origin, let associatedWindow = associatedWindow {
+                    surface = windowMenuAssociatedSurface(bounds: menu.bounds, target: window,
+                        associated: associatedWindow, windows: windows)
+                } else {
+                    surface = ordinaryBounds.flatMap {
                         windowMenuSurface(bounds: menu.bounds, target: window, windows: windows, ordinaryWindowBounds: $0)
-                    }))
+                    }
+                }
+                foundMenus.append(WindowMenuBoundSurface(element: entry.element, chain: entry.chain, path: entry.path,
+                    root: entry.selected, fingerprint: menu, menuFingerprints: ancestors, surface: surface))
             }
             if let current = fingerprint(entry.element, budget: budget) {
                 let inMenu = current.role == kAXMenuRole || (current.role == kAXMenuItemRole && !ancestors.isEmpty) || current.role == kAXMenuBarItemRole
@@ -824,7 +1060,7 @@ final class WindowMenuSession {
             }, menus: foundMenus.map { $0.json }, truncated: budget.truncated)
         let retained = Array(foundItems.prefix(bounded.retained))
         guard generation.install(observationId, generation: epoch, now: DispatchTime.now().uptimeNanoseconds) else { throw windowMenuError("menu_changed") }
-        items = Dictionary(uniqueKeysWithValues: retained.map { ($0.itemId, $0) }); menus = foundMenus
+        items = Dictionary(uniqueKeysWithValues: retained.map { ($0.itemId, $0) }); menus = foundMenus; associatedScan = associatedProof
         return bounded.receipt
     }
 
@@ -870,6 +1106,31 @@ final class WindowMenuSession {
 
     func action(_ command: WindowMenuCommand, acknowledge: () throws -> Void) throws -> [String: Any] {
         let (id, item, action) = try validatedItem(command)
+        if command.operation == .cancel, case .associatedWindow = item.root.origin {
+            guard let original = associatedScan, original.complete else { throw windowMenuError("menu_cancel_unavailable") }
+            func provesSelectedOutermost(_ scan: WindowMenuAssociatedScan<AXUIElement>) -> Bool {
+                let outermost = scan.menus.filter { $0.ancestorMenuCount == 0 }
+                return scan.complete && outermost.count == 1 && CFEqual(outermost[0].element, item.element)
+                    && outermost[0].path == item.path && outermost[0].fingerprint == item.fingerprint
+            }
+            guard provesSelectedOutermost(original) else { throw windowMenuError("menu_cancel_unavailable") }
+            // A portal submenu can be a sibling of the original DOM menu and
+            // need not change that menu's fingerprint. Re-scan the entire exact
+            // associated root immediately before handing cancellation to main.
+            guard let current = try scanAssociatedMenus(deadline: DispatchTime.now().uptimeNanoseconds + 2_500_000_000),
+                  generation.matches(id, now: DispatchTime.now().uptimeNanoseconds) else { throw windowMenuError("stale_observation") }
+            guard let associatedID = windowMenuAssociatedCancelWindowID(operation: command.operation,
+                origin: item.root.origin, fingerprint: item.fingerprint,
+                ancestorRoles: item.menuFingerprints.dropLast().map { $0.1.role },
+                associatedScanComplete: current.complete, uniqueOutermostMenu: provesSelectedOutermost(current),
+                target: window, associated: associatedWindow) else { throw windowMenuError("menu_cancel_unavailable") }
+            guard generation.consume(id, now: DispatchTime.now().uptimeNanoseconds) else { throw windowMenuError("stale_observation") }
+            items.removeAll(); menus.removeAll()
+            try validateRoot()
+            // Main must still prove the original request and dismiss it using
+            // the original overlay owner. No AX action or dispatched ACK here.
+            return ["ok": true, "requestId": command.requestId, "associatedCancelWindowId": associatedID]
+        }
         guard generation.consume(id, now: DispatchTime.now().uptimeNanoseconds) else { throw windowMenuError("stale_observation") }
         items.removeAll(); menus.removeAll()
         guard AXUIElementSetMessagingTimeout(item.element, 0.75) == .success else { throw windowMenuError("menu_changed") }
@@ -877,6 +1138,8 @@ final class WindowMenuSession {
         let result = AXUIElementPerformAction(item.element, action as CFString)
         pumpNotifications()
         guard result == .success, parentAlive() else { throw windowMenuError("menu_action_unknown", unknown: true) }
+        // AX success confirms dispatch, not consumption. The action may
+        // legitimately dismiss the overlay or close/rename the main window.
         return ["ok": true, "requestId": command.requestId, "dispatched": true]
     }
 
@@ -892,9 +1155,17 @@ final class WindowMenuSession {
                 invalidate(); throw windowMenuError("menu_changed")
             }
             if let surface = menu.surface {
-                guard let ordinaryBounds = ordinaryBounds,
-                      let current = windowMenuSurface(bounds: menu.fingerprint.bounds, target: window, windows: currentWindows,
-                        ordinaryWindowBounds: ordinaryBounds), current.windowId == surface.windowId else {
+                let current: WindowIdentity?
+                if case .associatedWindow = menu.root.origin, let associatedWindow = associatedWindow {
+                    current = windowMenuAssociatedSurface(bounds: menu.fingerprint.bounds, target: window,
+                        associated: associatedWindow, windows: currentWindows)
+                } else {
+                    current = ordinaryBounds.flatMap {
+                        windowMenuSurface(bounds: menu.fingerprint.bounds, target: window, windows: currentWindows,
+                            ordinaryWindowBounds: $0)
+                    }
+                }
+                guard let current = current, current.windowId == surface.windowId else {
                     invalidate(); throw windowMenuError("menu_changed")
                 }
                 try revalidateWindow(surface, requireUniqueAXWindow: false)
@@ -1043,8 +1314,9 @@ func windowMenuSession() throws {
         for line in try buffer.append(Data(bytes.prefix(count))) {
             guard parentAlive() else { return }
             if session == nil {
-                let request = try parseWindowRequest(line)
-                session = try WindowMenuSession(window: request.window, parentPID: parent, parentStartedAt: parentStartedAt)
+                let request = try parseWindowMenuStartup(line)
+                session = try WindowMenuSession(window: request.window, associatedWindow: request.associatedWindow,
+                    parentPID: parent, parentStartedAt: parentStartedAt)
                 try send(["ok": true, "ready": true]); lastInputAt = DispatchTime.now().uptimeNanoseconds; continue
             }
             guard let command = try parseWindowMenuCommand(line), let session = session else { continue }

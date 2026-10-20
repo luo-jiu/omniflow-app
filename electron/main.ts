@@ -28,7 +28,8 @@ import { createAppGracefulShutdown } from './service/appGracefulShutdown'
 import { agentMediaArtifactStore } from './service/agent/agent-media-artifact-store'
 import { agentOrchestrator } from './service/agent/agent-orchestrator'
 import { agentWorkspaceRendering } from './service/agent/computer/agent-workspace-rendering'
-import { configureAgentComputerAppearance } from './service/agent/computer/agent-computer-service-runtime'
+import { configureAgentComputerAppearance, configureAgentComputerAssociatedMenu } from './service/agent/computer/agent-computer-service-runtime'
+import { createAgentComputerAssociatedMenu } from './service/agent/computer/agent-computer-overlay'
 import { disposeAgentAttachmentDrafts } from './service/agent/agent-attachment-runtime'
 import {
   disposeAgentPersistenceRuntime,
@@ -528,7 +529,10 @@ app.whenReady().then(async () => {
   embeddedBrowserMainController.registerIpcHandlers()
   const appearance = registerAppearanceIpc({ getMainWindow: () => mainWindow, getOverlayWindow: () => overlayWindowController.getWindow() })
   configureAgentComputerAppearance(appearance.getAccentColor)
-  registerOverlayWindowIpcHandlers(overlayWindowController)
+  const overlayAccess = registerOverlayWindowIpcHandlers(overlayWindowController)
+  configureAgentComputerAssociatedMenu(createAgentComputerAssociatedMenu({
+    getMainWindow: () => mainWindow, controller: overlayWindowController, access: overlayAccess,
+  }))
   registerSystemVideoWindowIpcHandlers(systemVideoWindowController)
   registerAppUpdateIpcHandlers(ipcMain, appUpdateService)
 

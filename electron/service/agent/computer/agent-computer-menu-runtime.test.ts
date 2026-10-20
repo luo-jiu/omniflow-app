@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createAgentComputerRuntime, type AgentComputerRuntimeDependencies } from './agent-computer-runtime';
+import { createAgentComputerRuntime, type AgentComputerAssociatedMenu, type AgentComputerRuntimeDependencies } from './agent-computer-runtime';
 import { AgentComputerMenuSessionCloseError, type AgentComputerMenuObservation,
   type AgentComputerMenuSessionLease } from '../../../platform/computer-use/window-menu';
 import { AgentComputerInputError, type AgentComputerSharedWindow, type AgentComputerWindowIdentity } from '../../../platform/computer-use';
@@ -65,6 +65,7 @@ function fixture() {
     clickStatus: vi.fn(async () => ({ available: true })), requestClickPermission: vi.fn(async () => undefined),
     images: () => images, menuSession: vi.fn<NonNullable<AgentComputerRuntimeDependencies['menuSession']>>(async () => lease), now: () => clock,
     indicatePointer: undefined as AgentComputerRuntimeDependencies['indicatePointer'],
+    associatedMenu: undefined as AgentComputerRuntimeDependencies['associatedMenu'],
     captureWithPointer: vi.fn<NonNullable<AgentComputerRuntimeDependencies['captureWithPointer']>>(async () => ({ png: Buffer.from('root-with-pointer'), cursorIncluded: true })),
   };
   const runtime = createAgentComputerRuntime(dependencies);
@@ -105,7 +106,173 @@ function pointerFixture(f: ReturnType<typeof fixture>) {
   return { surface, pointerWindow, closed, visual, resolved };
 }
 
+function associatedCancelFixture() {
+  const f = fixture();
+  f.native.items[0] = { ...f.native.items[0], role: 'AXMenu', operations: ['cancel'] };
+  let current: AgentComputerAssociatedMenu | undefined;
+  let valid = true;
+  const dismiss = vi.fn(() => { current = undefined; return true; });
+  const association: AgentComputerAssociatedMenu = { key: 'request-generation-1', window: { ...f.window, windowId: 25 },
+    valid: () => valid && current === association, dismiss };
+  current = association;
+  f.dependencies.associatedMenu = { current: () => current, prepareCompletion: () => undefined };
+  f.lease.action.mockResolvedValue({ associatedCancelWindowId: 25 });
+  return { ...f, association, dismiss, invalidate: () => { valid = false; },
+    replace: (next?: AgentComputerAssociatedMenu) => { current = next; } };
+}
+
 describe('associated menu runtime', () => {
+  it('binds the exact first-party overlay privately and revokes actions when its request changes', async () => {
+    const f = fixture();
+    let current = true;
+    const association = { key: 'request-generation-1', window: { ...f.window, windowId: 25 }, valid: () => current };
+    f.dependencies.associatedMenu = { current: () => current ? association : undefined, prepareCompletion: () => undefined };
+    const seen = await f.observe();
+    expect(f.dependencies.menuSession).toHaveBeenCalledWith(f.window, f.controller.signal, association.window);
+    expect(JSON.stringify(seen.result)).not.toMatch(/request-generation|windowId|processStartedAt/);
+    const prepared = await f.prepareMenu(seen.data);
+    current = false;
+    await expect(f.runtime.menu(prepared, f.controller.signal, f.commit)).rejects.toThrow(/关联菜单请求已变化/);
+    expect(f.lease.action).not.toHaveBeenCalled();
+    expect(f.commit.begin).not.toHaveBeenCalled();
+    expect(f.lease.close).toHaveBeenCalledOnce();
+  });
+  it('discards pixels when an associated request changes during capture', async () => {
+    const f = fixture();
+    let current = true;
+    const association = { key: 'request-generation-1', window: { ...f.window, windowId: 25 }, valid: () => current };
+    f.dependencies.associatedMenu = { current: () => current ? association : undefined, prepareCompletion: () => undefined };
+    f.lease.capture.mockImplementation(async () => {
+      current = false;
+      return { available: true, png: Buffer.from('stale-overlay'), width: 800, height: 600,
+        bounds: f.window.bounds, menuCapture: 'included', cursorIncluded: false };
+    });
+    await expect(f.observe({ scope: 'menu', mode: 'both' })).rejects.toThrow(/关联菜单请求已变化/);
+    expect(f.images.import).not.toHaveBeenCalled();
+  });
+  it('accepts a successful AX menu selection that legitimately closes its associated request', async () => {
+    const f = fixture();
+    let current = true;
+    const association = { key: 'request-generation-1', window: { ...f.window, windowId: 25 }, valid: () => current };
+    f.dependencies.associatedMenu = { current: () => current ? association : undefined, prepareCompletion: () => undefined };
+    const seen = await f.observe();
+    f.lease.action.mockImplementation(async () => { current = false; });
+    await expect(f.runtime.menu(await f.prepareMenu(seen.data), f.controller.signal, f.commit)).resolves.toMatchObject({ ok: true });
+    expect(f.lease.action).toHaveBeenCalledOnce();
+  });
+
+  it('commits an associated cancellation only after the exact live request owner dismisses it', async () => {
+    const f = associatedCancelFixture();
+    const seen = await f.observe();
+    const prepared = await f.prepareMenu(seen.data, 'cancel');
+    const result = await f.runtime.menu(prepared, f.controller.signal, f.commit);
+    expect(f.dismiss).toHaveBeenCalledOnce();
+    expect(f.association.valid()).toBe(false);
+    expect(result).toMatchObject({ ok: true, data: { dispatchState: 'dispatched', mutationCommitState: 'committed',
+      menuOperation: 'cancel', retryAllowed: false, nextAction: 'observe' } });
+    expect(JSON.stringify(result)).not.toMatch(/associatedCancelWindowId|request-generation|windowId|processStartedAt/);
+    expect(f.commit.begin).toHaveBeenCalledOnce(); expect(f.commit.settle).toHaveBeenCalledWith(result);
+    await expect(f.runtime.menu(prepared, f.controller.signal, f.commit)).rejects.toThrow(/一次操作|过期/);
+    expect(f.lease.action).toHaveBeenCalledOnce();
+  });
+
+  it.each([false, true])('preserves ordinary void cancellation without dismissing a first-party owner (associated=%s)', async associated => {
+    const f = associatedCancelFixture();
+    if (!associated) f.dependencies.associatedMenu = undefined;
+    f.lease.action.mockResolvedValue(undefined);
+    const seen = await f.observe();
+    await expect(f.runtime.menu(await f.prepareMenu(seen.data, 'cancel'), f.controller.signal, f.commit))
+      .resolves.toMatchObject({ ok: true, data: { dispatchState: 'dispatched' } });
+    expect(f.dismiss).not.toHaveBeenCalled();
+  });
+
+  it.each([24, 0, -1, 25.5, Number.NaN, Number.MAX_SAFE_INTEGER + 1])('refuses invalid cancellation window marker %s without dismissing anything', async id => {
+    const f = associatedCancelFixture();
+    f.lease.action.mockResolvedValue({ associatedCancelWindowId: id });
+    const seen = await f.observe();
+    const result = await f.runtime.menu(await f.prepareMenu(seen.data, 'cancel'), f.controller.signal, f.commit);
+    expect(result).toMatchObject({ ok: false, data: { dispatchState: 'unknown', mutationCommitState: 'commit_unknown', retryAllowed: false } });
+    expect(f.dismiss).not.toHaveBeenCalled(); expect(f.lease.close).toHaveBeenCalledOnce();
+    expect(f.lease.action).toHaveBeenCalledOnce();
+  });
+
+  it.each([null, {}, { associatedCancelWindowId: 25, dispatched: true }, { associatedCancelWindowId: '25' }])(
+    'refuses malformed cancellation receipts %j', async invalid => {
+      const f = associatedCancelFixture();
+      f.lease.action.mockResolvedValue(invalid as Awaited<ReturnType<AgentComputerMenuSessionLease['action']>>);
+      const seen = await f.observe();
+      await expect(f.runtime.menu(await f.prepareMenu(seen.data, 'cancel'), f.controller.signal, f.commit))
+        .resolves.toMatchObject({ ok: false, data: { dispatchState: 'unknown', retryAllowed: false } });
+      expect(f.dismiss).not.toHaveBeenCalled(); expect(f.lease.action).toHaveBeenCalledOnce();
+    });
+
+  it.each(['open', 'press'] as const)('refuses an owner-cancel marker for %s', async operation => {
+    const f = associatedCancelFixture();
+    f.native.items[0].operations = [operation];
+    const seen = await f.observe();
+    await expect(f.runtime.menu(await f.prepareMenu(seen.data, operation), f.controller.signal, f.commit))
+      .resolves.toMatchObject({ ok: false, data: { dispatchState: 'unknown', retryAllowed: false } });
+    expect(f.dismiss).not.toHaveBeenCalled();
+  });
+
+  it('refuses an associated cancellation marker without an associated request', async () => {
+    const f = associatedCancelFixture(); f.dependencies.associatedMenu = undefined;
+    const seen = await f.observe();
+    await expect(f.runtime.menu(await f.prepareMenu(seen.data, 'cancel'), f.controller.signal, f.commit))
+      .resolves.toMatchObject({ ok: false, data: { dispatchState: 'unknown', retryAllowed: false } });
+    expect(f.dismiss).not.toHaveBeenCalled();
+  });
+
+  it.each(['invalid', 'closed', 'replacement'] as const)('never dismisses a changed owner after native preparation: %s', async change => {
+    const f = associatedCancelFixture();
+    const replacementDismiss = vi.fn(() => true);
+    f.lease.action.mockImplementation(async () => {
+      if (change === 'invalid') f.invalidate();
+      else f.replace(change === 'closed' ? undefined : { ...f.association, key: 'replacement', valid: () => true, dismiss: replacementDismiss });
+      return { associatedCancelWindowId: 25 };
+    });
+    const seen = await f.observe();
+    await expect(f.runtime.menu(await f.prepareMenu(seen.data, 'cancel'), f.controller.signal, f.commit))
+      .resolves.toMatchObject({ ok: false, data: { dispatchState: 'unknown', retryAllowed: false } });
+    expect(f.dismiss).not.toHaveBeenCalled(); expect(replacementDismiss).not.toHaveBeenCalled();
+    expect(f.lease.action).toHaveBeenCalledOnce();
+  });
+
+  it.each(['false', 'throws', 'throws-not-dispatched', 'missing'] as const)('requires an affirmative owner cancellation acknowledgement: %s', async response => {
+    const f = associatedCancelFixture();
+    if (response === 'missing') f.association.dismiss = undefined;
+    else f.dismiss.mockImplementation(() => {
+      if (response === 'throws') throw new Error('owner unavailable');
+      if (response === 'throws-not-dispatched') throw new AgentComputerInputError('owner unavailable', 'not-dispatched');
+      return false;
+    });
+    const seen = await f.observe();
+    await expect(f.runtime.menu(await f.prepareMenu(seen.data, 'cancel'), f.controller.signal, f.commit))
+      .resolves.toMatchObject({ ok: false, data: { dispatchState: 'unknown', retryAllowed: false } });
+    expect(f.lease.action).toHaveBeenCalledOnce(); expect(f.lease.close).toHaveBeenCalledOnce();
+  });
+
+  it.each(['abort', 'release'] as const)('never dismisses a live owner after Run %s during native preparation', async stop => {
+    const f = associatedCancelFixture();
+    f.lease.action.mockImplementation(async () => {
+      if (stop === 'abort') f.controller.abort();
+      else await f.runtime.releaseRun(f.identity.runId);
+      return { associatedCancelWindowId: 25 };
+    });
+    const seen = await f.observe();
+    await expect(f.runtime.menu(await f.prepareMenu(seen.data, 'cancel'), f.controller.signal, f.commit))
+      .resolves.toMatchObject({ ok: false, data: { dispatchState: 'unknown', retryAllowed: false } });
+    expect(f.dismiss).not.toHaveBeenCalled(); expect(f.lease.action).toHaveBeenCalledOnce();
+  });
+
+  it('never prepares native cancellation after an already-aborted Run', async () => {
+    const f = associatedCancelFixture(); const seen = await f.observe();
+    const prepared = await f.prepareMenu(seen.data, 'cancel');
+    f.controller.abort();
+    await expect(f.runtime.menu(prepared, f.controller.signal, f.commit)).rejects.toThrow();
+    expect(f.lease.action).not.toHaveBeenCalled(); expect(f.dismiss).not.toHaveBeenCalled();
+    expect(f.commit.begin).not.toHaveBeenCalled();
+  });
   it('uses AX by default and exposes fresh public IDs without native tokens, bounds or surface identity', async () => {
     const f = fixture();
     const first = await f.observe();
