@@ -14,6 +14,7 @@ import type {
   AgentToolMainPreparationResult,
 } from '../agent-tool-registry';
 import type { AgentShellRuntimeResult } from '../shell/agent-shell-runtime';
+import { toAgentProviderToolName } from '../agent-provider-tool-name';
 import {
   AGENT_SHELL_PROVIDER_OUTPUT_MAX_BYTES,
   projectAgentShellProviderOutput,
@@ -130,7 +131,7 @@ export function createAgentShellRunTool(runtime: AgentShellRunToolRuntime): Agen
     throw new Error('Agent Shell Tool 缺少生产运行时');
   }
   const tool: AgentTool = {
-    description: '运行一条完整的非交互式原生 Shell 命令。默认在当前 Agent Run 的隔离工作区执行；需要检查、读取或操作本机文件与工具时，显式使用 executionContext=host。命令、Provider、环境、宿主 cwd 和实际风险会在执行前由主进程分析并冻结。只有不存在 _omniflowProjection.truncated=true，且需要使用的 stdout/stderr 流均包含 content、truncated=false、omittedBytes=0，才表示这些命令输出已完整交付；这仍不表示命令覆盖了完整源文件。只有命令读取完整来源且所需输出也完整时，才能声称全文已读取。',
+    description: `运行一条完整的非交互式原生 Shell 命令。默认在当前 Agent Run 的隔离工作区执行；run-workspace 也能调用本机已安装的编译器、测试器及转换 CLI。本轮提供 ${toAgentProviderToolName('file.stage')} 时，资料库已保存文件需要编译、测试、校验或转换，优先用 ${toAgentProviderToolName('file.stage')} 暂存原始字节，再在 run-workspace 使用实际返回的 logicalPath，避免从 ${toAgentProviderToolName('file.read')} 文本重述源文件。辅助测试入口和临时构建产物写入 work 或 tmp；纯验证无需 ${toAgentProviderToolName('file.publish')}。直接读取、编译或操作本机真实文件时，使用 executionContext=host，可直接使用原路径，无需暂存。命令、Provider、环境、宿主 cwd 和实际风险会在执行前由主进程分析并冻结。只有不存在 _omniflowProjection.truncated=true，且需要使用的 stdout/stderr 流均包含 content、truncated=false、omittedBytes=0，才表示这些命令输出已完整交付；这仍不表示命令覆盖了完整源文件。只有命令读取完整来源且所需输出也完整时，才能声称全文已读取。`,
     execute: async (_input, context) => {
       if (!context.preparation) throw new Error('Agent Shell Tool 缺少 prepared execution');
       const result = await runtime.execute(context);
@@ -153,14 +154,14 @@ export function createAgentShellRunTool(runtime: AgentShellRunToolRuntime): Agen
         },
         cwd: {
           default: 'work',
-          description: '工作目录。用户给出文件路径时使用其父目录。run-workspace默认work；生成待发布文件建议cwd=output、命令写a.cpp，发布sourcePath用output/a.cpp。cwd=work时须写../output/a.cpp。host使用宿主目录，省略时用宿主默认cwd。',
+          description: '工作目录。用户给出文件路径时使用其父目录。run-workspace默认work；stage返回的logicalPath相对工作区根，沿用实际返回路径，例如input/a.cpp在cwd=work时用../input/a.cpp。辅助测试入口和临时构建产物写work或tmp。生成待发布文件建议cwd=output、命令写a.cpp，发布sourcePath用output/a.cpp。cwd=work时须写../output/a.cpp。host使用宿主目录，省略时用宿主默认cwd。',
           maxLength: AGENT_SHELL_MAX_CWD_BYTES,
           minLength: 1,
           type: 'string',
         },
         executionContext: {
           default: 'run-workspace',
-          description: '执行上下文。run-workspace 使用本次 Run 的虚拟工作区；host 使用当前 macOS 用户的真实宿主环境。不要仅因为 full-access 就省略这个字段。',
+          description: '执行上下文。run-workspace 使用本次 Run 的虚拟工作区，也能调用本机已安装的 CLI 编译、测试、校验或转换暂存文件；host 使用当前 macOS 用户的真实宿主环境，可直接操作本机真实文件。不要仅因为 full-access 就省略这个字段。',
           enum: ['run-workspace', 'host'],
           type: 'string',
         },

@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { AgentToolMainPreparedExecution } from '../agent-tool-registry';
 import { createAgentShellExecutionLeaseManager } from './agent-shell-execution-lease';
+import { createAgentShellExecutionIdentity } from './agent-shell-command-analyzer';
 import { createAgentShellCommandHash } from './agent-shell-prepared-action';
 import {
   createAgentShellSpawnPreflight,
@@ -60,7 +61,7 @@ function workspace(): AgentShellWorkspacePreparationContext {
 function prepared(): AgentToolMainPreparedExecution {
   const command = 'printf hello';
   const commandHash = createAgentShellCommandHash(command);
-  return {
+  const preparation: AgentToolMainPreparedExecution = {
     binding: {
       aiDestination: {
         configurationIdentity: `v1:${'e'.repeat(64)}`,
@@ -144,6 +145,17 @@ function prepared(): AgentToolMainPreparedExecution {
     },
     snapshotHash: '9'.repeat(64),
   };
+  const action = preparation.publicAction as AgentShellPreparedActionPublicV1;
+  const analysis = preparation.binding.analysis as { analysisIdentity: string; analyzerRevision: string;
+    providerAnalyzerRevision: string; workspaceBoundaryVerified: boolean; executionIdentity?: string };
+  analysis.executionIdentity = createAgentShellExecutionIdentity({
+    command,
+    dialect: action.provider.dialect,
+    logicalCwd: action.cwd.path,
+    providerAnalyzerRevision: analysis.providerAnalyzerRevision,
+    analysis: { ...analysis, assessment: action.assessment },
+  });
+  return preparation;
 }
 
 function currentBinding(input: AgentToolMainPreparedExecution): AgentShellSpawnPreflightCurrentBinding {
@@ -157,6 +169,7 @@ function currentBinding(input: AgentToolMainPreparedExecution): AgentShellSpawnP
     aiDestinationConfigurationIdentity: binding.aiDestination.configurationIdentity,
     aiDestinationIdentity: input.identity.aiDestinationIdentity,
     analysisIdentity: analysis.analysisIdentity,
+    executionIdentity: analysis.executionIdentity,
     analyzerRevision: analysis.analyzerRevision,
     authorizationIdentity: analysis.authorizationIdentity,
     environmentBindingVersion: binding.environmentBindingVersion,
@@ -204,6 +217,15 @@ async function hostPrepared(
     cwd: { kind: 'host', path: cwd },
     dataScope: { ...baseAction.dataScope, unresolvedWorkspaceRead: true },
   };
+  const analysis = binding.analysis as { analysisIdentity: string; analyzerRevision: string;
+    providerAnalyzerRevision: string; workspaceBoundaryVerified: boolean; executionIdentity?: string };
+  analysis.executionIdentity = createAgentShellExecutionIdentity({
+    command: publicAction.command,
+    dialect: publicAction.provider.dialect,
+    logicalCwd: host.cwd.lexicalPath,
+    providerAnalyzerRevision: analysis.providerAnalyzerRevision,
+    analysis: { ...analysis, assessment: publicAction.assessment },
+  });
   return {
     ...base,
     binding,
@@ -281,6 +303,25 @@ function createFixture() {
 }
 
 describe('Agent Shell spawn preflight', () => {
+  it.each([undefined, 'broken', `v1:${'0'.repeat(64)}`])('rejects a missing or changed recomputed execution identity: %s', async executionIdentity => {
+    const fixture = createFixture();
+    fixture.resolveCurrentBinding.mockResolvedValueOnce({ ...currentBinding(fixture.preparation), executionIdentity } as AgentShellSpawnPreflightCurrentBinding);
+    await expect(fixture.preflight.assertReady({ grant: await grantFor(fixture.preparation), owner: OWNER,
+      preparation: fixture.preparation, runCapabilityIdentity: fixture.preparation.identity.runCapabilityIdentity,
+      signal: new AbortController().signal, toolRunId: fixture.preparation.identity.toolRunId,
+      workspaceId: 'workspace-1' })).rejects.toThrow('execution binding 在 spawn 前已变化');
+  });
+
+  it('rejects changing the prepared execution identity after lease consumption', async () => {
+    const fixture = createFixture();
+    const grant = await grantFor(fixture.preparation);
+    Object.assign(fixture.preparation.binding.analysis as object, { executionIdentity: `v1:${'0'.repeat(64)}` });
+    await expect(fixture.preflight.assertReady({ grant, owner: OWNER, preparation: fixture.preparation,
+      runCapabilityIdentity: fixture.preparation.identity.runCapabilityIdentity,
+      signal: new AbortController().signal, toolRunId: fixture.preparation.identity.toolRunId,
+      workspaceId: 'workspace-1' })).rejects.toThrow('execution identity 与 grant 不匹配');
+  });
+
   it('rechecks identities and scans the workspace immediately before spawn', async () => {
     const fixture = createFixture();
     await expect(fixture.preflight.assertReady({

@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { createAgentToolRegistry } from '../agent-tool-registry';
+import { resolveAgentModelAdapter, restrictAgentToolsForModel } from '../agent-model-adapter';
+import { createAgentShellRunTool } from './shell-run-tool';
 import {
   createAgentFileBridgeTools,
   normalizeAgentFilePublishInputV1,
@@ -50,14 +52,39 @@ describe('Agent file bridge tools', () => {
       name: 'file.upload',
       registrationId: 'file.upload@1',
     }]);
-    expect(tools.find(tool => tool.name === 'file.stage')?.description)
-      .toContain('使用 shell_run 直接读取原路径，不要暂存');
+    const stageDescription = snapshot.tools.find(tool => tool.name === 'file.stage')?.description;
+    expect(stageDescription).toContain('按原始字节暂存');
+    expect(stageDescription).toContain('本机 CLI 编译、测试、校验或转换');
+    expect(stageDescription).toContain('优先暂存原始文件后使用 shell_run 的 run-workspace');
+    expect(stageDescription).toContain('避免把 file_read 的文本结果经模型重述、heredoc 重建为源文件');
+    expect(stageDescription).toContain('logicalPath 相对工作区根，沿用实际返回路径');
+    expect(stageDescription).toContain('input/a.cpp 且 cwd=work 时，命令使用 ../input/a.cpp');
+    expect(stageDescription).toContain('辅助测试入口和临时构建产物写入 work 或 tmp');
+    expect(stageDescription).toContain('纯验证无需 file_publish');
+    expect(stageDescription).toContain('executionContext=host 直接操作原路径，无需暂存');
     expect(tools.find(tool => tool.name === 'file.upload')?.description)
-      .toContain('先查看或检查原文件时，使用 shell_run 直接读取原路径');
+      .toContain('先查看或检查原文件，且本轮提供 shell_run 时，可使用该工具直接读取原路径');
     expect(tools.find(tool => tool.name === 'file.upload')?.description)
-      .toContain('只有需要工作副本来修改、转换或生成新文件时');
+      .toContain('只有需要工作副本来修改、转换或生成新文件，且本轮提供');
     expect(tools.find(tool => tool.name === 'file.upload')?.description)
-      .toContain('file_stage、shell_run 和 file_publish');
+      .toContain('file_stage、shell_run 和 file_publish 时，才使用这条处理链');
+  });
+
+  it('keeps cross-tool guidance conditional when the model filters Shell but retains staging', () => {
+    const original = createAgentToolRegistry([
+      ...createAgentFileBridgeTools(createRuntime()),
+      createAgentShellRunTool({ execute: vi.fn(), prepare: vi.fn() }),
+    ]).createSnapshot();
+    const restricted = restrictAgentToolsForModel(original, resolveAgentModelAdapter(
+      { providerType: 'openai' }, 'gpt-5.5', { supportsShellTool: false },
+    ));
+
+    expect(restricted.get('shell.run')).toBeNull();
+    const stageDescription = restricted.get('file.stage')?.description;
+    expect(stageDescription).toContain('本轮提供 shell_run 时，资料库文件需要交给本机 CLI');
+    expect(stageDescription).toContain('且本轮提供 shell_run 时，可使用其 executionContext=host');
+    expect(stageDescription).toContain('本轮提供 file_upload 时，原样传输应使用该工具');
+    expect(restricted.get('file.upload')?.description).toContain('且本轮提供 shell_run 时，可使用该工具');
   });
 
   it('accepts the picker and explicit local-path stage branches', () => {

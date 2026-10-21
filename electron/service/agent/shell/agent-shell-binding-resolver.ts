@@ -14,6 +14,7 @@ import {
 } from './agent-shell-prepared-action';
 import {
   createAgentShellCommandAnalyzer,
+  createAgentShellExecutionIdentity,
   type AgentShellCommandAnalyzer,
 } from './agent-shell-command-analyzer';
 import {
@@ -123,6 +124,7 @@ export function createAgentShellBindingResolver(
     );
     const preparedProvider = record(binding.provider, 'Agent Shell Provider binding');
     const preparedAnalysis = record(binding.analysis, 'Agent Shell analysis binding');
+    const preparedExecutionIdentity = requiredText(preparedAnalysis.executionIdentity, 'Agent Shell execution identity');
     const executionContext = action.cwd.kind;
     const preparedWorkspace = executionContext === 'run-workspace'
       ? record(
@@ -235,6 +237,16 @@ export function createAgentShellBindingResolver(
       commandAnalysis = createAgentShellConservativeAnalysis(action.environment.length > 0);
     }
     abortIfNeeded(input.signal);
+    const executionIdentity = createAgentShellExecutionIdentity({
+      command: action.command,
+      dialect: provider.publicIdentity.dialect,
+      logicalCwd: currentHost?.cwd.lexicalPath || preparedWorkspace!.logicalCwd,
+      providerAnalyzerRevision: provider.publicIdentity.analyzerRevision,
+      analysis: commandAnalysis,
+    });
+    if (preparedExecutionIdentity !== executionIdentity) {
+      throw new Error('Agent Shell execution identity 在 spawn 前已变化');
+    }
     const authorizationIdentity = createAgentShellAuthorizationIdentity({
       aiDestinationIdentity: currentAiDestination.identity,
       analysisIdentity: commandAnalysis.analysisIdentity,
@@ -277,6 +289,7 @@ export function createAgentShellBindingResolver(
       aiDestinationIdentity: currentAiDestination.identity,
       analysisIdentity: commandAnalysis.analysisIdentity,
       analyzerRevision: commandAnalysis.analyzerRevision,
+      executionIdentity,
       authorizationIdentity,
       environmentBindingVersion: AGENT_SHELL_ENVIRONMENT_BINDING_VERSION,
       environmentIdentity: effectiveEnvironment.identity,

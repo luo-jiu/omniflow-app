@@ -1,6 +1,18 @@
 # 内置 Agent Shell 架构
 
-更新时间：2026-09-09
+更新时间：2026-10-21
+
+## 资料库原文件编译与验证（2026-10-21）
+
+资料库已保存文件需要交给本机 CLI 编译、测试、校验或转换时，默认指导为 `file.stage -> shell.run(executionContext=run-workspace)`。stage 在 main 中下载/复制原始字节，返回实际 `logicalPath / contentHash / sizeBytes`；这条指导不再依赖是否提供 `file.write` 或 `file.publish`。避免把 `file.read` 的带行号、已解码正文交给模型重述为源文件：这种重建可能改变换行、BOM 或正文，不能天然证明测试对象就是原始文件。确需替代路线时由 Agent 自主选择，并如实说明实际验证对象。
+
+资料库节点的 `name / ext` 分字段保存，stage 复用既有文件名函数保留扩展名，已有后缀不重复追加；prepare 与 execute 使用同一名称并继续复验原始节点身份。`logicalPath` 相对工作区根，重名暂存可能改变文件名，必须沿用实际返回值。例如返回 `input/main.cpp`，默认 `cwd=work` 下引用 `../input/main.cpp`；辅助测试入口和临时构建结果写 `work / tmp`，直接 include 或读取原暂存文件。仅验证不调用 publish；用户需要交付的产物才放 `output` 并发布。本机真实项目文件仍可用 `host` 直接编译，不强制复制。
+
+每次 stage / publish prepare 都从同一 Workspace Store 读取当前 owner / Run 的权威快照，不沿用最初创建 Promise 中的 generation。暂存第二个文件或前一条 Shell 更新工作区后，后续 stage / publish 仍冻结当前版本；执行期间来源或工作区再变化时继续拒绝旧 prepared action，不静默重试。
+
+`run-workspace` 同样能调用 PATH 中可用的本机编译器和 CLI；工作目录与 HOME 的虚拟化不是另一台机器或 OS 沙箱。主进程为精确命令、assessment、cwd/方言和 analyzer/provider revision 生成独立 `executionIdentity`，在 prepare、lease 与 spawn 前复核。完整静态分析的 `analysisIdentity / authorizationIdentity` 继续表示规则匹配依据；无法完整分析时它们可为空，`persistentRuleEligible` 仍为 false，但不再因为缺少完整分析身份而直接拒绝执行。未知命令、动态语法和分析器故障保留 conservative / unresolved 审计，由既有 Policy 决策：ask/auto 询问，full-access 允许未命中不可变/显式 deny 的动作。命令、环境、Provider、workspace 内容与 owner 漂移仍拒绝，单次精确执行身份不成为长期授权。
+
+上述是工具指导与执行链修复，不新增编译器专用工具、权限档位或确认入口。自动化与真实 Agent 通过范围见[验证矩阵](frontend-validation-matrix.md)。
 
 普通文本文件新增直接保存入口 `file.write`，默认无需 Run 工作副本和发布；转换、二进制产物和复杂批处理继续使用本文链路。详见 [直接保存资料库文本](built-in-agent-file-write.md)。
 
@@ -8,7 +20,7 @@
 
 2026-09-09：Bash/Zsh 命令分析器支持单/双引号包围的静态 heredoc 标记（字母、数字、下划线、点和短横线），例如 `cat > output/main.cpp <<'EOF'`。正文按字面量处理，中文、C++ 符号以及正文中的 `$()`/反引号不会被当作可执行操作；完整命令（含正文）仍参与 analysis identity 和 command hash。输出重定向路径、结束标记之后的命令继续正常分析。分析器 revision 升为 v2，旧准备身份不能冒充新分析结果。
 
-未加引号的 heredoc、动态展开、缺失结束标记及其他未能完整分析的工作区命令，不生成可执行许可：PreparationService 在 ask/auto/full-access 下均提前返回明确拒绝，避免之前由 ExecutionLease 才报“workspace analysis identity 缺失”。完整分析且策略允许的静态写入仍走原准备、一次性租约、spawn preflight 和配额链，不放宽身份校验，也不改变 host 执行契约。
+2026-09-09 当时未能完整分析的工作区命令在所有模式下提前拒绝；该历史限制已由上文 2026-10-21 的精确执行身份取代。静态 heredoc 的完整分析能力保留，动态或无法完整分析的命令按当前权限模式处理，不冒充已完成静态分析。
 
 回归：真实 gpt-5.5 / macOS / win 资料库（ID 3）的 Run `17326958-41cc-47a6-9ebd-cb257285debf`，仅执行一次工作区 shell.run，以 quoted heredoc 创建并读回中文 C++ 测试文件，退出码0、unresolved为空、风险write；未编译、发布或上传。自动化覆盖单双引号、正文不执行展开、命令正文变更使身份变化、动态/不完整 heredoc 拒绝、外部目的地和后续危险命令继续检查。完整测试2,047项通过、7项跳过，lint、完整构建和源码diff检查通过；这是写入回归，不是资料库发布验收。
 
@@ -426,7 +438,7 @@ Provider 必须随 Run capability snapshot 冻结。批准后版本、可执行�
 
 ## 9. 权限模型
 
-Shell 权限模式固定为三种，并在 Run capability snapshot 创建时冻结；模式切换只影响后续新 Run，不能给正在执行或等待确认的 Run 中途提权：
+Shell 底层策略保留三种模式，并在 Run capability snapshot 创建时冻结；Agent 页面只提供询问访问/完全访问两档，会话模式分别映射到 Shell 的 ask/full-access。模式切换只影响后续新 Run，不能给正在执行或等待确认的 Run 中途提权：
 
 - `询问我（ask）`：没有精确规则覆盖的命令进入用户确认。它是当前生产准备链的默认值；直接读取明确宿主绝对路径也属于需要确认的外部访问。
 - `自动批准（auto）`：只由 main 的确定性 Analyzer + Policy 决策，不调用第二个 LLM，也不接受模型自己声明安全。只有语法已经完整分析、所有路径均由 main 证明位于 Run workspace、且不涉及外部路径、网络、包安装、系统配置、环境覆盖或其他未解决分面的命令才能自动放行；直接读取宿主绝对路径仍继续询问，其他情况询问或拒绝。
@@ -571,7 +583,7 @@ sweep(reason)
 
 当前实现状态（2026-08-31）：开发预览已经启用 `local-picker -> input`、`local-path -> input`、`library-node -> input`、`output -> local-save-as`、`output -> library` 和 `local-path -> library`。资料库写入目标同时接受 parent node ID 与从当前资料库根开始的绝对目录路径；路径从根逐段精确解析，不模糊搜索且不自动创建。main 持有 picker、Save As、打开文件句柄、Workspace Store、共享 Quota Manager、hash、generation 与 owned-file 复验；资料库 adapter 只通过绑定 renderer 提供的短期一次性 authority 取得节点快照、路径解析结果、签名下载 URL 或上传凭据。prepare 不取得正文 URL / credentials，execute 重新授权；stage 下载后再次重验节点身份，publish / upload 复用 main-owned 上传管理器并保留 `committed / uncommitted / commit_unknown` 三态。确认卡只展示 public action 和安全 preview，结果只返回逻辑路径、文件名或已提交节点身份；用户明确提供的来源显示路径是窄例外，canonical 路径、token、签名 URL、credentials 和 workspace 物理路径仍不外泄。Run 释放与应用关闭会取消并等待文件桥的权威结算后再清理 workspace。Windows 与 Linux 文件身份、reparse point / junction / UNC 和安装包验收继续延期；macOS 真实资料库行为也仍需人工验收。
 
-文件路由固定为：查看、读取、概括或分析用户明确给出的宿主绝对路径时，直接使用 `shell.run` 的受支持只读命令，不先 `file.stage`；需要工作副本、修改、转码或生成新文件时，使用 `file.stage -> shell.run -> file.publish`；本机普通文件无需加工而原样上传资料库时，使用 `file.upload`。这三条是 Tool 语义边界，不是按自然语言关键词写死的生产分支。
+文件路由按来源和交付目标选择：本机真实文件可直接使用统一文件工具或 `shell.run(host)`，不因查看或编译而强制 stage；资料库原文件交给 CLI 验证/处理时优先 `file.stage -> shell.run(run-workspace)`；需要交付产物时再写 `output` 并 `file.publish`；本机文件无需加工而原样入库时使用 `file.upload`。这些是模型的默认指导，不按自然语言关键词写死生产分支，也不新增执行限制。
 
 ### 11.1 `file.stage`
 
@@ -596,7 +608,7 @@ interface AgentFileStageResultV1 {
 
 `nodeId` 必须是正整数。`local-path` 只接受当前平台绝对路径或 `~/` 路径，最长 4,096 UTF-8 bytes；相对路径、控制字符、Windows device / UNC / ADS、目录、symlink、hardlink 和特殊文件都拒绝。`local-picker` 仍不接受 path 字段。`logicalPath`、`displayName`、大小和 hash 由 main 在原子落盘后生成：逻辑路径不超过 1,024 UTF-8 bytes，文件名不超过 240 UTF-8 bytes，大小是未超过单文件 quota 的安全整数，hash 使用固定 `sha256:<64 lowercase hex>` 格式。结果中不出现 library provider、签名 URL、canonical 本机路径、picker token、workspace realpath 或 capability。
 
-`file.stage` 把需要工作副本的受控来源复制到当前 Run 的 `input`；它不是查看本机文件的前置步骤：
+`file.stage` 把编译、测试、校验、转换或其他需要工作副本的受控来源按原始字节复制到当前 Run 的 `input`；它不是查看或直接编译本机文件的前置步骤：
 
 - 资料库来源使用安全 `nodeId`，但 node 必须来自本 Run 当前感知集合或用户通过受控交互显式选择的集合；main 重新校验 canonical backend / account / library owner、节点类型、可见性和内容读取授权，不能只验证“nodeId 是正整数”。
 - 通过校验后才生成一次性 renderer capability 取得内容；Shell 永远看不到 MinIO 签名 URL。

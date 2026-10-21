@@ -559,7 +559,7 @@ function normalizeBoundedTextList(
   return Object.freeze(input.map(item => boundedText(item, label, maximumItemBytes)));
 }
 
-function normalizePreparedAssessment(input: unknown): AgentShellPreparedAssessment {
+export function normalizeAgentShellPreparedAssessment(input: unknown): AgentShellPreparedAssessment {
   const source = strictObject(input, 'Agent Shell 分析结果');
   assertExactFields(source, ASSESSMENT_FIELDS, 'Agent Shell 分析结果');
   if (!Array.isArray(source.operations) || source.operations.length > 128) {
@@ -698,7 +698,7 @@ export function normalizeAgentShellPreparedActionPublicV1(
       profileLabel: boundedText(aiDestination.profileLabel, 'Agent Shell AI 配置', 512),
       providerType: boundedText(aiDestination.providerType, 'Agent Shell AI Provider', 128),
     }),
-    assessment: normalizePreparedAssessment(source.assessment),
+    assessment: normalizeAgentShellPreparedAssessment(source.assessment),
     command,
     commandHash: normalizeHash(source.commandHash, 'Agent Shell command hash', SHA256_PATTERN),
     cwd: Object.freeze({

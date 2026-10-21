@@ -39,6 +39,7 @@ import {
 } from './agent-shell-policy-engine';
 import {
   createAgentShellCommandAnalyzer,
+  createAgentShellExecutionIdentity,
   type AgentShellCommandAnalysis,
   type AgentShellCommandAnalyzer,
 } from './agent-shell-command-analyzer';
@@ -756,6 +757,13 @@ export function createAgentShellPreparationService(
       );
     }
     const assessment = commandAnalysis.assessment;
+    const executionIdentity = createAgentShellExecutionIdentity({
+      command: normalizedInput.command,
+      dialect: provider.publicIdentity.dialect,
+      logicalCwd: preparedHost?.cwd.lexicalPath || preparedWorkspace!.logicalCwd,
+      providerAnalyzerRevision: provider.publicIdentity.analyzerRevision,
+      analysis: commandAnalysis,
+    });
     const authorizationIdentity = createAgentShellAuthorizationIdentity({
       aiDestinationIdentity: aiDestination.identity,
       analysisIdentity: commandAnalysis.analysisIdentity,
@@ -799,17 +807,12 @@ export function createAgentShellPreparationService(
       timeoutMs: normalizedInput.timeoutMs,
       version: 1,
     });
-    let policyDecision = policyEngine.evaluate({
+    const policyDecision = policyEngine.evaluate({
       assessment,
       authorizationIdentity,
       mode: context.runCapabilitySnapshot.shellPermissionMode,
       workspaceBoundaryVerified: commandAnalysis.workspaceBoundaryVerified,
     });
-    if (executionContext === 'run-workspace' && (!commandAnalysis.analysisIdentity || !authorizationIdentity)
-      && policyDecision.behavior !== 'deny') {
-      policyDecision = Object.freeze({ behavior: 'deny', risk: assessment.risk,
-        reasonCodes: Object.freeze(['unresolved-analysis'] as const) });
-    }
     abortIfNeeded(context.signal);
     return Object.freeze({
       binding: Object.freeze({
@@ -817,6 +820,7 @@ export function createAgentShellPreparationService(
         analysis: Object.freeze({
           analysisIdentity: commandAnalysis.analysisIdentity,
           analyzerRevision: commandAnalysis.analyzerRevision,
+          executionIdentity,
           authorizationIdentity: authorizationIdentity || null,
           fallbackAnalyzerRevision: AGENT_SHELL_FALLBACK_ANALYZER_REVISION,
           immutableDenyRevision: AGENT_SHELL_IMMUTABLE_DENY_REVISION,
@@ -855,6 +859,7 @@ export function createAgentShellPreparationService(
         aiDestinationConfigurationIdentity: aiDestination.configurationIdentity,
         analysisIdentity: commandAnalysis.analysisIdentity,
         analyzerRevision: commandAnalysis.analyzerRevision,
+        executionIdentity,
         authorizationIdentity: authorizationIdentity || null,
         fallbackAnalyzerRevision: AGENT_SHELL_FALLBACK_ANALYZER_REVISION,
         immutableDenyRevision: AGENT_SHELL_IMMUTABLE_DENY_REVISION,

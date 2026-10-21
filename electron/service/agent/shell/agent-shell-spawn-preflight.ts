@@ -29,6 +29,7 @@ export interface AgentShellSpawnPreflightCurrentBinding {
   readonly aiDestinationConfigurationIdentity: string;
   readonly aiDestinationIdentity: string;
   readonly analysisIdentity: string | null;
+  readonly executionIdentity: string;
   readonly analyzerRevision: string;
   readonly authorizationIdentity: string | null;
   readonly environmentBindingVersion: number;
@@ -258,6 +259,7 @@ function expectedBinding(
       'Agent Shell AI destination identity',
     ) as string,
     analysisIdentity: assertIdentity(analysis.analysisIdentity, 'Agent Shell analysis identity', true),
+    executionIdentity: assertIdentity(analysis.executionIdentity, 'Agent Shell execution identity') as string,
     analyzerRevision: requiredText(
       analysis.analyzerRevision,
       'Agent Shell analyzer revision',
@@ -370,6 +372,7 @@ function assertCurrentBinding(
     'aiDestinationConfigurationIdentity',
     'aiDestinationIdentity',
     'analysisIdentity',
+    'executionIdentity',
     'analyzerRevision',
     'authorizationIdentity',
     'environmentBindingVersion',
@@ -429,6 +432,9 @@ function assertGrantMatchesPreparation(
     invalidPreflight('Agent Shell spawn owner 不匹配');
   }
   const binding = preparation.binding as Record<string, unknown>;
+  if (grant.executionIdentity !== (binding.analysis as { executionIdentity?: unknown } | undefined)?.executionIdentity) {
+    invalidPreflight('Agent Shell execution identity 与 grant 不匹配');
+  }
   const aiDestination = binding.aiDestination as { identity?: unknown } | undefined;
   const workspace = binding.workspace as AgentShellWorkspacePreparationContext | undefined;
   const invocation = binding.invocation as {

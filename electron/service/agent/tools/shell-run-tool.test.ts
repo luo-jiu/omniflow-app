@@ -306,11 +306,19 @@ describe('shell.run Tool', () => {
       .toMatchObject({ ok: false, message: 'Agent Shell 环境变量禁止覆盖' });
   });
 
-  it('describes the explicit host execution context without weakening workspace defaults', () => {
+  it('describes workspace CLI verification and direct host file execution without weakening workspace defaults', () => {
     const tool = createAgentShellRunTool({ execute: vi.fn(), prepare: vi.fn() });
 
     expect(tool.description).toContain('executionContext=host');
     expect(tool.description).toContain('隔离工作区');
+    expect(tool.description).toContain('run-workspace 也能调用本机已安装的编译器、测试器及转换 CLI');
+    expect(tool.description).toContain('本轮提供 file_stage 时，资料库已保存文件需要编译、测试、校验或转换');
+    expect(tool.description).toContain('优先用 file_stage 暂存原始字节');
+    expect(tool.description).toContain('实际返回的 logicalPath');
+    expect(tool.description).toContain('避免从 file_read 文本重述源文件');
+    expect(tool.description).toContain('辅助测试入口和临时构建产物写入 work 或 tmp');
+    expect(tool.description).toContain('纯验证无需 file_publish');
+    expect(tool.description).toContain('可直接使用原路径，无需暂存');
     expect(tool.description).toContain('不存在 _omniflowProjection.truncated=true');
     expect(tool.description).toContain('stdout/stderr 流均包含 content、truncated=false、omittedBytes=0');
     expect(tool.description).toContain('这仍不表示命令覆盖了完整源文件');
@@ -324,9 +332,13 @@ describe('shell.run Tool', () => {
           description: expect.stringContaining('用户给出文件路径时使用其父目录'),
         },
         executionContext: {
+          description: expect.stringContaining('也能调用本机已安装的 CLI 编译、测试、校验或转换暂存文件'),
           enum: ['run-workspace', 'host'],
         },
       },
+    });
+    expect(tool.inputSchema).toMatchObject({
+      properties: { cwd: { description: expect.stringContaining('input/a.cpp在cwd=work时用../input/a.cpp') } },
     });
   });
 });

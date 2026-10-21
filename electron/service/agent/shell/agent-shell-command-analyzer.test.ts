@@ -4,6 +4,7 @@ import type { AgentShellDialect } from '../../../../src/shared/agent/shell/agent
 import {
   AGENT_SHELL_COMMAND_ANALYZER_REVISION,
   createAgentShellCommandAnalyzer,
+  createAgentShellExecutionIdentity,
 } from './agent-shell-command-analyzer';
 
 const analyzer = createAgentShellCommandAnalyzer();
@@ -28,6 +29,25 @@ function analyze(
 }
 
 describe('Agent Shell command analyzer', () => {
+  it('binds an unresolved command beyond its bounded operation prefix without granting rule eligibility', async () => {
+    const command = `g++ ${Array.from({ length: 40 }, (_, index) => `source${index}.cpp`).join(' ')} -o test && ./test`;
+    const analysis = await analyze(command, 'zsh', { persistentRuleEligible: true });
+    expect(analysis.analysisIdentity).toBeNull();
+    expect(analysis.assessment.persistentRuleEligible).toBe(false);
+    const input = { command, dialect: 'zsh' as const, logicalCwd: 'work',
+      providerAnalyzerRevision: 'zsh-analysis-contract-v1', analysis };
+    const identity = createAgentShellExecutionIdentity(input);
+    expect(identity).toMatch(/^v1:[a-f0-9]{64}$/u);
+    for (const changed of [
+      { command: command.replace('source39', 'changed39') },
+      { logicalCwd: 'output' },
+      { dialect: 'bash' as const },
+      { providerAnalyzerRevision: 'changed-provider-revision' },
+      { analysis: { ...analysis, analyzerRevision: 'changed-analyzer-revision' } },
+      { analysis: { ...analysis, assessment: { ...analysis.assessment, unresolved: ['changed-assessment'] } } },
+    ]) expect(createAgentShellExecutionIdentity({ ...input, ...changed })).not.toBe(identity);
+  });
+
   it.each(['zsh', 'bash'] as const)('accepts quoted heredoc source writing in %s and binds the entire body', async dialect => {
     const command = "mkdir -p output && cat > output/quick_sort_cn.cpp <<'EOF'\n#include <iostream>\n// 中文注释；$HOME $(touch /tmp/should-not-run) `id` 都是正文\nint main() { return 0; }\nEOF\nls -l output/quick_sort_cn.cpp";
     const result = await analyze(command, dialect);

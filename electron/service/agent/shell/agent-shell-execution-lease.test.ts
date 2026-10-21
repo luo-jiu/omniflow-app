@@ -7,6 +7,7 @@ import {
 } from '../agent-tool-registry';
 import type { AgentShellPreparedActionPublicV1 } from '../../../../src/shared/agent/shell/agent-shell.types';
 import { createAgentShellExecutionLeaseManager } from './agent-shell-execution-lease';
+import { createAgentShellCommandAnalyzer, createAgentShellExecutionIdentity } from './agent-shell-command-analyzer';
 import { createAgentShellCommandHash } from './agent-shell-prepared-action';
 import type {
   AgentShellWorkspaceOwner,
@@ -42,11 +43,13 @@ function prepared(workspaceContext = workspace()): AgentToolMainPreparedExecutio
 } {
   const command = 'printf hello';
   const commandHash = createAgentShellCommandHash(command);
-  return {
+  const preparation: AgentToolMainPreparedExecution & { readonly publicAction: AgentShellPreparedActionPublicV1 } = {
     binding: {
       aiDestination: { identity: `v1:${'3'.repeat(64)}` },
       analysis: {
         analysisIdentity: `v1:${'4'.repeat(64)}`,
+        analyzerRevision: 'test-analyzer-v1',
+        providerAnalyzerRevision: 'test-provider-analyzer-v1',
         authorizationIdentity: `v1:${'5'.repeat(64)}`,
         workspaceBoundaryVerified: true,
       },
@@ -105,6 +108,16 @@ function prepared(workspaceContext = workspace()): AgentToolMainPreparedExecutio
     },
     snapshotHash: '9'.repeat(64),
   };
+  const analysis = preparation.binding.analysis as { analysisIdentity: string; analyzerRevision: string;
+    providerAnalyzerRevision: string; workspaceBoundaryVerified: boolean; executionIdentity?: string };
+  analysis.executionIdentity = createAgentShellExecutionIdentity({
+    command,
+    dialect: preparation.publicAction.provider.dialect,
+    logicalCwd: workspaceContext.logicalCwd,
+    providerAnalyzerRevision: analysis.providerAnalyzerRevision,
+    analysis: { ...analysis, assessment: preparation.publicAction.assessment },
+  });
+  return preparation;
 }
 
 function storeFixture(current: () => AgentShellWorkspacePreparationContext = workspace) {
@@ -112,7 +125,89 @@ function storeFixture(current: () => AgentShellWorkspacePreparationContext = wor
   return { resolvePreparationContext };
 }
 
+async function unknownPrepared() {
+  const source = prepared();
+  const command = 'g++ -std=c++17 ../input/main.cpp -o test && ./test';
+  const providerAnalyzerRevision = 'test-provider-analyzer-v1';
+  const analysis = await createAgentShellCommandAnalyzer().analyze({
+    command, dialect: 'zsh', logicalCwd: 'work', hasEnvironmentOverrides: false,
+    persistentRuleEligible: true, providerAnalyzerRevision,
+  });
+  const executionIdentity = createAgentShellExecutionIdentity({
+    command, dialect: 'zsh', logicalCwd: 'work', providerAnalyzerRevision, analysis,
+  });
+  const commandHash = createAgentShellCommandHash(command);
+  return {
+    ...source,
+    binding: { ...source.binding, commandHash,
+      analysis: { analysisIdentity: analysis.analysisIdentity, analyzerRevision: analysis.analyzerRevision,
+        authorizationIdentity: null, executionIdentity, providerAnalyzerRevision,
+        workspaceBoundaryVerified: analysis.workspaceBoundaryVerified },
+      invocation: { argv: ['-f', '-c', command], executable: '/bin/zsh', shell: false },
+    },
+    publicAction: { ...source.publicAction, command, commandHash, assessment: analysis.assessment,
+      dataScope: { stagedInputs: [], unresolvedWorkspaceRead: true } },
+  };
+}
+
 describe('Agent Shell execution lease', () => {
+  it('carries an unresolved compiler command through a one-shot lease without a rule identity', async () => {
+    const source = await unknownPrepared();
+    expect(source.binding.analysis.analysisIdentity).toBeNull();
+    expect(source.binding.analysis.authorizationIdentity).toBeNull();
+    const store = storeFixture();
+    const manager = createAgentShellExecutionLeaseManager({ workspaceStore: store });
+    const lease = await manager.acquire({ owner: OWNER, preparation: source,
+      runCapabilityIdentity: source.identity.runCapabilityIdentity, toolRunId: source.identity.toolRunId,
+      workspaceId: 'workspace-1' });
+    const grant = await manager.consume(lease, OWNER);
+    expect(grant.executionIdentity).toBe(source.binding.analysis.executionIdentity);
+    expect(grant.command).toBe(source.publicAction.command);
+    expect(store.resolvePreparationContext).toHaveBeenCalledTimes(2);
+    await expect(manager.consume(lease, OWNER)).rejects.toThrow('不存在或已失效');
+  });
+
+  it.each([undefined, null, 'broken', `v1:${'0'.repeat(64)}`])('rejects a missing, malformed or tampered execution identity: %s', async value => {
+    for (const source of [prepared(), await unknownPrepared()]) {
+      Object.assign(source.binding.analysis as object, { executionIdentity: value });
+      const manager = createAgentShellExecutionLeaseManager({ workspaceStore: storeFixture() });
+      await expect(manager.acquire({ owner: OWNER, preparation: source,
+        runCapabilityIdentity: source.identity.runCapabilityIdentity, toolRunId: source.identity.toolRunId,
+        workspaceId: 'workspace-1' })).rejects.toThrow('execution identity');
+      expect(manager.getActiveCount()).toBe(0);
+    }
+  });
+
+  it('rejects command replacement even when its command hash and invocation are updated', async () => {
+    const source = await unknownPrepared();
+    const command = `${source.publicAction.command} --changed`;
+    const commandHash = createAgentShellCommandHash(command);
+    const replaced = { ...source,
+      publicAction: { ...source.publicAction, command, commandHash },
+      binding: { ...source.binding, commandHash,
+        invocation: { ...source.binding.invocation, argv: ['-f', '-c', command] } },
+    };
+    const manager = createAgentShellExecutionLeaseManager({ workspaceStore: storeFixture() });
+    await expect(manager.acquire({ owner: OWNER, preparation: replaced,
+      runCapabilityIdentity: source.identity.runCapabilityIdentity, toolRunId: source.identity.toolRunId,
+      workspaceId: 'workspace-1' })).rejects.toThrow('execution identity 不匹配');
+  });
+
+  it('rechecks the execution identity and workspace bytes when consuming unknown-command leases', async () => {
+    for (const change of ['identity', 'content'] as const) {
+      const source = await unknownPrepared();
+      let current = workspace();
+      const manager = createAgentShellExecutionLeaseManager({ workspaceStore: storeFixture(() => current) });
+      const lease = await manager.acquire({ owner: OWNER, preparation: source,
+        runCapabilityIdentity: source.identity.runCapabilityIdentity, toolRunId: source.identity.toolRunId,
+        workspaceId: 'workspace-1' });
+      if (change === 'identity') source.binding.analysis.executionIdentity = `v1:${'0'.repeat(64)}`;
+      else current = { ...current, workspaceContentIdentity: `v3:${'f'.repeat(64)}` };
+      await expect(manager.consume(lease, OWNER)).rejects.toThrow(change === 'identity' ? 'execution identity' : 'spawn 前已变化');
+      expect(manager.getActiveCount()).toBe(0);
+    }
+  });
+
   it('accepts the snapshot hash emitted by a real Registry main seal', async () => {
     const source = prepared();
     const toolInput = { command: source.publicAction.command };

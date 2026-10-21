@@ -372,7 +372,7 @@ export function createAgentFileBridgeTools(runtime: AgentFileBridgeToolRuntime):
   const providerToolName = toAgentProviderToolName;
   const stageTool: AgentTool = {
     cancellationSettleTimeoutMs: 45_000,
-    description: `把一个本机普通文件或当前资料库中的普通文件暂存到当前 Run 的 input 目录，返回逻辑路径、大小和 SHA-256。本机来源可使用用户明确给出的绝对路径或 ~/ 路径；只有用户没有给路径时才使用系统文件选择器。此 Tool 只用于需要工作副本的修改、转换或生成流程；仅查看、概括或分析用户明确给出的宿主绝对路径时，应使用 ${providerToolName('shell.run')} 直接读取原路径，不要暂存。原样传输应使用 ${providerToolName('file.upload')}。`,
+    description: `把一个本机普通文件或当前资料库中的已保存普通文件按原始字节暂存到当前 Run 的 input 目录，返回 logicalPath、大小和 SHA-256。本轮提供 ${providerToolName('shell.run')} 时，资料库文件需要交给本机 CLI 编译、测试、校验或转换，优先暂存原始文件后使用 ${providerToolName('shell.run')} 的 run-workspace；避免把 ${providerToolName('file.read')} 的文本结果经模型重述、heredoc 重建为源文件。logicalPath 相对工作区根，沿用实际返回路径；例如返回 input/a.cpp 且 cwd=work 时，命令使用 ../input/a.cpp。辅助测试入口和临时构建产物写入 work 或 tmp；纯验证无需 ${providerToolName('file.publish')}。暂存也适用于需要工作副本的修改或生成流程。本机来源可使用用户明确给出的绝对路径或 ~/ 路径；只有用户没有给路径时才使用系统文件选择器。本机真实文件仅需查看、读取、编译或测试，且本轮提供 ${providerToolName('shell.run')} 时，可使用其 executionContext=host 直接操作原路径，无需暂存。本轮提供 ${providerToolName('file.upload')} 时，原样传输应使用该工具。`,
     execute: async (_input, context) => runtime.executeStage(context),
     executor: 'main',
     inputSchema: stageInputSchema,
@@ -426,7 +426,7 @@ export function createAgentFileBridgeTools(runtime: AgentFileBridgeToolRuntime):
   };
   const uploadTool: AgentTool = {
     cancellationSettleTimeoutMs: 45_000,
-    description: `原样传输一个用户明确给出绝对路径或 ~/ 路径的本机普通文件到当前 OmniFlow 资料库。资料库目标可用目录节点 ID 或从根开始的绝对目录路径；此 Tool 直接完成传输，不需要先 ${providerToolName('file.stage')}，也不会打开系统文件选择器。需要先查看或检查原文件时，使用 ${providerToolName('shell.run')} 直接读取原路径，确认无需修改后仍可使用本 Tool；只有需要工作副本来修改、转换或生成新文件时，才使用 ${providerToolName('file.stage')}、${providerToolName('shell.run')} 和 ${providerToolName('file.publish')}。`,
+    description: `原样传输一个用户明确给出绝对路径或 ~/ 路径的本机普通文件到当前 OmniFlow 资料库。资料库目标可用目录节点 ID 或从根开始的绝对目录路径；此 Tool 直接完成传输，不需要先 ${providerToolName('file.stage')}，也不会打开系统文件选择器。需要先查看或检查原文件，且本轮提供 ${providerToolName('shell.run')} 时，可使用该工具直接读取原路径，确认无需修改后仍可使用本 Tool；只有需要工作副本来修改、转换或生成新文件，且本轮提供 ${providerToolName('file.stage')}、${providerToolName('shell.run')} 和 ${providerToolName('file.publish')} 时，才使用这条处理链。`,
     execute: async (_input, context) => runtime.executeUpload(context),
     executor: 'main',
     inputSchema: uploadInputSchema,

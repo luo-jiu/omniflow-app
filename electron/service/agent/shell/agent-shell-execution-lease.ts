@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { createAgentShellExecutionIdentity } from './agent-shell-command-analyzer';
 
 import {
   type AgentShellExecutionContextKind,
@@ -54,6 +55,7 @@ export interface AgentShellExecutionLeaseRequest {
 
 interface AgentShellExecutionLeaseBase {
   readonly commandHash: string;
+  readonly executionIdentity: string;
   readonly expiresAt: number;
   readonly executionContext: AgentShellExecutionContextKind;
   readonly leaseId: string;
@@ -81,6 +83,7 @@ export type AgentShellExecutionLease =
 interface AgentShellExecutionLeaseGrantBase extends AgentShellExecutionLeaseGrantBrand {
   readonly command: string;
   readonly commandHash: string;
+  readonly executionIdentity: string;
   readonly cwdPath: string;
   readonly environment: readonly { name: string; value: string }[];
   readonly executionContext: AgentShellExecutionContextKind;
@@ -151,6 +154,7 @@ export interface CreateAgentShellExecutionLeaseManagerOptions {
 interface LeaseRecord {
   readonly command: string;
   readonly commandHash: string;
+  readonly executionIdentity: string;
   readonly environment: readonly { name: string; value: string }[];
   readonly expiresAt: number;
   readonly executionContext: AgentShellExecutionContextKind;
@@ -516,7 +520,7 @@ function extractBinding(input: {
   }
   assertOwnerIdentity(input.identity, owner);
   const analysis = plainObject(input.binding.analysis, 'Agent Shell analysis binding');
-  const authorizationIdentity = requireOptionalIdentity(
+  requireOptionalIdentity(
     analysis.authorizationIdentity,
     'Agent Shell authorization identity',
   );
@@ -524,12 +528,27 @@ function extractBinding(input: {
     analysis.analysisIdentity,
     'Agent Shell analysis identity',
   );
-  if (executionContext === 'run-workspace' && (!authorizationIdentity || !analysisIdentity)) {
-    invalidLease('Agent Shell workspace analysis identity 缺失');
-  }
   if (typeof analysis.workspaceBoundaryVerified !== 'boolean') {
     invalidLease('Agent Shell workspace boundary binding 无效');
   }
+  const executionIdentity = requireString(
+    analysis.executionIdentity,
+    'Agent Shell execution identity',
+    /^v[1-9]\d*:[a-f0-9]{64}$/u,
+  );
+  const expectedExecutionIdentity = createAgentShellExecutionIdentity({
+    command,
+    dialect: input.action.provider.dialect,
+    logicalCwd: host?.cwd.lexicalPath || workspace!.logicalCwd,
+    providerAnalyzerRevision: requireString(analysis.providerAnalyzerRevision, 'Agent Shell Provider analyzer revision'),
+    analysis: {
+      analysisIdentity: analysisIdentity || null,
+      analyzerRevision: requireString(analysis.analyzerRevision, 'Agent Shell analyzer revision'),
+      assessment: input.action.assessment,
+      workspaceBoundaryVerified: analysis.workspaceBoundaryVerified,
+    },
+  });
+  if (executionIdentity !== expectedExecutionIdentity) invalidLease('Agent Shell execution identity 不匹配');
   requireString(provider.registrationIdentity, 'Agent Shell Provider registration identity');
   requireString(provider.resolvedExecutable, 'Agent Shell Provider resolved executable');
   requireString(provider.executable, 'Agent Shell Provider executable');
@@ -552,6 +571,7 @@ function extractBinding(input: {
   return {
     command,
     commandHash,
+    executionIdentity,
     executionContext,
     environment: Object.freeze(
       (environment as Array<{ name: string; value: string }>).map(entry => (
@@ -621,6 +641,10 @@ export function createAgentShellExecutionLeaseManager(
     signal?: AbortSignal,
   ): Promise<void> {
     abortIfNeeded(signal);
+    const currentBinding = extractBinding(normalizePreparedExecution(record.preparation));
+    if (currentBinding.executionIdentity !== record.executionIdentity) {
+      invalidLease('Agent Shell execution identity 在 lease 消费前已变化');
+    }
     if (record.executionContext === 'host') {
       if (!record.host) invalidLease('Agent Shell host binding 缺失');
       try {
@@ -704,6 +728,7 @@ export function createAgentShellExecutionLeaseManager(
       if (!workspace) invalidLease('Agent Shell workspace binding 缺失');
       return Object.freeze({
         commandHash: record.commandHash,
+        executionIdentity: record.executionIdentity,
         expiresAt,
         executionContext: 'run-workspace' as const,
         generation: workspace.generation,
@@ -719,6 +744,7 @@ export function createAgentShellExecutionLeaseManager(
     }
     return Object.freeze({
       commandHash: record.commandHash,
+      executionIdentity: record.executionIdentity,
       expiresAt,
       executionContext: 'host' as const,
       leaseId,
@@ -764,6 +790,7 @@ export function createAgentShellExecutionLeaseManager(
         [AGENT_SHELL_EXECUTION_LEASE_GRANT]: true as const,
         command: record.command,
         commandHash: record.commandHash,
+        executionIdentity: record.executionIdentity,
         cwdPath: workspace.physicalCwdPath,
         environment: record.environment,
         executionContext: 'run-workspace' as const,
@@ -785,6 +812,7 @@ export function createAgentShellExecutionLeaseManager(
       [AGENT_SHELL_EXECUTION_LEASE_GRANT]: true as const,
       command: record.command,
       commandHash: record.commandHash,
+      executionIdentity: record.executionIdentity,
       cwdPath: host.cwd.canonicalPath,
       environment: record.environment,
       executionContext: 'host' as const,

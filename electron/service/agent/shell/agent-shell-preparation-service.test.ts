@@ -16,9 +16,12 @@ import { createAgentRunCapabilitySnapshot } from '../agent-run-capability-snapsh
 import {
   createAgentToolRegistry,
   type AgentToolMainPreparationContext,
+  type AgentToolMainPreparedExecution,
 } from '../agent-tool-registry';
 import { createAgentSkillRegistry } from '../skills/agent-skill-registry';
 import { AGENT_SHELL_COMMAND_ANALYZER_REVISION } from './agent-shell-command-analyzer';
+import { createAgentShellExecutionLeaseManager } from './agent-shell-execution-lease';
+import { createAgentShellCommandHash } from './agent-shell-prepared-action';
 import type { AgentShellProviderRegistrySnapshot } from './agent-shell-provider-registry';
 import { AGENT_SHELL_WORKSPACE_CONTENT_SCANNER_REVISION } from './agent-shell-workspace-content-scanner';
 import {
@@ -386,13 +389,94 @@ describe('Agent Shell PreparationService', () => {
     expect(result.snapshotMaterial).toMatchObject({ permissionMode: mode });
   });
 
-  it.each(['ask', 'auto', 'full-access'] as const)('rejects unresolved workspace syntax before issuing an executable binding in %s', async mode => {
+  it.each([
+    { command: "printf ' hello '", prefix: ['hello'], unresolved: false },
+    { command: "printf '%s' '  value  '", prefix: ['%s', 'value'], unresolved: false },
+    { command: "g++ '  main.cpp  ' -o test", prefix: ['main.cpp', '-o', 'test'], unresolved: true },
+  ])('carries quoted argument whitespace through preparation and lease: $command', async ({ command, prefix, unresolved }) => {
+    const workspace = workspaceFixture();
+    const snapshot = runCapabilitySnapshot(providerFixture(), 'full-access');
+    const context = preparationContext(snapshot);
+    const result = await createAgentShellPreparationService({ workspaceStore: workspace.store }).prepare(
+      prepareRequest(context, { input: { command } }),
+    );
+    const action = normalizeAgentShellPreparedActionPublicV1(result.publicAction);
+    const preparation: AgentToolMainPreparedExecution = {
+      binding: result.binding,
+      identity: context.preparationIdentity,
+      preparedActionId: context.preparationIdentity.preparedActionId,
+      publicAction: action,
+      snapshotHash: 'a'.repeat(64),
+    };
+    expect(action.assessment.operations[0]?.argvPrefix).toEqual(prefix);
+    expect(result.decision.behavior).toBe('allow');
+    if (unresolved) {
+      expect(result.binding).toMatchObject({ analysis: { analysisIdentity: null, authorizationIdentity: null } });
+    }
+    const manager = createAgentShellExecutionLeaseManager({ workspaceStore: workspace.store });
+    const leaseRequest = {
+      owner: workspace.owner,
+      preparation,
+      runCapabilityIdentity: snapshot.identity,
+      toolRunId: context.preparationIdentity.toolRunId,
+      workspaceId: WORKSPACE_ID,
+    };
+    const grant = await manager.consume(await manager.acquire(leaseRequest), workspace.owner);
+    expect(grant.command).toBe(command);
+    expect(grant.executionIdentity).toBe((result.binding.analysis as { executionIdentity: string }).executionIdentity);
+
+    const changedCommand = command.replace(/' +/u, "'");
+    expect(changedCommand).not.toBe(command);
+    const commandHash = createAgentShellCommandHash(changedCommand);
+    const invocation = preparation.binding.invocation as { argv: readonly string[] };
+    await expect(manager.acquire({
+      ...leaseRequest,
+      preparation: {
+        ...preparation,
+        binding: {
+          ...preparation.binding,
+          commandHash,
+          invocation: { ...invocation, argv: [...invocation.argv.slice(0, -1), changedCommand] },
+        },
+        publicAction: { ...action, command: changedCommand, commandHash },
+      },
+    })).rejects.toThrow('execution identity 不匹配');
+  });
+
+  it.each(['ask', 'auto', 'full-access'] as const)('binds unknown compiler and test execution while retaining %s policy', async mode => {
     const result = await createAgentShellPreparationService({ workspaceStore: workspaceFixture().store }).prepare(
       prepareRequest(preparationContext(runCapabilitySnapshot(providerFixture(), mode)),
-        { input: { command: 'opaque-command "value"' } }),
+        { input: { command: 'g++ -std=c++17 ../input/main.cpp -o test && ./test' } }),
     );
-    expect(result.decision).toMatchObject({ behavior: 'deny', message: expect.stringContaining('无法完整分析') });
-    expect(result.snapshotMaterial).toMatchObject({ policyReasonCodes: ['unresolved-analysis'] });
+    expect(result.decision.behavior).toBe(mode === 'full-access' ? 'allow' : 'ask');
+    expect(result.publicAction).toMatchObject({ assessment: { persistentRuleEligible: false },
+      dataScope: { unresolvedWorkspaceRead: true } });
+    expect(result.binding).toMatchObject({ analysis: {
+      analysisIdentity: null, authorizationIdentity: null,
+      executionIdentity: expect.stringMatching(/^v1:[a-f0-9]{64}$/u), workspaceBoundaryVerified: false,
+    } });
+  });
+
+  it.each(['ask', 'auto', 'full-access'] as const)('keeps dynamic and incomplete analysis under %s policy', async mode => {
+    const service = createAgentShellPreparationService({ workspaceStore: workspaceFixture().store });
+    for (const command of ['printf "$VALUE"', "cat > test.cpp <<'EOF'\nmissing end\n"]) {
+      const result = await service.prepare(prepareRequest(
+        preparationContext(runCapabilitySnapshot(providerFixture(), mode)), { input: { command } },
+      ));
+      expect(result.decision.behavior).toBe(mode === 'full-access' ? 'allow' : 'ask');
+      expect(result.binding).toMatchObject({ analysis: { analysisIdentity: null,
+        executionIdentity: expect.stringMatching(/^v1:[a-f0-9]{64}$/u), authorizationIdentity: null } });
+    }
+  });
+
+  it.each(['ask', 'auto', 'full-access'] as const)('keeps immutable denials ahead of unknown command handling in %s', async mode => {
+    const service = createAgentShellPreparationService({ workspaceStore: workspaceFixture().store });
+    for (const command of ['g++ a.cpp && sudo id', 'g++ a.cpp &', 'g++ a.cpp && vim a.cpp']) {
+      const result = await service.prepare(prepareRequest(
+        preparationContext(runCapabilitySnapshot(providerFixture(), mode)), { input: { command } },
+      ));
+      expect(result.decision.behavior).toBe('deny');
+    }
   });
 
   it('prepares a quoted heredoc write with both identities in full-access mode', async () => {
@@ -445,7 +529,7 @@ describe('Agent Shell PreparationService', () => {
     });
   });
 
-  it('falls back without exposing parser failures when analysis is unavailable', async () => {
+  it.each(['ask', 'auto', 'full-access'] as const)('keeps %s policy without exposing parser failures when analysis is unavailable', async mode => {
     const provider = providerFixture();
     const result = await createAgentShellPreparationService({
       commandAnalyzer: {
@@ -453,7 +537,7 @@ describe('Agent Shell PreparationService', () => {
       },
       workspaceStore: workspaceFixture().store,
     }).prepare(prepareRequest(
-      preparationContext(runCapabilitySnapshot(provider, 'auto')),
+      preparationContext(runCapabilitySnapshot(provider, mode)),
       { input: { command: 'pwd' } },
     ));
     const action = normalizeAgentShellPreparedActionPublicV1(result.publicAction);
@@ -465,11 +549,12 @@ describe('Agent Shell PreparationService', () => {
       risk: 'destructive',
       unresolved: ['ast-analysis-unavailable'],
     });
-    expect(result.decision.behavior).toBe('deny');
+    expect(result.decision.behavior).toBe(mode === 'full-access' ? 'allow' : 'ask');
     expect(result.snapshotMaterial).toMatchObject({
       analysisIdentity: null,
       analyzerRevision: 'shell-analysis-unavailable-v1',
       authorizationIdentity: null,
+      executionIdentity: expect.stringMatching(/^v1:[a-f0-9]{64}$/u),
       workspaceBoundaryVerified: false,
     });
     expect(JSON.stringify(result)).not.toContain('/private/parser failure');

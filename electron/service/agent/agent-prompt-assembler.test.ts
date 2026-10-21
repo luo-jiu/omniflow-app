@@ -132,13 +132,54 @@ describe('Agent prompt assembler', () => {
     expect(prompt).toContain('确认无需修改后仍使用 file_upload');
     expect(prompt).toContain('本机文件 -> 资料库目录');
     expect(prompt).toContain('不要再打开系统文件选择器');
-    expect(prompt).toContain('需要工作副本来修改、转换或生成新文件');
+    expect(prompt).toContain('需要工作副本来修改、转换或生成新文件并交付');
     expect(prompt).toContain('file_stage -> shell_run -> file_publish');
     expect(prompt).toContain('逐段精确校验');
     expect(prompt).toContain('不自行模糊匹配或创建目录');
     expect(prompt).toContain('没有当前资料库文件感知范围');
     expect(prompt).toContain('宿主绝对路径仍可按当前文件资源路由调用 shell_run 读取');
     expect(prompt).not.toContain('相关问题应明确说明无法读取');
+  });
+
+  it.each([
+    ['file.stage', 'shell.run'],
+    ['file.stage', 'shell.run', 'file.read', 'file.write', 'file.patch'],
+    ['file.stage', 'shell.run', 'file.read', 'file.write', 'file.patch', 'file.publish'],
+  ])('keeps original-byte CLI validation available with capabilities %j', (...capabilities) => {
+    const prompt = buildAgentSystemPrompt({
+      libraryId: 3,
+      platform: 'darwin',
+      selectedNodeIds: [15989],
+    }, undefined, capabilities);
+
+    expect(prompt).toContain('优先用 file_stage 暂存已保存文件的原始字节');
+    expect(prompt).toContain('executionContext=run-workspace');
+    expect(prompt).toContain('也能调用 PATH 中可用的本机编译器');
+    expect(prompt).toContain('logicalPath 可能因重名变化，使用实际返回路径');
+    expect(prompt).toContain('cwd=work 时应引用 ../input/main.cpp');
+    expect(prompt).toContain('辅助测试入口和临时构建结果放 work 或 tmp');
+    expect(prompt).toContain('仅验证不需要发布或回写原文件');
+    expect(prompt).toContain('明确实际验证的对象与差别');
+    if (!capabilities.includes('file.publish')) {
+      expect(prompt).not.toContain('file_publish');
+    }
+    if (!capabilities.includes('file.read')) {
+      expect(prompt).not.toContain('file_read');
+    }
+  });
+
+  it.each([
+    ['file.read', 'file.write', 'shell.run'],
+    ['file.read', 'file.write', 'file.stage'],
+  ])('does not advertise an unavailable staging-to-Shell route with capabilities %j', (...capabilities) => {
+    const prompt = buildAgentSystemPrompt({
+      libraryId: 3,
+      platform: 'darwin',
+      selectedNodeIds: [],
+    }, undefined, capabilities);
+
+    expect(prompt).not.toContain('优先用 file_stage 暂存已保存文件的原始字节');
+    expect(prompt).not.toContain('暂存 logicalPath 相对 Run 工作区根');
   });
 
   it('does not instruct a Run to call file tools that are not in its capability snapshot', () => {

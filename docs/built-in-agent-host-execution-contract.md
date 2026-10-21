@@ -1,6 +1,6 @@
 # 内置 Agent 宿主机执行契约
 
-更新时间：2026-09-01
+更新时间：2026-10-21
 
 状态：**macOS Zsh 的 `host` 执行上下文已接入 main Shell 执行链，当前为开发预览；Linux / Windows 仍 fail-closed，持久规则和真实安装包验收尚未完成**。
 
@@ -146,6 +146,7 @@ type AgentShellExecutionContext =
 - 使用现有 `input / work / output / tmp / home` 虚拟目录。
 - 继续执行 workspace generation、manifest、symlink、配额和产物发布检查。
 - 适合需要暂存、转换、生成和后续 `file.publish` 的工作流。
+- 也能调用 PATH 中可用的本机编译器/CLI。资料库已保存文件需要编译、测试或校验时优先 stage 原始字节后在此执行；这类验证不依赖 `file.publish`，也不需要为了调用本机工具而切换 host。按实际返回的 `logicalPath` 计算 cwd 相对路径，例如 `cwd=work` 下读取 `../input/main.cpp`。
 - Shell 输出写入 workspace 不等于已经进入资料库。
 
 ### 5.2 `host`
@@ -228,6 +229,10 @@ host 默认继承主进程的必要宿主环境，以便发现 `ffmpeg`、`git` 
 需要修改或转换后入库      -> file.stage -> shell.run -> file.publish
 目录创建、资料库提交      -> 结构化业务 Tool
 ```
+
+资料库已有文件的编译/测试默认使用 `file.stage -> shell.run(run-workspace)`，避免模型重述 `file.read` 的正文；只在用户需要交付产物时 publish。直接操作本机真实项目仍可 host 编译，不强制暂存。工具路由是指导，替代路线应准确报告实际验证对象。
+
+两种执行上下文均使用 main-only `executionIdentity` 绑定精确命令和分析结果，并复验环境、Provider、cwd 与来源内容。完整分析才生成可供规则匹配的 `analysisIdentity / authorizationIdentity`；未知语法不生成规则身份，也不再成为工作区命令的额外硬拒绝理由。ask/auto 仍询问，full-access 继续按既有 Policy 放行，已识别的不可变/显式 deny 优先。
 
 不能因为 Shell 能够调用 HTTP、文件系统或数据库 CLI，就把资料库事务改为不可审计的命令字符串。结构化 Tool 提供稳定 Schema、owner 校验、事务状态、再感知和恢复语义；Shell 提供宿主机的开放能力。
 

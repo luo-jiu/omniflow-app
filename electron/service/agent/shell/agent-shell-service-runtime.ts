@@ -68,6 +68,7 @@ import {
   verifyOpenedAgentLocalFileUnchanged,
 } from '../tools/agent-local-file';
 import { createAgentShellRunTool } from '../tools/shell-run-tool';
+import { buildAgentMediaFileName } from '../tools/media-tool-node';
 import { createAgentShellBindingResolver } from './agent-shell-binding-resolver';
 import { createAgentShellExecutionLeaseManager } from './agent-shell-execution-lease';
 import {
@@ -618,6 +619,15 @@ export function createAgentShellServiceRuntime(
     return entry;
   }
 
+  async function currentWorkspace(entry: RunWorkspaceEntry) {
+    const created = await entry.promise;
+    const workspace = workspaceStore.get(created.workspaceId, entry.owner);
+    if (!workspace || workspace.runId !== entry.runId) {
+      throw new Error('Agent Shell Run workspace 不存在或已释放');
+    }
+    return workspace;
+  }
+
   async function resolveLibraryDestination(
     destination: AgentLibraryPublishDestination | AgentLibraryUploadDestination,
     file: { fileName: string; sizeBytes: number },
@@ -785,7 +795,7 @@ export function createAgentShellServiceRuntime(
       sessionId: context.preparationIdentity.sessionId,
     });
     const entry = ensureWorkspace(context.preparationIdentity.runId, owner);
-    const workspace = await entry.promise;
+    const workspace = await currentWorkspace(entry);
     if (normalizedInput.source.kind === 'library-node') {
       const libraryId = context.preparationIdentity.libraryId;
       const authority = await requestFileAuthority({
@@ -809,10 +819,11 @@ export function createAgentShellServiceRuntime(
       ) {
         throw new Error('资料库来源文件与 Agent 请求不匹配');
       }
+      const sourceDisplayName = buildAgentMediaFileName(authority.node);
       const defaultAction = normalizeAgentFileStagePreparedActionPublicV1({
         kind: AGENT_FILE_STAGE_PREPARED_ACTION_KIND,
         libraryId,
-        sourceDisplayName: authority.node.name,
+        sourceDisplayName,
         sourceIdentity: fileAuthorityNodeIdentity(authority.node),
         sourceKind: 'library-node',
         sourceNodeId: authority.node.id,
@@ -842,10 +853,10 @@ export function createAgentShellServiceRuntime(
         decision: {
           behavior: 'ask' as const,
           preview: {
-            description: `将把资料库文件“${authority.node.name}”复制到当前任务工作区。`,
+            description: `将把资料库文件“${sourceDisplayName}”复制到当前任务工作区。`,
             details: [
               { label: '来源', value: `资料库节点 #${authority.node.id}` },
-              { label: '文件', value: authority.node.name },
+              { label: '文件', value: sourceDisplayName },
               { label: '大小', value: `${authority.node.fileSize} bytes` },
               { label: '进入', value: defaultAction.targetLabel },
             ],
@@ -1011,7 +1022,7 @@ export function createAgentShellServiceRuntime(
         || !authority.downloadUrl
         || authority.node.id !== action.sourceNodeId
         || authority.node.libraryId !== action.libraryId
-        || authority.node.name !== action.sourceDisplayName
+        || buildAgentMediaFileName(authority.node) !== action.sourceDisplayName
         || authority.node.fileSize !== action.sourceSizeBytes
         || fileAuthorityNodeIdentity(authority.node) !== action.sourceIdentity
       ) {
@@ -1191,7 +1202,7 @@ export function createAgentShellServiceRuntime(
       sessionId: context.preparationIdentity.sessionId,
     });
     const entry = ensureWorkspace(context.preparationIdentity.runId, owner);
-    const workspace = await entry.promise;
+    const workspace = await currentWorkspace(entry);
     const metadata = await workspaceStore.withOwnedFile(
       workspace.workspaceId,
       normalizedInput.sourcePath,

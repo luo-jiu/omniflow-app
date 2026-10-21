@@ -3,13 +3,14 @@ import { describe, expect, it, vi } from 'vitest';
 import { createAgentAiDestinationSnapshot } from '../agent-ai-destination';
 import type { AgentToolMainPreparedExecution } from '../agent-tool-registry';
 import { createAgentShellBindingResolver } from './agent-shell-binding-resolver';
+import { createAgentShellCommandAnalyzer, createAgentShellExecutionIdentity } from './agent-shell-command-analyzer';
 import { createAgentShellCommandHash } from './agent-shell-prepared-action';
 import { createAgentShellProviderRegistry } from './agent-shell-provider-registry';
 import type { AgentShellWorkspacePreparationContext } from './agent-shell-workspace-store';
 
 const EXECUTABLE_IDENTITY = Object.freeze({ sha256: 'a'.repeat(64), sizeBytes: 128 });
 
-async function fixture() {
+async function fixture(unresolved = false) {
   const providerRegistry = createAgentShellProviderRegistry({
     candidates: { darwin: ['/bin/zsh'] },
     platform: 'darwin',
@@ -42,7 +43,7 @@ async function fixture() {
     workspaceMetadataIdentity: `v2:${'c'.repeat(64)}`,
     workspaceTotalBytes: 0,
   });
-  const command = 'pwd';
+  const command = unresolved ? 'g++ ../input/main.cpp -o test && ./test' : 'pwd';
   const commandHash = createAgentShellCommandHash(command);
   const assessment = Object.freeze({
     facets: Object.freeze(['filesystem.read', 'process_launch'] as const),
@@ -54,6 +55,15 @@ async function fixture() {
     persistentRuleEligible: true,
     risk: 'read' as const,
     unresolved: Object.freeze([]),
+  });
+  const analysis = unresolved ? await createAgentShellCommandAnalyzer().analyze({
+    command, dialect: 'zsh', logicalCwd: workspace.logicalCwd, hasEnvironmentOverrides: false,
+    persistentRuleEligible: true, providerAnalyzerRevision: provider.publicIdentity.analyzerRevision,
+  }) : Object.freeze({
+    analysisIdentity: `v1:${'3'.repeat(64)}`,
+    analyzerRevision: 'analyzer-v1',
+    assessment,
+    workspaceBoundaryVerified: true,
   });
   const preparation: AgentToolMainPreparedExecution = {
     binding: {
@@ -93,7 +103,7 @@ async function fixture() {
         profileLabel: 'Test',
         providerType: 'openai',
       },
-      assessment,
+      assessment: analysis.assessment,
       command,
       commandHash,
       cwd: { kind: 'run-workspace', path: 'work' },
@@ -114,13 +124,11 @@ async function fixture() {
     name: 'Test',
     providerType: 'openai' as const,
   };
-  const analysis = Object.freeze({
-    analysisIdentity: `v1:${'3'.repeat(64)}`,
-    analyzerRevision: 'analyzer-v1',
-    assessment,
-    workspaceBoundaryVerified: true,
-  });
   const currentExecutableIdentity = { value: EXECUTABLE_IDENTITY };
+  Object.assign(preparation.binding.analysis as object, { executionIdentity: createAgentShellExecutionIdentity({
+    command, dialect: 'zsh', logicalCwd: workspace.logicalCwd,
+    providerAnalyzerRevision: provider.publicIdentity.analyzerRevision, analysis,
+  }) });
   const resolver = createAgentShellBindingResolver({
     commandAnalyzer: { analyze: vi.fn(async () => analysis) },
     probeDependencies: {
@@ -141,6 +149,7 @@ async function fixture() {
     preparation,
     providerSnapshot,
     resolver,
+    analysis,
   };
 }
 
@@ -179,6 +188,25 @@ describe('Agent Shell binding resolver', () => {
       preparation: input.preparation,
       signal: new AbortController().signal,
     })).rejects.toThrow('executable identity 已变化');
+  });
+
+  it.each([undefined, null, 'broken', `v1:${'0'.repeat(64)}`])('rejects a missing or changed exact execution identity: %s', async value => {
+    for (const unresolved of [false, true]) {
+      const input = await fixture(unresolved);
+      Object.assign(input.preparation.binding.analysis as object, { executionIdentity: value });
+      await expect(input.resolver.resolveCurrentBinding({ owner: input.preparation.binding.workspace as never,
+        preparation: input.preparation, signal: new AbortController().signal,
+      })).rejects.toThrow('execution identity');
+    }
+  });
+
+  it('recomputes an unresolved command identity without creating a rule authorization identity', async () => {
+    const input = await fixture(true);
+    const binding = await input.resolver.resolveCurrentBinding({ owner: input.preparation.binding.workspace as never,
+      preparation: input.preparation, signal: new AbortController().signal });
+    expect(binding.analysisIdentity).toBeNull();
+    expect(binding.authorizationIdentity).toBeNull();
+    expect(binding.executionIdentity).toBe((input.preparation.binding.analysis as { executionIdentity: string }).executionIdentity);
   });
 
   it('keeps the Run-frozen permission mode when the global setting changes', async () => {

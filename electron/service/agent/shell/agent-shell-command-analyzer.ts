@@ -4,16 +4,17 @@ import { createRequire } from 'node:module';
 import TreeSitter from '@vscode/tree-sitter-wasm';
 import type { Node } from '@vscode/tree-sitter-wasm';
 
-import type {
-  AgentShellDialect,
-  AgentShellPreparedAssessment,
-  AgentShellPreparedOperation,
-  AgentShellRisk,
-  AgentShellRiskFacet,
+import {
+  normalizeAgentShellPreparedAssessment,
+  type AgentShellDialect,
+  type AgentShellPreparedAssessment,
+  type AgentShellPreparedOperation,
+  type AgentShellRisk,
+  type AgentShellRiskFacet,
 } from '../../../../src/shared/agent/shell/agent-shell.types';
 
 export const AGENT_SHELL_COMMAND_ANALYZER_REVISION =
-  'tree-sitter-command-analyzer-v2+vscode-wasm-0.3.1';
+  'tree-sitter-command-analyzer-v3+vscode-wasm-0.3.1';
 
 const MAX_AST_NODES = 8_192;
 const MAX_OPERATIONS = 128;
@@ -343,6 +344,28 @@ let runtimePromise: Promise<AnalyzerRuntime> | null = null;
 function hashIdentity(domain: string, value: unknown): string {
   const digest = crypto.createHash('sha256').update(JSON.stringify([domain, value])).digest('hex');
   return `v1:${digest}`;
+}
+
+/** Exact execution binding, including unresolved analysis; never a permission-rule identity. */
+export function createAgentShellExecutionIdentity(input: {
+  readonly command: string;
+  readonly dialect: AgentShellDialect;
+  readonly logicalCwd: string;
+  readonly providerAnalyzerRevision: string;
+  readonly analysis: AgentShellCommandAnalysis;
+}): string {
+  return hashIdentity('omniflow.agent.shell.execution-v1', {
+    analysisIdentity: input.analysis.analysisIdentity,
+    analyzerRevision: input.analysis.analyzerRevision,
+    // Public action sealing canonicalizes bounded assessment text. All callers
+    // hash that same representation while the exact command remains bound.
+    assessment: normalizeAgentShellPreparedAssessment(input.analysis.assessment),
+    command: input.command,
+    dialect: input.dialect,
+    logicalCwd: input.logicalCwd,
+    providerAnalyzerRevision: input.providerAnalyzerRevision,
+    workspaceBoundaryVerified: input.analysis.workspaceBoundaryVerified,
+  });
 }
 
 function analyzerRuntime(): Promise<AnalyzerRuntime> {

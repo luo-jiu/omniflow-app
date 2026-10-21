@@ -6,6 +6,8 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { AgentToolMainPreparedExecution } from '../agent-tool-registry';
 import { createAgentShellExecutionLeaseManager } from './agent-shell-execution-lease';
+import { createAgentShellExecutionIdentity } from './agent-shell-command-analyzer';
+import type { AgentShellPreparedActionPublicV1 } from '../../../../src/shared/agent/shell/agent-shell.types';
 import { createAgentShellCommandHash } from './agent-shell-prepared-action';
 import { createAgentShellProcessSupervisor } from './agent-shell-process-supervisor';
 import type {
@@ -40,11 +42,13 @@ function workspace(): AgentShellWorkspacePreparationContext {
 function prepared(timeoutMs = 10_000): AgentToolMainPreparedExecution {
   const command = 'printf hello';
   const commandHash = createAgentShellCommandHash(command);
-  return {
+  const preparation: AgentToolMainPreparedExecution = {
     binding: {
       aiDestination: { identity: `v1:${'3'.repeat(64)}` },
       analysis: {
         analysisIdentity: `v1:${'4'.repeat(64)}`,
+        analyzerRevision: 'test-analyzer-v1',
+        providerAnalyzerRevision: 'test-provider-analyzer-v1',
         authorizationIdentity: `v1:${'5'.repeat(64)}`,
         workspaceBoundaryVerified: true,
       },
@@ -103,6 +107,17 @@ function prepared(timeoutMs = 10_000): AgentToolMainPreparedExecution {
     },
     snapshotHash: '9'.repeat(64),
   };
+  const action = preparation.publicAction as AgentShellPreparedActionPublicV1;
+  const analysis = preparation.binding.analysis as { analysisIdentity: string; analyzerRevision: string;
+    providerAnalyzerRevision: string; workspaceBoundaryVerified: boolean; executionIdentity?: string };
+  analysis.executionIdentity = createAgentShellExecutionIdentity({
+    command,
+    dialect: action.provider.dialect,
+    logicalCwd: action.cwd.path,
+    providerAnalyzerRevision: analysis.providerAnalyzerRevision,
+    analysis: { ...analysis, assessment: action.assessment },
+  });
+  return preparation;
 }
 
 async function grant(timeoutMs = 10_000) {

@@ -22,8 +22,11 @@ import type {
   AgentShellRuntimeRunInput,
 } from './agent-shell-runtime';
 import type {
+  AgentShellWorkspace,
   AgentShellWorkspaceOwnedFile,
   AgentShellWorkspaceOwner,
+  AgentShellWorkspaceStageFileInput,
+  AgentShellWorkspaceStore,
 } from './agent-shell-workspace-store';
 
 type RequestFileAuthority = NonNullable<
@@ -152,14 +155,15 @@ function createFixture(options: {
     Parameters<typeof createAgentShellServiceRuntime>[0]['requestFileAuthority']
   >;
 } = {}) {
-  const workspace = {
+  const workspace: AgentShellWorkspace = {
     generation: 1,
     logicalRoots: ['input', 'work', 'output', 'tmp', 'home'],
     manifest: { entries: [], generation: 1, provenance: [], workspaceId: 'workspace-1' },
     owner: OWNER,
     runId: 'run-1',
     workspaceId: 'workspace-1',
-  } as const;
+  };
+  let generation = workspace.generation;
   const workspaceStore = {
     beginExecutionQuota: vi.fn(async () => ({
       baselineBytes: 0,
@@ -170,6 +174,11 @@ function createFixture(options: {
     })),
     cancelExecutionQuota: vi.fn(async () => true),
     create: vi.fn(async () => workspace),
+    get: vi.fn<AgentShellWorkspaceStore['get']>(() => ({
+      ...workspace,
+      generation,
+      manifest: { ...workspace.manifest, generation },
+    })),
     requestCleanup: vi.fn(async () => ({ released: true, state: 'released' as const })),
     resolveExecutionResultContext: vi.fn(async () => ({
       generation: 1,
@@ -187,21 +196,25 @@ function createFixture(options: {
       workspaceTotalBytes: 0,
     })),
     scanExecutionQuotaUsage: vi.fn(async () => ({ entryCount: 5, totalBytes: 0 })),
-    stageFileFromHandle: vi.fn(async () => ({
-      contentHash: `sha256:${'b'.repeat(64)}`,
-      displayName: 'selected.txt',
-      generation: 2,
-      logicalPath: 'input/selected.txt',
-      sizeBytes: 13,
-      workspaceId: 'workspace-1',
-    })),
+    stageFileFromHandle: vi.fn(async (input: AgentShellWorkspaceStageFileInput) => {
+      if (input.expectedGeneration !== generation) throw new Error('Agent workspace generation 已变化');
+      generation += 1;
+      return {
+        contentHash: `sha256:${'b'.repeat(64)}`,
+        displayName: 'selected.txt',
+        generation,
+        logicalPath: 'input/selected.txt',
+        sizeBytes: 13,
+        workspaceId: 'workspace-1',
+      };
+    }),
     withOwnedFile: vi.fn(async (
       _workspaceId: string,
       _logicalPath: string,
       _runId: string,
       _owner: AgentShellWorkspaceOwner,
       consumer: (file: ReturnType<typeof ownedFile>) => Promise<unknown>,
-    ) => consumer(ownedFile())),
+    ) => consumer(ownedFile({ generation }))),
   };
   const prepare = vi.fn(async () => ({}) as never);
   const run = vi.fn(async (
@@ -599,11 +612,29 @@ describe('Agent Shell service runtime', () => {
     expect(fixture.saveLocalFileAs).not.toHaveBeenCalled();
   });
 
-  it('stages a stable library file without exposing its signed URL or physical path', async () => {
-    const fixture = createFixture();
+  it.each([
+    { name: 'source.txt', ext: undefined, displayName: 'source.txt' },
+    { name: 'main', ext: 'cpp', displayName: 'main.cpp' },
+    { name: 'main.cpp', ext: 'cpp', displayName: 'main.cpp' },
+    { name: 'MAIN.CPP', ext: 'cpp', displayName: 'MAIN.CPP' },
+    { name: 'main', ext: '.cpp', displayName: 'main.cpp' },
+  ])('stages a stable library file named $name / $ext as $displayName without exposing its signed URL or physical path', async ({ name, ext, displayName }) => {
+    const requestFileAuthority = vi.fn<RequestFileAuthority>(async input => ({
+      ...(input.operation.operation === 'stage-library-node' && input.operation.includeDownloadUrl
+        ? { downloadUrl: 'https://example.com/signed-source' } : {}),
+      node: authorityNode({ name, ext }),
+      operation: 'stage-library-node',
+      version: 1,
+    }));
+    const fixture = createFixture({ requestFileAuthority });
     const prepared = await fixture.service.prepareFileStage({
       source: { kind: 'library-node', nodeId: 8 },
     }, undefined, fixture.preparationContext);
+    expect(prepared.publicAction).toMatchObject({ sourceDisplayName: displayName });
+    expect(prepared.decision).toMatchObject({ preview: {
+      description: `将把资料库文件“${displayName}”复制到当前任务工作区。`,
+      details: expect.arrayContaining([{ label: '文件', value: displayName }]),
+    } });
     expect(fixture.requestFileAuthority).toHaveBeenCalledWith(expect.objectContaining({
       operation: expect.objectContaining({ includeDownloadUrl: false }),
     }));
@@ -635,6 +666,110 @@ describe('Agent Shell service runtime', () => {
     expect(JSON.stringify(result)).not.toContain('signed-source');
     expect(JSON.stringify(result)).not.toContain('private-token');
     expect(fixture.workspaceStore.stageFileFromHandle).toHaveBeenCalledOnce();
+    expect(fixture.workspaceStore.stageFileFromHandle).toHaveBeenCalledWith(expect.objectContaining({ displayName }));
+  });
+
+  it.each([2, 3])('rejects extension changes at authority request %s before staging', async changedAt => {
+    let requests = 0;
+    const requestFileAuthority = vi.fn<RequestFileAuthority>(async input => ({
+      ...(input.operation.operation === 'stage-library-node' && input.operation.includeDownloadUrl
+        ? { downloadUrl: 'https://example.com/signed-source' } : {}),
+      node: authorityNode({ name: 'main', ext: ++requests === changedAt ? 'cc' : 'cpp' }),
+      operation: 'stage-library-node',
+      version: 1,
+    }));
+    const fixture = createFixture({ requestFileAuthority });
+    const prepared = await fixture.service.prepareFileStage({
+      source: { kind: 'library-node', nodeId: 8 },
+    }, undefined, fixture.preparationContext);
+    await expect(fixture.service.executeFileStage({
+      onProgress: vi.fn(),
+      preparation: {
+        binding: prepared.binding,
+        identity: fixture.preparationContext.preparationIdentity,
+        preparedActionId: 'prepared-1',
+        publicAction: prepared.publicAction,
+        snapshotHash: 'a'.repeat(64),
+      },
+      signal: new AbortController().signal,
+    } as unknown as AgentToolExecutionContext)).rejects.toThrow(changedAt === 2 ? '执行前已经变化' : '下载期间已经变化');
+    expect(fixture.workspaceStore.stageFileFromHandle).not.toHaveBeenCalled();
+    expect(fixture.downloadFile).toHaveBeenCalledTimes(changedAt === 2 ? 0 : 1);
+  });
+
+  it('uses the current Store generation for repeated staging and publishing in one Run', async () => {
+    const fixture = createFixture();
+    for (const generation of [1, 2]) {
+      const stageContext = {
+        ...fixture.preparationContext,
+        preparationIdentity: {
+          ...fixture.preparationContext.preparationIdentity,
+          preparedActionId: `stage-prepared-${generation}`,
+          toolRunId: `stage-${generation}`,
+        },
+      };
+      const staged = await fixture.service.prepareFileStage({
+        source: { kind: 'library-node', nodeId: 8 },
+      }, undefined, stageContext);
+      expect(staged.binding).toMatchObject({ generation });
+      expect(staged.snapshotMaterial).toMatchObject({ generation });
+      expect(await fixture.service.executeFileStage({
+        onProgress: vi.fn(),
+        preparation: {
+          binding: staged.binding,
+          identity: stageContext.preparationIdentity,
+          preparedActionId: stageContext.preparationIdentity.preparedActionId,
+          publicAction: staged.publicAction,
+          snapshotHash: 'a'.repeat(64),
+        },
+        signal: stageContext.signal,
+      } as unknown as AgentToolExecutionContext)).toMatchObject({ ok: true });
+
+      const publishContext = {
+        ...fixture.preparationContext,
+        preparationIdentity: {
+          ...fixture.preparationContext.preparationIdentity,
+          preparedActionId: `publish-prepared-${generation}`,
+          toolName: 'file.publish',
+          toolRegistrationId: 'file.publish@1',
+          toolRunId: `publish-${generation}`,
+        },
+      };
+      const published = await fixture.service.prepareFilePublish({
+        destination: { kind: 'local-save-as' },
+        sourcePath: 'output/result.txt',
+      }, undefined, publishContext);
+      expect(published.binding).toMatchObject({ generation: generation + 1 });
+      expect(await fixture.service.executeFilePublish({
+        onProgress: vi.fn(),
+        preparation: {
+          binding: published.binding,
+          identity: publishContext.preparationIdentity,
+          preparedActionId: publishContext.preparationIdentity.preparedActionId,
+          publicAction: published.publicAction,
+          snapshotHash: 'b'.repeat(64),
+        },
+        signal: publishContext.signal,
+      } as unknown as AgentToolExecutionContext)).toMatchObject({ ok: true });
+    }
+
+    expect(fixture.workspaceStore.create).toHaveBeenCalledOnce();
+    expect(fixture.workspaceStore.get).toHaveBeenCalledTimes(4);
+    expect(fixture.workspaceStore.stageFileFromHandle.mock.calls.map(([input]) => input.expectedGeneration))
+      .toEqual([1, 2]);
+    expect(fixture.saveLocalFileAs).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not reuse a created workspace snapshot after the Store releases it', async () => {
+    const fixture = createFixture();
+    fixture.workspaceStore.get.mockReturnValueOnce(null);
+
+    await expect(fixture.service.prepareFileStage({
+      source: { kind: 'library-node', nodeId: 8 },
+    }, undefined, fixture.preparationContext)).rejects.toThrow('workspace 不存在或已释放');
+
+    expect(fixture.requestFileAuthority).not.toHaveBeenCalled();
+    expect(fixture.workspaceStore.stageFileFromHandle).not.toHaveBeenCalled();
   });
 
   it('rejects a library stage when the source identity drifts during download', async () => {
