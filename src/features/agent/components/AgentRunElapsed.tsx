@@ -8,7 +8,9 @@ import { formatAgentRunElapsed, isAgentRunActive } from '../agent-run-presentati
 const ElapsedRow = styled.div`
   min-height: 28px;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  column-gap: 16px;
   padding: 3px 0 7px;
   border-bottom: 1px solid var(--app-border);
   color: var(--app-text-muted);
@@ -32,11 +34,12 @@ const ElapsedRow = styled.div`
   button:focus-visible { outline: 2px solid var(--semi-color-primary); outline-offset: 3px; }
 `;
 
-export default function AgentRunElapsed({ run, collapsible, expanded, onToggle }: {
+export default function AgentRunElapsed({ run, collapsible, expanded, onToggle, changes }: {
   run: AgentRunSnapshot;
   collapsible: boolean;
   expanded: boolean;
   onToggle: () => void;
+  changes?: React.ReactNode;
 }) {
   const [now, setNow] = React.useState(Date.now);
   const workspaceActive = React.useContext(WorkspaceVisibilityContext);
@@ -53,5 +56,6 @@ export default function AgentRunElapsed({ run, collapsible, expanded, onToggle }
       aria-label={`${expanded ? '收起' : '展开'}任务过程，${label}`} onClick={onToggle}>
       <span>{label}</span><AgentDisclosureChevron expanded={expanded} />
     </button> : <span>{label}</span>}
+    {changes}
   </ElapsedRow>;
 }

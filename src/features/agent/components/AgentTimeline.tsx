@@ -27,6 +27,7 @@ import { serializeAgentOwnerScope } from '@/shared/agent/agent-owner-scope';
 import { useAgentProcessExpansion } from '../hooks/useAgentProcessExpansion';
 import type { AgentTimelineItem } from '../agent-timeline';
 import AgentRunElapsed from './AgentRunElapsed';
+import AgentFileChanges from './AgentFileChanges';
 import { buildAgentComputerPointerPlans } from '../agent-computer-pointer-plan';
 
 const Timeline = styled.div`
@@ -255,6 +256,7 @@ function AgentTimeline({
       const autoCollapse = restoredRuns.current.has(run.id) || shouldAutoCollapseAgentProcess(run, group);
       return [root, {
         run,
+        attempts,
         autoCollapse,
         expansionKey: root,
         firstKey: group[0]?.key,
@@ -262,6 +264,11 @@ function AgentTimeline({
       }];
     }));
   }, [continuation, items]);
+
+  const renderFileChanges = (attempts: AgentRunSnapshot[]) => ownerScope && attempts[0] ? (
+    <AgentFileChanges ownerScope={ownerScope} libraryId={libraryId} sessionId={attempts[0].sessionId}
+      runIds={attempts.map(run => run.id)} activities={toolActivities} />
+  ) : null;
 
   const renderItem = (item: AgentTimelineItem, detailsVisible: boolean) => {
         if (item.type === 'run-status') {
@@ -361,6 +368,7 @@ function AgentTimeline({
           && item.layer !== 'conversation');
         const elapsed = presentation?.firstKey === item.key ? (
           <AgentRunElapsed run={presentation.run} collapsible={presentation.collapsible}
+            changes={renderFileChanges(presentation.attempts)}
             expanded={expanded} onToggle={() => {
               onToolExpand?.();
               setRunExpanded(presentation.expansionKey, !expanded);
@@ -379,8 +387,8 @@ function AgentTimeline({
           {user ? elapsed : null}
         </React.Fragment>;
       })}
-      {[...runPresentations.values()].filter(presentation => !presentation.firstKey).map(({ run }) => (
-        <AgentRunElapsed key={run.id} run={run} collapsible={false} expanded={false} onToggle={() => {}} />
+      {[...runPresentations.values()].filter(presentation => !presentation.firstKey).map(({ run, attempts }) => (
+        <AgentRunElapsed key={run.id} run={run} changes={renderFileChanges(attempts)} collapsible={false} expanded={false} onToggle={() => {}} />
       ))}
       {reserveLiveStatus ? (
         <LiveStatus role={liveStatus ? 'status' : undefined} aria-live={liveStatus ? 'polite' : undefined}

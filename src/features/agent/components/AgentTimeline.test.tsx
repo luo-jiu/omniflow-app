@@ -13,6 +13,7 @@ import AgentTimeline from './AgentTimeline';
 import AgentMessageContent from './AgentMessageContent';
 import AgentToolActivityCard from './AgentToolActivityCard';
 import AgentToolActivityGroup from './AgentToolActivityGroup';
+import AgentFileChanges from './AgentFileChanges';
 
 const messageContentRenders = vi.hoisted(() => vi.fn());
 
@@ -42,6 +43,7 @@ vi.mock('./AgentToolActivityGroup', () => ({
   )),
 }));
 vi.mock('./AgentAttachmentPreview', () => ({ default: () => null }));
+vi.mock('./AgentFileChanges', () => ({ default: () => <div data-testid="file-changes-entry" /> }));
 
 const renderers: TestRenderer.ReactTestRenderer[] = [];
 
@@ -258,7 +260,7 @@ describe('AgentTimeline commentary presentation', () => {
       createdAt: resumed.finishedAt!, content: '统一最终结果', assistantItem: { ...commentary().assistantItem, phase: 'final' as const } };
     let renderer!: TestRenderer.ReactTestRenderer;
     act(() => { renderer = TestRenderer.create(<AgentTimeline approvalBusyIds={new Set()} interactionBusyIds={new Set()}
-      libraryId={3} ownerScope={null} onResolveApproval={vi.fn()} runs={[stopped, resumed]}
+      libraryId={3} ownerScope={{ accountScope: 'user:7', backendScope: 'https://example.test' }} onResolveApproval={vi.fn()} runs={[stopped, resumed]}
       messages={[question, { ...commentary(), runId: stopped.id, sessionId: stopped.sessionId, createdAt: '2026-09-12T00:00:01Z' },
         { ...question, id: 'continued-user-audit', runId: resumed.id, createdAt: resumed.createdAt }, final]}
       toolActivities={[{ ...toolActivity(), runId: stopped.id, sessionId: stopped.sessionId, createdAt: '2026-09-12T00:00:02Z' }]} />); });
@@ -266,6 +268,10 @@ describe('AgentTimeline commentary presentation', () => {
     expect(renderer.root.findAll(node => node.type === 'div' && Boolean(node.props['data-agent-question']))).toHaveLength(1);
     const elapsed = renderer.root.findAll(node => node.type === 'div' && Boolean(node.props['data-agent-elapsed']));
     expect(elapsed).toHaveLength(1);
+    const changes = elapsed[0].findByType(AgentFileChanges);
+    expect(changes.props.runIds).toEqual([stopped.id, resumed.id]);
+    expect(changes.props.sessionId).toBe(stopped.sessionId);
+    expect(changes.parent?.props['aria-hidden']).toBeUndefined();
     expect(elapsed[0].findAllByType('span').some(node => node.children.includes('用时 30s'))).toBe(true);
     expect(renderer.root.findByProps({ 'aria-expanded': false })).toBeTruthy();
     expect(renderer.root.findAllByType(AgentMessageContent).some(node => node.props.content === '统一最终结果')).toBe(true);
