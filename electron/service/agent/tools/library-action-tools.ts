@@ -1,7 +1,8 @@
 import type { AgentTool } from '../agent-tool-registry';
 import { normalizeAgentLibraryAction, type AgentLibraryMutationName } from '../../../../src/shared/agent/agent-library-actions';
+import { resolveAgentFileToolInput } from '../agent-file-path-resolver';
 
-const source = { path: { type: 'string', minLength: 2, maxLength: 2048 }, nodeId: { type: 'integer', minimum: 1 } };
+const source = { path: { type: 'string', minLength: 1, maxLength: 2048 }, basePath: { type: 'string', minLength: 1, maxLength: 2048 }, nodeId: { type: 'integer', minimum: 1 } };
 const parent = { parentPath: { type: 'string', minLength: 1, maxLength: 2048 }, parentId: { type: 'integer', minimum: 1 } };
 const nameProperty = { type: 'string', minLength: 1, maxLength: 240, description: '完整的新文件名，包含后缀；不是路径。' };
 const descriptions: Record<string, string> = {
@@ -26,15 +27,15 @@ function mutation(toolName: Exclude<AgentLibraryMutationName, 'directory.create'
         ...(toolName === 'file.rename' ? { required: ['name'] } : { anyOf: [{ properties: { parentPath: {} }, required: ['parentPath'] }, { properties: { parentId: {} }, required: ['parentId'] }] }),
       }),
     },
-    validate(input, context) {
+    async validate(input, context) {
       try {
-        normalizeAgentLibraryAction(toolName, input);
+        normalizeAgentLibraryAction(toolName, await resolveAgentFileToolInput(toolName, input, context));
         if (!Number.isSafeInteger(context.appContext.libraryId) || Number(context.appContext.libraryId) <= 0) throw new Error('当前资料库不可用');
         return { ok: true };
       } catch (error) { return { ok: false, message: error instanceof Error ? error.message : '文件操作参数无效' }; }
     },
-    assess(input, context) {
-      const query = normalizeAgentLibraryAction(toolName, input);
+    async assess(input, context) {
+      const query = normalizeAgentLibraryAction(toolName, await resolveAgentFileToolInput(toolName, input, context));
       const observed = context.perception?.knownNodes?.find(node => node.id === query.nodeId && node.libraryId === context.appContext.libraryId);
       const target = query.path || observed?.path || `节点 ${query.nodeId}`;
       return { behavior: 'ask', risk: 'write', preview: { title: titles[toolName], risk: 'write',

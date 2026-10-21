@@ -654,6 +654,13 @@ afterEach(() => {
 });
 
 describe('AgentToolActivityCard approval transitions and mixed groups', () => {
+  it.each(['host', 'library'])('renders a committed %s patch as a saved file with an edit icon', scope => {
+    const renderer = renderCard(shellActivity({ call: { id: 'patch-call', name: 'file.patch', input: { scope } },
+      preparation: undefined, result: { ok: true, data: { scope, fileName: 'patched.txt', writeCommitState: 'committed' } } }));
+    expect(textContent(renderer.root.findByProps({ className: 'agent-activity-header' }))).toBe('已保存patched.txt');
+    expect(renderer.root.findByProps({ 'data-tool-icon': 'edit' })).toBeDefined();
+  });
+
   it('replaces a pending approval with its real business step without an approval receipt row', () => {
     const onResolveApproval = vi.fn();
     const pending = shellActivity({ call: { id: 'write-call', name: 'file.write', input: {} }, preparation: undefined,

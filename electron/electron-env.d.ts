@@ -300,6 +300,18 @@ interface Window {
     readShellLogPage: (
       input: import('@/shared/agent/shell/agent-shell.types').AgentShellLogPageRequestV1,
     ) => Promise<import('@/shared/agent/shell/agent-shell.types').AgentShellLogPageV1>;
+    prepareFileChange: (
+      input: import('@/shared/agent/agent-file-changes').AgentFileChangePrepareRequest,
+    ) => Promise<boolean>;
+    listFileChanges: (
+      input: import('@/shared/agent/agent-file-changes').AgentFileChangeListRequest,
+    ) => Promise<import('@/shared/agent/agent-file-changes').AgentFileChangeList>;
+    readFileDiff: (
+      input: import('@/shared/agent/agent-file-changes').AgentFileDiffRequest,
+    ) => Promise<import('@/shared/agent/agent-file-changes').AgentFileDiffResult>;
+    cancelFileDiff: (
+      input: import('@/shared/agent/agent-file-changes').AgentFileDiffCancelRequest,
+    ) => Promise<boolean>;
     completeFileAuthority: (
       input: import('@/shared/agent/agent.types').AgentFileAuthorityCompletionV1,
     ) => Promise<boolean>;

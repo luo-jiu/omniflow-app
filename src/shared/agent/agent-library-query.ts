@@ -11,6 +11,7 @@ export interface AgentLibraryQuery {
   nodeId?: number;
   directoryId?: number;
   path?: string;
+  basePath?: string;
   keyword?: string;
   nodeType?: 'dir' | 'file';
   tagIds?: number[];

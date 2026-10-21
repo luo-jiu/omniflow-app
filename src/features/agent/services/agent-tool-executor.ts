@@ -18,13 +18,14 @@ import {
   reportAgentToolExecutionProgress,
   saveAgentMediaArtifact,
   uploadAgentMediaArtifact,
+  prepareAgentFileChange,
 } from './agent.api';
 import { readAgentPerception } from './agent-context.api';
 import { buildFileFullName } from '@/utils/fileTreeSettings';
 import { readAgentMediaError } from '@/shared/agent/agent-media-error';
 import { normalizeAgentLibraryDirectoryPath } from '@/shared/agent/agent-library-path';
 import { readAgentLibraryNode } from './agent-library.api';
-import { executeAgentFileWrite } from './agent-file-write';
+import { executeAgentFileWrite, type AgentFileWriteDependencies } from './agent-file-write';
 import { verifyAgentToolAccess } from './agent.api';
 import { executeAgentFileDelete } from './agent-file-delete';
 import { executeAgentLibraryAction, executeAgentRecycleList, type AgentLibraryActionDependencies } from './agent-library-actions';
@@ -82,6 +83,7 @@ export interface AgentRendererToolOutcome {
 }
 
 export interface AgentRendererToolExecutorDependencies extends AgentLibraryActionDependencies {
+  prepareMutation?: AgentFileWriteDependencies['prepareMutation'];
   readLibraryNode?: typeof readAgentLibraryNode;
   createDirectory?: typeof createNode;
   extractMediaAudio?: typeof extractAgentMediaAudio;
@@ -283,6 +285,14 @@ function buildUploadStateData(
   };
 }
 
+function fileSnapshotBase64(bytes: Uint8Array): string {
+  const chunks: string[] = [];
+  for (let offset = 0; offset < bytes.length; offset += 32_768) {
+    chunks.push(String.fromCharCode(...bytes.subarray(offset, offset + 32_768)));
+  }
+  return btoa(chunks.join(''));
+}
+
 export async function executeAgentRendererTool(
   request: AgentToolExecutionRequest,
   dependencies: AgentRendererToolExecutorDependencies = {},
@@ -297,7 +307,24 @@ export async function executeAgentRendererTool(
     } };
     await dependencies.beforeCommit!();
   }
-  if (request.toolName === 'file.write') return executeAgentFileWrite(request, dependencies);
+  if (request.toolName === 'file.write' || request.toolName === 'file.patch') {
+    return executeAgentFileWrite(request, { ...dependencies,
+      prepareMutation: dependencies.prepareMutation || (async snapshot => {
+        throwIfAborted(dependencies.signal);
+        const accepted = await prepareAgentFileChange({ executionId: request.executionId,
+          ownerScope: request.ownerScope, libraryId: Number(request.appContext.libraryId),
+          sessionId: request.sessionId, runId: request.runId,
+          snapshot: { path: snapshot.path, ...(snapshot.nodeId ? { nodeId: snapshot.nodeId } : {}),
+            beforeBase64: snapshot.beforeBytes === null ? null : fileSnapshotBase64(snapshot.beforeBytes),
+            afterBase64: fileSnapshotBase64(snapshot.afterBytes),
+            ...(snapshot.beforeRevision ? { beforeRevision: snapshot.beforeRevision } : {}),
+            afterRevision: snapshot.afterRevision },
+        });
+        if (!accepted) throw new Error('文件改动记录准备被拒绝，未提交');
+        throwIfAborted(dependencies.signal);
+      }),
+    });
+  }
   if (request.toolName === 'file.delete') return executeAgentFileDelete(request, dependencies);
   if (request.toolName === 'node.configure') return executeAgentNodeConfigure(request, dependencies);
   if ((AGENT_LIBRARY_MUTATION_TOOLS as readonly string[]).includes(request.toolName)) return executeAgentLibraryAction(request, dependencies);

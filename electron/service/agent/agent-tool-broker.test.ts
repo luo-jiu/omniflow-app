@@ -10,6 +10,8 @@ import {
   type AgentToolExecutionContext,
 } from './agent-tool-registry';
 import type { AgentToolResult } from '../../../src/shared/agent/agent.types';
+import { fileWriteTool } from './tools/file-write-tool';
+import { filePatchTool } from './tools/file-patch-tool';
 
 const OWNER_SCOPE = {
   accountScope: 'user:7',
@@ -58,6 +60,87 @@ function brokerDeferred<T>() {
   const promise = new Promise<T>(resolvePromise => { resolve = resolvePromise; });
   return { promise, resolve };
 }
+
+describe('trusted file mutation main settlement', () => {
+  const operationId = '83fc584b-037d-4c82-8883-a609846ea0d4';
+  const receipt = (state: 'committed' | 'uncommitted' | 'commit_unknown'): AgentToolResult => ({
+    ok: state === 'committed', data: { operationId, mutationCommitState: state, writeCommitState: state },
+  });
+  const toolInput = (name: string) => name === 'file.write' ? { path: '/a.txt', content: 'new' }
+    : { path: '/a.txt', revision: 'a'.repeat(64), patch: '@@ -1 +1 @@\n-old\n+new\n' };
+
+  it.each(['file.write', 'file.patch'])('injects main-owned settlement into actual registered %s and preserves post-cancel receipts', async name => {
+    for (const state of ['committed', 'uncommitted', 'commit_unknown'] as const) {
+      const registry = createAgentToolRegistry([fileWriteTool, filePatchTool]);
+      const snapshot = registry.createSnapshot();
+      const controller = new AbortController();
+      const begun = brokerDeferred<AgentMainCommitSettlement>();
+      const completion = brokerDeferred<AgentToolResult>();
+      const executeLibraryFileMutation = vi.fn(async (_input: unknown, signal: AbortSignal, commit?: AgentMainCommitSettlement) => {
+        expect(commit).toBeDefined();
+        commit!.begin(receipt('commit_unknown'));
+        begun.resolve(commit!);
+        const actual = await completion.promise;
+        expect(signal.aborted).toBe(true);
+        commit!.settle(actual);
+        return { ok: false, message: 'late cancellation must not replace actual commit state' };
+      });
+      const context = { appContext: prepareInput(controller.signal).appContext, onProgress: vi.fn(), signal: controller.signal,
+        executeLibraryFileMutation, runCapabilitySnapshot: { getTool: (requested: string) => snapshot.get(requested) } } as unknown as AgentToolDispatchContext;
+      const broker = createAgentToolBroker({ toolRegistry: registry });
+      const running = broker.executeMain(name, toolInput(name), context, 10_000, snapshot);
+      await begun.promise;
+      controller.abort();
+      completion.resolve(receipt(state));
+      await expect(running).resolves.toEqual(receipt(state));
+    }
+  });
+
+  it.each(['file.write', 'file.patch'])('retains %s unknown state when cancellation settlement times out and rejects late replacement', async name => {
+    vi.useFakeTimers();
+    const completion = brokerDeferred<AgentToolResult>();
+    try {
+      const registry = createAgentToolRegistry([fileWriteTool, filePatchTool]);
+      const snapshot = registry.createSnapshot();
+      const controller = new AbortController();
+      const begun = brokerDeferred<AgentMainCommitSettlement>();
+      const context = { appContext: prepareInput(controller.signal).appContext, onProgress: vi.fn(), signal: controller.signal,
+        runCapabilitySnapshot: { getTool: (requested: string) => snapshot.get(requested) },
+        executeLibraryFileMutation: async (_input: unknown, _signal: AbortSignal, commit?: AgentMainCommitSettlement) => {
+          commit!.begin(receipt('commit_unknown')); begun.resolve(commit!); return completion.promise;
+        } } as unknown as AgentToolDispatchContext;
+      const broker = createAgentToolBroker({ toolRegistry: registry });
+      const running = broker.executeMain(name, toolInput(name), context, 10_000, snapshot, 50);
+      const commit = await begun.promise;
+      controller.abort();
+      await vi.advanceTimersByTimeAsync(50);
+      await expect(running).resolves.toEqual(receipt('commit_unknown'));
+      expect(() => commit.settle(receipt('committed'))).toThrow('已经结束');
+    } finally { completion.resolve(receipt('uncommitted')); vi.useRealTimers(); }
+  });
+
+  it.each(['file.write', 'file.patch'])('does not grant %s settlement to forged versions, sources or inherited closures', async name => {
+    for (const overrides of [
+      { registrationId: 'spoof:file-mutation@1' }, { risk: 'read' }, { executor: 'renderer' }, { kind: 'control' },
+      { pluginOperation: 'rename' }, { pluginOperation: 'file-output' },
+      { pluginSource: { pluginId: 'spoof', registrationId: 'spoof@1' } },
+    ]) {
+      const inherited = { begin: vi.fn(), settle: vi.fn() };
+      const registered = { name, registrationId: name === 'file.write' ? 'builtin:file.write@2' : 'builtin:file.patch@1',
+        kind: 'business', risk: 'write', executor: 'main', ...overrides };
+      const execute = vi.fn(async (_name: string, _input: unknown, context: AgentToolDispatchContext) => {
+        expect(context.commitSettlement).toBeUndefined(); return { ok: false };
+      });
+      const context = { appContext: prepareInput(new AbortController().signal).appContext, onProgress: vi.fn(),
+        signal: new AbortController().signal, commitSettlement: inherited,
+        runCapabilitySnapshot: { getTool: () => registered } } as unknown as AgentToolDispatchContext;
+      const broker = createAgentToolBroker({ toolRegistry: { execute } });
+      await expect(broker.executeMain(name, {}, context)).resolves.toEqual({ ok: false });
+      expect(inherited.begin).not.toHaveBeenCalled();
+      expect(inherited.settle).not.toHaveBeenCalled();
+    }
+  });
+});
 
 describe('Agent tool broker', () => {
   it.each(['computer.setText', 'computer.scroll', 'computer.input', 'computer.menu'] as const)('preserves %s committed and unknown receipts after cancellation', async name => {

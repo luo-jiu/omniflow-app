@@ -26,6 +26,29 @@ function completedActivity(
   };
 }
 
+describe('saved file mutation summaries', () => {
+  it.each(['file.write', 'file.patch'])('shows %s saves consistently for either scope', name => {
+    expect(getAgentToolNameTitle(name)).toBe('保存文件');
+    for (const scope of ['host', 'library']) {
+      const activity = completedActivity(name, { scope, fileName: 'result.txt', writeCommitState: 'committed' });
+      expect(buildAgentToolSummary(activity, 3)).toEqual({ label: '已保存', subject: 'result.txt' });
+      expect(buildAgentToolSummary({ ...activity, status: 'running' }, 3)).toEqual({ label: '正在保存文件' });
+    }
+  });
+
+  it.each(['file.write', 'file.patch'])('does not claim %s was saved for an uncertain or rejected receipt', name => {
+    for (const field of ['writeCommitState', 'mutationCommitState']) {
+      expect(buildAgentToolSummary(completedActivity(name, { fileName: 'result.txt', [field]: 'commit_unknown' }), 3))
+        .toEqual({ label: '保存待核对', subject: 'result.txt' });
+      expect(buildAgentToolSummary(completedActivity(name, { fileName: 'result.txt', [field]: 'uncommitted' }), 3))
+        .toEqual({ label: '文件未保存', subject: 'result.txt' });
+    }
+    const failedReceipt = completedActivity(name, { fileName: 'result.txt' });
+    failedReceipt.result!.ok = false;
+    expect(buildAgentToolSummary(failedReceipt, 3)).toEqual({ label: '文件未保存', subject: 'result.txt' });
+  });
+});
+
 const IMAGE_ID = 'eddf85c3-f841-46a2-8016-2a061b58983e';
 const OBSERVATION_ID = '237e3952-2a40-4c7b-b2f4-bec335a79cce';
 const WINDOW_TARGET_ID = '12022dc1-f61c-4c2a-aac6-2963b60e5f7a';

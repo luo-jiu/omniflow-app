@@ -1,23 +1,27 @@
 # Agent 统一文件读取
 
-更新时间：2026-09-08
+更新时间：2026-10-21
 
 ## 当前能力
 
-文件工具使用 `scope=library|host`。默认 library，表示当前资料库；host 必须明确本机绝对路径或 `~/` 路径。路径命名空间不根据文件是否存在自动猜测，不把资料库路径当作本机路径。
+文件工具使用 `scope=library|host`，默认 library 不变。library 接受绝对或相对 path；相对路径以显式绝对 basePath，或 Run 当前目录的权威 path 为基准，`..` 不得越过 `/` 根。host 相对 path 必须显式提供当前平台绝对 / `~/` basePath，缺失即失败，不使用 `process.cwd()`；绝对 path 不依赖 basePath，但传入的 basePath 仍须合法。路径命名空间不根据文件是否存在自动猜测，不把资料库路径当作本机路径。
+
+main 在 accessGuard / assess 前一次规范化并冻结 canonical input、移除 basePath；prepare、execute、renderer executor 和私有快照复用同一目标，不暗换 scope，也未新增稳定 resource ref。
 
 - `file.list`：列出一层目录，默认 50 条、最多 100 条。
 - `file.search`：在路径子树按名称字面包含、glob 和类型筛选；不区分大小写，不搜索正文，不解释正则或管道。
 - `file.stat`：元数据；资料库可附带存储健康观察，不代表正文已读。
 - `file.resolve`：精确路径定位；调用 read/list 时不是必要前置步骤。
-- `file.read`：UTF-8 正文，返回带行号的结构化文本片段。
-- `file.grep`：按单行字面文本搜索正文，返回路径、行号、上下文和有界续搜游标。完整契约见 [文件与正文搜索](agent-file-search.md)。
+- `file.read`：已保存的 UTF-8 正文，返回带行号的结构化文本片段。
+- `file.grep`：按单行 literal 或 `mode=regex`（`rust-regex-v1`）搜索已保存正文，两 scope 共用 include / exclude Glob，返回路径、Unicode 行列、上下文和有界续搜游标。完整契约见 [文件与正文搜索](agent-file-search.md)。
 
 资料库 ID、directoryId 和标签只属于 library，不透传给 host。资料库仍通过 renderer authority 和 HTTP 读取数据库；本机在 Electron main 读取，两者不经过 Shell 命令拼接。
 
+`file.read` / `file.grep` 均只读取权威 saved 内容：library 从资料库当前存储绑定读取，host 从本机文件系统读取。它们不读取 TextViewer 的未保存 buffer 或 DraftStore，不会因文件已在编辑器打开而换成草稿，也不会顺带保存草稿。当前 read / grep 没有可选择 `view=working` 的输入；共享工作副本仍属后续设计。
+
 ## 正文契约
 
-输入：`scope`、`path`、`offset`、`column`、`limit`、`revision`、`maxOutputTokens`。
+输入：`scope`、`path`、`basePath`、`offset`、`column`、`limit`、`revision`、`maxOutputTokens`。
 
 offset 为一基行号，默认 1；column 为一基 Unicode 字符位置，默认 1，不是 UTF-16 下标或字节位置。省略 limit 时从指定位置尽量读到末尾；提供 limit 时按模型主动指定的行数读取，不再有默认 200 行或最多 2,000 行的限制。
 
@@ -36,7 +40,7 @@ offset 为一基行号，默认 1；column 为一基 Unicode 字符位置，默�
 - 已解码逻辑行数组由同一 raw entry 持有，共享上述条数、TTL 和 16 MiB 权重配额，不另建跨 Run 内容缓存。每次命中先算原字节 SHA-256，返回 bytes 被调用方改写时不能命中或污染缓存；派生数组只读。派生权重保守估算 UTF-16 backing 与行对象 / 数组，超额时仅保留 raw，继续正常解码；不是精确 V8 heap 计量。200、撤权 / 读取失败、身份变化、TTL 与 Run 释放同时使派生状态失效。
 - URL、存储对象键和凭据不返回模型；正文仍通过既有 Tool 结果脱敏管线。正文是不可信内容，不授予工具权限。
 
-本机目录搜索最多扫描 5,000 项，不递归符号链接；更大范围明确建议缩小目录或使用 Shell。游标绑定查询条件和扫描结果指纹，目录变化后拒绝旧游标，不伪装成完整结果。目录树查询不是原子文件系统快照。
+本机 `file.search` 的 file-only 递归搜索用随包 rg 枚举最多 5,000 个文件候选，按该查询的共同 Glob / keyword 筛后并发取元数据；grep 的 Glob 当前在候选元数据后、正文前过滤。资源缺失时用 JS 等价枚举。单层 list / 混合目录搜索保留 5,000 条目边界，不递归符号链接。续页仍重新枚举，游标绑定查询和匹配元数据指纹，变化后拒绝，不伪装成完整结果；详见[搜索专题](agent-file-search.md)。
 
 ## 输出预算
 
@@ -50,7 +54,11 @@ offset 为一基行号，默认 1；column 为一基 Unicode 字符位置，默�
 
 ## 尚未实现
 
-这不是资料库 FUSE 挂载或 Shell 管道解释器。本机复杂 `rg/sed`、正则和管道继续使用现有 Shell；内部正文搜索是有界逐文件读取，没有全文索引。首次读取、缓存失效或没有强 ETag 时完整读取最多 8 MiB，再切片；缓存有效且源返回 304 时无需再次传输正文。尚未实现 Range 续读或行索引，续读仍有权限、元数据与条件请求开销。后续优化必须保留版本检查、取消、字节与对象数量上限。
+这不是资料库 FUSE 挂载或 Shell 管道解释器。`file.grep` 已在两 scope 支持默认 literal 与 `rust-regex-v1` 正则，以及共同 include / exclude Glob；PCRE2、lookaround、backreference、跨行或复杂管道仍超出该工具契约。本机需要这些能力时可使用现有 Shell。
+
+grep 候选在 host 使用受限原生目录枚举、library 继续元数据分页；正文完整安全读取、hash 和解码后形成有界快照，再经 stdin 交给 rg。rg 不直接读整树正文或下载对象存储。没有 rg 时 literal 等价回退并返回 warning，regex 明确不可用。`ignoreMode` 只支持 `none`，不自动遵循 `.gitignore` / `.ignore`。当前没有全文索引、原生 Glob 目录剪枝或流式正文扫描。
+
+首次读取、缓存失效或没有强 ETag 时完整读取最多 8 MiB，再切片；缓存有效且源返回 304 时无需再次传输正文，并可复用 decoded 行数组。尚未实现 Range 续读、磁盘 / 字节偏移行索引或全文索引，续读仍有 hash、前后权限、元数据与条件请求开销。
 
 ## 验证
 

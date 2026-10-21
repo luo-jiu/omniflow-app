@@ -18,6 +18,7 @@ function dependencies() {
   return {
     assertOwner: vi.fn(),
     beforeCommit: vi.fn(async () => undefined),
+    prepareMutation: vi.fn(async () => undefined),
     selectProvider: vi.fn(async () => ({ id: 'reachable-provider', label: 'Online storage' })),
     resolvePath: vi.fn(async (_library: number, _path: string, type?: string) => ({ id: type === 'file' ? 9 : 8, parentId: 8, libraryId: 3, type: type || 'dir', name: 'test', path: '/docs/test.cpp' })) as any,
     detail: vi.fn(async () => ({ id: 9, parentId: 8, libraryId: 3, name: 'test', type: 'file', storageKey: 'old-binding', fileSize: 3 })) as any,
@@ -54,6 +55,9 @@ describe('direct library file writes', () => {
     expect(result.result.ok).toBe(true);
     expect(JSON.stringify(result)).not.toContain('old-binding');
     expect(deps.upload).not.toHaveBeenCalled();
+    expect(deps.prepareMutation).toHaveBeenCalledWith(expect.objectContaining({ scope: 'library', nodeId: 9,
+      beforeRevision: digest('old'), afterRevision: digest('// 中文\nint main() {}'),
+      beforeBytes: new TextEncoder().encode('old'), afterBytes: new TextEncoder().encode('// 中文\nint main() {}') }));
   });
   it('does not overwrite a changed revision or bypass a backend conflict', async () => {
     const deps = dependencies();
@@ -118,5 +122,42 @@ describe('direct library file writes', () => {
     expect(deps.update).not.toHaveBeenCalled();
     deps.update.mockRejectedValueOnce(new Error('lost PUT receipt'));
     expect((await executeAgentFileWrite(request(digest('old')), deps)).result.data).toMatchObject({ writeCommitState: 'commit_unknown' });
+  });
+  it('refuses mutations without a successful private snapshot transport', async () => {
+    const deps = dependencies();
+    const missing = await executeAgentFileWrite(request(digest('old')), { ...deps, prepareMutation: undefined });
+    expect(missing.result).toMatchObject({ ok: false, data: { writeCommitState: 'uncommitted' } });
+    deps.prepareMutation.mockRejectedValueOnce(new Error('snapshot quota'));
+    expect((await executeAgentFileWrite(request(digest('old')), deps)).result.ok).toBe(false);
+    expect(deps.update).not.toHaveBeenCalled();
+    expect(deps.upload).not.toHaveBeenCalled();
+  });
+  it('applies the common patch engine before the existing conditional saved update', async () => {
+    const before = '\uFEFFalpha\r\nbeta\nlast';
+    const deps = dependencies();
+    deps.readBytes.mockResolvedValueOnce(new TextEncoder().encode(before));
+    const value = request();
+    value.toolName = 'file.patch';
+    value.input = { libraryId: 3, path: '/docs/test.cpp', expectedRevision: digest(before), patch: '@@ -2 +2 @@\n-beta\n+中文😀\n' };
+    const outcome = await executeAgentFileWrite(value, deps);
+    const after = '\uFEFFalpha\r\n中文😀\nlast';
+    expect(deps.update).toHaveBeenCalledWith(expect.objectContaining({ content: after, expectedStorageKey: 'old-binding' }));
+    expect(outcome).toMatchObject({ committed: true, result: { ok: true, data: { additions: 1, deletions: 1,
+      hunks: 1, revision: digest(after), writeCommitState: 'committed' } } });
+    expect(JSON.stringify(outcome)).not.toContain('alpha');
+  });
+  it('rejects stale patch versions, context mismatch and non-library scope before commit', async () => {
+    const deps = dependencies();
+    const value = request();
+    value.toolName = 'file.patch';
+    value.input = { libraryId: 3, path: '/docs/test.cpp', revision: digest('old'),
+      patch: '@@ -1 +1 @@\n-mismatch\n+new\n' };
+    expect((await executeAgentFileWrite(value, deps)).result).toMatchObject({ ok: false, data: { code: 'PATCH_CONTEXT_MISMATCH' } });
+    value.input = { ...(value.input as object), revision: digest('stale') };
+    expect((await executeAgentFileWrite(value, deps)).result).toMatchObject({ ok: false, data: { code: 'REVISION_CONFLICT' } });
+    value.input = { ...(value.input as object), scope: 'host' };
+    expect((await executeAgentFileWrite(value, deps)).result.ok).toBe(false);
+    expect(deps.update).not.toHaveBeenCalled();
+    expect(deps.prepareMutation).not.toHaveBeenCalled();
   });
 });

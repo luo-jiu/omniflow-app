@@ -20,12 +20,24 @@ describe('committed publication refresh target', () => {
       } } })).toBe(state === 'committed' ? 8 : null);
     }
   });
-  it('refreshes direct writes only after an authoritative commit', () => {
-    const direct = { ...activity, call: { ...activity.call, name: 'file.write' } };
+  it.each(['file.write', 'file.patch'])('refreshes library %s only after an authoritative commit', name => {
+    const direct = { ...activity, call: { ...activity.call, name, input: { scope: 'library' } } };
     for (const state of ['committed', 'commit_unknown', 'uncommitted']) {
-      expect(committedAgentFileParent({ ...direct, result: { ok: true, data: {
-        writeCommitState: state, destination: { kind: 'library', nodeId: 32, parentId: 20 },
-      } } })).toBe(state === 'committed' ? 20 : null);
+      const completed = { ...direct, result: { ok: true, data: {
+        scope: 'library', writeCommitState: state, destination: { kind: 'library', nodeId: 32, parentId: 20 },
+      } } };
+      expect(committedAgentFileParent(completed)).toBe(state === 'committed' ? 20 : null);
+      expect(committedAgentFileParents(completed, 3)).toEqual(state === 'committed' ? [20] : []);
+    }
+  });
+  it.each(['file.write', 'file.patch'])('never refreshes a library directory for host %s', name => {
+    for (const [inputScope, resultScope] of [['host', 'host'], ['host', 'library'], ['library', 'host'], [undefined, 'host']]) {
+      const host = { ...activity, call: { ...activity.call, name, input: { scope: inputScope } }, result: { ok: true, data: {
+        scope: resultScope, writeCommitState: 'committed', mutationCommitState: 'committed', affectedParentIds: [20],
+        destination: { kind: 'library', nodeId: 32, parentId: 20 },
+      } } };
+      expect(committedAgentFileParent(host)).toBeNull();
+      expect(committedAgentFileParents(host, 3)).toEqual([]);
     }
   });
   it.each(['file.publish', 'file.upload'])('refreshes committed %s destinations', name => {

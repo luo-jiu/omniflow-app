@@ -3,9 +3,10 @@ import { AGENT_TEXT_MAX_BYTES, AGENT_READ_DEFAULT_OUTPUT_TOKENS, AGENT_READ_OUTP
   decodeAgentText, type AgentTextReadQuery } from '../agent-text-reader';
 import { packAgentTextResult } from '../agent-text-result';
 import { openAgentLocalFile, verifyOpenedAgentLocalFileUnchanged } from './agent-local-file';
+import { resolveAgentFileQuery } from '../agent-file-path-resolver';
 
-export function assessFileScope(input: unknown, context: AgentToolExecutionContext): AgentToolPermissionDecision {
-  const query = input as { scope?: string; path?: string };
+export async function assessFileScope(input: unknown, context: AgentToolExecutionContext): Promise<AgentToolPermissionDecision> {
+  const query = await resolveAgentFileQuery(input as { scope?: 'library' | 'host'; path?: string }, context);
   if (query.scope !== 'host' || context.runCapabilitySnapshot?.shellPermissionMode === 'full-access') {
     return { behavior: 'allow', risk: 'read' };
   }
@@ -15,6 +16,7 @@ export function assessFileScope(input: unknown, context: AgentToolExecutionConte
 }
 
 export async function readAgentFileBytes(query: Pick<AgentTextReadQuery, 'scope' | 'path'> & { nodeId?: number }, context: AgentToolExecutionContext) {
+    query = await resolveAgentFileQuery(query, context);
     let bytes: Uint8Array;
     if (query.scope === 'host') {
       const opened = await openAgentLocalFile(query.path, context.signal);
@@ -47,10 +49,11 @@ export async function readAgentFileBytes(query: Pick<AgentTextReadQuery, 'scope'
 export const fileContentTool: AgentTool = {
   name: 'file.read', risk: 'read', timeoutMs: 30_000,
   presentation: { groupKind: 'resource-read', operationKind: 'stat' },
-  description: '读取 UTF-8 正文（源文件最多8MiB），scope 默认 library，host 明确读取本机。直接给路径，不必先 resolve/stat。省略 limit 从 offset 读到文件末尾，只有输出预算不足才分段；limit 是主动选择的行数，没有200/2000行限制。默认输出10000 tokens，受当前上下文和运行时策略约束。content 为带行号文本；offset/column 从1开始，column 按Unicode字符计数；hasMore 时用 nextOffset/nextColumn/revision 续读。不读取PDF或二进制正文。',
+  description: '读取已保存UTF-8正文（源最多8MiB），scope默认library。直接给path；PDF/二进制用文档工具。offset/column从1开始，column按Unicode字符；省略limit读到末尾，指定则为行数。输出默认10000tokens且受上下文预算约束。content带行号；hasMore时用nextOffset/nextColumn/revision续读。',
   inputSchema: { type: 'object', additionalProperties: false, required: ['path'], properties: {
     scope: { type: 'string', enum: ['library', 'host'] },
-    path: { type: 'string', minLength: 1, maxLength: 2048 },
+    path: { type: 'string', minLength: 1, maxLength: 4096 },
+    basePath: { type: 'string', minLength: 1, maxLength: 4096 },
     offset: { type: 'integer', minimum: 1 }, column: { type: 'integer', minimum: 1 },
     limit: { type: 'integer', minimum: 1 },
     maxOutputTokens: { type: 'integer', minimum: 1, maximum: AGENT_READ_OUTPUT_MAX_BYTES / 4,
@@ -59,7 +62,7 @@ export const fileContentTool: AgentTool = {
   } },
   assess: assessFileScope,
   async execute(input, context) {
-    const query = input as AgentTextReadQuery;
+    const query = await resolveAgentFileQuery(input as AgentTextReadQuery, context);
     const bytes = await readAgentFileBytes(query, context);
     const decoded = decodeAgentText(bytes);
     const requested = query.maxOutputTokens ?? AGENT_READ_DEFAULT_OUTPUT_TOKENS;

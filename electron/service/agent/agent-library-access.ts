@@ -48,7 +48,7 @@ function intentFor(name: string, value: unknown, context: AgentAppContext, actio
   if (['skill.activate', 'agent.plan.set', 'memory.propose', 'interaction.request', 'operation.verify'].includes(name)
     || ['attachment.read', 'attachment.inspect', 'attachment.view', 'attachment.query'].includes(name)) return { targets: [], external: true };
   if (['shell.run', 'computer.windows', 'computer.observe', 'computer.click', 'computer.setText', 'computer.scroll', 'computer.input', 'computer.menu', 'computer.hidePointer'].includes(name)) return { targets: [], external: true };
-  if (['file.list', 'file.search', 'file.stat', 'file.resolve', 'file.read', 'file.grep'].includes(name) && input.scope === 'host') return { targets: [], external: true };
+  if (['file.list', 'file.search', 'file.stat', 'file.resolve', 'file.read', 'file.grep', 'file.write', 'file.patch'].includes(name) && input.scope === 'host') return { targets: [], external: true };
   if (name === 'library.batch') {
     if (!Array.isArray(input.actions) || input.actions.length > 50) throw new Error('批量操作参数无效');
     const intents = input.actions.map(item => intentFor(String(record(item).operation), item, context));
@@ -60,7 +60,8 @@ function intentFor(name: string, value: unknown, context: AgentAppContext, actio
       : context.currentDirectory?.id ? { nodeId: context.currentDirectory.id } : { path: '/' }), write: false, descendants: true,
   }] };
   if (['file.stat', 'file.resolve', 'file.read', 'file.grep', 'media.inspect', 'library.document.inspect', 'library.document.read', 'library.document.view', 'library.document.query'].includes(name)) return { targets: [source(false)] };
-  if (name === 'file.write') return { targets: input.revision ? [source(true)]
+  if (name === 'file.patch') return { targets: [source(true)] };
+  if (name === 'file.write') return { targets: input.revision || input.expectedRevision || input.mode === 'replace' ? [source(true)]
     : [{ path: parentPath(String(input.path || '')), write: true }] };
   if (name === 'directory.create') return { targets: [text(input.path) ? { path: parentPath(String(input.path)), write: true } : parent()] };
   if (name === 'node.configure') return { targets: [{ ...source(true), directoryOnly: true }] };

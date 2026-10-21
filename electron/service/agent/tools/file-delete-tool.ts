@@ -1,5 +1,6 @@
 import type { AgentTool, AgentToolExecutionContext } from '../agent-tool-registry';
 import { normalizeAgentLibraryDirectoryPath } from '../../../../src/shared/agent/agent-library-path';
+import { resolveAgentFileToolInput } from '../agent-file-path-resolver';
 
 function requestedPath(input: unknown): string | undefined {
   const query = input as { path?: unknown; nodeId?: unknown };
@@ -21,16 +22,18 @@ function target(input: unknown, context: AgentToolExecutionContext) {
 
 export const fileDeleteTool: AgentTool = {
   name: 'file.delete', executor: 'renderer', risk: 'write', timeoutMs: 60000,
-  description: '将当前资料库文件移入回收站，可用recycle.restore恢复。提供资料库绝对path，或先用file.stat/file.resolve确认nodeId，二选一。文件夹仅在用户要求删除整个目录时传recursive=true。不下载或彻底删除存储对象；不是本机文件删除。',
+  description: '将当前资料库文件移入回收站，可用recycle.restore恢复。提供资料库path，或先用file.stat/file.resolve确认nodeId，二选一。文件夹仅在用户要求删除整个目录时传recursive=true。不下载或彻底删除存储对象；不是本机文件删除。',
   inputSchema: { type: 'object', additionalProperties: false, oneOf: [{ properties: { nodeId: {} }, required: ['nodeId'] }, { properties: { path: {} }, required: ['path'] }], properties: {
-    path: { type: 'string', minLength: 2, maxLength: 2048 },
+    path: { type: 'string', minLength: 1, maxLength: 2048 },
+    basePath: { type: 'string', minLength: 1, maxLength: 2048 },
     nodeId: { type: 'integer', minimum: 1 }, recursive: { type: 'boolean', description: '明确删除文件夹及全部内容时设为 true。' },
   } },
-  validate(input, context) {
-    try { if (!requestedPath(input)) target(input, context); return { ok: true }; }
+  async validate(input, context) {
+    try { input = await resolveAgentFileToolInput('file.delete', input, context); if (!requestedPath(input)) target(input, context); return { ok: true }; }
     catch (error) { return { ok: false, message: error instanceof Error ? error.message : '删除目标无效' }; }
   },
-  assess(input, context) {
+  async assess(input, context) {
+    input = await resolveAgentFileToolInput('file.delete', input, context);
     const path = requestedPath(input);
     if (path) return { behavior: 'ask', risk: 'write', preview: { title: '移入回收站', risk: 'write',
       description: `将“${path}”${(input as { recursive?: boolean }).recursive ? '及其全部内容' : ''}移入回收站，可恢复。`, details: [{ label: '位置', value: path }] } };

@@ -1,3 +1,5 @@
+import crypto from 'node:crypto';
+import type { AgentFileChangeStore } from './agent-file-change-store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type {
@@ -58,7 +60,7 @@ import { agentFileAuthorityBroker } from './agent-file-authority-broker';
 import { getBuiltInAgentComputerTools } from './tools/computer-tools';
 import { AGENT_ACTIVE_CONTEXT_SUMMARY_PREFIX } from './agent-active-context';
 import { AGENT_COMPLETION_CHECK_PROMPT } from './agent-completion-check';
-import type { AgentProviderMessage } from './agent-provider-model';
+import type { AgentProviderMessage, AgentProviderToolCall } from './agent-provider-model';
 import {
   estimateAgentFixedInputTokens,
   estimateAgentProviderTurnTokens,
@@ -91,6 +93,7 @@ import { builtInAgentSkillRegistry } from './skills/agent-skill-runtime';
 import { resolveAgentSkillActivationResult } from './skills/skill-activate-tool';
 import { createAIServiceRunSessionRegistry } from '../aiServiceRunSession';
 import { validateComputerText } from '../../../src/shared/computer-use/computer-use-contract';
+import * as agentRipgrepExecutable from './agent-ripgrep-executable';
 
 const OWNER_SCOPE = {
   accountScope: 'user:7',
@@ -272,6 +275,109 @@ describe('Agent orchestrator', () => {
       ...options,
     });
   }
+
+  it.each([
+    { toolName: 'file.write', relative: false }, { toolName: 'file.patch', relative: false },
+    { toolName: 'file.write', relative: true }, { toolName: 'file.patch', relative: true },
+  ] as const)('journals the bound $toolName through the real broker (relative=$relative)', async ({ toolName, relative }) => {
+    const before = Buffer.from('before\n');
+    const after = Buffer.from('after\n');
+    const revision = crypto.createHash('sha256').update(before).digest('hex');
+    const afterRevision = crypto.createHash('sha256').update(after).digest('hex');
+    const target = relative ? { path: 'notes.txt', basePath: '/' } : { path: '/notes.txt' };
+    const input = toolName === 'file.write' ? { ...target, content: 'after\n' }
+      : { ...target, revision, patch: '@@ -1 +1 @@\n-before\n+after\n' };
+    const changes: AgentFileChangeStore = { prepare: vi.fn(async () => undefined), settle: vi.fn(async () => undefined),
+      list: vi.fn(async () => ({ changes: [], truncated: false, coverage: 'structured-file-writes' as const })),
+      read: vi.fn(), sweep: vi.fn(async () => undefined), close: vi.fn(async () => undefined) };
+    mocks.streamAgentProviderTurn
+      .mockResolvedValueOnce({ content: '', toolCalls: [{ id: 'mutate-text', name: toolName, input }] })
+      .mockImplementationOnce(async (_connection, providerInput, onDelta) => {
+        expect(JSON.stringify(providerInput.messages)).not.toContain('beforeBase64');
+        expect(JSON.stringify(providerInput.messages)).not.toContain('afterBase64');
+        const modelCall = providerInput.messages.flatMap((message: AgentProviderMessage) => message.role === 'assistant' ? message.toolCalls ?? [] : [])
+          .find((call: AgentProviderToolCall) => call.id === 'mutate-text');
+        expect(modelCall?.input).toEqual(input);
+        onDelta('已保存。'); return { content: '已保存。', toolCalls: [] };
+      });
+    const webContents = sender();
+    const orchestrator = createOrchestrator({ getFileChangeStore: async () => changes,
+      readLibraryMetadata: vi.fn(async () => ({ libraryId: 3, node: { id: 88, libraryId: 3, parentId: 0, name: 'notes.txt', type: 'file' as const, path: '/notes.txt' } })),
+      readLibraryText: vi.fn(async () => before) });
+    const started = await orchestrator.start(webContents as never, request());
+    const approval = await pendingWindowApproval(webContents);
+    await orchestrator.resolveToolApproval(webContents.id, { approvalId: approval.approvalId, approved: true,
+      libraryId: 3, ownerScope: OWNER_SCOPE, runId: started.runId, sessionId: started.sessionId });
+    await vi.waitFor(() => expect(webContents.send.mock.calls.map(call => call[1])).toContainEqual(expect.objectContaining({ type: 'tool-execution-requested' })));
+    const execution = webContents.send.mock.calls.map(call => call[1]).find(event => event.type === 'tool-execution-requested').execution;
+    expect(execution.input).toEqual(expect.objectContaining({ path: '/notes.txt' }));
+    expect(execution.input).not.toHaveProperty('basePath');
+    const prepare = { ownerScope: OWNER_SCOPE, libraryId: 3, runId: started.runId, sessionId: started.sessionId,
+      executionId: execution.executionId, snapshot: { path: '/notes.txt',
+        beforeBase64: toolName === 'file.write' ? null : before.toString('base64'), afterBase64: after.toString('base64'),
+        afterRevision, ...(toolName === 'file.patch' ? { beforeRevision: revision, nodeId: 88 } : {}) } };
+    await expect(orchestrator.prepareFileChange(webContents.id + 1, prepare)).rejects.toThrow('无权');
+    await orchestrator.prepareFileChange(webContents.id, prepare);
+    await expect(orchestrator.prepareFileChange(webContents.id, prepare)).rejects.toThrow('已经使用');
+    expect(changes.prepare).toHaveBeenCalledWith(expect.objectContaining({ runId: started.runId, sessionId: started.sessionId, ownerScope: OWNER_SCOPE,
+      libraryId: 3, operationId: expect.any(String), toolRunId: expect.any(String) }),
+      expect.objectContaining({ scope: 'library', afterRevision, path: '/notes.txt' }), expect.any(AbortSignal));
+    orchestrator.completeToolExecution(webContents.id, { executionId: execution.executionId, libraryId: 3, ownerScope: OWNER_SCOPE,
+      ...started, result: { ok: true, message: '已保存', data: { operationId: execution.executionId,
+        mutationCommitState: 'committed', writeCommitState: 'committed' } } });
+    await waitForCompletedFinal(webContents, '已保存。', started);
+    expect(changes.settle).toHaveBeenCalledWith(expect.any(Object), expect.objectContaining({ ok: true,
+      data: expect.objectContaining({ writeCommitState: 'committed' }) }));
+    await expect(orchestrator.listFileChanges({ ...prepare, runIds: ['other-run'] })).rejects.toThrow('不属于');
+    await orchestrator.listFileChanges({ ...prepare, runIds: [started.runId] });
+    expect(changes.list).toHaveBeenCalled();
+  });
+
+  it('rejects a relative host write without a base before approval or filesystem dispatch', async () => {
+    mocks.streamAgentProviderTurn
+      .mockResolvedValueOnce({ content: '', toolCalls: [{ id: 'missing-host-base', name: 'file.write',
+        input: { scope: 'host', path: 'notes.txt', content: 'synthetic\n' } }] })
+      .mockImplementationOnce(async (_connection, providerInput, onDelta) => {
+        expect(JSON.stringify(providerInput.messages)).toContain('basePath');
+        onDelta('需要明确本机基目录。');
+        return { content: '需要明确本机基目录。', toolCalls: [] };
+      });
+    const webContents = sender();
+    const orchestrator = createOrchestrator();
+    const started = await orchestrator.start(webContents as never, request());
+    await waitForCompletedFinal(webContents, '需要明确本机基目录。', started);
+    const events = webContents.send.mock.calls.map(call => call[1]);
+    expect(events).not.toContainEqual(expect.objectContaining({ type: 'tool-approval-required' }));
+    expect(events).not.toContainEqual(expect.objectContaining({ type: 'tool-execution-requested' }));
+    const snapshot = await store.getSession(started.sessionId, OWNER_SCOPE, 3);
+    expect(snapshot?.toolActivities).toEqual(expect.arrayContaining([expect.objectContaining({
+      result: expect.objectContaining({ ok: false, message: expect.stringContaining('basePath') }),
+    })]));
+  });
+
+  it('audits raw file arguments even when canonicalization removes a sensitive base', async () => {
+    const secret = 'sk-abcdefghijklmnopqrstuv';
+    mocks.streamAgentProviderTurn
+      .mockResolvedValueOnce({ content: '', toolCalls: [{ id: 'raw-base-audit', name: 'file.write',
+        input: { path: '/safe.txt', basePath: `/${secret}`, content: 'ok' } }] })
+      .mockImplementationOnce(async (_connection, providerInput, onDelta) => {
+        expect(JSON.stringify(providerInput.messages)).not.toContain(secret);
+        onDelta('已拒绝。'); return { content: '已拒绝。', toolCalls: [] };
+      });
+    const webContents = sender();
+    const orchestrator = createOrchestrator();
+    try {
+      const started = await orchestrator.start(webContents as never, request());
+      await waitForCompletedFinal(webContents, '已拒绝。', started);
+      const session = await store.getSession(started.sessionId, OWNER_SCOPE, 3);
+      expect(session?.toolActivities).toEqual([expect.objectContaining({
+        permissionBehavior: 'deny', result: expect.objectContaining({ ok: false, message: expect.stringContaining('敏感凭据') }),
+      })]);
+      expect(JSON.stringify(session)).not.toContain(secret);
+      expect(JSON.stringify(webContents.send.mock.calls)).not.toContain(secret);
+      expect(webContents.send.mock.calls.some(call => ['tool-approval-required', 'tool-execution-requested'].includes(call[1]?.type))).toBe(false);
+    } finally { await orchestrator.shutdown(); }
+  });
 
   it('leaves task context in a 32k model after the complete built-in tool surface and safety reserves', async () => {
     const budget = resolveAgentContextBudget({ contextWindowTokens: 32_000 });
@@ -1579,15 +1685,25 @@ describe('Agent orchestrator', () => {
     mocks.streamAgentProviderTurn
       .mockResolvedValueOnce({ content: '', toolCalls: [{ id: 'grep-text', name: 'file.grep', input: { path: '/docs/read.txt', pattern: 'needle' } }] })
       .mockImplementationOnce(async (_connection, input, onDelta) => {
-        expect(JSON.stringify(input.messages)).toContain('needle');
+        const result = input.messages.find((message: AgentProviderMessage) => message.role === 'tool' && message.toolCallId === 'grep-text');
+        expect(JSON.parse(result?.content ?? '{}')).toMatchObject({ ok: true, data: {
+          matches: [{ path: '/docs/read.txt', nodeId: 88, line: 2, text: 'needle' }], complete: true,
+        } });
         onDelta('已找到正文。'); return { content: '已找到正文。', toolCalls: [] };
       });
     const webContents = sender();
     const orchestrator = createOrchestrator({ readLibraryMetadata, readLibraryText, contextBudget: { contextWindowTokens: 32_000 } });
-    const started = await orchestrator.start(webContents as never, request());
-    await waitForCompletedFinal(webContents, '已找到正文。', started);
-    expect(readLibraryText).toHaveBeenCalledWith(expect.objectContaining({ libraryId: 3, ownerScope: OWNER_SCOPE,
-      operation: { operation: 'stage-library-node', nodeId: 88, includeDownloadUrl: true } }));
+    // Native matching has separate integration coverage; keep this authority dispatch test independent of process startup.
+    const resolveRipgrep = vi.spyOn(agentRipgrepExecutable, 'resolveAgentRipgrepExecutable').mockResolvedValue(null);
+    try {
+      const started = await orchestrator.start(webContents as never, request());
+      await waitForCompletedFinal(webContents, '已找到正文。', started);
+      expect(readLibraryText).toHaveBeenCalledWith(expect.objectContaining({ libraryId: 3, ownerScope: OWNER_SCOPE,
+        operation: { operation: 'stage-library-node', nodeId: 88, includeDownloadUrl: true } }));
+    } finally {
+      await orchestrator.shutdown();
+      resolveRipgrep.mockRestore();
+    }
   });
 
   it('lets a library search feed media inspection without changing the UI selection', async () => {

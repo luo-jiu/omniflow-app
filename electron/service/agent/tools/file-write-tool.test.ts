@@ -14,8 +14,8 @@ describe('file.write contract', () => {
       expect(resolveAgentRunPermissionDecision('file.write', decision, undefined).behavior).toBe('ask');
     }
   });
-  it('rejects host writes, invalid revisions and invalid names', () => {
-    expect(() => normalizeAgentFileWriteInput({ path: '/a.txt', content: '', scope: 'host' })).toThrow();
+  it('supports host scope while rejecting invalid revisions and invalid names', () => {
+    expect(normalizeAgentFileWriteInput({ path: '/a.txt', content: '', scope: 'host' })).toMatchObject({ scope: 'host', mode: 'create' });
     expect(() => normalizeAgentFileWriteInput({ path: '/', content: '' })).toThrow();
     expect(() => normalizeAgentFileWriteInput({ path: '/CON.txt', content: '' })).toThrow();
     expect(() => normalizeAgentFileWriteInput({ path: '/a.txt', content: '', revision: 'guess' })).toThrow();

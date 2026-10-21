@@ -47,11 +47,15 @@ export function getPluginRenamePreparedAction(activity: AgentToolActivitySnapsho
 }
 
 export function committedAgentFileParent(activity: AgentToolActivitySnapshot): number | null {
-  if (!['file.publish', 'file.upload', 'file.write', 'file.delete'].includes(activity.call.name)
+  if (!['file.publish', 'file.upload', 'file.write', 'file.patch', 'file.delete'].includes(activity.call.name)
     || activity.status !== 'completed' || activity.result?.ok !== true) return null;
-  const data = activity.result.data as { deleteCommitState?: unknown; uploadCommitState?: unknown; writeCommitState?: unknown; destination?: { kind?: unknown; nodeId?: unknown; parentId?: unknown } } | undefined;
+  const data = activity.result.data as { scope?: unknown; deleteCommitState?: unknown; uploadCommitState?: unknown; writeCommitState?: unknown; destination?: { kind?: unknown; nodeId?: unknown; parentId?: unknown } } | undefined;
+  const textMutation = activity.call.name === 'file.write' || activity.call.name === 'file.patch';
+  const input = activity.call.input as { scope?: unknown } | undefined;
+  if (textMutation && ((input?.scope !== undefined && input.scope !== 'library')
+    || (data?.scope !== undefined && data.scope !== 'library'))) return null;
   const destination = data?.destination;
-  const state = activity.call.name === 'file.delete' ? data?.deleteCommitState : activity.call.name === 'file.write' ? data?.writeCommitState : data?.uploadCommitState;
+  const state = activity.call.name === 'file.delete' ? data?.deleteCommitState : textMutation ? data?.writeCommitState : data?.uploadCommitState;
   if (state !== 'committed' || destination?.kind !== 'library') return null;
   const parentId = destination.parentId;
   return Number.isSafeInteger(parentId) && Number(parentId) > 0

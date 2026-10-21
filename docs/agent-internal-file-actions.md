@@ -9,7 +9,7 @@ Agent 的内部文件工具直接使用资料库接口，不把逻辑路径当�
 | 操作 | Tool 与定位参数 |
 | --- | --- |
 | 浏览、搜索、属性、路径定位 | file.list/search/stat/resolve，沿用现有分页与路径约定 |
-| 文本创建与修改 | file.write，修改必须携带 file.read 返回的 revision |
+| 文本创建与修改 | file.write/patch，library与host统一；修改必须携带file.read返回的revision，见[写入契约](built-in-agent-file-write.md) |
 | 跨目录建目录 | directory.create：完整新目录 path，或 name + parentPath/parentId；仅 name 使用当前目录，无当前目录时使用根 |
 | 重命名 | file.rename：path/nodeId 二选一，name 为含后缀的完整新名称 |
 | 移动 | file.move：path/nodeId + parentPath/parentId，保留原名，同名报冲突 |
@@ -21,7 +21,9 @@ Agent 的内部文件工具直接使用资料库接口，不把逻辑路径当�
 
 普通操作不提供覆盖语义，名称不得混用路径。多级新目录依次创建，父目录必须存在。恢复到原位置遇到冲突明确失败，不能自动永久删除冲突项。复制在原存储中生成独立对象，每次最多1000节点、1 GiB、后端120秒；它复制内容和目录结构，不复制标签、归档/展示配置或历史，源存储必须可达。复制和标签写入必须使用本轮新后端，不能把旧服务器的404误判为能力已经可用。标签细节见 [标签工具](agent-library-tags.md)，统一 UI 同步见 [节点变更同步](internal-node-ui-synchronization.md)。
 
-`file.delete` 支持直接传绝对 path；使用 nodeId 时先通过 file.stat/file.resolve 或目录查询取得本轮已知节点。仅处理当前 Run 资料库，根目录禁止删除。普通文件直接移入回收站，文件夹必须明确 recursive=true。本工具不提供永久删除、清空回收站或本机文件删除。
+`directory.create`与`file.rename/move/copy/delete`的path/parentPath支持资料库相对路径，显式basePath必须为资料库绝对目录；省略时使用本轮当前目录的权威路径，无当前目录则使用根。main在访问范围评估前固化规范目标；仅name建目录的缺省父目录也会固定为parentId或根路径，不随后续UI选择变化。路径解析不会扩展这些操作的scope，它们仍只操作当前资料库。
+
+`file.delete` 支持直接传 path；使用 nodeId 时先通过 file.stat/file.resolve 或目录查询取得本轮已知节点。仅处理当前 Run 资料库，根目录禁止删除。普通文件直接移入回收站，文件夹必须明确 recursive=true。本工具不提供永久删除、清空回收站或本机文件删除。
 
 删除只修改现有后端节点删除状态，不下载文件，也不删除 MinIO 对象，因此不要求文件所在存储当前可达。回收站恢复可通过系统入口或 Agent 工具完成。
 

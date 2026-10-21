@@ -1,11 +1,13 @@
 import type { AgentTool } from '../agent-tool-registry';
 import { fileWriteTool } from './file-write-tool';
+import { filePatchTool } from './file-patch-tool';
 import { fileDeleteTool } from './file-delete-tool';
 import { libraryActionTools } from './library-action-tools';
 import { getAgentTagTools } from './tag-tools';
 import { normalizeAgentLibraryAction } from '../../../../src/shared/agent/agent-library-actions';
 import { libraryBatchTool } from './library-batch-tool';
 import { nodeConfigureTool } from './node-configure-tool';
+import { resolveAgentFileToolInput } from '../agent-file-path-resolver';
 
 const MAX_DIRECTORY_NAME_LENGTH = 120;
 const WINDOWS_RESERVED_NAME = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
@@ -41,7 +43,8 @@ export const directoryCreateTool: AgentTool = {
   inputSchema: {
     additionalProperties: false,
     properties: {
-      path: { type: 'string', minLength: 2, maxLength: 2048 },
+      path: { type: 'string', minLength: 1, maxLength: 2048 },
+      basePath: { type: 'string', minLength: 1, maxLength: 2048 },
       parentPath: { type: 'string', minLength: 1, maxLength: 2048 },
       parentId: { type: 'integer', minimum: 1 },
       conflictPolicy: { type: 'string', enum: ['error', 'auto_rename'] },
@@ -58,9 +61,9 @@ export const directoryCreateTool: AgentTool = {
   name: 'directory.create',
   risk: 'write',
   timeoutMs: 30_000,
-  validate(input, context) {
+  async validate(input, context) {
     try {
-      normalizeAgentLibraryAction('directory.create', input);
+      normalizeAgentLibraryAction('directory.create', await resolveAgentFileToolInput('directory.create', input, context));
     } catch (error) {
       return {
         message: error instanceof Error ? error.message : '文件夹名称无效',
@@ -73,10 +76,11 @@ export const directoryCreateTool: AgentTool = {
     }
     return { ok: true };
   },
-  assess(input, context) {
-    const query = normalizeAgentLibraryAction('directory.create', input);
+  async assess(input, context) {
+    const query = normalizeAgentLibraryAction('directory.create', await resolveAgentFileToolInput('directory.create', input, context));
     const name = query.name!;
-    const directoryName = query.parentPath || (query.parentId ? `目录 ${query.parentId}` : context.appContext.currentDirectory?.name || '根目录');
+    const directoryName = query.parentPath === '/' ? '根目录' : query.parentPath || (query.parentId && query.parentId !== context.appContext.currentDirectory?.id
+      ? `目录 ${query.parentId}` : context.appContext.currentDirectory?.name || '根目录');
     return {
       behavior: 'ask',
       preview: {
@@ -104,5 +108,5 @@ export const directoryCreateTool: AgentTool = {
 };
 
 export function getBuiltInActionTools(): AgentTool[] {
-  return [directoryCreateTool, nodeConfigureTool, fileWriteTool, fileDeleteTool, ...libraryActionTools, ...getAgentTagTools(), libraryBatchTool];
+  return [directoryCreateTool, nodeConfigureTool, fileWriteTool, filePatchTool, fileDeleteTool, ...libraryActionTools, ...getAgentTagTools(), libraryBatchTool];
 }

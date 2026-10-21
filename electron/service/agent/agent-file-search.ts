@@ -7,7 +7,10 @@ import { normalizeAgentLibraryDirectoryPath } from '../../../src/shared/agent/ag
 
 export interface AgentFileSearchQuery extends Omit<AgentLibraryQuery, 'kind'> { scope?: 'library' | 'host'; glob?: string }
 export interface AgentFileSearchEntry { id?: number; path?: string; name: string; type: string; ext?: string; fileSize?: number; updatedAt?: string }
-export interface AgentFileSearchPage { entries: AgentFileSearchEntry[]; hasMore: boolean; nextCursor?: string; examinedEntries?: number }
+export interface AgentFileSearchPage {
+  entries: AgentFileSearchEntry[]; hasMore: boolean; nextCursor?: string; examinedEntries?: number;
+  enumerationEngine?: string; metadataReads?: number;
+}
 
 export async function searchAgentFiles(query: AgentFileSearchQuery, context: AgentToolExecutionContext): Promise<AgentFileSearchPage> {
   const match = createAgentFileGlob(query.glob);

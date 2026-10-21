@@ -29,6 +29,8 @@ import { agentFileAuthorityBroker } from '../service/agent/agent-file-authority-
 import { agentFirstPartyControls, configureAgentFirstPartyControls } from '../service/agent/computer/agent-first-party-controls';
 import { agentWorkspaceRendering, configureAgentWorkspaceRendering } from '../service/agent/computer/agent-workspace-rendering';
 import type { AgentShellLogPageRequestV1 } from '@/shared/agent/shell/agent-shell.types';
+import type { AgentFileChangeListRequest, AgentFileChangePrepareRequest, AgentFileDiffRequest, AgentFileDiffCancelRequest } from '../../src/shared/agent/agent-file-changes';
+import { createAgentFileDiffRequests } from '../service/agent/agent-file-diff-requests';
 import { assertMainWindowAgentSender } from './aiServiceAccess';
 
 interface RegisterAgentIpcOptions {
@@ -40,6 +42,7 @@ export function registerAgentIpc(
   options: RegisterAgentIpcOptions,
 ): void {
   const ownersWithCleanup = new Set<number>();
+  const fileDiffRequests = createAgentFileDiffRequests();
   configureAgentFirstPartyControls(options.getMainWindow);
   configureAgentWorkspaceRendering(options.getMainWindow);
 
@@ -137,6 +140,28 @@ export function registerAgentIpc(
   ipcMain.handle('agent:shell:log:read-page', (event, input: AgentShellLogPageRequestV1) => {
     requireMainWindow(event);
     return agentOrchestrator.readShellLogPage(input);
+  });
+
+  ipcMain.handle('agent:file-change:prepare', async (event, input: AgentFileChangePrepareRequest) => {
+    const sender = requireMainWindow(event);
+    ensureOwnerCleanup(sender);
+    await agentOrchestrator.prepareFileChange(sender.id, input);
+    return true;
+  });
+
+  ipcMain.handle('agent:file-changes:list', (event, input: AgentFileChangeListRequest) => {
+    requireMainWindow(event);
+    return agentOrchestrator.listFileChanges(input);
+  });
+
+  ipcMain.handle('agent:file-change:diff', (event, input: AgentFileDiffRequest) => {
+    const sender = requireMainWindow(event);
+    return fileDiffRequests.read(sender, event.senderFrame!, input, signal => agentOrchestrator.readFileDiff(input, signal));
+  });
+
+  ipcMain.handle('agent:file-change:diff:cancel', (event, input: AgentFileDiffCancelRequest) => {
+    const sender = requireMainWindow(event);
+    return fileDiffRequests.cancel(sender, event.senderFrame!, input);
   });
 
   ipcMain.handle(

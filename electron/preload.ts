@@ -63,6 +63,8 @@ import type {
   AgentShellPermissionMode,
   AgentShellSettingsSnapshot,
 } from '@/shared/agent/shell/agent-shell.types'
+import type { AgentFileChangeList, AgentFileChangeListRequest, AgentFileChangePrepareRequest,
+  AgentFileDiffRequest, AgentFileDiffResult, AgentFileDiffCancelRequest } from '@/shared/agent/agent-file-changes';
 import type {
   QQMusicLyricsOperation,
   QQMusicLyricsPreview,
@@ -303,6 +305,18 @@ contextBridge.exposeInMainWorld('electronAgent', {
   ),
   readShellLogPage: (input: AgentShellLogPageRequestV1): Promise<AgentShellLogPageV1> => (
     ipcRenderer.invoke('agent:shell:log:read-page', input)
+  ),
+  prepareFileChange: (input: AgentFileChangePrepareRequest): Promise<boolean> => (
+    ipcRenderer.invoke('agent:file-change:prepare', input)
+  ),
+  listFileChanges: (input: AgentFileChangeListRequest): Promise<AgentFileChangeList> => (
+    ipcRenderer.invoke('agent:file-changes:list', input)
+  ),
+  readFileDiff: (input: AgentFileDiffRequest): Promise<AgentFileDiffResult> => (
+    ipcRenderer.invoke('agent:file-change:diff', input)
+  ),
+  cancelFileDiff: (input: AgentFileDiffCancelRequest): Promise<boolean> => (
+    ipcRenderer.invoke('agent:file-change:diff:cancel', input)
   ),
   completeFileAuthority: (input: AgentFileAuthorityCompletionV1): Promise<boolean> => (
     ipcRenderer.invoke('agent:file-authority:complete', input)

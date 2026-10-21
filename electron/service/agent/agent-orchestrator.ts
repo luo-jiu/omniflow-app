@@ -1,3 +1,10 @@
+import type { AgentFileChangePrepareRequest, AgentFileChangeListRequest, AgentFileDiffRequest } from '../../../src/shared/agent/agent-file-changes';
+import { normalizeAgentFileWriteInput, type AgentFileMutationHooks, type AgentFileMutationSnapshot } from '../../../src/shared/agent/agent-file-write';
+import { normalizeAgentFilePatchInput } from '../../../src/shared/agent/agent-file-patch';
+import { decodeAgentFileChangeSnapshot } from './agent-file-change-prepare';
+import { getAgentFileChangeStore } from './agent-file-change-runtime';
+import { resolveAgentFileToolInput } from './agent-file-path-resolver';
+import type { AgentFileChangeStore, AgentFileMutationIdentity } from './agent-file-change-store';
 import { prepareAgentPluginRename, executeAgentPluginRename, prepareAgentPluginFileOutput, executeAgentPluginFileOutput, releaseAgentPluginOutputs } from './agent-plugin-service';
 import type { AgentPluginRenameRequest } from './agent-plugin-rename';
 import type { AgentPluginFileOutputRequest } from './agent-plugin-file-output';
@@ -403,6 +410,7 @@ interface AgentOrchestratorOptions {
   getRuntimeProfile?: (profileId: string) => AgentRuntimeProfile;
   getMemoryStore?: () => Promise<AgentMemoryStore>;
   getSessionStore?: () => Promise<AgentSessionStore>;
+  getFileChangeStore?: () => Promise<AgentFileChangeStore>;
   inspectMediaSource?: typeof inspectAgentMediaSource;
   interactionTimeoutMs?: number;
   readShellLogPage?: (request: AgentShellLogReadRequest) => Promise<AgentShellLogPageV1>;
@@ -1088,6 +1096,9 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
   );
   const resolveSessionStore = options.getSessionStore
     || (async () => (await getAgentPersistenceRuntime()).sessionStore);
+  const resolveFileChangeStore = options.getFileChangeStore || (options.getSessionStore
+    ? async (): Promise<AgentFileChangeStore> => { throw new Error('当前运行时未配置文件改动记录'); }
+    : getAgentFileChangeStore);
   const retrieveMemories = options.retrieveMemories || (
     options.getSessionStore && !options.getMemoryStore
       ? async () => []
@@ -1133,6 +1144,12 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
   const pendingInteractions = new Map<string, PendingAgentInteraction>();
   const activeMediaArtifactSaves = new Set<ActiveMediaArtifactSave>();
   const mediaArtifactFallbackGrants = new Map<string, AgentMediaArtifactFallbackGrant>();
+  const pendingFileMutations = new Map<string, {
+    ownerWebContentsId: number; identity: AgentFileMutationIdentity; toolName: string;
+    input: ReturnType<typeof normalizeAgentFileWriteInput> | ReturnType<typeof normalizeAgentFilePatchInput>;
+    hooks: AgentFileMutationHooks; prepare: (snapshot: AgentFileMutationSnapshot, signal: AbortSignal) => Promise<void>;
+    begin: () => void;
+  }>();
   let shuttingDown = false;
 
   function releaseRunRendering(runtime: ActiveAgentRun): void {
@@ -1754,6 +1771,39 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     return { accepted: true, activity };
   }
 
+  async function prepareFileChange(ownerWebContentsId: number, input: AgentFileChangePrepareRequest): Promise<void> {
+    const pending = pendingFileMutations.get(String(input?.executionId || ''));
+    if (!pending || pending.ownerWebContentsId !== ownerWebContentsId
+      || pending.identity.sessionId !== input.sessionId || pending.identity.runId !== input.runId
+      || pending.identity.libraryId !== input.libraryId || !sameOwnerScope(pending.identity.ownerScope, normalizeAgentOwnerScope(input.ownerScope))) {
+      throw new Error('当前窗口无权准备该文件改动');
+    }
+    await toolBroker.verifyRendererAccess(ownerWebContentsId, input);
+    const capability = toolBroker.claimRendererCapability(ownerWebContentsId, { ...input, capability: 'prepare-file-change' }, pending.toolName);
+    const snapshot = decodeAgentFileChangeSnapshot(input.snapshot, pending.input);
+    await pending.prepare(snapshot, capability.signal);
+    capability.signal.throwIfAborted();
+    pending.begin();
+    capability.beginCriticalSettlement();
+  }
+
+  async function requireFileChangeSession(input: AgentFileChangeListRequest | AgentFileDiffRequest) {
+    const session = await (await resolveSessionStore()).getSession(input?.sessionId, normalizeAgentOwnerScope(input?.ownerScope), input?.libraryId, true);
+    if (!session) throw new Error('Agent 会话不存在或不属于当前资料库');
+    return session;
+  }
+  async function listFileChanges(input: AgentFileChangeListRequest) {
+    const session = await requireFileChangeSession(input);
+    if (!Array.isArray(input.runIds) || input.runIds.length < 1 || input.runIds.length > 16
+      || input.runIds.some(id => !session.runs.some(run => run.id === id))) throw new Error('改动执行范围不属于该会话');
+    return (await resolveFileChangeStore()).list(input, input.runIds);
+  }
+  async function readFileDiff(input: AgentFileDiffRequest, signal?: AbortSignal) {
+    await requireFileChangeSession(input);
+    signal?.throwIfAborted();
+    return (await resolveFileChangeStore()).read(input, input.changeId, input.throughChangeId, signal);
+  }
+
   function completeToolExecution(
     ownerWebContentsId: number,
     input: AgentToolExecutionCompletion,
@@ -2136,6 +2186,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     resolveComputerTextAuditSource: AgentComputerTextAuditSourceResolver,
     readOutputTokenBudget?: number,
   ): Promise<AgentToolResult> {
+    const providerCall = call;
     const tool = capabilitySnapshot.getTool(call.name, activeSkillId);
     let pluginInputError: string | undefined;
     const registeredTool = capabilitySnapshot.toolSnapshot.get(call.name);
@@ -2264,7 +2315,71 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         authority: { sender, ownerScope: input.ownerScope, libraryId: Number(input.appContext.libraryId), sessionId, runId, toolRunId,
           signal: AbortSignal.any([signal, operationSignal]), operation: { operation: 'stage-library-node', nodeId, includeDownloadUrl: true } } };
     };
+    const isFileMutation = tool?.name === call.name && tool.executor === 'main' && tool.kind === 'business'
+      && !tool.pluginSource && !tool.pluginOperation
+      && (call.name === 'file.write' && tool.registrationId === 'builtin:file.write@2'
+        || call.name === 'file.patch' && tool.registrationId === 'builtin:file.patch@1');
+    const mutationIdentity: AgentFileMutationIdentity = { ownerScope: input.ownerScope,
+      libraryId: Number(input.appContext.libraryId), sessionId, runId, toolRunId, operationId: crypto.randomUUID() };
+    const fileMutation: AgentFileMutationHooks | undefined = isFileMutation ? {
+      operationId: mutationIdentity.operationId,
+      prepare: async (snapshot, operationSignal) => {
+        operationSignal.throwIfAborted();
+        await (await resolveFileChangeStore()).prepare(mutationIdentity, snapshot, operationSignal);
+      },
+      settle: async result => { await (await resolveFileChangeStore()).settle(mutationIdentity, result); },
+    } : undefined;
     const executionContext: AgentToolExecutionContext = {
+      ...(fileMutation ? { fileMutation, executeLibraryFileMutation: async (mutationInput, operationSignal, commit) => {
+        if (!commit) throw new Error('文件提交结算能力未配置');
+        const normalized = call.name === 'file.patch' ? normalizeAgentFilePatchInput(mutationInput) : normalizeAgentFileWriteInput(mutationInput);
+        if (normalized.scope !== 'library') throw new Error('资料库执行器不能切换文件来源');
+        const execution = toolBroker.prepareRendererExecution({
+          verifyAccess: accessGuard ? async () => { await accessGuard.authorizeTool(call, toolRunId, undefined, false); } : undefined,
+          appContext: input.appContext, executionInput: { ...normalized, libraryId: Number(input.appContext.libraryId) },
+          ownerScope: input.ownerScope, ownerWebContentsId: sender.id, onProgress: persistAndEmitProgress,
+          onCancel: cancelRendererExecution, runId, sessionId, signal: operationSignal,
+          timeoutMs: tool?.timeoutMs || 120_000, toolName: call.name,
+        });
+        let began = false;
+        let acceptedReceipt: AgentToolResult | undefined;
+        const unknown: AgentToolResult = { ok: false, message: '文件写入提交状态暂时无法确认，请检查改动记录，勿自动重试',
+          data: { operationId: fileMutation.operationId, writeCommitState: 'commit_unknown', mutationCommitState: 'commit_unknown' } };
+        pendingFileMutations.set(execution.request.executionId, {
+          ownerWebContentsId: sender.id, identity: mutationIdentity, toolName: call.name, input: normalized, hooks: fileMutation,
+          prepare: async (snapshot, prepareSignal) => {
+            if (snapshot.beforeBytes !== null) {
+              if (!executionContext.readLibraryMetadata || !executionContext.readLibraryText) throw new Error('当前运行时无法验证保存版本');
+              const metadata = await executionContext.readLibraryMetadata({ kind: 'resolve', path: normalized.path }, prepareSignal);
+              if (!metadata.node || metadata.node.id !== snapshot.nodeId || metadata.node.type !== 'file') throw new Error('写入文件节点已变化');
+              const current = await executionContext.readLibraryText(metadata.node.id, prepareSignal);
+              if (crypto.createHash('sha256').update(current).digest('hex') !== snapshot.beforeRevision) throw new Error('保存版本已变化，请重新读取');
+            }
+            await fileMutation.prepare(snapshot, prepareSignal);
+          },
+          begin: () => { commit.begin(unknown); began = true; },
+        });
+        try {
+          emit(sender, { type: 'tool-execution-requested', execution: execution.request, runId, sessionId });
+          const outcome = await execution.outcome;
+          const result = { ...outcome.result, data: { ...(outcome.result.data && typeof outcome.result.data === 'object' ? outcome.result.data : {}), operationId: fileMutation.operationId } };
+          if (began) { commit.settle(result); acceptedReceipt = result; }
+          await fileMutation.settle(result);
+          if (outcome.perception) await acceptRendererPerception(outcome.perception);
+          return result;
+        } catch (error) {
+          const result = acceptedReceipt || (began ? unknown : { ok: false, message: '文件写入在提交前停止', data: {
+            operationId: fileMutation.operationId, writeCommitState: 'uncommitted', mutationCommitState: 'uncommitted' } });
+          // Accept the canonical receipt synchronously before any asynchronous journal work.
+          // A broker that already sealed unknown rejects late success.
+          if (began && !acceptedReceipt) {
+            try { commit.settle(result); acceptedReceipt = result; } catch { /* Already sealed: retain unknown. */ }
+          }
+          await fileMutation.settle(acceptedReceipt || result).catch(() => undefined);
+          if (began) return acceptedReceipt || unknown;
+          throw error;
+        } finally { pendingFileMutations.delete(execution.request.executionId); }
+      } } satisfies Pick<AgentToolExecutionContext, 'fileMutation' | 'executeLibraryFileMutation'> : {}),
       ...(isBuiltinComputerHidePointerTool(tool) ? { hideComputerPointer: async (operationSignal: AbortSignal) => {
         throwIfAborted(operationSignal);
         const activeRun = activeRuns.get(sessionId);
@@ -2513,6 +2628,23 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     let omitDeniedAudit = false;
     let preflightDecision: AgentToolPermissionDecision | undefined = pluginInputError ? { behavior: 'deny', risk: 'read', message: pluginInputError } : undefined;
     let scopeMayAutoApprove = false;
+    const builtInFileRegistration = tool && agentToolRegistry.get(call.name);
+    if (!preflightDecision && !call.inputError && tool?.kind === 'business' && !tool.pluginSource && !tool.pluginOperation
+      && tool.registrationId === builtInFileRegistration?.registrationId) {
+      try {
+        // Resolve once before auditing, approval and preparation. A later UI directory
+        // change must not redirect an already approved relative file operation.
+        const resolvedInput = await resolveAgentFileToolInput(call.name, call.input, executionContext);
+        // Keep the model's original arguments in its already-budgeted transcript.
+        // Approval, audit and execution share the separately frozen target.
+        if (resolvedInput !== call.input) call = { ...call, input: resolvedInput };
+        signal.throwIfAborted();
+      } catch (error) {
+        if (signal.aborted) throw error;
+        preflightDecision = { behavior: 'deny', risk: tool.risk,
+          message: error instanceof Error ? error.message : '文件路径上下文无效' };
+      }
+    }
     if (!call.inputError && call.name === interactionRequestTool.name) {
       try {
         call.input = normalizeAgentInteractionRequest(call.input);
@@ -2526,12 +2658,16 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       }
     }
     const auditProjection = projectAgentToolAuditInput(call.input, computerTextAuditSource || tool);
+    const providerAuditProjection = providerCall === call ? auditProjection
+      : projectAgentToolAuditInput(providerCall.input, computerTextAuditSource || tool);
     let safeCallInput = privateComputerText ? auditProjection.input : call.input;
-    if (!preflightDecision && (!auditProjection.complete || auditProjection.sensitive)) {
-      omitDeniedAudit = call.name === interactionRequestTool.name && auditProjection.sensitive;
+    if (!preflightDecision && (!auditProjection.complete || auditProjection.sensitive
+      || !providerAuditProjection.complete || providerAuditProjection.sensitive)) {
+      const sensitive = auditProjection.sensitive || providerAuditProjection.sensitive;
+      omitDeniedAudit = call.name === interactionRequestTool.name && sensitive;
       preflightDecision = {
         behavior: 'deny',
-        message: auditProjection.sensitive
+        message: sensitive
           ? 'Agent Tool 参数包含不能进入会话的敏感凭据'
           : 'Agent Tool 参数超过安全审计上限',
         risk: registeredTool?.risk || 'external',
@@ -2845,6 +2981,9 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       if (!privateComputerText) call.input = omitDeniedAudit
         ? { _omniflowAudit: 'sensitive interaction request omitted' }
         : auditProjection.input;
+      if (!privateComputerText && providerCall !== call) providerCall.input = omitDeniedAudit
+        ? { _omniflowAudit: 'sensitive interaction request omitted' }
+        : providerAuditProjection.input;
       if (!privateComputerText) safeCallInput = call.input;
       if (omitDeniedAudit) {
         return { message, ok: false };
@@ -4533,6 +4672,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       || deletingSession.toolActivities.some(activity => activity.call.name === 'computer.observe')) {
       await getAgentAttachmentStore().releaseSession({ ownerScope, libraryId }, sessionId).catch(() => undefined);
     }
+    await resolveFileChangeStore().then(store => store.sweep()).catch(() => undefined);
     return true;
   }
 
@@ -4679,6 +4819,9 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
 
   return {
     completeToolPreparation,
+    prepareFileChange,
+    listFileChanges,
+    readFileDiff,
     reconcilePluginOperation: async (sender: WebContents, request: AgentPluginOperationReconcileRequest) =>
       reconcileAgentPluginOperation(await resolveSessionStore(), sender, request),
     completeToolExecution,
@@ -4713,6 +4856,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
 }
 
 export const agentOrchestrator = createAgentOrchestrator({
+  getFileChangeStore: getAgentFileChangeStore,
   keepOwnerRendering: keepAgentOwnerRendering,
   preparePluginFileOutput: prepareAgentPluginFileOutput,
   executePluginFileOutput: executeAgentPluginFileOutput,

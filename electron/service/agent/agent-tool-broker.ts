@@ -253,7 +253,11 @@ export function createAgentToolBroker(options: AgentToolBrokerOptions = {}) {
       const registeredTool = context.runCapabilitySnapshot?.getTool(name, context.activeSkillId);
       const expectedRegistrationId = registeredTool?.registrationId;
       const computerInput = ['computer.click', 'computer.setText', 'computer.scroll', 'computer.input', 'computer.menu'].includes(name);
-      const supportsCommitSettlement = ((!computerInput && (registeredTool?.pluginOperation === 'rename' || registeredTool?.pluginOperation === 'file-output'))
+      const fileMutationTool = ['file.write', 'file.patch'].includes(name);
+      const fileMutation = fileMutationTool && registeredTool?.name === name
+        && registeredTool.registrationId === (name === 'file.write' ? 'builtin:file.write@2' : 'builtin:file.patch@1') && registeredTool.kind === 'business'
+        && !registeredTool.pluginSource && !registeredTool.pluginOperation;
+      const supportsCommitSettlement = (fileMutation || (!computerInput && !fileMutationTool && (registeredTool?.pluginOperation === 'rename' || registeredTool?.pluginOperation === 'file-output'))
         || (computerInput && registeredTool?.name === name && registeredTool.registrationId === `builtin:${name}@1`
           && registeredTool.kind === 'business' && !registeredTool.pluginSource && !registeredTool.pluginOperation
           && typeof registeredTool.prepareMain === 'function'))
@@ -504,7 +508,7 @@ export function createAgentToolBroker(options: AgentToolBrokerOptions = {}) {
     }
     const result = normalizeAgentToolResult(input.result);
     const data = result.data as { writeCommitState?: string; deleteCommitState?: string; mutationCommitState?: string } | undefined;
-    const state = pending.toolName === 'file.delete' ? data?.deleteCommitState : pending.toolName === 'file.write' ? data?.writeCommitState : data?.mutationCommitState;
+    const state = pending.toolName === 'file.delete' ? data?.deleteCommitState : ['file.write', 'file.patch'].includes(pending.toolName) ? data?.writeCommitState : data?.mutationCommitState;
     const writeSettled = isAgentRendererMutationTool(pending.toolName) && !result.ok
       && (state === 'uncommitted' || state === 'commit_unknown');
     if (pending.signal.aborted && !pending.committedResult && !writeSettled) throw abortError();

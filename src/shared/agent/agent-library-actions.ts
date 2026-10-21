@@ -1,9 +1,10 @@
 import { normalizeAgentLibraryDirectoryPath } from './agent-library-path';
+import { resolveAgentLibraryFilePath } from './agent-file-path';
 
 export const AGENT_LIBRARY_MUTATION_TOOLS = ['directory.create', 'file.rename', 'file.move', 'file.copy', 'recycle.restore'] as const;
 export type AgentLibraryMutationName = typeof AGENT_LIBRARY_MUTATION_TOOLS[number];
 export function isAgentRendererMutationTool(name: string): boolean {
-  return [...AGENT_LIBRARY_MUTATION_TOOLS, 'node.configure', 'file.write', 'file.delete', 'tag.update', 'library.batch'].includes(name);
+  return [...AGENT_LIBRARY_MUTATION_TOOLS, 'node.configure', 'file.write', 'file.patch', 'file.delete', 'tag.update', 'library.batch'].includes(name);
 }
 export interface AgentLibraryActionInput {
   path?: string;
@@ -28,12 +29,14 @@ export function normalizeAgentNodeName(value: unknown): string {
 export function normalizeAgentLibraryAction(name: AgentLibraryMutationName, value: unknown): AgentLibraryActionInput {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('文件操作参数无效');
   const source = value as Record<string, unknown>;
-  const allowed = name === 'directory.create' ? ['path', 'name', 'parentPath', 'parentId', 'conflictPolicy']
-    : name === 'file.rename' ? ['path', 'nodeId', 'name'] : name === 'recycle.restore' ? ['nodeId']
-      : ['path', 'nodeId', 'parentPath', 'parentId', ...(name === 'file.copy' ? ['name', 'recursive', 'conflictPolicy'] : [])];
+  const allowed = name === 'directory.create' ? ['path', 'name', 'basePath', 'parentPath', 'parentId', 'conflictPolicy']
+    : name === 'file.rename' ? ['path', 'nodeId', 'basePath', 'name'] : name === 'recycle.restore' ? ['nodeId']
+      : ['path', 'nodeId', 'basePath', 'parentPath', 'parentId', ...(name === 'file.copy' ? ['name', 'recursive', 'conflictPolicy'] : [])];
   if (Object.keys(source).some(key => !allowed.includes(key))) throw new Error('文件操作包含不支持的参数');
   const input: AgentLibraryActionInput = {};
-  for (const key of ['path', 'parentPath'] as const) if (source[key] !== undefined) input[key] = normalizeAgentLibraryDirectoryPath(source[key]);
+  const basePath = source.basePath === undefined ? undefined : normalizeAgentLibraryDirectoryPath(source.basePath);
+  for (const key of ['path', 'parentPath'] as const) if (source[key] !== undefined) input[key] = resolveAgentLibraryFilePath(source[key], basePath);
+  if (name === 'directory.create' && basePath !== undefined && source.path === undefined && source.parentPath === undefined && source.parentId === undefined) input.parentPath = basePath;
   for (const key of ['nodeId', 'parentId'] as const) if (source[key] !== undefined) {
     if (!Number.isSafeInteger(source[key]) || Number(source[key]) <= 0) throw new Error('节点ID必须是正整数');
     input[key] = Number(source[key]);

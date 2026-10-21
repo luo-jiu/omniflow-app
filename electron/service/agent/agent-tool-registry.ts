@@ -121,6 +121,8 @@ export interface AgentMainCommitSettlement {
 }
 
 export interface AgentToolExecutionContext {
+  readonly fileMutation?: import('../../../src/shared/agent/agent-file-write').AgentFileMutationHooks;
+  readonly executeLibraryFileMutation?: (input: unknown, signal: AbortSignal, commit?: AgentMainCommitSettlement) => Promise<AgentToolResult>;
   readonly commitSettlement?: AgentMainCommitSettlement;
   /** Main-owned current-Run cleanup; Tool input never selects a Run, owner, or window. */
   readonly hideComputerPointer?: (signal: AbortSignal) => Promise<AgentToolResult>;

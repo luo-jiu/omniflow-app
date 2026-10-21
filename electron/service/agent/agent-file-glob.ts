@@ -18,3 +18,23 @@ export function createAgentFileGlob(pattern?: string): (relativePath: string) =>
   });
   return relativePath => matcher.match(relativePath);
 }
+
+export const agentGlobListProperty = {
+  type: 'array', maxItems: 16, items: agentGlobProperty,
+  description: '共同 glob 规则；include 任一命中即保留，exclude 任一命中即排除。相对搜索目录匹配，包含隐藏文件。',
+};
+
+export function createAgentFileFilter(query: { glob?: string; include?: string[]; exclude?: string[] }) {
+  const compile = (patterns: string[] | undefined) => {
+    if (patterns !== undefined && (!Array.isArray(patterns) || patterns.length > 16 || patterns.some(pattern => typeof pattern !== 'string'))) {
+      throw new Error('include/exclude 必须为最多 16 个 glob 的数组');
+    }
+    return patterns?.map(pattern => createAgentFileGlob(pattern)) ?? [];
+  };
+  const legacy = createAgentFileGlob(query.glob);
+  const includes = compile(query.include);
+  const excludes = compile(query.exclude);
+  return (relativePath: string) => legacy(relativePath)
+    && (!includes.length || includes.some(match => match(relativePath)))
+    && !excludes.some(match => match(relativePath));
+}

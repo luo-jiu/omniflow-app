@@ -41,6 +41,8 @@ import type {
 import { clearAuthSessionAndDisposeWorkspaces } from '@/service/auth-session-release';
 import { auth } from '@/utils/auth';
 import type { AgentSessionListFilter, AgentSessionGroupInput, AgentSessionOrganizationInput } from '@/shared/agent/agent-session-management';
+import type { AgentFileChangeList, AgentFileChangeListRequest, AgentFileChangePrepareRequest,
+  AgentFileDiffRequest, AgentFileDiffResult } from '@/shared/agent/agent-file-changes';
 
 function bridge() {
   if (!window.electronAgent) {
@@ -97,6 +99,29 @@ export function readAgentShellLogPage(
   input: AgentShellLogPageRequestV1,
 ): Promise<AgentShellLogPageV1> {
   return bridge().readShellLogPage(input);
+}
+
+/** Private snapshot transport; the payload is never sent through Tool progress/results. */
+export function prepareAgentFileChange(input: AgentFileChangePrepareRequest): Promise<boolean> {
+  return bridge().prepareFileChange(input);
+}
+
+export function listAgentFileChanges(input: AgentFileChangeListRequest): Promise<AgentFileChangeList> {
+  return bridge().listFileChanges(input);
+}
+
+export async function readAgentFileDiff(input: AgentFileDiffRequest, signal?: AbortSignal): Promise<AgentFileDiffResult> {
+  signal?.throwIfAborted();
+  const request = signal ? { ...input, requestId: input.requestId ?? crypto.randomUUID() } : input;
+  const transport = bridge();
+  const cancel = () => { if (request.requestId) void transport.cancelFileDiff({ ownerScope: request.ownerScope,
+    libraryId: request.libraryId, sessionId: request.sessionId, requestId: request.requestId }).catch(() => undefined); };
+  signal?.addEventListener('abort', cancel, { once: true });
+  try {
+    const result = await transport.readFileDiff(request);
+    signal?.throwIfAborted();
+    return result;
+  } finally { signal?.removeEventListener('abort', cancel); }
 }
 
 export function completeAgentFileAuthority(

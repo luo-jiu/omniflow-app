@@ -42,10 +42,10 @@ describe('file.read', () => {
     await symlink(file, path.join(directory, 'link'));
     await expect(fileContentTool.execute!({ scope: 'host', path: path.join(directory, 'link') }, context())).rejects.toThrow('符号链接');
   });
-  it('requires approval for host reads outside full access', () => {
-    expect(assessFileScope({ scope: 'host', path: '/tmp/a' }, context()).behavior).toBe('ask');
-    expect(assessFileScope({ path: '/a' }, context()).behavior).toBe('allow');
+  it('requires approval for host reads outside full access', async () => {
+    expect((await assessFileScope({ scope: 'host', path: '/tmp/a' }, context())).behavior).toBe('ask');
+    expect((await assessFileScope({ path: '/a' }, context())).behavior).toBe('allow');
     const ctx = { ...context(), runCapabilitySnapshot: { shellPermissionMode: 'full-access' } } as AgentToolExecutionContext;
-    expect(assessFileScope({ scope: 'host', path: '/tmp/a' }, ctx).behavior).toBe('allow');
+    expect((await assessFileScope({ scope: 'host', path: '/tmp/a' }, ctx)).behavior).toBe('allow');
   });
 });

@@ -17,6 +17,7 @@ const OPERATION_ICONS: Record<string, OutlineIconName> = {
   'recycle.list': 'search',
   'tag.list': 'search',
   'file.write': 'edit',
+  'file.patch': 'edit',
   'computer.setText': 'edit',
   'computer.scroll': 'move',
   'computer.input': 'move',

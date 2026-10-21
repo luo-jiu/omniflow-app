@@ -306,6 +306,7 @@ const TOOL_TITLES: Record<string, string> = {
   'computer.input': '向窗口发送输入',
   'computer.menu': '操作应用菜单',
   'file.write': '保存文件',
+  'file.patch': '保存文件',
   'file.delete': '移入回收站',
   'file.rename': '重命名文件',
   'file.move': '移动文件',
@@ -370,7 +371,12 @@ export function buildAgentToolSummary(activity: AgentToolActivitySnapshot, libra
     ...(action?.kind === 'computer.input' && action.operation === 'shortcut'
       ? { subject: formatComputerInputShortcut(action.shortcut) } : {}) };
   }
-  if (activity.call.name === 'file.write') return { label: '已保存', subject: textValue(data?.fileName) || undefined };
+  if (activity.call.name === 'file.write' || activity.call.name === 'file.patch') {
+    const subject = textValue(data?.fileName) || undefined;
+    if (data?.writeCommitState === 'commit_unknown' || data?.mutationCommitState === 'commit_unknown') return { label: '保存待核对', subject };
+    if (activity.result?.ok !== true || data?.writeCommitState === 'uncommitted' || data?.mutationCommitState === 'uncommitted') return { label: '文件未保存', subject };
+    return { label: '已保存', subject };
+  }
   if (activity.call.name === 'file.grep') return {
     label: data?.complete === false && !data?.hasMore ? '已搜索正文 · 结果不完整' : '已搜索正文',
     subject: textValue(data?.path) || undefined,

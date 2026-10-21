@@ -27,6 +27,7 @@ describe('direct writes reuse publication storage selection', () => {
     } as AgentToolExecutionRequest;
     const output = await executeAgentFileWrite(request, {
       assertOwner: vi.fn(), resolvePath: vi.fn(async () => ({ id: 8 })) as any,
+      prepareMutation: vi.fn(async () => undefined),
       stage: vi.fn(async () => ({ filePath: '/tmp/test.cpp' })), cleanup: vi.fn(), upload: upload as any,
     });
     expect(output.result.ok).toBe(true);
