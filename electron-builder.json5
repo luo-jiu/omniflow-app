@@ -3,7 +3,7 @@
   "$schema": "https://raw.githubusercontent.com/electron-userland/electron-builder/master/packages/app-builder-lib/scheme.json",
   "appId": "com.loyce.omniflow",
   "asar": true,
-  "beforeBuild": "tools/prepare-sqlite3-native.cjs",
+  "beforeBuild": "tools/prepare-desktop-native.cjs",
   "asarUnpack": [
     "node_modules/@napi-rs/**",
     "node_modules/sqlite3/**",
@@ -63,12 +63,18 @@
   "mac": {
     "extraResources": [
       {
+        "from": "build/native/ripgrep/darwin-universal",
+        "to": "ripgrep",
+        "filter": ["rg", "LICENSE"]
+      },
+      {
         "from": "build/native/computer-use/darwin-${arch}",
         "to": "computer-use",
         "filter": ["omniflow-click"]
       }
     ],
-    "binaries": ["Contents/Resources/computer-use/omniflow-click"],
+    "binaries": ["Contents/Resources/computer-use/omniflow-click", "Contents/Resources/ripgrep/rg"],
+    "x64ArchFiles": "Contents/Resources/{ripgrep/rg,computer-use/omniflow-click}",
     "files": [
       {
         "from": "build/native/sqlite3/darwin-${arch}/build/Release",
@@ -89,6 +95,7 @@
     "artifactName": "${productName}-Mac-${version}-Installer.${ext}"
   },
   "win": {
+    "extraResources": [{ "from": "build/native/ripgrep/win32-${arch}", "to": "ripgrep", "filter": ["rg.exe", "LICENSE"] }],
     "files": [
       {
         "from": "build/native/sqlite3/win32-${arch}/build/Release",
@@ -115,6 +122,7 @@
     "deleteAppDataOnUninstall": false
   },
   "linux": {
+    "extraResources": [{ "from": "build/native/ripgrep/linux-${arch}", "to": "ripgrep", "filter": ["rg", "LICENSE"] }],
     "files": [
       {
         "from": "build/native/sqlite3/linux-${arch}/build/Release",

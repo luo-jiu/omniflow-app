@@ -28,8 +28,8 @@
     "release:mac": "node tools/release-mac.mjs",
     "update:serve": "node tools/serve-update-feed.mjs",
     "preview": "vite preview",
-    "predev": "node tools/plugin-isolation/prepare-first-party.mjs && node tools/computer-use/prepare.mjs",
-    "prebuild": "node tools/plugin-isolation/prepare-first-party.mjs && node tools/computer-use/prepare.mjs"
+    "predev": "node tools/plugin-isolation/prepare-first-party.mjs && node tools/computer-use/prepare.mjs && node tools/prepare-ripgrep.cjs",
+    "prebuild": "node tools/plugin-isolation/prepare-first-party.mjs && node tools/computer-use/prepare.mjs && node tools/prepare-ripgrep.cjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.1",
@@ -66,6 +66,7 @@
     "@vscode/tree-sitter-wasm": "0.3.1",
     "@xmldom/xmldom": "^0.8.10",
     "bplist-parser": "^0.3.2",
+    "diff": "8.0.2",
     "echarts": "^6.0.0",
     "electron-updater": "^6.8.9",
     "exceljs": "4.4.0",
@@ -97,6 +98,7 @@
     "@typescript-eslint/eslint-plugin": "^7.1.1",
     "@typescript-eslint/parser": "^7.1.1",
     "@vitejs/plugin-react": "^4.2.1",
+    "@vscode/ripgrep": "1.18.0",
     "ajv": "^8.17.1",
     "electron": "^30.0.1",
     "electron-builder": "^24.13.3",

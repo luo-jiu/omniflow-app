@@ -1,6 +1,6 @@
 # 桌面平台适配架构
 
-更新时间：2026-10-19
+更新时间：2026-10-21
 
 适用范围：`omniflow-app` 的 macOS、Windows 和 Linux 宿主差异，包含主窗口配置、renderer 平台识别、标题栏安全区、平台专属系统能力及分平台构建验证。
 
@@ -137,6 +137,18 @@ QQ 音乐歌词缓存是明确的 macOS 专属宿主能力，但共享业务页�
 - 解密和预览是本机只读流程；最终 `.qrc.xml` 保存仍属于共享资料库上传能力，不是平台层或 Go 后端的本地访问职责。
 
 完整契约见 `docs/qqmusic-lyrics-tool.md`。
+
+### 4.3 Agent 随包 ripgrep
+
+`electron/platform/ripgrepExecutable.ts` 唯一解析 main 私有 rg 路径，不向 renderer / 模型暴露可执行选择。开发资源位于 `build/native/ripgrep/`，打包资源位于 `process.resourcesPath/ripgrep/rg[.exe]`、ASAR 外；不依赖 PATH、Shell 或其他应用。资源缺失返回明确不可用，由上层维持 literal / 目录 JS 兼容与 regex 失败语义。
+
+构建依赖 `@vscode/ripgrep` 精确固定 1.18.0（rg 15.0.0），其可选平台包的全部 tarball / SHA-512 由 package-lock 固定。`predev / prebuild` 与 electron-builder `beforeBuild` 调用 `tools/prepare-ripgrep.cjs`；只在开发 / 构建阶段下载锁定 npm 归档，验证完整性及 name / version / OS / CPU，再提取固定普通 binary、LICENSE 和 metadata，不运行包脚本。已制备资源按版本、归档 integrity 及实际内容 hash 复验后复用；运行应用时不联网补装。
+
+macOS 构建在本机用系统 lipo 将官方 arm64 / x64 binary 合并并验证两片，两个架构的应用都复制同一 `darwin-universal` 输出，不把宿主 arm64 optional 包视为 universal。Windows / Linux 按目标 arch 制备独立目录。`prepare-desktop-native.cjs` 接在原 SQLite hook 前，归一化 builder 的字符串 / 数字 arch，保留 SQLite 的 N-API 制备与 `false` skip-rebuild 结果。资源与 LICENSE 通过各平台 extraResources 复制；mac rg 纳入 `mac.binaries`，沿用[个人签名流程](local-macos-signing-and-release.md)。缺目标 lock、归档损坏或 universal 架构校验失败直接阻断构建。
+
+rg 与既有 `omniflow-click` helper 都在各架构 app 组装前预合并为 universal，两个 app 内的对应资源字节相同。`@electron/universal` 默认拒绝相同 Mach-O，因此 `mac.x64ArchFiles` 只用精确 brace 列表 `Contents/Resources/{ripgrep/rg,computer-use/omniflow-click}` 允许跳过重复 lipo。该配置名来自依赖，并非允许这两份程序仅带 x64；两者仍必须含 arm64 / x86_64，两路径之外的相同 Mach-O 继续拒绝。
+
+2026-10-21：macOS 真实 rg 版本、双架构 lipo、PATH 清空的结构化 grep、实际 app.asar 外资源布局和损坏 / 缺失 / hook 顺序测试通过。`tools/ripgrep-universal.test.ts` 使用真实 `@electron/universal.makeUniversalApp` 合并最小 app 夹具：无规则拒绝、仅 rg 规则仍拒 helper、完整精确规则成功；合并后两份资源仍与输入同字节且含两片，rg 在空 PATH 下可执行，另加的无关相同 Mach-O 仍拒绝。helper 只检查字节与架构，没有执行 GUI 能力。Windows x64、Linux x64 / arm64 仅完成归档校验和资源制备，未执行跨平台 binary。未生成完整签名发行包，不能把最小合并夹具视为发行验收。完整搜索契约见[文件与正文搜索](agent-file-search.md)。
 
 ## 5. Renderer 演进准则
 

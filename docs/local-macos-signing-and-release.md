@@ -2,6 +2,8 @@
 
 2026-10-09 新增内置 Agent 点击 helper：`predev / prebuild` 通过系统 Swift 编译器构建 universal `omniflow-click`，mac 打包将其复制到 `Contents/Resources/computer-use/` 并列入 `mac.binaries`，沿用本文签名流程。代码接线和双架构编译已验证；本轮未签名/发布，安装包的录屏与辅助功能权限归属未验收，不能以开发终端自检替代。功能及 smoke 见 [屏幕查看与点击](agent-computer-use.md)。
 
+2026-10-21 新增固定版本随包 rg：构建阶段校验锁定 npm 平台归档，再以 lipo 制备 / 验证 arm64 + x86_64 universal binary。mac 打包将 rg 与 LICENSE 复制到 `Contents/Resources/ripgrep/`，rg 列入 `mac.binaries`，仍走本文签名流程；不在运行时下载或依赖其他 App。rg 和既有 `omniflow-click` 都预合并为 universal，两架构 app 中对应字节相同；`mac.x64ArchFiles` 用精确列表 `Contents/Resources/{ripgrep/rg,computer-use/omniflow-click}` 允许 merger 保留这两份双片资源，不是 x64-only 豁免。真实无 GUI merger 夹具已验证缺规则拒绝、仅 rg 规则仍拒 helper、完整配置成功且双片 / 字节保留；helper 未执行 GUI 能力。双片与 ASAR 外资源布局已验证，尚未生成 / 签名完整发行包，见[桌面平台契约](desktop-platform-architecture.md#43-agent-随包-ripgrep)。
+
 更新时间：2026-08-18
 
 适用范围：OmniFlow 个人长期使用的 macOS 自签名身份、bootstrap 安装、Tailscale 更新源、后续版本发布和证书恢复。
