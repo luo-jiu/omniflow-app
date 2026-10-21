@@ -1,7 +1,7 @@
 import { net } from 'electron';
 import type { AgentFileAuthorityBrokerRequestInput } from './agent-file-authority-broker';
 import { agentFileAuthorityBroker } from './agent-file-authority-broker';
-import { AGENT_TEXT_MAX_BYTES, collectAgentTextStream } from './agent-text-reader';
+import { AGENT_TEXT_MAX_BYTES, collectAgentTextStream, bindAgentTextDecodeCache, type AgentDecodedText } from './agent-text-reader';
 import { runtimeLogger } from '../../runtimeLogger';
 
 interface CachedText {
@@ -10,17 +10,24 @@ interface CachedText {
   identity: string;
   runId: string;
   timer: ReturnType<typeof setTimeout>;
+  decoded?: AgentDecodedText;
+  decodedBytes: number;
 }
 
 export function createAgentLibraryTextReader(options: { maxBytes?: number; ttlMs?: number } = {}) {
   const entries = new Map<string, CachedText>();
   const maximum = Math.max(0, Math.min(options.maxBytes ?? 16 * 1024 * 1024, 16 * 1024 * 1024));
   let retainedBytes = 0;
+  let decodeHits = 0, decodeStores = 0;
   function remove(key: string) {
     const entry = entries.get(key);
     if (!entry) return;
     clearTimeout(entry.timer);
-    retainedBytes -= entry.bytes.length;
+    retainedBytes -= entry.bytes.length + entry.decodedBytes;
+    // Returned bytes may outlive the entry; their WeakMap binding must not retain our owned raw copy.
+    entry.bytes = Buffer.alloc(0);
+    entry.decoded = undefined;
+    entry.decodedBytes = 0;
     entries.delete(key);
   }
   function releaseRun(runId: string) {
@@ -34,7 +41,34 @@ export function createAgentLibraryTextReader(options: { maxBytes?: number; ttlMs
     timer.unref?.();
     const ownedBytes = Buffer.from(bytes);
     retainedBytes += ownedBytes.length;
-    entries.set(key, { bytes: ownedBytes, etag, identity, runId, timer });
+    entries.set(key, { bytes: ownedBytes, etag, identity, runId, timer, decodedBytes: 0 });
+  }
+  function bindDecoded(key: string, bytes: Uint8Array) {
+    const entry = entries.get(key);
+    if (!entry) return;
+    bindAgentTextDecodeCache(bytes, {
+      get(revision) {
+        if (entries.get(key) !== entry || entry.decoded?.revision !== revision) return;
+        decodeHits += 1;
+        return entry.decoded;
+      },
+      retain(decoded, estimatedBytes) {
+        if (entries.get(key) !== entry || entry.decoded || entry.bytes.length + estimatedBytes > maximum) return;
+        if (Buffer.compare(entry.bytes, bytes) !== 0) return;
+        // Do not evict this operation's raw bytes while admitting their derived line index.
+        for (const other of entries.keys()) {
+          if (retainedBytes + estimatedBytes <= maximum) break;
+          if (other !== key) remove(other);
+        }
+        if (retainedBytes + estimatedBytes > maximum) return;
+        Object.freeze(decoded.lines);
+        Object.freeze(decoded);
+        entry.decoded = decoded;
+        entry.decodedBytes = estimatedBytes;
+        retainedBytes += estimatedBytes;
+        decodeStores += 1;
+      },
+    });
   }
   async function read(
     input: AgentFileAuthorityBrokerRequestInput,
@@ -65,16 +99,19 @@ export function createAgentLibraryTextReader(options: { maxBytes?: number; ttlMs
     const stored = entries.get(key);
     const cached = stored?.identity === identity ? stored : undefined;
     if (stored && !cached) remove(key);
+    // TTL or another read may evict the entry while this conditional GET awaits
+    // its response. Keep this operation's immutable source reference separately.
+    const cachedBytes = cached?.bytes;
     let response: Response;
     try { response = await fetchText(source.downloadUrl, { signal, redirect: 'error', cache: 'no-store',
       ...(cached ? { headers: { 'If-None-Match': cached.etag } } : {}) }); }
     catch { signal.throwIfAborted(); throw new Error('源存储不可达，元数据存在不代表正文可读'); }
     let bytes: Uint8Array;
     const etag = response.headers.get('etag');
-    if (response.status === 304 && cached) {
+    if (response.status === 304 && cached && cachedBytes) {
       await response.body?.cancel();
       if (etag && etag !== cached.etag) throw new Error('源文件版本响应不一致，请重新读取');
-      bytes = Buffer.from(cached.bytes);
+      bytes = Buffer.from(cachedBytes);
     } else {
       if (response.status !== 200 || !response.body) {
         await response.body?.cancel();
@@ -93,13 +130,15 @@ export function createAgentLibraryTextReader(options: { maxBytes?: number; ttlMs
     }
     const strongEtag = etag || (response.status === 304 ? cached?.etag : undefined);
     if (strongEtag && /^"[^"\r\n]{1,254}"$/u.test(strongEtag) && typeof input.runId === 'string') {
-      store(key, bytes, strongEtag, identity, input.runId);
+      if (response.status !== 304) store(key, bytes, strongEtag, identity, input.runId);
+      bindDecoded(key, bytes);
     } else remove(key);
     runtimeLogger.debug('agent.library.text.read', { runId: input.runId, nodeId: source.node.id,
       downloadedBytes: response.status === 304 ? 0 : bytes.byteLength, revalidated: response.status === 304 });
     return bytes;
   }
-  return { read, releaseRun, retainedBytes: () => retainedBytes };
+  return { read, releaseRun, retainedBytes: () => retainedBytes,
+    decodeMetrics: () => ({ hits: decodeHits, stores: decodeStores }) };
 }
 
 export const agentLibraryTextReader = createAgentLibraryTextReader();

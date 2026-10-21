@@ -4,9 +4,21 @@ export const AGENT_TEXT_MAX_BYTES = 8 * 1024 * 1024;
 export const AGENT_READ_DEFAULT_OUTPUT_TOKENS = 10_000;
 export const AGENT_READ_OUTPUT_MAX_BYTES = 1024 * 1024;
 
+export interface AgentDecodedText { revision: string; lines: string[] }
+interface AgentTextDecodeBinding {
+  get(revision: string): AgentDecodedText | undefined;
+  retain(decoded: AgentDecodedText, estimatedBytes: number): void;
+}
+// Only the authorized raw-byte owner may attach derived state. It is never a global content cache.
+const decodeBindings = new WeakMap<Uint8Array, AgentTextDecodeBinding>();
+export function bindAgentTextDecodeCache(bytes: Uint8Array, binding: AgentTextDecodeBinding): void {
+  decodeBindings.set(bytes, binding);
+}
+
 export interface AgentTextReadQuery {
   scope?: 'library' | 'host';
   path: string;
+  basePath?: string;
   offset?: number;
   column?: number;
   limit?: number;
@@ -17,6 +29,11 @@ export interface AgentTextReadQuery {
 export function decodeAgentText(bytes: Uint8Array) {
   if (bytes.byteLength > AGENT_TEXT_MAX_BYTES) throw new Error('文本超过 8 MiB 读取上限，请使用范围下载或本机 Shell');
   if (Buffer.from(bytes.subarray(0, 5)).toString() === '%PDF-') throw new Error('PDF 不是可直接按行读取的文本，请使用文档解析工具');
+  // Returned byte arrays are mutable: hash before a hit, rather than trusting object identity.
+  const revision = crypto.createHash('sha256').update(bytes).digest('hex');
+  const binding = decodeBindings.get(bytes);
+  const cached = binding?.get(revision);
+  if (cached) return cached;
   let text: string;
   try { text = new TextDecoder('utf-8', { fatal: true }).decode(bytes); }
   catch { throw new Error('文件不是有效的 UTF-8 文本'); }
@@ -24,10 +41,12 @@ export function decodeAgentText(bytes: Uint8Array) {
     const code = text.charCodeAt(i);
     if (code <= 8 || (code >= 14 && code <= 31)) throw new Error('文件包含二进制内容，不能作为文本读取');
   }
-  const revision = crypto.createHash('sha256').update(bytes).digest('hex');
   const lines = text ? text.split(/\r\n|\n|\r/u) : [];
   if (lines.at(-1) === '') lines.pop();
-  return { revision, lines };
+  const decoded = { revision, lines };
+  // Conservative admission weight for UTF-16 backing and line strings/array slots; not exact V8 heap usage.
+  binding?.retain(decoded, text.length * 4 + lines.length * 48 + 128);
+  return decoded;
 }
 
 export function sliceAgentText(bytes: Uint8Array, query: AgentTextReadQuery, outputBytes = AGENT_READ_DEFAULT_OUTPUT_TOKENS * 4) {
