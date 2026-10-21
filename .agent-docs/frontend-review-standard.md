@@ -1,6 +1,6 @@
 # OmniFlow App Frontend Review Standard
 
-更新时间：2026-10-16
+更新时间：2026-10-21
 
 适用范围：`omniflow-app` 前端、Electron renderer / preload / main、IPC、工作区交互和前端文档相关改动的代码评审。
 
@@ -59,9 +59,11 @@ views -> features -> components / hooks -> service / bridge -> backend or electr
 - `service` 是否开始拼页面状态机
 - `features` 是否偷偷承担页面总控
 - `electron` 是否反向承担 renderer 业务编排
+- IPC 请求必须先校验入参与 frame、计算作用域，再创建异步执行和监听；注册失败不能留下无人接收的 Promise 拒绝或已启动的任务。
 - 外部文件后缀、类型或方法名用于索引权限白名单时，必须只匹配自有键或使用 Map；不得让 `constructor`、`__proto__` 等继承属性通过能力筛选。
 - embedded browser 页面属于未受信任内容；页面 console、DOM 全局变量或可伪造事件不能直接授权 main 执行下载、写盘、凭据读取等重操作，必须经过 isolated world、不可预测 nonce、可信事件和一次性 capability 校验
 - Tool 的私有输入投影不能依赖执行可见性：模型或环境过滤、不可用及 unknown-tool 拒绝路径仍按可信注册身份保护原名和 Provider 名称的私有正文，不得写入 SQLite、IPC 或续轮历史；隐私识别不能恢复被过滤的执行能力。
+- Tool 参数归一化须分别核对模型原始输入与执行输入的敏感 / 大小审计；删除 basePath 等字段不能清除原始历史中的审计责任。审批、执行与快照共用固定目标，但不能共享对象修改已预算的 Provider 历史；拒绝后的原始历史仍须同步安全投影。
 - 新增宿主输入动作必须逐层纳入可信注册、权限准备和 broker 的受监督提交结算，不能只在 runtime 测试里手传结算对象而漏掉真实 Agent 接线。取消期间保留有界的释放回执等待，已结束的未知结算不得被迟到成功覆盖，也不得自动重放。
 - 定向输入不能将 PID 投递当作单窗消费证明。持续手势每步复验冻结窗口可见性、接收窗口 / 控件及新出现的临时表面；取消只能向仍有效的原窗口发送唯一配对释放，不能把 up 路由到同 PID 的另一窗口。释放未确认时须实际阻断当前 Run 的后续手势，不能只写拒绝文案；新观察、重批、换窗及已封存动作均不得绕过，结束后的迟到回执不复活门禁。私有坐标 API 缺失须首发前拒绝，软件 / 系统 profile 与真实业务验收证据分别记录。
 - 持久合成焦点须只有一个输入会话 owner，跨 Run 交接先等前 owner 清理并真实退出；输入队列串行不代表动作间保留的状态互斥。焦点通知是独立副作用，鼠标零事件不等于完全未提交；鼠标配对释放、焦点清理和原生进程退出分别结算。关闭 ACK、kill 请求及单独 exit 不能冒充焦点清理；清理未知须跨新观察和新 Run 阻断，迟到成功不洗白。事件过滤依赖持续服务的独立 RunLoop，回调不做阻塞 AX 读取；暂停 WindowServer 更新必须在取消和错误路径恢复。合成操作后目标意外成为真实前台，不能仅凭该采样认定用户已接管；有证据的用户接管与尚未完成的旧前台恢复分开持有，无法确认恢复不能报告 released。
@@ -96,6 +98,8 @@ views -> features -> components / hooks -> service / bridge -> backend or electr
 - timer、event listener、upload task、browser tab、WebContentsView、session 是否回收
 - Electron main 持有的真实临时文件是否同时具备单文件/总量配额、TTL、导航或 tab 清理、正常退出清理和崩溃残留回收
 - 异步回调是否会把旧页面 / 旧 tab / 旧库结果写回当前界面
+- 缓存淘汰与进行中的读取须分离：TTL、配额或失效清理不能清空该读取仍需使用的字节；覆盖条件请求等待期间淘汰的竞争，并确认完成后不复活已淘汰 entry。
+- 分页面板须明确关闭 / 重开的读取生命周期；不能直接复用已过期游标，也不能因请求 key 相同而接受上次打开期间的迟到结果。验证同时覆盖关闭取消、重开首屏及保持打开时的过期恢复。
 - 临时 Electron / GUI 测试启动器必须将 Node launcher 与 Electron main 入口明确分开：用显式参数及 `process.versions.electron` 验证运行态，Electron 内只通过内建 `require('electron')` 获取 API，不能用绝对 npm 包路径的返回类型判断运行态。启动前须有进程代数上限、单实例/并发上限、父进程消失清理和独立总时限；先以不启动 GUI 的测试确认最多 spawn 一次、错误入口直接失败，再做实机。`node --check` 不能证明启动生命周期安全；诊断脚本也不得绕过这些门禁。
 - 等待用户回答的 Tool 必须有独立等待期限和收口预算，且 host 回调使用执行监督器提供的 Tool signal；不能捕获外层 Run signal 而漏掉工具超时取消。验证须覆盖超过普通工具时限、回答续轮、停止、创建期间取消与真实过期后的 pending 清理；交互终态已落库但回执迟到时，停止或超时不得覆盖真实结算，规范 Tool 仍须有 result 和 finishedAt，不能只检查 Run 状态。
 
@@ -136,6 +140,7 @@ views -> features -> components / hooks -> service / bridge -> backend or electr
 - 是否执行了 `npm run build`
 - 是否按 `docs/frontend-validation-matrix.md` 覆盖本次改动对应的主路径和边界路径
 - 是否同步更新了真正受影响的文档
+- 随包原生程序须验证真实打包器的资源路径、架构合并与签名接线；两个架构目录复制同一份预合并二进制时，不能用源码构建或 lipo 自检替代合并验证。需要跳过重复合并时只允许精确资源路径，并反验无关二进制仍被拒绝。
 
 ## 3. 最低验证门禁
 

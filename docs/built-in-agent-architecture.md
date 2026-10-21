@@ -1,5 +1,21 @@
 # 内置 Agent 架构
 
+## 内外文件工具与独立改动记录（2026-10-21）
+
+`file.write@2` 与 `file.patch@1` 已统一为可信 main Tool，按显式 `scope=library|host` 分流；模型依据目标和上下文自主选择，两端工具不会在失败时静默切换。默认 library 仅用于参数兼容。当前只操作 saved，编辑器未保存草稿不进入 Agent 文件读取，也不会被顺带保存。详细语义和未实现的后续方案见 [统一文件工具](agent-unified-file-tools-research.md) 与 [写入契约](built-in-agent-file-write.md)。
+
+main 为每次结构化写入绑定 operationId/owner/library/Session/Run/ToolRun。host executor 直接封存 before/after；library 仍经标准 renderer broker，提交前通过一次性 `agent:file-change:prepare` 私有能力校验正文、版本与目标，main 重新读取权威节点/保存版本再落快照。正文不进入普通 Tool result 或模型历史，原始模型写入参数仍按既有审计规则处理。Broker 同步接受规范提交回执后再异步结算 journal；取消后已经封存的 unknown 不接受迟到成功覆写。
+
+SQLite `agent_file_changes` 保存独立提交事实；私有快照目录保存原始字节。每文件8 MiB、Run64 MiB、owner512 MiB，记录数Run1000/owner20000；已结算快照7天、unknown14天，活跃lease不清理。过期保留摘要；Session删除与cleanup outbox同事务，物理删除失败保持占用记录并重试。该存储是本机有限保留的审阅历史，不是资料库备份或同步版本库。启动不重放未知写入，WAL/NORMAL不承诺突然掉电零丢失。
+
+`agent:file-changes:list` 与 `agent:file-change:diff` 为主窗口只读接口，复验owner/库/Session；列表最多16个真实Run、200条并明确截断。Diff基于不可变快照，不依赖Git或当前文件；library同Run/node/path/revision连续链可看净差异，host只看单次。仅覆盖结构化file.write/patch，不完整追踪任意Shell写入。
+
+Diff正文计算由独立 `worker_threads` 执行，生产构建入口为 `agent-file-diff-worker`，输出 `dist-electron/agent-file-diff-worker.js`，与主进程入口同目录。store串行队列只做快照授权、版本链与正文读取，计算在队列外执行，不阻塞后续prepare/settle/list。每个store最多2个在途读取且不排无界队列；线程堆限制为old192 MiB/young16 MiB、stack4 MiB，计算库时限1500ms、编辑量20000，线程总时限5秒。单源仍最多8 MiB且最多200000行；展示总量最多4 Mi UTF-16单元、4096页。达到任一预算明确返回截断/失败，私有历史快照继续保留。
+
+`readFileDiff`兼容原请求，增加可选`cursor/pageLines/requestId`。默认每页200行、最多500行，每页最多32 Ki UTF-16单元，超长行按合法代理对边界分段并返回续行标记。main持有最多4个结果、共8 Mi UTF-16单元的60秒缓存，每15秒回收过期条目；cursor为opaque引用，绑定owner/库/Session、操作端点、文件身份、实际快照revision、净差异或单次变体及pageLines。翻页重新验证权威元数据，不重算正文；cursor失效或版本范围变化只提示重读首屏，不回退读取当前文件。
+
+新增只读取消通道`agent:file-change:diff:cancel`，只接受原WebContents及精确sender frame对象/processId/routingId和owner/库/Session/requestId，不能取消其他窗口或frame的请求。每窗口最多4个、全局最多8个在途请求；主frame导航、renderer崩溃、窗口销毁、store关闭均取消读取。完成、取消、超时和错误都等待`worker.terminate()`真实结束后才结算，并解除对应监听和定时器；该生命周期不改变Run/ToolRun事实。
+
 ## Computer Use 当前架构与阶段结论（2026-10-16）
 
 macOS 开发预览已接入八种可信内置工具：`computer.windows / observe / click / setText / scroll / input / menu / hidePointer`。本批按用户要求阶段收口，当前事实以[电脑操作契约](agent-computer-use.md)为准；[验证矩阵](frontend-validation-matrix.md#computer-use-阶段收口2026-10-16)保留真实 Run 身份、成功与失败范围，[Codex 光标研究](agent-computer-cursor-codex-research.md)区分静态依据、推断与实现差异。后续在出现明显问题或明确扩展场景时继续，不将这次收口解释为任意应用兼容验收完成。
@@ -34,7 +50,7 @@ AT2 修复插件故障终态竞态，并在 App 路由/Auth 边界释放离库�
 
 插件 Tool 已接入每轮冻结目录、会话文件授权与 ToolRun 来源审计，AT1 macOS 核心范围验收完成。除 Electron 合成链路外，真实 gpt-5.5 已在 win 资料库（ID 3、本机 macOS MinIO）完成单文件授权、文件定位和 CSV 插件查询；无需打开 Viewer，插件来源详情可见并持久化。故障闭环与范围限制见上述 AT2 结论；成功链路的实现与证据见 [AT1 插件工具](plugin-system-at1-agent-tools.md)。
 
-会话组、归档与会话级目录授权由main和本机SQLite持有，纯客户端、不做跨设备同步；元数据版本、Run冻结策略、目录检查与归档只读门禁见 [本机会话组与访问](agent-session-groups-and-access.md)。组不是Shell沙箱或历史信息擦除边界。
+会话组、归档与会话权限由main和本机SQLite持有，纯客户端、不做跨设备同步。同组会话权限允许在运行中更新，仅供后续新 Run 读取；当前 Run 的能力/目录权限快照、已保存审计与待决审批不变，移动/归档/组策略仍受运行锁保护。元数据版本、Run冻结策略、目录检查与归档只读门禁见 [本机会话组与访问](agent-session-groups-and-access.md)。组不是Shell沙箱或历史信息擦除边界。
 
 内部文件删除现已通过 `file.delete` 接入资料库回收站，权限、提交状态和目录/预览同步见 [内部文件操作](agent-internal-file-actions.md)。
 
@@ -90,7 +106,7 @@ Shell 的 main-only 一次性 execution lease、Process Supervisor、LogStore、
 - 按权限策略执行的 `media.extractAudio`：区分源可读与目标可写，默认保存资料库；完全访问下非覆盖动作免重复审批，选择本机或切换目标仍走同一 prepare、一次性能力与提交链。
 - main / renderer Tool 的统一执行分发，以及只由已注册媒体 Tool 间接使用的受控本地进程基座。
 - Tool Registry 与 Orchestrator 的通用 prepare 生命周期：声明 prepare 的 Tool 必须由 main 或 renderer 单一持有；main-owned prepare 直接从 Run 冻结快照生成 public action、不可变私有 binding 和 hash，私有 binding 只经 main execution context 交给同一冻结 Tool 实现，不进入模型输入、SQLite 或 renderer IPC。macOS 开发预览中的 `shell.run` 已使用该 main-owned prepare 链路。
-- macOS Zsh `shell.run` 开发预览：只支持非交互前台命令；用户可以在 Agent 页面选择 `ask / auto / full-access`，main 持久化该本机设置并只影响后续新 Run。`ask` 展示完整冻结命令、Provider、逻辑 cwd、风险、超时和非敏感环境覆盖；`auto` 只自动批准确定性分析已证明在 Run workspace 内的普通操作，访问外部路径时仍询问；`full-access` 对已经完整分析的外部路径读取直接放行，但仍受不可变 deny 和 Analyzer 完整性门禁约束。查看、读取、概括或分析用户明确给出的宿主绝对路径时，模型直接调用受支持只读命令，不先暂存文件。`run-workspace` 中的 `~ / HOME` 指向 Run 虚拟 home，`host` 中则指向 main 冻结的宿主 home。Supervisor 在继续 drain 全部输出的同时维护最多 `1 MiB`、等额保留 head / tail 的 main-only 诊断采集；该采集同时受固定字节数和最多 `4,096` 个返回事件约束，尾部回收不依赖数组头部搬移。原始采集不进入 SQLite、模型或 renderer。输出事件经控制序列清洗和脱敏后进入详细日志，并同步形成最多 `160,000` UTF-8 bytes、使用固定 Buffer 而不按来源碎片积累对象的安全 head / tail 模型源；规范 Tool result 仍经过 `100,000` JSON 字符门禁，Shell 会自适应收口到约 `90,000` JSON 字符为清洗和传输字段留余量。Orchestrator 为单个 `shell.run` Tool result 提供最高约 `40,000 tokens` 的独立投影预算，真实 continuation 空间不足时按 byte / token 再次投影并重算真实 `omittedBytes`。renderer 每个 stdout / stderr 摘要最多 `4 KiB`，但非审批 Shell 默认只以无框单行展示最低状态和 main public prepared action 中的命令摘要，不铺开输出，也不显示耗时、退出码或预览截断；点击具备 owner-bound 结果的行后，才展开最高约 `256px`、内部滚动的受控详细日志，真实过期或缺口只在展开区弱提示。审批态继续使用完整确认卡；命令显示禁止回退到 `call.input`。原始采集、规范结果中的模型源、provider Tool result、renderer 摘要和详细日志是互不替代的预算层。
+- macOS Zsh `shell.run` 开发预览：只支持非交互前台命令；用户在 Agent 页面选择 `ask / full-access`，main 持久化会话设置并只影响后续新 Run；`auto` 仅保留为历史 / 内部策略兼容值。`ask` 展示完整冻结命令、Provider、逻辑 cwd、风险、超时和非敏感环境覆盖；`auto` 只自动批准确定性分析已证明在 Run workspace 内的普通操作，访问外部路径时仍询问；`full-access` 允许未命中不可变 / 显式 deny 的动作，未知 CLI 与动态语法保留 unresolved assessment，不因完整分析身份为空而硬拒绝；精确命令通过独立 executionIdentity 在 prepare、lease 与 spawn 前复验，不能用于持久规则授权。查看、读取、概括或分析用户明确给出的宿主绝对路径时，模型直接调用受支持只读命令，不先暂存文件。`run-workspace` 中的 `~ / HOME` 指向 Run 虚拟 home，`host` 中则指向 main 冻结的宿主 home。Supervisor 在继续 drain 全部输出的同时维护最多 `1 MiB`、等额保留 head / tail 的 main-only 诊断采集；该采集同时受固定字节数和最多 `4,096` 个返回事件约束，尾部回收不依赖数组头部搬移。原始采集不进入 SQLite、模型或 renderer。输出事件经控制序列清洗和脱敏后进入详细日志，并同步形成最多 `160,000` UTF-8 bytes、使用固定 Buffer 而不按来源碎片积累对象的安全 head / tail 模型源；规范 Tool result 仍经过 `100,000` JSON 字符门禁，Shell 会自适应收口到约 `90,000` JSON 字符为清洗和传输字段留余量。Orchestrator 为单个 `shell.run` Tool result 提供最高约 `40,000 tokens` 的独立投影预算，真实 continuation 空间不足时按 byte / token 再次投影并重算真实 `omittedBytes`。renderer 每个 stdout / stderr 摘要最多 `4 KiB`，但非审批 Shell 默认只以无框单行展示最低状态和 main public prepared action 中的命令摘要，不铺开输出，也不显示耗时、退出码或预览截断；点击具备 owner-bound 结果的行后，才展开最高约 `256px`、内部滚动的受控详细日志，真实过期或缺口只在展开区弱提示。审批态继续使用完整确认卡；命令显示禁止回退到 `call.input`。原始采集、规范结果中的模型源、provider Tool result、renderer 摘要和详细日志是互不替代的预算层。
 - `file.stage@1` / `file.publish@1` / `file.upload@1` 文件桥开发预览：stage 可由 main 系统 picker 或用户在当前请求中明确给出的本机绝对 / `~/` 来源路径把需要工作副本的普通文件暂存进 Run，也可暂存当前资料库普通文件；本机文件只有在需要修改、转码或生成新文件时才走 stage，单纯查看不复制。publish 把 Run 输出发布到 Save As、目录节点或从资料库根开始的绝对目录路径；upload 将明确本机来源原样上传到资料库，不先进入 Run。资料库路径由 renderer authority 从根逐段精确解析，缺失、重名、文件段或层级漂移均失败；prepare 与 execute 分别重验节点、目标、owner、Session、Run 和 ToolRun。stage 的签名 URL 只在 main 下载期存在，publish / upload 复用 main-owned 上传事务并保留 `committed / uncommitted / commit_unknown` 三态。用户明确提供的来源路径可进入对应 Tool input、public prepared action、确认卡和 SQLite 审计；canonical 路径、workspace 物理路径、token、签名 URL 与 credentials 仍只由 main 持有。三个 Tool 都是规范 `business` Tool，并使用 45 秒有界取消结算预算；真实资料库与安装包行为仍需人工验收。
 - 本机会话分组分页、搜索、新建、打开、重命名、移组、归档、只读查档、恢复及归档后的永久删除。
 - 等待确认状态持久化、应用重启后的会话恢复，以及未完成运行的中断标记。
@@ -111,7 +127,7 @@ Shell 的 main-only 一次性 execution lease、Process Supervisor、LogStore、
 
 当前 macOS 开发构建在 Zsh 探测成功后会注册 `shell.run`、`file.stage`、`file.publish` 与 `file.upload`，模型可以按 Run 冻结的权限模式直接读取明确宿主绝对路径、执行其他受支持宿主命令、把需要工作副本的本机或当前资料库普通文件放入 Run、把 Run 输出发布到本机和资料库，或把用户明确指定的本机普通文件原样上传到资料库；这仍不是稳定发布能力。当前不提供 Shell Session / 资料库长期规则、Shell 规则管理 UI、实时双流日志时间线、通用媒体转码 Tool、可重写计划、跨多轮 Workflow、自动恢复未完成运行、后台自动记忆提取、跨机器同步或向量检索。Skill 支持同一 Run 按需加载多个内置说明，但不支持本地 `SKILL.md`、远程来源、插件注册、热更新、Hook、子 Agent 或专用管理 UI。`AgentLocalProcessRunner` 仍只被 `media.inspect`、`media.extractAudio` 等具体 Tool 内部使用，不是模型可调用的 Tool；raw Shell 只能进入独立的 `shell.run` 生产链。
 
-Shell 基座已经包含 `shell.run@1` strict input / public action、schema 2 持久化分支、main-only exact command hash、macOS Zsh / Linux Bash / Windows PowerShell Provider discovery、Run snapshot、AI destination binding、AST Analyzer、三态 Policy、PreparationService、一次性执行能力与 Runtime。Analyzer 使用微软维护的 `@vscode/tree-sitter-wasm` 预编译 runtime：Zsh / Bash 使用 Bash grammar，PowerShell 使用独立 grammar。静态已知子集生成 `operations / facets / risk / unresolved`、`workspaceBoundaryVerified` 和稳定 `analysisIdentity`；PreparationService 再将其与 AI destination、环境、Provider、workspace content 和各 policy revision 合成为 `authorizationIdentity`。变量展开、命令替换、控制流、动态命令头、嵌套解释器、未知命令或参数、链接创建、交互参数和语法错误均 fail-closed；Parser / WASM 故障回退到不泄漏原始异常的 conservative assessment。
+Shell 基座已经包含 `shell.run@1` strict input / public action、schema 2 持久化分支、main-only exact command hash、macOS Zsh / Linux Bash / Windows PowerShell Provider discovery、Run snapshot、AI destination binding、AST Analyzer、三态 Policy、PreparationService、一次性执行能力与 Runtime。Analyzer 使用微软维护的 `@vscode/tree-sitter-wasm` 预编译 runtime：Zsh / Bash 使用 Bash grammar，PowerShell 使用独立 grammar。静态已知子集生成 `operations / facets / risk / unresolved`、`workspaceBoundaryVerified` 和稳定 `analysisIdentity`；PreparationService 再将其与 AI destination、环境、Provider、workspace content 和各 policy revision 合成为 `authorizationIdentity`。独立 main-only `executionIdentity` 绑定精确命令及分析结果，不把单次执行当成完整分析或长期规则。未知命令、动态语法和 Parser / WASM 故障保留 unresolved / conservative assessment，按既有权限模式询问或放行；已识别的后台脱离、交互和提权等不可变 deny 仍优先。workspace 与 host 均在 lease / spawn 前复验精确身份，不能因分析不完整而跳过验证。资料库文件交给 CLI 编译、测试或校验时，默认 stage 原始字节再在 run-workspace 执行；本机真实项目可直接 host，纯验证无需发布，详见 [Shell 契约](built-in-agent-shell-architecture.md#资料库原文件编译与验证2026-10-21)。
 
 在 macOS / Linux 上，PreparationService 会在 Quota live lease 下以 25 秒有界预算运行 scanner v3，扫描 `input / work / output / tmp / home` 的普通文件 data fork，以 Buffer 名称流式枚举目录并拒绝非规范 UTF-8、链接、特殊文件、硬链接、越界、超限和扫描中可检测的漂移；文件内容、`ctimeNs`、POSIX mode、平台上报的 allocated blocks、目录、累积 provenance 和物理 workspace 根 mode 均进入与 workspace ID / generation 无关的 `workspaceContentIdentity`。配额按 `max(data fork 读取字节, st_blocks * 512)` 校正，而不是宣称精确覆盖全部物理元数据。当前 Node 文件系统层尚不能以可信 handle 枚举或计量 generic xattr、ACL 和平台 file flags；macOS resource fork 在 APFS 上通常反映到 allocated blocks，但 generic xattr 可以只改变 `ctimeNs` 而不增加 `st_blocks`。macOS 的单次 `ask` 执行接受这一已明确记录的同用户 TOCTOU 与扩展元数据残余风险；代码继续固定 `persistentRuleEligible: false`，不能据此创建 Session / 长期规则。持久规则和更强执行身份仍需要 handle-based 平台 metadata adapter、扩展元数据身份与 allocated accounting，或在无法完整覆盖时 fail-closed。
 
@@ -119,7 +135,7 @@ Workspace Store 的恢复、manifest / usage / touch / cleanup、adapter remove 
 
 `AgentShellWorkspaceStore` 关闭时会先同步关闭公开准入，再等待此前已接纳的多阶段操作和 adapter 回调，最后注销 adapter 并关闭 persistence；重复 dispose 复用同一 Promise。
 
-Shell 权限核心保留纯 main 的 `ask / auto / full-access` 三态 Policy Engine，并把模式冻结进 Run capability identity 与 prepared snapshot。`auto` 只允许确定性分析器已经完整证明处于 Run workspace 内的普通操作，不调用第二个模型代替用户审批；`full-access` 明确代表当前宿主用户权限而不是沙箱。Agent 页面现操作会话级 `ask / group / full-access`，不改写共享Shell设置；前两者映射Shell询问，显式完全访问映射Shell完全访问。组内普通资料库操作另由目录guard准入，不自动扩大宿主权限；持久命令规则仍不是当前用户能力。
+Shell 权限核心保留纯 main 的 `ask / auto / full-access` 三态 Policy Engine，并把模式冻结进 Run capability identity 与 prepared snapshot。`auto` 只允许确定性分析器已经完整证明处于 Run workspace 内的普通操作，不调用第二个模型代替用户审批；`full-access` 明确代表当前宿主用户权限而不是沙箱。Agent 页面仅提供会话级 `ask / full-access`，不改写共享Shell设置，两者分别映射Shell询问/完全访问。旧 Session 的 group 编码按 ask 读取，新 Run 不再使用组内自动权限；历史 Run 快照与审计保留原值。持久命令规则仍不是当前用户能力。
 
 ## 2. 分层与所有权
 
@@ -181,7 +197,8 @@ Main-owned Agent media upload transaction
 
 - SQLite 是会话组、Session、Run、Message、ToolRun 和已确认长期记忆的唯一持久化事实源；召回排序与 provider 消息都是可重建投影。组目录授权、会话归属/模式与归档字段由main管理，Run目录权限快照不可变。
 - Renderer 不把会话历史复制到 `localStorage`，只保留本机模型 / 推理强度偏好和临时展示状态。
-- `LibraryDetail` 只向 Agent 投影当前 `libraryId`、目录和选中节点，不持有 Agent 会话副本。
+- `LibraryDetail` 只向 Agent 投影当前 `libraryId`、目录和完整选中节点 ID 列表，不持有 Agent 会话副本。`primaryNode` 用于推导当前目录，不代替完整选区；`appContext.selectedNodeIds` 去重后保留全部有效 ID，超出模型预算时在启动前明确失败，不静默截成前 200 项。初始感知仍最多获取 20 个选中节点的详情；它是部分元数据快照，模型以完整 ID 列表判断选区，并按需调用工具补查其余节点。
+- 单文件工具只有在恰好选中一项时才能省略目标并沿用该项；多选时模型须显式指定 `path / nodeId / sourceNodeId`，权限检查不得擅自取第一项作为目标。
 - API Key 继续由 AI Service 的本机安全存储负责，禁止进入 Agent 数据库、消息或事件。
 - Capability Registry、Tool Registry、Skill Registry 与可选 Shell Provider Registry 是应用内置定义的 owner；每个 Run 只读取启动边界生成的组合内存快照。Shell Provider identity 已能参与快照 hash，但生产路径尚未提供该快照。完整 Capability 状态、Effective View、Provider binding 和 executor 引用不跨进程恢复，稳定的 capability identity、Tool catalog revision 与 Skill catalog revision 随 Run 持久化用于诊断。当前激活 Skill 只属于该活跃 Run，`skill.activate` 的 ToolRun 是持久化审计事实。
 - 会话 owner 由规范化 `VITE_API_BASE_URL`、数字用户 ID 和 `libraryId` 共同确定；同一台机器切换账号或后端环境时不得复用其他 owner 的会话。

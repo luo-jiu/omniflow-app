@@ -1,6 +1,6 @@
 # OmniFlow App 前端交接索引
 
-更新时间：2026-10-20
+更新时间：2026-10-21
 
 适用对象：继续维护 `omniflow-app` 前端、Electron 主进程、IPC、桌面交互和前端文档的开发者或 Coding Agent。
 
@@ -110,6 +110,7 @@
   - `docs/built-in-agent-architecture.md`
   - `docs/built-in-agent-shell-architecture.md`
   - `docs/built-in-agent-ui-contract.md`
+  - [内外文件统一工具、路径与独立 Diff](../docs/agent-unified-file-tools-research.md)（同一 file 工具支持 library/host，LLM 自主判断来源与探索；saved write/patch、相对 path/basePath 审批前冻结、host 原生候选枚举、资料库解码复用、Agent 独立改动入口及后台分页 Diff 已实现。完整检查与限定 macOS 验收见验证矩阵；working / 共享文档 owner、全文索引与稳定引用仍属后续目标）
 - 文件树、文件打开、预览 tab、viewer 分发边界：
   - `docs/file-explorer-file-viewer-boundary.md`
 - 内置类型、归档模式、目录树特殊语义：

@@ -2,6 +2,102 @@
 
 2026-10-20阶段提交沿用各节已有验证，按用户要求不重跑全量检查；历史“未提交”描述指对应测试发生时点。
 
+## 文件与 Agent 改动提交前 Review（2026-10-21）
+
+对编辑器、内外文件工具与搜索、写入快照与 Diff、会话权限、多选和 Shell 链路进行分工 review，发现并修复两项 P2：条件 GET 等待期间缓存 TTL / 配额淘汰会清空读取所需字节，现由该读取持有独立引用并保留前后授权复验；无效 Diff 请求可能在元数据注册前启动无人接收的 Promise，现先校验请求与 frame，再启动执行和监听。回归覆盖两类淘汰竞争、异常请求、序列化失败和缺失 frame；复审未发现未解决问题。
+
+最终全量 `npm run lint`、`npm test -- --maxWorkers=2 --minWorkers=1`（**537 文件 / 6,728 项通过**，3 文件 / 7 项沿用跳过）、`npm run build` 通过。构建发现的新异常入参测试类型断言已修正；随后相关 2 文件 / 14 项回归、定向 ESLint 和完整构建再次通过，仅该测试类型断言与文件末尾空行调整发生在全量测试之后。分批暂存均检查 `git diff --cached --check`，混合功能文件另检查暂存 TypeScript 语法。日志 `/tmp/omniflow-review-commit-{lint,tests,build,diff-regression}.log`。
+
+本轮未新增 GUI 验证；交互沿用下列同次开发、非首个 win / ID3 资料库的已有实机证据。本轮两个修复的竞争与异常路径以自动化为证；Windows/Linux、完整签名发行包及各专题已注明的视觉边界仍未验收。后端无改动，本地按功能分批提交。
+
+## Agent 原文件编译验证（2026-10-21）
+
+资料库原文件交给本机 CLI 时，默认指导为原始字节 `file.stage -> shell.run(run-workspace)`，不再因同时提供 `file.write` 或缺少 `file.publish` 而省略路线；模型按实际 `logicalPath` 引用输入，辅助测试与临时构建结果写 `work / tmp`，纯验证不发布。本机真实项目仍可 host 直接处理。Tool 描述中的跨工具建议以本轮提供对应能力为前提。
+
+未解析命令使用独立精确 `executionIdentity` 进入现有权限策略，不伪造完整 `analysisIdentity / authorizationIdentity` 或持久规则资格。回归覆盖 unknown CLI、编译结果运行、动态/损坏语法与分析器故障在 ask/auto/full-access 下的决策，不可变 deny 优先、已知安全 auto 不变；缺失/损坏/篡改执行身份，以及命令、Provider、环境、workspace 内容漂移在 lease / preflight 拒绝。assessment 与 public action 共用既有归一化函数，合法引号内首尾空格不再导致 lease 误拒绝；完整命令原文继续参与身份，空格篡改仍改变身份。
+
+真实链路回归使用含 CRLF、中文及末尾换行的源码、真实资料库 `name/ext` 分字段形态，通过正式 stage 暂存两次，使用同名后缀后的实际路径，从默认 work 编译并运行辅助入口；核对来源字节、SHA-256、input 不变及产物不入库。runtime 从 Workspace Store 获取当前 generation，连续 stage/publish 不沿用最初创建版本；扩展名、已含后缀、大小写、下载前后 ext 漂移和已释放 workspace 另有回归。集成只模拟 renderer authority/下载来源，实际执行本机 Zsh / Clang，不等同真实资料库或模型自主选路。
+
+macOS 已有开发窗口、非第一个 **win / ID3**、本机 MinIO、gpt-6.1-sol 高、既有完全访问会话 `6db1de24-f01b-4691-856c-51a569d5d038` 实测：自然请求未指定工具，Run `a3c6099a-d873-4534-bcdd-fc8db7d4f144` 自主选择 `file.stat -> file.stage -> shell.run(run-workspace, cwd=work)`，原字节直接编译、独立测试入口 include 原输入，C++17 与 10 组用例通过。未调用 file.write/patch/publish，Shell 仅在 work 生成测试入口和构建结果。
+
+实机同时发现暂存丢扩展名，修复后 Run `36921d9c-6e61-4830-8573-089fe187accc` 再次完成相同链路：返回 `main.cpp / input/main.cpp`，922 bytes、`sha256:3f46c867061a5c8fabee52fafe4e54d57ac57be514b5f2c5b6585c7da284d67c` 与修复前一致。直接以 `.cpp` 编译，无需额外指定语言；Apple Clang 21.0.0、C++17、`-Wall -Wextra -pedantic` 无警告/错误，ASan/UBSan 下 10/10 用例通过，未修改或回写资料库。规范 ToolRun、Shell 实际命令/输出与界面终态分别核对，两轮均 completed。
+
+自动化：全量 `npm run lint`、`npm test -- --maxWorkers=2 --minWorkers=1`（**537 文件 / 6,719 项通过**，3 文件 / 7 项沿用跳过）通过；最终测试 union 类型收窄后，相关 46 项回归、ESLint、全项目 `tsc --noEmit`、`npm run build` 和 `git diff --check` 通过，生产代码未再变化。日志 `/tmp/omniflow-agent-original-compile-{lint-final,tests-final,build}.log`。owner-bound grep 分发测试已显式隔离 rg 探测并在 finally 先 shutdown，再关闭 SQLite；真实 rg 子进程覆盖保留，未扩大等待超时或修改生产读取逻辑。
+
+独立 review 发现并修复上述空白参数身份问题，最终复审未发现未解决问题。只验 macOS 开发环境；询问访问策略边界以自动化为证，Windows/Linux、完整发行包和多文件工程依赖解析未手验。本轮未新增弹框、权限档位或持久授权规则。
+
+## Agent 目录树多选上下文（2026-10-21）
+
+目录树沿用当前可见节点的 Shift 首尾范围及 Cmd/Ctrl 增减选择，页面把完整选区只读传给 Agent；多选文件、文件夹或混选显示“选中：第一项名称 等”，名称与“等”之间保留一个空格。首项对应 `selectedNodeIds[0]`，不使用最后一个主节点冒充；取消首项后剩余第一项接替显示。单选保留完整文件名或目录名，取消最后一项后回到资料库根目录。选区只在下一次发送/继续时进入新 Run，不修改既有 Run 快照。
+
+回归覆盖 Shift 连续混选、Cmd 离散混选/取消、普通单击回单选、主节点不变时选区即时更新、旧上下文不被改写及当前目录回退；另验证大于 200 项完整 ID 保留、20 项详情查询仍有界、部分详情不能冒充完整选区，以及超预算选区在创建会话/Run和调用模型前失败。单文件工具在多选缺少目标时不擅取第一项，也不先弹错项授权；显式目标和单选默认目标继续可用。
+
+全量 `npm test -- --maxWorkers=2 --minWorkers=1` **536 文件 / 6,675 项通过**，3 文件 / 7 项沿用跳过。最后追加媒体保存到本机的缺来源分支后，授权文件 **59 项回归通过**；该分支在任何读取和审批前失败，独立复核未发现问题。`npm run lint`、`npm run build` 和 `git diff --check` 通过，日志 `/tmp/omniflow-agent-multiselect-{lint,tests,build,access-tests}.log`。首轮全量使用旧成功夹具时，大选区触发其 32k 测试模型预算，已仅将完整 1000 ID 成功用例改用 128k 测试窗口；50,000 ID 超预算拒绝用例保留默认 32k，生产预算没有放宽。
+
+macOS 已有开发窗口、非第一个 win / ID 3、暗色实测：在既有合成文件上 Shift 连选后，Cmd 加入文件夹及不相邻文件，目录树高亮与“选中：多个文件”同步；Cmd 取消已有项不影响剩余选区，退为单项后恢复文件名，取消最后一项显示“选中：资料库根目录”。没有新建文件或发送模型请求。亮色、最窄布局与 Windows/Linux 原生修饰键未手验，完整发送上下文和预算边界以自动化回归为证。
+
+同日标签改为“第一项名称 等”：首项与主节点分开只读投影，保留原选区顺序和当前目录；文件名过长时只截断文字，后缀单独保留。原 Workspace 回归已更新为首项名称、目录名称及首项取消后的替换；macOS 同一 win 资料库实看文件多选与首项取消后名称更新通过。最终 `lint`、全量测试（**536 文件 / 6,676 项通过**，3 文件 / 7 项沿用跳过）、`build` 与 diff 检查通过，日志 `/tmp/omniflow-agent-selection-label-{lint,tests,build}.log`。亮色和实际名称截断布局未手验；侧栏拖动未消费，不作为窄栏验证证据。
+
+## Agent 权限随时切换、下一轮生效（2026-10-21）
+
+权限菜单仅有“询问访问 / 完全访问”，不增加说明或确认弹框。运行/待审批/待输入期间可保存设置，当前 Run 继续使用冻结权限；下一次发送或继续创建的 Run 读取新值。组选中和移组默认询问，组设置只编辑名称；旧 Session 的 group 编码按 ask 兼容读取，历史 Run 的 group 快照不改写。契约见[会话组与权限](agent-session-groups-and-access.md)。
+
+最终门禁：`npm run lint`、`npm test -- --maxWorkers=2 --minWorkers=1`（**536 文件 / 6,653 项通过**，3 文件 / 7 项沿用跳过）、`npm run build` 全通过。日志为 `/tmp/omniflow-agent-permissions-simple-{lint,tests,build}.log`。首次默认并发全量有两项无 GUI Swift harness 编译超时，限制两 worker 后完整重跑通过；未修改原生实现或跳过失败用例。
+
+回归覆盖运行中双向切换/当前审批不自动解卡/当前后续工具权限不变/下一 Run 生效、启动已读元数据尚未创建 Run 的竞态、四种活动状态的 SQLite 条件门禁、旧 trigger 真库重开替换、旧 group Session 兼容与历史 Run 保真、保存不取消自动标题、UI 保存期间停止和第一方电脑控件可用、保存失败重试以及 A→B→A 迟到成功/失败/finally 隔离。组重命名保留原目录元数据，新组为空目录/read。独立只读 review 未发现问题。
+
+macOS 已有开发版、win（ID 3）限定验收：合成交互等待期间真实保存权限后任务仍等待、停止入口仍可用；最终两档界面实看无 group 选项及新增提示，Escape 关闭后原交互可提交并完成。Session `47013d19-52e5-4a75-b55a-94fc0cf047e9` 的下一轮 `3dff7a65-2057-4725-9679-a0ccd83a4e99` 正常 completed，只调用 interaction.request；只读查 SQLite 确认新 Run mode=ask，旧 Run 的 group 审计仍保留。组设置实看仅组名/删除/取消/保存，随后关闭并恢复原文件工具会话。内置 Agent 未读写资料库或本机文件，未调用 Shell/电脑工具；前两次验收因本轮开发 main 重载取消，不计作功能失败或完成证据。
+
+本轮未手验亮色/最窄布局及跨平台；ask/full 双向真实工具策略以自动化回归为证，不把两档菜单可见等同于实机完整授权测试。
+
+## Agent 内外文件工具与独立 Diff（2026-10-21）
+
+当前实现与后续边界见[统一文件工具调研](agent-unified-file-tools-research.md)。模型共用 `file.*` 与 `scope=library|host`，新增两端 saved `file.write/patch`、共同 rg 快照匹配与独立历史 Diff；TextViewer 全局草稿 Modal 改为文档内恢复条，dirty 按保存基线计算。默认缩进 4、点击 4↔2 保留。
+
+首批自动化：`npm run lint`、`npm test`（**524 文件 / 6,570 项通过**，3 文件 / 7 项沿用跳过）及 `npm run build` 全部通过。构建含 TypeScript、renderer、Electron main 与 preload；Vite 仍有大 chunk 提示，未作为本次文件能力回归处理。日志为 `/tmp/omniflow-agent-{lint,tests,build}-final.log`。本轮追加后的最终门禁见下方续批记录。
+
+自动化覆盖两 scope 版本条件与严格 patch、BOM / CRLF / EOF、host 身份复验与取消、library main prepare 校验、伪造 broker 注册拒绝、提交未知与迟到回执、SQLite 快照配额 / TTL / outbox / 会话级联清理、只读 IPC 归属、rg 真进程与 fallback / regex 不可用、搜索游标和完整度、32k 模型上下文预算、patch 保存展示 / 目录刷新隔离，以及编辑器异步保存和草稿保护。具体测试不代表所有平台或真实故障注入通过。
+
+实机使用已有 macOS 开发版、第三个 **win / ID 3** 资料库与本机 MinIO，gpt-6.1-sol 高、询问访问；仅操作本轮合成文件 `/agent-unified-files-qa-20261021.txt`，未调用 Shell、未读取用户其他文件。会话“文件工具新建读取与修改验收”完成以下主链：
+
+- `file.write` 新建 `alpha\nbeta\n`，读取后用 `file.patch` 改为 `alpha\ngamma\n` 并读回；过程折叠后“改动 1”仍可进入。净 Diff 为新建最终正文，单操作 Diff 为 `beta → gamma`。
+- 编辑器默认缩进 4，点击切 2、再次点击回 4；输入后 dirty，Cmd+Z 回到基线后保存禁用、dirty 消失。
+- 人工加入第三行 `local-draft-only` 并保持未保存，切回 Agent 无全局草稿弹框。Agent 实际读取 2 行保存版本，再 patch `gamma → delta` 并读回 2 行；人工草稿没有进入 Agent 保存正文。
+- 返回文件模式只出现文档内恢复条：最新版本为 `alpha/delta`，只读草稿为 `alpha/gamma/local-draft-only`；采用最新后恢复条消失、正文 clean。只处理了本轮合成草稿。
+- 第二轮独立 Diff 正确显示 `gamma → delta`；首轮历史 Diff 仍保持 `beta → gamma`。暗色下新增 / 删除文字和长文件路径可辨，目录树拉宽及当前最小窗口下刷新 / 返回和横向滚动可用，随后恢复窗口与目录宽度。
+
+首批未手验：亮色主题、560px 以下 Diff 紧凑分支、Windows / Linux、host 的真实模型写入、新 regex / include / exclude 的桌面链、真实网络中断 / 撤权 / 重启 / 并发写故障及性能 benchmark。续批新增证据如下；保留合成文件和会话供复核，不永久删除资料。
+
+### 路径、性能与后台 Diff 续批
+
+已接入相对 path / basePath 的统一 resolver：library 默认当前目录，host 必须有显式基目录，审批前固定目标；保留全库 file.search 与当前目录 file.list 的原缺省语义。执行规范输入与模型原始参数分开，避免改写已预算历史；原始和规范输入都检查敏感信息，覆盖被删除 basePath 中的敏感字段。原 32k 模型窗口门禁保留。
+
+host 文件候选改为固定随包 rg 原生枚举，file.search 的 Glob / keyword 在元数据前筛选、最多 8 并发读取元数据；grep include/exclude 在候选元数据后、正文前筛选，每次扫描上限 50 文件。library 在原 16 项 / 16 MiB / 60 秒 / Run owner 中复用 decoded 文本与行数组，每页仍做权限、条件 GET 与 hash 复验。目录续页仍 live 重新枚举，不宣称有目录缓存、正文流式扫描或全文索引。
+
+Diff 计算迁入独立 Worker Thread，取消等待真实退出；默认 200 行 / 32 Ki UTF-16 units 每页，最多 500 行，页面只渲染当前页。游标绑定归属 / 历史版本 / 比较模式 / 页大小，有界 60 秒缓存；切范围 / 文件 / 关闭取消旧请求。空 patch 且计算受限明确提示，不能显示“没有净差异”。
+
+最终自动化：**`npm run lint`、`npm test`（534 文件 / 6,632 项通过，3 文件 / 7 项沿用跳过）和 `npm run build` 全部通过**；日志 `/tmp/omniflow-agent-ui-reopen-final-{lint,tests,build}.log`。另直接启动最终产物 `dist-electron/agent-file-diff-worker.js`，300 行→300 行中文修改得到 603 行 / 4 页，无截断；取消 / 超时 / store 不阻塞 / 过期游标 / 迟到响应由真实 worker 集成与组件测试覆盖。
+
+随包搜索资源固定为 `@vscode/ripgrep 1.18.0` / rg 15.0.0。`node tools/prepare-ripgrep.cjs` 制备成功，lipo 确认 x86_64 + arm64；真实 app.asar 夹具中，执行文件位于 `Resources/ripgrep`、PATH 为空仍能执行 Unicode regex。真实 `registry.execute('file.grep')` 在 PATH 为空时验证 host / regex / include / exclude / 隐藏文件。锁定 tarball、SHA-512、许可证、构建 hook 及失败不发布由测试覆盖；Windows x64、Linux x64 / arm64 归档制备已校验，但没有在这些平台执行，也没有完成完整发行包签名验收。
+
+最终打包复核修正 `@electron/universal` 对相同 Mach-O 的拒绝：rg 与原生 helper 已预合并双片，`mac.x64ArchFiles` 精确允许 `Contents/Resources/{ripgrep/rg,computer-use/omniflow-click}` 跳过重复合并。真实 merger 回归直接读取 builder 配置，验证无规则失败、仅 rg 规则仍拒 helper、完整规则合并成功；两份资源保持原字节与 arm64 / x86_64，rg 在空 PATH 执行 Unicode regex，无关同字节 Mach-O 仍拒绝。helper 未执行，不启动 GUI；最小 app 合并夹具不等于完整签名发行包验收。
+
+macOS warm FS 合成 benchmark（随包 rg 默认路径）：2,010 文件 / 100 目录、10 个 Glob 命中，平均 25.9453→11.3943 ms，约 2.28 倍；应用 describe 次数 2,111→11，不含根复验和 rg 内部 I/O，不能称总 syscall 数。1.5 MB / 50,000 行混合 UTF-8 / CRLF 的重复页 hash+decode+split 为 4.3335 ms，hash+decoded 复用为 0.4435 ms，约 9.77 倍；仅 CPU 热页，不含网络和权限复验。复现命令 `npx vitest bench --run electron/service/agent/agent-file-performance.bench.ts`。
+
+实机沿用 macOS 开发版、第三个 win / ID3、本机 MinIO、原会话“文件工具新建读取与修改验收”。仅新增隔离临时目录 `omniflow-agent-files-followup-*` 的合成文件：本机相对 path/basePath 的读取审批显示正确规范路径，read→patch 第二行 beta→gamma→read 成功，独立核对磁盘为 `alpha\ngamma\n`，“改动 1”入口出现。首轮 regex 因 App 无 PATH rg 明确失败，随后补齐上述随包资源及空 PATH 实际工具验证。
+
+桌面曾在 library 相对只读审批时锁屏，该次 Run 被停止。用户解锁后复用同一开发窗口、win / ID3、本机 MinIO 和原会话补验，未重放已经完成的写入、未操作第一个资料库：
+
+- 真实 Agent 携带 regex / include / exclude 参数搜索同一合成目录，完整结束、无 skipped，只匹配 `nested/中文.txt` 第 2 行 `beta-42`；随后以 library、basePath=/、相对 path 读取库内合成文件，得到 2 行 `alpha/delta`。首轮缺 rg 的失败不再代表当前运行结果。
+- 本机 `paging.txt` 先读取 revision，再由 `file.write` 将 240 行 before 完整替换为 240 行 after 并读回；独立读取磁盘确认精确等于 `after\n` 重复 240 次、1,440 bytes、末尾换行保留。未使用 Shell，也未修改其他文件。
+- 该记录的真实 host Diff 共 483 行，三页依次为 1–200、201–400、401–483；首页上一页与末页下一页禁用，正文按页替换。旧 `target.txt` 历史 Diff 仍为 beta→gamma。保持打开时续页过期明确报错，点击“返回首屏”能恢复。
+- 实机发现后页关闭后重新打开沿用旧 cursor，过期时直接报错。已修复两个入口（“返回对话”及再次点击“改动”）统一清除页码、旧正文和错误；复验第三 / 第二页关闭再打开均回第 1 页，关闭后面板消失，焦点回到原入口。迟到结果隔离和 AbortSignal 取消由强化的组件回归覆盖；此处不将可见关闭结果冒充线程实际退出证据。
+- 亮色及暗色下核对新增 / 删除文字、路径、页码和禁用控件；最小允许窗口下独立 Diff 滚动与分页可用。验收后恢复原“跟随系统”主题、窗口大小和目录树宽度。没有触发全局草稿弹框。
+
+仍未手验 560px 以下紧凑分支、长行分段、真实加载途中关闭 / 切文件的竞态、Windows / Linux、网络故障 / 撤权 / 重启 / 并发写。完整签名发行包仍未生成；未以自动化或最小 app 夹具替代这些验收。
+
+当前只读 / 写 **saved**，不读编辑器未保存 buffer；成功写入会持久化，unknown 不等于已保存。Diff 仅记录结构化 write / patch；host 只单次，library 净 Diff 仅在同 Run 的已确认连续版本链上成立。resourceRef、共享 working / DocumentSession、持久项目根及全文索引仍未实现。
+
 ## 自身右键 Overlay 修复验证（2026-10-19）
 
 修复范围与权限边界见[自身菜单关联](agent-computer-use.md#自身右键-overlay-关联2026-10-19)。仅复用已有开发 Vite / Electron，Win / ID3、本机 MinIO、gpt-6.1-sol high / 完全访问；不执行删除或重命名，不新起 GUI 夹具，不提交。
@@ -1127,7 +1223,9 @@ legacy 兼容检查：
 2026-09-25 归档拖拽性能：四类归档改用纯 CSS Grid，移除尺寸观察、同步布局读取和逐像素 React 状态更新。200 张卡片、120 次模拟尺寸变化的回归测试中，组件渲染由旧实现 122 次降为首次 1 次；此计数不代表真实帧率。lint、全量 3344 项测试（7 项跳过）、build 通过。macOS 非首个 Win（id=3）图集归档检查真实左右拖拽、5→3→5 列重排和宽度恢复。未测大批真实封面下的逐帧耗时、其他归档的深滚动恢复和 Windows/Linux；既有滚动快照扫描及浏览器图片重绘仍有独立成本。
 
 - PDF 长文档的页码跳转、上一页/下一页、缩放、文件 tab 往返、工作区模式往返和关闭重开都保持同一阅读页；窗口宽度变化后按页锚点恢复，实际视口与页码控件显示一致
-- Text Viewer 底栏按 `行:列 / LF|CRLF|CR / UTF-8 / 字号` 显示文档状态，不显示翻译图标、制表符控制或自动换行按钮；光标状态仅随选区 / 正文更新，换行符识别不在每次输入时扫描全文。`Cmd/Ctrl+S` 保存当前资料库节点，`Cmd/Ctrl+Shift+S` 与另存为图标都弹出紧凑名称确认并在当前目录创建自动重命名副本；下载图标弹出系统保存窗口并写入当前编辑正文。三个图标常态透明、悬停显示中圆角中性背景，只使用浏览器原生提示，在亮色和暗色主题下均清晰可用
+- Text Viewer 底栏按 `行:列 / 缩进 4|2 / LF|CRLF|CR / UTF-8 / 字号` 显示文档状态，不显示翻译图标或自动换行按钮；缩进默认 4 空格，点击循环切换 4 → 2 → 4，Tab、自动缩进与选区缩进同步生效，切换不改正文或 dirty 状态，按文件恢复选定宽度。光标状态仅随选区 / 正文更新，换行符识别不在每次输入时扫描全文。`Cmd/Ctrl+S` 保存当前资料库节点，`Cmd/Ctrl+Shift+S` 与另存为图标都弹出紧凑名称确认并在当前目录创建自动重命名副本；下载图标弹出系统保存窗口并写入当前编辑正文。三个图标常态透明、悬停显示中圆角中性背景，只使用浏览器原生提示，在亮色和暗色主题下均清晰可用
+
+2026-10-20 文本缩进：lint、全量测试（513 文件 / 6430 项通过，3 文件 / 7 项跳过）和 build 通过。真实 TextViewer 的隔离合成页面（独立账号 scope、libraryId=3，无业务资料库读取或写入）已验证默认 4、4/2 循环、C++ / Shell / 纯文本 Tab、C++ 回车自动缩进、两档选区缩进与 Shift+Tab、键盘 Enter/Space 切换、切换不改正文/dirty、文件间隔离及卸载重建后 Warm 恢复，并检查亮暗底栏和键盘焦点。未完成桌面资料库完整实机回归、跨重启 UI 恢复或 Windows/Linux 验证。
 - ASMR 嵌套路径、列表锚点、选择在真卸载后恢复；播放后浏览到另一目录时，播放节点和原队列仍由稳定父目录与 `globalAudioPlayer` 投影
 - Video 倍速、字幕开关/来源/字号/底部偏移、操作台和观看位置在真卸载后恢复；同一个媒体 DOM 不被复制
 - Video 底部控制条覆盖在画面内，鼠标移动时出现、静止时渐隐；时间轴采用无圆点主题强调色渐变，点击直接跳转，拖动仅预览且松手后才提交 seek，鼠标提交后 `Space/K/J/L/M/F` 等快捷键仍可用；拖动时间轴、聚焦控件或展开播放列表 / 音量 / 倍速面板时保持可见，全屏下仍可操作，点击工具台会先退出全屏再显示侧栏
