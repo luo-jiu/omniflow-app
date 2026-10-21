@@ -101,7 +101,8 @@ export default defineConfig(({ mode }) => {
       main: {
         onstart({ startup }) { startup(['.']); },
         // Shortcut of `build.lib.entry`.
-        entry: { main: 'electron/main.ts', 'agent-document-worker': 'electron/service/agent/documents/document-worker.ts' },
+        entry: { main: 'electron/main.ts', 'agent-document-worker': 'electron/service/agent/documents/document-worker.ts',
+          'agent-file-diff-worker': 'electron/service/agent/agent-file-diff-worker.ts' },
         vite: {
           define: {
             __OMNIFLOW_API_BASE_URL__: JSON.stringify(apiBaseUrl),

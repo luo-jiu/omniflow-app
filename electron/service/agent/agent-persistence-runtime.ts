@@ -25,8 +25,12 @@ import { initializeAgentShellWorkspaceDatabaseSchema } from './shell/agent-shell
 import { initializeAgentShellLogDatabaseSchema } from './shell/agent-shell-log-sqlite';
 import { agentDatabaseSchemaCoordinator } from './storage/agent-database-schema-coordinator';
 import { initializeAgentLocalStorageQuotaDatabaseSchema } from './storage/agent-local-storage-quota-sqlite';
+import { initializeAgentFileChangeDatabaseSchema } from './agent-file-change-store';
+import { disposeAgentFileChangeStore } from './agent-file-change-runtime';
 
 const REQUIRED_AGENT_DATABASE_TABLES = [
+  'agent_file_changes',
+  'agent_file_change_cleanup',
   'agent_context_checkpoints',
   'agent_local_storage_resources',
   'agent_memories',
@@ -39,6 +43,8 @@ const REQUIRED_AGENT_DATABASE_TABLES = [
 ] as const;
 
 const REQUIRED_AGENT_DATABASE_COLUMNS = {
+  agent_file_changes: ['id', 'operation_id', 'backend_scope', 'account_scope', 'library_id', 'session_id', 'run_id', 'tool_run_id', 'scope', 'path', 'node_id', 'kind', 'state', 'before_revision', 'after_revision', 'bytes', 'retained', 'created_at', 'expires_at'],
+  agent_file_change_cleanup: ['id', 'backend_scope', 'account_scope', 'run_id', 'bytes'],
   agent_context_checkpoints: [
     'id',
     'session_id',
@@ -204,6 +210,7 @@ const REQUIRED_AGENT_DATABASE_COLUMNS = {
 } as const;
 
 const REQUIRED_AGENT_DATABASE_INDEXES = [
+  'agent_file_changes_owner_idx',
   'agent_context_checkpoints_one_started_idx',
   'agent_context_checkpoints_session_completed_idx',
   'agent_local_storage_resources_expiry_idx',
@@ -224,6 +231,8 @@ const REQUIRED_AGENT_DATABASE_INDEXES = [
 ] as const;
 
 const REQUIRED_AGENT_DATABASE_TRIGGERS = [
+  'agent_file_changes_cleanup_delete',
+  'agent_file_changes_cleanup_expire',
   'agent_context_checkpoints_delete_only_with_session',
   'agent_context_checkpoints_validate_insert',
   'agent_context_checkpoints_validate_transition',
@@ -261,6 +270,7 @@ export async function bootstrapAgentPersistenceDatabase(
   await agentDatabaseSchemaCoordinator.bootstrap(databasePath, {
     initialize: async (database) => {
       await initializeAgentSessionDatabaseSchema(database, { manageTransactions: false });
+      await initializeAgentFileChangeDatabaseSchema(database);
       await initializeAgentMemoryDatabaseSchema(database);
       await initializeAgentLocalStorageQuotaDatabaseSchema(database);
       await initializeAgentShellWorkspaceDatabaseSchema(database);
@@ -386,7 +396,7 @@ const agentPersistenceRuntimeManager = createAgentPersistenceRuntimeManager({
   bootstrap: () => bootstrapAgentPersistenceDatabase(getAgentSessionDatabasePath()),
   disposeMemoryStore: disposeAgentMemoryStore,
   disposeSessionStore: disposeAgentSessionStore,
-  disposeShellStorage: disposeAgentShellStorageRuntime,
+  disposeShellStorage: async () => { await disposeAgentFileChangeStore(); await disposeAgentShellStorageRuntime(); },
   getMemoryStore: getAgentMemoryStore,
   getSessionStore: getAgentSessionStore,
   getShellStorage: getAgentShellStorageRuntime,
