@@ -1594,7 +1594,7 @@ function escapeLikePattern(value: string): string {
 function toSessionSummary(row: SessionRow): AgentSessionSummary {
   return {
     groupId: row.group_id || null,
-    permissionMode: row.permission_mode || 'ask',
+    permissionMode: normalizeAgentSessionPermissionMode(row.permission_mode || 'ask'),
     revision: Number(row.metadata_revision || 1),
     ...(row.archived_at ? { archivedAt: row.archived_at } : {}),
     createdAt: row.created_at,
@@ -1892,8 +1892,9 @@ async function ensureSessionOrganizationSchema(database: sqlite3.Database): Prom
         WHERE id = NEW.group_id AND backend_scope = NEW.backend_scope AND account_scope = NEW.account_scope AND library_id = NEW.library_id)
         THEN RAISE(ABORT, 'Session group owner mismatch') END;
     END;
-    CREATE TRIGGER agent_sessions_organization_idle BEFORE UPDATE OF group_id, permission_mode, archived_at ON agent_sessions
-    WHEN EXISTS (SELECT 1 FROM agent_runs WHERE session_id = OLD.id AND status IN ('running','preparing','awaiting_approval','awaiting_interaction'))
+    CREATE TRIGGER agent_sessions_organization_idle BEFORE UPDATE OF group_id, archived_at ON agent_sessions
+    WHEN (NEW.group_id IS NOT OLD.group_id OR NEW.archived_at IS NOT OLD.archived_at)
+      AND EXISTS (SELECT 1 FROM agent_runs WHERE session_id = OLD.id AND status IN ('running','preparing','awaiting_approval','awaiting_interaction'))
     BEGIN SELECT RAISE(ABORT, 'Agent session is running'); END;
     CREATE TRIGGER agent_session_groups_policy_idle BEFORE UPDATE OF directories_json, access ON agent_session_groups
     WHEN (NEW.directories_json <> OLD.directories_json OR NEW.access <> OLD.access)
@@ -4006,7 +4007,7 @@ export async function createSQLiteAgentSessionStore(
         input.now,
         input.now,
         input.groupId || null,
-        normalizeAgentSessionPermissionMode(input.permissionMode || (input.groupId ? 'group' : 'ask')),
+        normalizeAgentSessionPermissionMode(input.permissionMode || 'ask'),
       ]);
       const created = await readSummary(input.id, ownerScope, libraryId);
       if (!created) throw new Error('Agent 会话创建失败');

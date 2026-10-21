@@ -279,11 +279,22 @@ const Composer = styled.form`
   .agent-context-label {
     min-width: 0;
     flex: 1;
+    display: flex;
     color: var(--app-text-muted);
     font-size: 12px;
     overflow: hidden;
-    text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .agent-context-text {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .agent-context-suffix {
+    flex-shrink: 0;
+    white-space: pre;
   }
 
   .agent-submit {
@@ -332,6 +343,8 @@ type AgentWorkspaceProps = {
   onRefreshDirectory?: (directoryId: number) => Promise<void> | void;
   ownerScope: AgentOwnerScope | null;
   rootNodeId: number | null;
+  firstSelectedTreeNode: SelectedTreeNode | null;
+  selectedNodeIds: number[];
   selectedTreeNode: SelectedTreeNode | null;
   layoutMotionPending?: boolean;
   layoutMeasurementPending?: boolean;
@@ -342,6 +355,7 @@ function buildAppContext(
   libraryId: number,
   rootNodeId: number | null,
   selectedTreeNode: SelectedTreeNode | null,
+  selectedNodeIds: number[],
 ): AgentAppContext {
   const currentDirectoryId = selectedTreeNode?.type === 'dir'
     ? selectedTreeNode.id
@@ -360,7 +374,7 @@ function buildAppContext(
       : undefined,
     libraryId,
     platform: window.electronWindow?.platform || 'unknown',
-    selectedNodeIds: selectedTreeNode ? [selectedTreeNode.id] : [],
+    selectedNodeIds,
   };
 }
 
@@ -370,6 +384,8 @@ export default function AgentWorkspace({
   onRefreshDirectory,
   ownerScope,
   rootNodeId,
+  firstSelectedTreeNode,
+  selectedNodeIds,
   selectedTreeNode,
   layoutMotionPending = false,
   layoutMeasurementPending = layoutMotionPending,
@@ -396,6 +412,7 @@ export default function AgentWorkspace({
   const [draftGroupId, setDraftGroupId] = React.useState<string | null>(null);
   const [draftPermissionMode, setDraftPermissionMode] = React.useState<AgentSessionPermissionMode>('ask');
   const [permissionsSaving, setPermissionsSaving] = React.useState(false);
+  const permissionRequestRef = React.useRef<symbol>();
   const [sessionMutationBusy, setSessionMutationBusy] = React.useState(false);
   const [groupEditor, setGroupEditor] = React.useState<AgentSessionGroup | null | undefined>();
   const [groupPicker, setGroupPicker] = React.useState<{ kind: 'new' | 'move'; session?: AgentSessionSummary } | null>(null);
@@ -429,8 +446,8 @@ export default function AgentWorkspace({
   const groupDirectory = useAgentSessionGroups(ownerScope, libraryId);
   const refreshGroups = groupDirectory.refresh;
   const appContext = React.useMemo(
-    () => buildAppContext(libraryId, rootNodeId, selectedTreeNode),
-    [libraryId, rootNodeId, selectedTreeNode],
+    () => buildAppContext(libraryId, rootNodeId, selectedTreeNode, selectedNodeIds),
+    [libraryId, rootNodeId, selectedTreeNode, selectedNodeIds],
   );
   const activeProfile = aiServices?.profiles.find(profile => profile.id === aiServices.activeProfileId) || null;
   const {
@@ -538,6 +555,15 @@ export default function AgentWorkspace({
   activeSessionIdRef.current = currentSessionId;
   const currentGroupId = currentSessionId ? session.sessionInfo?.groupId || null : draftGroupId;
   const permissionMode = currentSessionId ? session.sessionInfo?.permissionMode || 'ask' : draftPermissionMode;
+  // Run permissions are frozen by main. Only wait for metadata loading/saving,
+  // rather than locking the next Run's setting for the active Run's lifetime.
+  const permissionModeDisabled = resume.loading || permissionsSaving || sessionMutationBusy
+    || session.isPreparing || !ownerScope || Boolean(currentSessionId && !session.sessionInfo);
+  React.useEffect(() => {
+    permissionRequestRef.current = undefined;
+    setPermissionsSaving(false);
+    return () => { permissionRequestRef.current = undefined; };
+  }, [sessionScopeKey, currentSessionId]);
   React.useLayoutEffect(() => {
     computerScrollRef.current = false;
     pointerInteractionRef.current = false;
@@ -600,7 +626,6 @@ export default function AgentWorkspace({
     setGroupEditor(undefined);
     setGroupPicker(null);
     setArchivedPreview(null);
-    setPermissionsSaving(false);
     setSessionMutationBusy(false);
   }, [loadSessions, sessionScopeKey]);
 
@@ -708,32 +733,42 @@ export default function AgentWorkspace({
   const handlePermissionModeChange = async (
     nextMode: AgentSessionPermissionMode,
   ) => {
-    if (nextMode === permissionMode || permissionsSaving || sessionBusy) return;
+    if (nextMode === permissionMode || permissionModeDisabled || permissionRequestRef.current) return;
     if (!currentSessionId) { setDraftPermissionMode(nextMode); return; }
     if (!ownerScope || !session.sessionInfo) return;
+    const request = Symbol();
+    permissionRequestRef.current = request;
+    const isCurrentRequest = () => permissionRequestRef.current === request
+      && currentSessionScopeKeyRef.current === sessionScopeKey
+      && activeSessionIdRef.current === currentSessionId;
     setPermissionsSaving(true);
     try {
       const updated = await organizeAgentSession(ownerScope, libraryId, currentSessionId, {
         revision: session.sessionInfo.revision || 1, groupId: currentGroupId, permissionMode: nextMode,
       });
-      if (currentSessionScopeKeyRef.current !== sessionScopeKey) return;
+      if (!isCurrentRequest()) return;
       session.updateSessionInfo(updated);
       void refreshGroups();
     } catch (error) {
-      if (currentSessionScopeKeyRef.current === sessionScopeKey) Toast.error(error instanceof Error ? error.message : '更新会话权限失败');
+      if (isCurrentRequest()) Toast.error(error instanceof Error ? error.message : '更新会话权限失败');
     } finally {
-      if (currentSessionScopeKeyRef.current === sessionScopeKey) setPermissionsSaving(false);
+      if (isCurrentRequest()) {
+        permissionRequestRef.current = undefined;
+        setPermissionsSaving(false);
+      }
     }
   };
 
-  const selectedNodeLabel = selectedTreeNode
-    ? selectedTreeNode.type === 'file'
-      ? buildFileFullName(selectedTreeNode.name, selectedTreeNode.ext)
-      : selectedTreeNode.name
-    : rootNodeId
-      ? '资料库根目录'
-      : '未选择文件';
-  const contextLabel = `选中：${selectedNodeLabel}`;
+  const multipleSelected = selectedNodeIds.length > 1;
+  const labelNode = multipleSelected ? firstSelectedTreeNode : selectedTreeNode;
+  const selectedNodeLabel = labelNode
+    ? labelNode.type === 'file'
+      ? buildFileFullName(labelNode.name, labelNode.ext)
+      : labelNode.name
+    : multipleSelected ? '多个文件' : rootNodeId ? '资料库根目录' : '未选择文件';
+  const contextText = `选中：${selectedNodeLabel}`;
+  const contextSuffix = multipleSelected && labelNode ? ' 等' : '';
+  const contextLabel = `${contextText}${contextSuffix}`;
   const canSubmit = Boolean(
     ownerScope && (session.draft.trim() || session.attachments.entries.length) && session.attachments.ready && modelPreferences.model && activeProfile && !loadingConfig
     && !resume.loading && !resume.failed,
@@ -748,7 +783,7 @@ export default function AgentWorkspace({
   useAgentComputerControls({
     context: ownerScope && currentSessionId ? { ownerScope, libraryId, sessionId: currentSessionId } : null,
     active: workspaceActive && !managerMode,
-    blocked: session.isPreparing || resume.loading || resume.failed || sessionMutationBusy || permissionsSaving
+    blocked: session.isPreparing || resume.loading || resume.failed || sessionMutationBusy
       || groupEditor !== undefined || !!groupPicker || !!archivedPreview,
     textareaRef, scrollRef,
     readDraft: session.readComputerDraft,
@@ -828,7 +863,7 @@ export default function AgentWorkspace({
     selectSession(null);
     setSessionQuery('');
     setDraftGroupId(groupId);
-    setDraftPermissionMode(groupId ? 'group' : 'ask');
+    setDraftPermissionMode('ask');
     setManagerMode(null);
   }, [resetSession, selectSession]);
   const startNewSession = (groupId: string | null) => {
@@ -923,7 +958,7 @@ export default function AgentWorkspace({
     setGroupEditor(undefined);
   };
   const handleDeleteGroup = (group: AgentSessionGroup) => {
-    openCompactConfirm({ title: '删除会话组', content: `删除“${group.name}”？会话将移到未分组，组内自动授权失效，文件不会删除。`,
+    openCompactConfirm({ title: '删除会话组', content: `删除“${group.name}”？会话将移到未分组，文件不会删除。`,
       okText: '删除组', cancelText: '取消', okButtonProps: { type: 'danger' }, onOk: async () => {
         if (!ownerScope) return;
         await deleteAgentSessionGroup(ownerScope, libraryId, group.id, group.revision);
@@ -947,7 +982,7 @@ export default function AgentWorkspace({
       const target = groupPicker.session;
       const updated = await organizeAgentSession(ownerScope, libraryId, target.id, {
         revision: target.revision || 1, groupId,
-        permissionMode: target.permissionMode === 'full-access' ? 'full-access' : groupId ? 'group' : 'ask',
+        permissionMode: target.permissionMode === 'full-access' ? 'full-access' : 'ask',
       });
       if (currentSessionScopeKeyRef.current !== sessionScopeKey) return;
       session.updateSessionInfo(updated);
@@ -1241,7 +1276,10 @@ export default function AgentWorkspace({
               style={{ display: 'grid', placeItems: 'center', width: 28, height: 28, flexShrink: 0, border: 0, background: 'transparent', cursor: 'pointer' }}>
               <OutlineIcon name="plus" />
             </button>
-            <span className="agent-context-label" title={contextLabel}>{contextLabel}</span>
+            <span className="agent-context-label" title={contextLabel}>
+              <span className="agent-context-text">{contextText}</span>
+              {contextSuffix ? <span className="agent-context-suffix">{contextSuffix}</span> : null}
+            </span>
             <AIModelSettingsControl
               availableModels={models}
               disabled={sessionBusy || loadingConfig}
@@ -1259,7 +1297,7 @@ export default function AgentWorkspace({
                 reasoningEffort,
               })}
             />
-            <AgentPermissionControl value={permissionMode} grouped={Boolean(currentGroupId)} disabled={sessionBusy}
+            <AgentPermissionControl value={permissionMode} disabled={permissionModeDisabled}
               onChange={mode => { void handlePermissionModeChange(mode); }} />
             <AgentSubmitButton streaming={session.isStreaming} busy={sessionBusy}
               canSubmit={canSubmit} onStop={() => { void session.stop(); }}
@@ -1268,7 +1306,7 @@ export default function AgentWorkspace({
           </Composer>
         </ComposerFrame> : null}
       {groupEditor !== undefined ? <AgentSessionGroupEditor key={groupEditor?.id || `new:${sessionScopeKey}`}
-        group={groupEditor || undefined} libraryId={libraryId} onSave={handleSaveGroup} onCancel={() => setGroupEditor(undefined)}
+        group={groupEditor || undefined} onSave={handleSaveGroup} onCancel={() => setGroupEditor(undefined)}
         onDelete={groupEditor ? () => handleDeleteGroup(groupEditor) : undefined} /> : null}
       {groupPicker ? <AgentSessionGroupPicker key={`${groupPicker.kind}:${groupPicker.session?.id || sessionScopeKey}`}
         title={groupPicker.kind === 'new' ? '新建会话' : '移动会话到组'} groups={groupDirectory.summary.groups}

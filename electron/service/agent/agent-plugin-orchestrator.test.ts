@@ -43,10 +43,10 @@ const NODES: AgentLibraryNode[] = [
   { id: 21, parentId: 20, libraryId: 3, type: 'file', name: 'outside.csv', path: '/outside/outside.csv' },
 ];
 function sender() { return { id: 77, isDestroyed: () => false, send: vi.fn() }; }
-function request(groupId: string): AgentChatRequest {
+function request(groupId: string, permissionMode: 'ask' | 'full-access' = 'full-access'): AgentChatRequest {
   return { appContext: { currentDirectory: { id: 10, name: 'csv' }, libraryId: 3, platform: 'darwin', selectedNodeIds: [11] },
     model: 'test-model', profileId: 'profile-1', ownerScope: OWNER_SCOPE, reasoningEffort: 'auto',
-    groupId, permissionMode: 'group', userPrompt: '查询当前CSV中的中文行',
+    groupId, permissionMode, userPrompt: '查询当前CSV中的中文行',
     perception: { collectedAt: '2026-09-22T00:00:00Z', selectedNodes: [NODES[2]],
       currentDirectory: { id: 10, name: 'csv', entries: [NODES[2]], entryCount: 1 } } };
 }
@@ -138,12 +138,12 @@ describe('Agent plugin orchestration with the real library access guard', () => 
     expect(webContents.send.mock.calls.some(call => call[1]?.type === 'tool-approval-required')).toBe(false);
   });
 
-  it.each([true, false])('holds an out-of-group CSV until exact file approval (approved=%s)', async approved => {
+  it.each([true, false])('holds a CSV in ask mode until exact file approval (approved=%s)', async approved => {
     const executePluginTool = vi.fn(async (): Promise<AgentToolResult> => ({ ok: true, data: { count: 1 } }));
     mocks.streamAgentProviderTurn.mockResolvedValueOnce(toolTurn(21)); finalTurn();
     const webContents = sender();
     const orchestrator = createOrchestrator({ executePluginTool });
-    const started = await orchestrator.start(webContents as never, request(groupId));
+    const started = await orchestrator.start(webContents as never, request(groupId, 'ask'));
     await vi.waitFor(() => expect(webContents.send.mock.calls.some(call => call[1]?.type === 'tool-approval-required')).toBe(true));
     expect(executePluginTool).not.toHaveBeenCalled();
     const approval = webContents.send.mock.calls.map(call => call[1]).find(event => event.type === 'tool-approval-required').approval;
@@ -167,12 +167,12 @@ describe('Agent plugin orchestration with the real library access guard', () => 
       call: { input: { _omniflowAudit: 'invalid Tool input omitted' } }, result: { ok: false } });
   });
 
-  it('retains plugin source when stopped while waiting for out-of-group file access', async () => {
+  it('retains plugin source when stopped while waiting for file access in ask mode', async () => {
     const executePluginTool = vi.fn();
     mocks.streamAgentProviderTurn.mockResolvedValueOnce(toolTurn(21));
     const webContents = sender();
     const orchestrator = createOrchestrator({ executePluginTool });
-    const started = await orchestrator.start(webContents as never, request(groupId));
+    const started = await orchestrator.start(webContents as never, request(groupId, 'ask'));
     await vi.waitFor(() => expect(webContents.send.mock.calls.some(call => call[1]?.type === 'tool-approval-required')).toBe(true));
     expect(await pluginActivity(started.sessionId)).toMatchObject({ pluginSource: SOURCE });
     orchestrator.stop(started.sessionId, webContents.id);

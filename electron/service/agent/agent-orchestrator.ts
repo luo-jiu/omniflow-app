@@ -273,7 +273,6 @@ const MAX_AGENT_PROFILE_ID_CHARACTERS = 200;
 const MAX_AGENT_SESSION_ID_CHARACTERS = 200;
 const MAX_AGENT_ACTIVE_TOOL_ID_CHARACTERS = 100;
 const MAX_AGENT_DIRECTORY_NAME_CHARACTERS = 500;
-const MAX_AGENT_SELECTED_NODE_IDS = 200;
 const MAX_AGENT_PROGRESS_MESSAGE_CHARACTERS = 2_000;
 const MAX_AGENT_ERROR_MESSAGE_CHARACTERS = 4_000;
 const TOOL_APPROVAL_TIMEOUT_MS = 10 * 60 * 1000;
@@ -503,7 +502,6 @@ function normalizeContext(input: AgentAppContext): AgentAppContext {
     ? Array.from(new Set(input.selectedNodeIds
       .map(value => Number(value))
       .filter(value => Number.isFinite(value) && value > 0)))
-      .slice(0, MAX_AGENT_SELECTED_NODE_IDS)
     : [];
   const directoryId = Number(input?.currentDirectory?.id);
   return {
@@ -4145,8 +4143,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       const selectedGroupId = session ? session.groupId || null : input.groupId || null;
       if (selectedGroupId !== null && (typeof selectedGroupId !== 'string' || selectedGroupId.length > 200)) throw new Error('会话组标识无效');
       if (session && input.groupId !== undefined && input.groupId !== selectedGroupId) throw new Error('请先在会话管理中移动分组');
-      const permissionMode = normalizeAgentSessionPermissionMode(session?.permissionMode || input.permissionMode || (selectedGroupId ? 'group' : 'ask'));
-      if (permissionMode === 'group' && !selectedGroupId) throw new Error('组内访问需要选择一个会话组');
+      const permissionMode = normalizeAgentSessionPermissionMode(session?.permissionMode || input.permissionMode || 'ask');
       if (selectedGroupId) startingGroupKeys.set(runId, groupKey(ownerScope, libraryId, selectedGroupId));
       const selectedGroup = selectedGroupId ? await store.getGroup(ownerScope, libraryId, selectedGroupId) : null;
       if (selectedGroupId && !selectedGroup) throw new Error('会话组不存在或不属于当前资料库');
@@ -4561,9 +4558,11 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
   }
   async function organizeSession(id: string, owner: AgentOwnerScope, libraryId: number, value: AgentSessionOrganizationInput) {
     const store = await resolveSessionStore();
-    assertSessionIdle(id);
+    if (activeRuns.has(id) || startingSessions.has(id)) {
+      const current = await store.getSession(id, normalizeAgentOwnerScope(owner), libraryId);
+      if (!current || (current.groupId || null) !== value.groupId) assertSessionIdle(id);
+    }
     const result = await store.organizeSession(id, owner, libraryId, value, now());
-    activeTitleTasks.get(id)?.controller.abort();
     return result;
   }
   async function archiveSession(id: string, owner: AgentOwnerScope, libraryId: number, archived: boolean, revision: number) {

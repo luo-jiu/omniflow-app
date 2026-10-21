@@ -108,6 +108,7 @@ interface DirectoryTreeProps {
   onOpenMediaTool?: (node: any) => void | Promise<void>;
   onOpenPluginCommand?: (request: PluginCommandOpenRequest) => void;
   onSelectionChange?: (payload: {
+    firstNode: any | null;
     primaryNode: any | null;
     selectedNodeIds: number[];
   }) => void;
@@ -461,7 +462,12 @@ export default function DirectoryTree({
     const primaryNode = primaryNodeId
       ? findNodeById(treeDataRef.current || [], Number(primaryNodeId))
       : null;
+    const firstNodeId = selectedNodeIds[0];
+    const firstNode = firstNodeId === primaryNodeId
+      ? primaryNode
+      : firstNodeId ? findNodeById(treeDataRef.current || [], firstNodeId) : null;
     handler({
+      firstNode,
       primaryNode,
       selectedNodeIds,
     });

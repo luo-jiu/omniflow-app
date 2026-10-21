@@ -7,7 +7,7 @@ import { createAgentLibraryAccessGuard, type AgentAccessApproval } from './agent
 
 function fixture(mode: AgentLibraryAccessSnapshot['mode'] = 'group', access: AgentLibraryAccessSnapshot['access'] = 'read-write',
   pluginTools?: ReadonlyMap<string, AgentPluginToolSource>, pluginRenameTools?: ReadonlyMap<string, AgentPluginToolSource>,
-  pluginOutputTools?: ReadonlyMap<string, AgentPluginToolSource>) {
+  pluginOutputTools?: ReadonlyMap<string, AgentPluginToolSource>, selectedNodeIds: number[] = []) {
   const nodes = new Map<number, AgentLibraryNode>([
     [1, { id: 1, libraryId: 3, parentId: 0, name: 'root', type: 'dir', path: '/' }],
     [10, { id: 10, libraryId: 3, parentId: 1, name: 'docs', type: 'dir', path: '/docs' }],
@@ -29,13 +29,53 @@ function fixture(mode: AgentLibraryAccessSnapshot['mode'] = 'group', access: Age
   const controller = new AbortController();
   const assertCurrent = vi.fn(async () => undefined);
   const guard = createAgentLibraryAccessGuard({ policy: { version: 1, groupId: 'g', policyRevision: 1, mode, access,
-    directories: [{ nodeId: 10, name: 'docs' }] }, context: { libraryId: 3, platform: 'darwin', selectedNodeIds: [], currentDirectory: { id: 10, name: 'docs' } },
+    directories: [{ nodeId: 10, name: 'docs' }] }, context: { libraryId: 3, platform: 'darwin', selectedNodeIds, currentDirectory: { id: 10, name: 'docs' } },
     signal: controller.signal, read, approve, assertCurrent, pluginTools, pluginRenameTools, pluginOutputTools });
   const call = (name: string, input: object) => ({ id: name, name, input });
   return { guard, nodes, read, approve, controller, assertCurrent, call };
 }
 
 describe('Client-owned Agent directory authorization', () => {
+  it.each([
+    { name: 'file.stat', input: {} },
+    { name: 'media.inspect', input: {} },
+    { name: 'media.extractAudio', input: {} },
+    { name: 'media.extractAudio', input: { destination: 'local' } },
+  ])('rejects ambiguous multi-selection for $name: $input before reading or requesting access', async ({ name, input }) => {
+    const { guard, call, read, approve } = fixture('ask', 'read-write', undefined, undefined, undefined, [21, 13]);
+
+    await expect(guard.authorizeTool(call(name, input), 'ambiguous')).rejects.toThrow('请提供明确的文件或目录');
+
+    expect(read).not.toHaveBeenCalled();
+    expect(approve).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { name: 'file.stat', input: { path: '/docs/sub/nested.txt' } },
+    { name: 'file.stat', input: { nodeId: 13 } },
+    { name: 'media.inspect', input: { nodeId: 13 } },
+    { name: 'media.extractAudio', input: { sourceNodeId: 13 } },
+    { name: 'media.extractAudio', input: { nodeId: 13 } },
+  ])('honors the explicit non-first selected target for $name: $input', async ({ name, input }) => {
+    const { guard, call, read, approve } = fixture('group', 'read-write', undefined, undefined, undefined, [21, 13]);
+
+    expect(await guard.authorizeTool(call(name, input), 'explicit-target')).toBe(true);
+
+    expect(read).toHaveBeenCalled();
+    expect(guard.observedNodes().some(node => node.id === 13)).toBe(true);
+    expect(guard.observedNodes().some(node => node.id === 21)).toBe(false);
+    expect(approve).not.toHaveBeenCalled();
+  });
+
+  it.each(['file.stat', 'media.inspect', 'media.extractAudio'])('retains the single selected node fallback for %s', async name => {
+    const { guard, call, approve } = fixture('group', 'read-write', undefined, undefined, undefined, [13]);
+
+    expect(await guard.authorizeTool(call(name, {}), 'single-target')).toBe(true);
+
+    expect(guard.observedNodes().some(node => node.id === 13)).toBe(true);
+    expect(approve).not.toHaveBeenCalled();
+  });
+
   it('authorizes directory configuration and batches with existing write grants, without expanding read-only access', async () => {
     const writable = fixture();
     expect(await writable.guard.authorizeTool(writable.call('node.configure', { nodeId: 10, builtInType: 'COMIC' }), 'config')).toBe(true);

@@ -79,6 +79,23 @@ describe('readAgentPerception', () => {
     ]);
   });
 
+  it('bounds selection metadata probes without changing the complete selected ID list', async () => {
+    const selectedNodeIds = Array.from({ length: 1_000 }, (_, index) => index + 1);
+    const appContext = { libraryId: 3, platform: 'darwin' as const, selectedNodeIds };
+    Object.freeze(selectedNodeIds);
+    mocks.fetchNodeDetailById.mockImplementation(async id => ({ id, name: `file-${id}`, type: 'file' }));
+
+    const result = await readAgentPerception(appContext);
+
+    expect(mocks.fetchNodeDetailById).toHaveBeenCalledTimes(20);
+    expect(mocks.fetchNodeDetailById.mock.calls.map(([id]) => id)).toEqual(selectedNodeIds.slice(0, 20));
+    expect(result.selectedNodes.map(node => node.id)).toEqual(selectedNodeIds.slice(0, 20));
+    expect(appContext.selectedNodeIds).toBe(selectedNodeIds);
+    expect(appContext.selectedNodeIds).toHaveLength(1_000);
+    expect(appContext.selectedNodeIds.at(-1)).toBe(1_000);
+    expect(mocks.getChildrenByNodeId).not.toHaveBeenCalled();
+  });
+
   it('exposes actual resource configuration in directory, entries and selection without inferring old-server defaults', async () => {
     const folder = { id: 8, name: '漫画', type: 'dir', builtInType: 'COMIC', archiveMode: 1 };
     mocks.getChildrenByNodeId.mockResolvedValue([folder, { id: 9, name: 'unknown', type: 'dir' }]);

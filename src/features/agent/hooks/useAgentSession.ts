@@ -847,7 +847,7 @@ export function useAgentSession({
         || sessionScopeKeyRef.current !== submissionScopeKey
       ) return;
       const result = await startAgentChat({
-        ...(!sessionIdRef.current ? { groupId: groupId || null, permissionMode: permissionMode || (groupId ? 'group' : 'ask') } : {}),
+        ...(!sessionIdRef.current ? { groupId: groupId || null, permissionMode: permissionMode || 'ask' } : {}),
         ...(resumeRunId ? { resumeRunId } : {}),
         ...(submittedAttachments.length ? { attachmentIds: submittedAttachments.map(item => item.attachment!.id) } : {}),
         appContext,

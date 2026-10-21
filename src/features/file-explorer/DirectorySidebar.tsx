@@ -26,6 +26,7 @@ interface Props {
   onOpenMediaTool?: (node: SelectedTreeNode) => void | Promise<void>;
   onOpenPluginCommand?: (request: PluginCommandOpenRequest) => void;
   onSelectionChange?: (payload: {
+    firstNode: SelectedTreeNode | null;
     primaryNode: SelectedTreeNode | null;
     rootNodeId: number | null;
     selectedNodeIds: number[];
@@ -256,21 +257,23 @@ const DirectorySidebar = React.forwardRef<DirectorySidebarHandle, Props>(({
             });
           }}
           onSelectionChange={(payload) => {
+            const toSelectedNode = (node: typeof payload.primaryNode): SelectedTreeNode | null => node
+              ? {
+                archiveMode: Number(node.archiveMode ?? 0),
+                builtInType: String(node.builtInType || 'DEF'),
+                ext: node.ext ? String(node.ext) : undefined,
+                id: Number(node.id),
+                key: String(node.key || ''),
+                libraryId: Number(node.libraryId || libraryId),
+                mimeType: node.mimeType ? String(node.mimeType) : undefined,
+                name: String(node.name || ''),
+                parentId: Number(node.parentId || 0),
+                type: node.type === 'dir' ? 'dir' : 'file',
+              }
+              : null;
             onSelectionChange?.({
-              primaryNode: payload.primaryNode
-                ? {
-                  archiveMode: Number(payload.primaryNode.archiveMode ?? 0),
-                  builtInType: String(payload.primaryNode.builtInType || 'DEF'),
-                  ext: payload.primaryNode.ext ? String(payload.primaryNode.ext) : undefined,
-                  id: Number(payload.primaryNode.id),
-                  key: String(payload.primaryNode.key || ''),
-                  libraryId: Number(payload.primaryNode.libraryId || libraryId),
-                  mimeType: payload.primaryNode.mimeType ? String(payload.primaryNode.mimeType) : undefined,
-                  name: String(payload.primaryNode.name || ''),
-                  parentId: Number(payload.primaryNode.parentId || 0),
-                  type: payload.primaryNode.type === 'dir' ? 'dir' : 'file',
-                }
-                : null,
+              firstNode: toSelectedNode(payload.firstNode),
+              primaryNode: toSelectedNode(payload.primaryNode),
               rootNodeId,
               selectedNodeIds: payload.selectedNodeIds,
             });

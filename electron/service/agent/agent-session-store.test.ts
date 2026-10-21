@@ -869,7 +869,7 @@ describe('SQLite Agent session store', () => {
     const grouped = await store.createSession({ id: 'grouped', ownerScope: OWNER_SCOPE, appContext: { libraryId: 3, platform: 'darwin', selectedNodeIds: [] },
       title: '组内会话', groupId: group.id, now: timestamp(1) });
     await createSession(store, 'ungrouped', 3, '未分组会话');
-    expect(grouped.permissionMode).toBe('group');
+    expect(grouped.permissionMode).toBe('ask');
     expect(await store.listGroups(OWNER_SCOPE, 3)).toMatchObject({ total: 2, ungroupedCount: 1, archivedCount: 0,
       groups: [{ id: group.id, sessionCount: 1 }] });
     expect((await store.listSessions(OWNER_SCOPE, 3, '', undefined, { groupId: group.id })).sessions.map(item => item.id)).toEqual(['grouped']);
@@ -895,11 +895,14 @@ describe('SQLite Agent session store', () => {
     const policy = { version: 1 as const, mode: 'group' as const, groupId: group.id, policyRevision: group.policyRevision, access: group.access, directories: group.directories };
     await store.createRun({ id: 'local-run', sessionId: session.id, model: 'model', profileId: 'profile', reasoningEffort: 'auto', userPrompt: '工作', libraryAccess: policy, now: timestamp(2) });
     await store.updateRun('local-run', { status: 'cancelled', updatedAt: timestamp(3), finishedAt: timestamp(3) });
+    await executeDatabaseSql(databasePath, "UPDATE agent_sessions SET permission_mode = 'group' WHERE id = 'local-session'");
+    expect((await store.getSession(session.id, OWNER_SCOPE, 3))?.permissionMode).toBe('ask');
     await store.archiveSession(session.id, OWNER_SCOPE, 3, true, session.revision!, timestamp(4));
     await expect(executeDatabaseSql(databasePath, "UPDATE agent_runs SET library_access_json = NULL WHERE id = 'local-run'")).rejects.toThrow('immutable');
     await store.close(); stores.splice(stores.indexOf(store), 1);
     const reopened = await createStore(databasePath);
     const restored = await reopened.getSession(session.id, OWNER_SCOPE, 3, true);
+    expect(restored?.permissionMode).toBe('ask');
     expect(restored?.runs[0].libraryAccess).toEqual(policy);
     expect(restored?.archivedAt).toBeTruthy();
     expect((await reopened.listGroups(OWNER_SCOPE, 3)).groups[0].id).toBe(group.id);
@@ -913,7 +916,7 @@ describe('SQLite Agent session store', () => {
     await expect(store.createSession({ id: 'bad-member', groupId: group.id, ownerScope: OWNER_SCOPE,
       appContext: { libraryId: 3, platform: 'darwin', selectedNodeIds: [] }, title: '不应创建', now: timestamp(1) })).rejects.toThrow('owner mismatch');
     const session = await createSession(store, 'member', 3, '会话');
-    await expect(store.organizeSession(session.id, OWNER_SCOPE, 3, { groupId: group.id, permissionMode: 'group', revision: session.revision! }, timestamp(2))).rejects.toThrow('owner mismatch');
+    await expect(store.organizeSession(session.id, OWNER_SCOPE, 3, { groupId: group.id, permissionMode: 'ask', revision: session.revision! }, timestamp(2))).rejects.toThrow('owner mismatch');
     const renamed = await store.renameSession(session.id, OWNER_SCOPE, 3, '新标题', timestamp(3));
     await expect(store.archiveSession(session.id, OWNER_SCOPE, 3, true, session.revision!, timestamp(4))).rejects.toThrow('已变化');
     expect(renamed.revision).toBeGreaterThan(session.revision!);
@@ -932,6 +935,60 @@ describe('SQLite Agent session store', () => {
     await expect(store.deleteGroup(OWNER_SCOPE, 3, group.id, group.revision)).rejects.toThrow('running');
     const renamed = await store.saveGroup(OWNER_SCOPE, 3, { id: group.id, revision: group.revision, name: '改名', access: 'read-write', directories: [] }, timestamp(3));
     expect(renamed.policyRevision).toBe(group.policyRevision);
+  });
+
+  it.each(['preparing', 'running', 'awaiting_approval', 'awaiting_interaction'] as const)(
+    'updates the next Run permission during %s without changing the current authorization', async status => {
+      const store = await createStore();
+      const group = await store.saveGroup(OWNER_SCOPE, 3, { name: '工作', access: 'read-write', directories: [] }, timestamp(0));
+      const session = await store.createSession({ id: 'permission-member', groupId: group.id, ownerScope: OWNER_SCOPE,
+        appContext: { libraryId: 3, platform: 'darwin', selectedNodeIds: [] }, title: '任务', now: timestamp(1) });
+      const policy = { version: 1 as const, mode: 'group' as const, groupId: group.id,
+        policyRevision: group.policyRevision, access: group.access, directories: group.directories };
+      await store.createRun({ id: 'permission-run', sessionId: session.id, model: 'model', profileId: 'profile',
+        reasoningEffort: 'auto', userPrompt: '工作', libraryAccess: policy, now: timestamp(2) });
+      await store.updateRun('permission-run', { status, updatedAt: timestamp(2) });
+      const before = (await store.getSession(session.id, OWNER_SCOPE, 3))!;
+      const updated = await store.organizeSession(session.id, OWNER_SCOPE, 3,
+        { groupId: group.id, permissionMode: 'full-access', revision: session.revision! }, timestamp(3));
+      expect(updated.permissionMode).toBe('full-access');
+      expect(updated.revision).toBe(session.revision! + 1);
+      const after = (await store.getSession(session.id, OWNER_SCOPE, 3))!;
+      expect(after.runs).toEqual(before.runs);
+      expect(after.toolActivities).toEqual(before.toolActivities);
+      await expect(store.organizeSession(session.id, OWNER_SCOPE, 3,
+        { groupId: group.id, permissionMode: 'ask', revision: session.revision! }, timestamp(4))).rejects.toThrow('已变化');
+      await expect(store.organizeSession(session.id, OTHER_OWNER_SCOPE, 3,
+        { groupId: group.id, permissionMode: 'ask', revision: updated.revision! }, timestamp(4))).rejects.toThrow('不存在');
+      await expect(store.organizeSession(session.id, OWNER_SCOPE, 3,
+        { groupId: null, permissionMode: 'ask', revision: updated.revision! }, timestamp(4))).rejects.toThrow('running');
+      await expect(store.archiveSession(session.id, OWNER_SCOPE, 3, true, updated.revision!, timestamp(4))).rejects.toThrow('running');
+      await expect(store.deleteGroup(OWNER_SCOPE, 3, group.id, group.revision)).rejects.toThrow('running');
+    },
+  );
+
+  it('replaces the previous busy permission trigger when reopening an existing database', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'agent-permission-trigger-'));
+    temporaryDirectories.push(directory);
+    const databasePath = path.join(directory, 'sessions.sqlite3');
+    const store = await createStore(databasePath);
+    const session = await createSession(store, 'permission-reopen', 3, '权限');
+    await store.close(); stores.splice(stores.indexOf(store), 1);
+    await executeDatabaseSql(databasePath, `
+      DROP TRIGGER agent_sessions_organization_idle;
+      CREATE TRIGGER agent_sessions_organization_idle BEFORE UPDATE OF group_id, permission_mode, archived_at ON agent_sessions
+      WHEN EXISTS (SELECT 1 FROM agent_runs WHERE session_id = OLD.id AND status IN ('running','preparing','awaiting_approval','awaiting_interaction'))
+      BEGIN SELECT RAISE(ABORT, 'Agent session is running'); END;
+    `);
+    const reopened = await createStore(databasePath);
+    await reopened.createRun({ id: 'permission-reopen-run', sessionId: session.id, model: 'model', profileId: 'profile',
+      reasoningEffort: 'auto', userPrompt: '工作', now: timestamp(1) });
+    const updated = await reopened.organizeSession(session.id, OWNER_SCOPE, 3,
+      { groupId: null, permissionMode: 'full-access', revision: session.revision! }, timestamp(2));
+    expect(updated.permissionMode).toBe('full-access');
+    await expect(executeDatabaseSql(databasePath,
+      "UPDATE agent_sessions SET permission_mode = 'group' WHERE id = 'permission-reopen'")).rejects.toThrow('requires a session group');
+    await expect(reopened.archiveSession(session.id, OWNER_SCOPE, 3, true, updated.revision!, timestamp(3))).rejects.toThrow('running');
   });
 
   it('removes a group without deleting sessions and prevents archived sessions from starting runs', async () => {

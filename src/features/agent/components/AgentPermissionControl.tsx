@@ -6,8 +6,8 @@ import styled from 'styled-components';
 import { getAppPopupContainer } from '@/utils/popup-container';
 import type { AgentSessionPermissionMode } from '@/shared/agent/agent-session-management';
 
-const LABELS: Record<AgentSessionPermissionMode, string> = {
-  ask: '询问访问', group: '组内自动', 'full-access': '完全访问',
+const LABELS = {
+  ask: '询问访问', 'full-access': '完全访问',
 };
 
 const Trigger = styled.button`
@@ -65,9 +65,8 @@ const Menu = styled.div`
   svg { display: block; width: 14px; height: 14px; }
 `;
 
-export default function AgentPermissionControl({ value, disabled, onChange, grouped = false }: {
+export default function AgentPermissionControl({ value, disabled, onChange }: {
   value: AgentSessionPermissionMode;
-  grouped?: boolean;
   disabled: boolean;
   onChange: (value: AgentSessionPermissionMode) => void;
 }) {
@@ -77,6 +76,7 @@ export default function AgentPermissionControl({ value, disabled, onChange, grou
   const triggerRef = React.useRef<HTMLButtonElement>(null);
   const menuRef = React.useRef<HTMLDivElement | null>(null);
   const focusMenuOnOpen = React.useRef(false);
+  const selectedMode = value === 'full-access' ? 'full-access' : 'ask';
   return <Popover trigger="click" position="topRight" showArrow={false} motion={false}
     visible={workspaceActive && !disabled && visible} onVisibleChange={setVisible} getPopupContainer={getAppPopupContainer}
     style={{ backgroundColor: 'transparent', boxShadow: 'none' }}
@@ -96,10 +96,10 @@ export default function AgentPermissionControl({ value, disabled, onChange, grou
       const current = options.indexOf(document.activeElement as HTMLButtonElement);
       options[(current + (event.key === 'ArrowDown' ? 1 : options.length - 1)) % options.length]?.focus();
     }}>
-      {(Object.keys(LABELS) as AgentSessionPermissionMode[]).filter(mode => mode !== 'group' || grouped).map(mode => (
-        <button key={mode} type="button" role="menuitemradio" aria-checked={mode === value}
+      {(Object.keys(LABELS) as (keyof typeof LABELS)[]).map(mode => (
+        <button key={mode} type="button" role="menuitemradio" aria-checked={mode === selectedMode}
           onClick={() => { setVisible(false); triggerRef.current?.focus(); onChange(mode); }}>
-          <span>{LABELS[mode]}</span>{mode === value ? <IconTick aria-hidden="true" /> : null}
+          <span>{LABELS[mode]}</span>{mode === selectedMode ? <IconTick aria-hidden="true" /> : null}
         </button>
       ))}
     </Menu>}>
@@ -112,8 +112,8 @@ export default function AgentPermissionControl({ value, disabled, onChange, grou
           else { focusMenuOnOpen.current = true; setVisible(true); }
         }
       }}
-      aria-label={`Agent 权限模式：${LABELS[value]}`} title="当前会话的访问权限">
-      <IconShieldStroked aria-hidden="true" /><span>{LABELS[value]}</span>
+      aria-label={`Agent 权限模式：${LABELS[selectedMode]}`} title="访问权限">
+      <IconShieldStroked aria-hidden="true" /><span>{LABELS[selectedMode]}</span>
     </Trigger>
   </Popover>;
 }

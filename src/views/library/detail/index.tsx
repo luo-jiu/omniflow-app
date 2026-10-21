@@ -291,21 +291,37 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
   const [browserInput, setBrowserInput] = React.useState(initialWorkspaceState.browserInput);
   const [searchMode, setSearchMode] = React.useState<SearchWorkspaceMode>(initialWorkspaceState.searchMode);
   const [searchDraft] = React.useState(initialWorkspaceState.searchDraft);
-  const [selectedTreeNode, setSelectedTreeNode] = React.useState<SelectedTreeNode | null>(null);
-  const [selectedTreeNodeIds, setSelectedTreeNodeIds] = React.useState<number[]>([]);
+  const [treeSelection, setTreeSelection] = React.useState<{
+    firstNode: SelectedTreeNode | null;
+    primaryNode: SelectedTreeNode | null;
+    selectedNodeIds: number[];
+  }>({ firstNode: null, primaryNode: null, selectedNodeIds: [] });
+  const { firstNode: firstSelectedTreeNode, primaryNode: selectedTreeNode, selectedNodeIds: selectedTreeNodeIds } = treeSelection;
   const [pluginCommandRequest, setPluginCommandRequest] = React.useState<PluginCommandOpenRequest | null>(null);
   React.useEffect(() => subscribeLibraryFilesDeleted(event => {
     if (!matchesLibraryMutationScope(event, agentOwnerScope?.accountScope ?? null, API_CONFIG.BASE_URL, libraryId)) return;
-    setSelectedTreeNode(previous => previous && event.nodeIds.includes(previous.id) ? null : previous);
+    const clearDeleted = (node: SelectedTreeNode | null) => node && event.nodeIds.includes(node.id) ? null : node;
+    setTreeSelection(previous => {
+      const firstNode = clearDeleted(previous.firstNode);
+      const primaryNode = clearDeleted(previous.primaryNode);
+      return firstNode === previous.firstNode && primaryNode === previous.primaryNode
+        ? previous : { ...previous, firstNode, primaryNode };
+    });
   }), [agentOwnerScope, libraryId]);
   React.useEffect(() => subscribeLibraryNodesMutated(event => {
     if (!matchesLibraryMutationScope(event, agentOwnerScope?.accountScope ?? null, API_CONFIG.BASE_URL, libraryId)) return;
-    setSelectedTreeNode(previous => previous && previous.id === event.nodeId ? {
-      ...previous,
-      name: event.name ?? previous.name,
-      ext: event.ext ?? previous.ext,
-      parentId: event.parentId ?? previous.parentId,
-    } : previous);
+    const updateNode = (node: SelectedTreeNode | null) => node && node.id === event.nodeId ? {
+      ...node,
+      name: event.name ?? node.name,
+      ext: event.ext ?? node.ext,
+      parentId: event.parentId ?? node.parentId,
+    } : node;
+    setTreeSelection(previous => {
+      const firstNode = updateNode(previous.firstNode);
+      const primaryNode = updateNode(previous.primaryNode);
+      return firstNode === previous.firstNode && primaryNode === previous.primaryNode
+        ? previous : { ...previous, firstNode, primaryNode };
+    });
   }), [agentOwnerScope, libraryId]);
   const [treeRootNodeId, setTreeRootNodeId] = React.useState<number | null>(null);
   const [workspaceDisplayMode, setWorkspaceDisplayMode] = React.useState<WorkspaceDisplayMode>(initialWorkspaceState.workspaceDisplayMode);
@@ -1683,7 +1699,7 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
 
   React.useEffect(() => {
     setPluginCommandRequest(null);
-    setSelectedTreeNodeIds([]);
+    setTreeSelection({ firstNode: null, primaryNode: null, selectedNodeIds: [] });
     return () => { void pluginCommandApi.releaseLibrary(libraryId).catch(() => undefined); };
   }, [libraryId]);
 
@@ -2633,9 +2649,8 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
             onOpenMediaTool={openLibraryMediaProcessingWorkspace}
             onOpenPluginCommand={openPluginCommandWorkspace}
             onRootNodeIdChange={setTreeRootNodeId}
-            onSelectionChange={(payload) => {
-              setSelectedTreeNode(payload.primaryNode);
-              setSelectedTreeNodeIds(payload.selectedNodeIds);
+            onSelectionChange={({ firstNode, primaryNode, selectedNodeIds }) => {
+              setTreeSelection({ firstNode, primaryNode, selectedNodeIds });
             }}
             onOpenFileInBrowser={handleOpenFileInBrowser}
             browserModeOpen={browserModeOpen}
@@ -3135,6 +3150,8 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
                 onRefreshDirectory={refreshAgentDirectory}
                 ownerScope={agentOwnerScope}
                 rootNodeId={treeRootNodeId}
+                firstSelectedTreeNode={firstSelectedTreeNode}
+                selectedNodeIds={selectedTreeNodeIds}
                 selectedTreeNode={selectedTreeNode}
               />
             </RetainedWorkspacePane>

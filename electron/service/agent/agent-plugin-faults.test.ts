@@ -138,7 +138,7 @@ describe('AT2 plugin faults through Agent, admission, access and SQLite settleme
     const input: AgentChatRequest = {
       appContext: { currentDirectory: { id: 10, name: 'csv' }, libraryId: 3, platform: 'darwin', selectedNodeIds: [11] },
       model: 'synthetic-model', profileId: 'synthetic-profile', ownerScope: OWNER_SCOPE, reasoningEffort: 'auto',
-      groupId, permissionMode: 'group', userPrompt: '查询CSV',
+      groupId, permissionMode: 'full-access', userPrompt: '查询CSV',
       perception: { collectedAt: new Date().toISOString(), selectedNodes: [NODES[2]],
         currentDirectory: { id: 10, name: 'csv', entries: [NODES[2]], entryCount: 1 } },
     };

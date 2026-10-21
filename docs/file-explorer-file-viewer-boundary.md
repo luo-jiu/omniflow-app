@@ -154,6 +154,8 @@ DirectoryTree double click
 
 目录树的节点选择状态也由 `DirectoryTree` 单独持有：`selectedNodeIds` 保存当前多选结果，`selectionAnchorKey` 保存 Shift 范围锚点。选择事件在树容器统一委托到 `.semi-tree-option[data-key]`，因此点击文件名、图标或行内空白使用同一套普通点击、Shift 范围和 Cmd/Ctrl 增量选择规则；展开箭头继续只负责展开，不改变选区。范围按当前可见树的深度优先顺序计算，普通点击会清掉旧范围并把当前节点设为新的锚点。
 
+`LibraryDetail` 将同一选择事件的完整 `selectedNodeIds` 只读投影给 Agent 与工具区，不能用 `primaryNode` 重建成单选。事件额外提供对应 `selectedNodeIds[0]` 的 `firstNode` 用于显示；页面将首项、主节点和 ID 数组合在同一个选区投影中，改名、移动、删除同步节点元数据。Agent 多选文件、文件夹或混选时显示“选中：第一项名称 等”，首项暂不可解析时回退“选中：多个文件”；单选保留名称。`primaryNode` 仍只用于推导当前目录（目录自身或文件父目录），清空选择后回退资料库根目录，不增加第二份选区 owner。
+
 上述结构状态都在 `useRepositoryTree` 内维护，并按 `libraryId` 做 snapshot 缓存；节点选择状态属于当前 `DirectoryTree` 实例，不写入树结构 snapshot。
 
 当前缓存行为：

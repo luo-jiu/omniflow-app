@@ -41,9 +41,8 @@ describe('Agent permission selection', () => {
     act(() => renderer.update(<AgentPermissionControl value="ask" disabled={false} onChange={onChange} />));
     expect(renderer.root.findAllByProps({ role: 'menuitemradio' }).map(option => option.props['aria-checked']))
       .toEqual([true, false]);
-    act(() => renderer.update(<AgentPermissionControl value="group" grouped disabled={false} onChange={onChange} />));
-    expect(renderer.root.findAllByProps({ role: 'menuitemradio' }).map(option => option.props['aria-checked']))
-      .toEqual([false, true, false]);
+    expect(renderer.root.findAllByProps({ role: 'menuitemradio' }).map(option => option.findAllByType('span')[0].children[0]))
+      .toEqual(['询问访问', '完全访问']);
     act(() => renderer.unmount());
   });
 });

@@ -38,8 +38,9 @@ function intentFor(name: string, value: unknown, context: AgentAppContext, actio
       || !id(resource.nodeId)) throw new Error('插件 Tool 必须提供明确的 resource.nodeId');
     return { targets: [{ nodeId: id(resource.nodeId), write: false, singleFile: true }] };
   }
+  const selectedNodeId = context.selectedNodeIds.length === 1 ? context.selectedNodeIds[0] : undefined;
   const source = (write: boolean, sensitive = false): Target => ({
-    ...(text(input.path) ? { path: text(input.path) } : { nodeId: id(input.nodeId) || id(input.sourceNodeId) || context.selectedNodeIds[0] }), write, sensitive,
+    ...(text(input.path) ? { path: text(input.path) } : { nodeId: id(input.nodeId) || id(input.sourceNodeId) || selectedNodeId }), write, sensitive,
   });
   const parent = (): Target => ({ ...(text(input.parentPath) ? { path: text(input.parentPath) }
     : id(input.parentId) ? { nodeId: id(input.parentId) }
@@ -83,7 +84,9 @@ function intentFor(name: string, value: unknown, context: AgentAppContext, actio
   if (name === 'media.extractAudio') {
     const prepared = action?.kind === 'media.extractAudio' ? action : undefined;
     const root = prepared || input;
-    const targets: Target[] = [{ nodeId: id(root.sourceNodeId) || id(input.nodeId) || context.selectedNodeIds[0], write: false }];
+    const sourceNodeId = id(root.sourceNodeId) || id(input.nodeId) || selectedNodeId;
+    if (!sourceNodeId) throw new Error('请提供明确的文件或目录，才能确认访问范围');
+    const targets: Target[] = [{ nodeId: sourceNodeId, write: false }];
     if (root.destination === 'local') return { targets, opaque: '保存媒体到本机，需要单独确认' };
     targets.push({ nodeId: id(root.parentId) || context.currentDirectory?.id, write: true });
     return { targets };

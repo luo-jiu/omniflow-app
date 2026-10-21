@@ -84,6 +84,14 @@ function promptContext(context: AgentAppContext, capabilities: string[]): AgentP
   };
 }
 
+function selectionPerceptionScope(context: AgentAppContext, perception: AgentChatRequest['perception']): string {
+  if (!perception || context.selectedNodeIds.length === 0) return '';
+  const detailedNodeIds = new Set(perception.selectedNodes.map(node => node.id));
+  return context.selectedNodeIds.some(id => !detailedNodeIds.has(id))
+    ? '\nperception.selectedNodes 仅包含部分选中节点详情；完整选区以当前安全上下文中的 app.selectedNodeIds（来自 appContext.selectedNodeIds）为准，缺少详情不表示节点未被选中。选中本身不授予访问权限。'
+    : '';
+}
+
 function promptSkillCatalog(
   summaries: readonly AgentSkillSummaryV1[],
 ): AgentSkillSummaryV1[] {
@@ -214,7 +222,7 @@ export function buildAgentSystemPrompt(
   const catalogBudgetNotice = omittedSkillCount > 0
     ? `Skill 摘要目录因上下文预算省略了 ${Math.floor(omittedSkillCount)} 个条目；未展示的 Skill 在本 Run 中不可激活。`
     : '';
-  return `${AGENT_POLICY_PROMPT}${agentFileRoutingPrompt(capabilities)}${agentComputerRoutingPrompt(capabilities)}\n\n当前安全上下文：\n${JSON.stringify(promptContext(context, capabilities))}\n\n${skillCatalog}${catalogBudgetNotice ? `\n${catalogBudgetNotice}` : ''}\n\n${perceptionScope}${agentModelAdapterPrompt(modelAdapter)}`;
+  return `${AGENT_POLICY_PROMPT}${agentFileRoutingPrompt(capabilities)}${agentComputerRoutingPrompt(capabilities)}\n\n当前安全上下文：\n${JSON.stringify(promptContext(context, capabilities))}\n\n${skillCatalog}${catalogBudgetNotice ? `\n${catalogBudgetNotice}` : ''}\n\n${perceptionScope}${selectionPerceptionScope(context, perception)}${agentModelAdapterPrompt(modelAdapter)}`;
 }
 
 export function buildAgentFallbackSystemPrompt(
@@ -225,5 +233,5 @@ export function buildAgentFallbackSystemPrompt(
   const scope = perception
     ? '本轮只读感知快照将作为单独的低权限消息提供。'
     : '本轮没有可用的文件感知快照。';
-  return `${AGENT_POLICY_PROMPT}\n\n当前安全上下文：\n${JSON.stringify(promptContext(context, []))}\n\n${scope} 当前连接按无工具兼容模式运行，只能依据明确提供的数据回答，不能把未列出的内容当作已知。${modelAdapter?.toolCalling === false ? agentModelAdapterPrompt(modelAdapter) : ''}`;
+  return `${AGENT_POLICY_PROMPT}\n\n当前安全上下文：\n${JSON.stringify(promptContext(context, []))}\n\n${scope}${selectionPerceptionScope(context, perception)} 当前连接按无工具兼容模式运行，只能依据明确提供的数据回答，不能把未列出的内容当作已知。${modelAdapter?.toolCalling === false ? agentModelAdapterPrompt(modelAdapter) : ''}`;
 }

@@ -1912,6 +1912,29 @@ describe('Agent orchestrator', () => {
     expect(await orchestrator.shutdown()).toBe(true);
   });
 
+  it('does not cancel pending first title generation when saving a session permission', async () => {
+    let finishTitle!: (value: string | null) => void;
+    let titleSignal!: AbortSignal;
+    const generateSessionTitle = vi.fn((input: { signal: AbortSignal }) => {
+      titleSignal = input.signal;
+      return new Promise<string | null>(resolve => { finishTitle = resolve; });
+    });
+    mocks.streamAgentProviderTurn.mockImplementationOnce(async (_connection, _input, delta) => {
+      delta('完成。'); return { content: '完成。', toolCalls: [] };
+    });
+    const webContents = sender();
+    const orchestrator = createOrchestrator({ generateSessionTitle });
+    try {
+      const started = await orchestrator.start(webContents as never, request());
+      await waitForCompletedFinal(webContents, '完成。', started);
+      await vi.waitFor(() => expect(generateSessionTitle).toHaveBeenCalledOnce());
+      const session = (await store.getSession(started.sessionId, OWNER_SCOPE, 3))!;
+      await orchestrator.organizeSession(session.id, OWNER_SCOPE, 3,
+        { groupId: null, permissionMode: 'full-access', revision: session.revision! });
+      expect(titleSignal.aborted).toBe(false);
+    } finally { finishTitle?.(null); await orchestrator.shutdown(); }
+  });
+
   it.each(['rename', 'release-owner', 'generation-failure'] as const)(
     'preserves the fallback or manual title when title generation is interrupted by %s', async reason => {
       let finishTitle!: (value: string | null) => void;
@@ -1999,7 +2022,7 @@ describe('Agent orchestrator', () => {
     expect(await orchestrator.shutdown()).toBe(true);
   });
 
-  it.each(['ask', 'group'] as const)('enforces %s directory access before exposing file content', async mode => {
+  it.each(['ask', 'group-default', 'legacy-group', 'full-access'] as const)('enforces %s directory access before exposing file content', async mode => {
     const actual = await vi.importActual<typeof import('./agent-library-access')>('./agent-library-access');
     mocks.createAgentLibraryAccessGuard.mockImplementation(actual.createAgentLibraryAccessGuard);
     const nodes = [
@@ -2015,7 +2038,7 @@ describe('Agent orchestrator', () => {
         : { libraryId: 3, node };
     });
     const readLibraryText = vi.fn(async () => Buffer.from('authorized file content'));
-    const group = mode === 'group' ? await store.saveGroup(OWNER_SCOPE, 3, { name: '文档组', directories: [{ nodeId: 10, name: '/docs' }], access: 'read-write' }, new Date().toISOString()) : null;
+    const group = mode !== 'ask' ? await store.saveGroup(OWNER_SCOPE, 3, { name: '文档组', directories: [{ nodeId: 10, name: '/docs' }], access: 'read-write' }, new Date().toISOString()) : null;
     mocks.streamAgentProviderTurn.mockImplementationOnce(async (_connection, input) => {
       expect(input.systemPrompt).not.toContain('movie.mp4');
       return { content: '', toolCalls: [{ id: 'scope-read', name: 'file.read', input: { path: '/docs/a.txt' } }] };
@@ -2025,8 +2048,9 @@ describe('Agent orchestrator', () => {
     });
     const webContents = sender();
     const orchestrator = createOrchestrator({ readLibraryMetadata, readLibraryText });
-    const started = await orchestrator.start(webContents as never, { ...request(), groupId: group?.id || null, permissionMode: mode });
-    if (mode === 'ask') {
+    const started = await orchestrator.start(webContents as never, { ...request(), groupId: group?.id || null,
+      ...(mode === 'group-default' ? {} : { permissionMode: mode === 'legacy-group' ? 'group' as never : mode }) });
+    if (mode !== 'full-access') {
       await vi.waitFor(() => expect(webContents.send).toHaveBeenCalledWith('agent:chat:event', expect.objectContaining({ type: 'tool-approval-required' })));
       expect(readLibraryText).not.toHaveBeenCalled();
       const approval = webContents.send.mock.calls.map(call => call[1]).find(event => event.type === 'tool-approval-required').approval;
@@ -2036,10 +2060,144 @@ describe('Agent orchestrator', () => {
     }
     await waitForCompletedFinal(webContents, '读取完成。', started);
     expect(readLibraryText).toHaveBeenCalledOnce();
-    if (mode === 'group') expect(webContents.send.mock.calls.some(call => call[1]?.type === 'tool-approval-required')).toBe(false);
+    if (mode === 'full-access') expect(webContents.send.mock.calls.some(call => call[1]?.type === 'tool-approval-required')).toBe(false);
     const snapshot = (await store.getSession(started.sessionId, OWNER_SCOPE, 3))!;
-    expect(snapshot.runs[0].libraryAccess).toMatchObject({ mode, groupId: group?.id || null });
+    expect(snapshot.permissionMode).toBe(mode === 'full-access' ? 'full-access' : 'ask');
+    expect(snapshot.runs[0].libraryAccess).toMatchObject({ mode: mode === 'full-access' ? 'full-access' : 'ask', groupId: group?.id || null });
     expect(await orchestrator.shutdown()).toBe(true);
+  });
+
+  it('keeps frozen file access valid after the session permission and metadata revision change', async () => {
+    const actual = await vi.importActual<typeof import('./agent-library-access')>('./agent-library-access');
+    mocks.createAgentLibraryAccessGuard.mockImplementation(actual.createAgentLibraryAccessGuard);
+    const nodes = [
+      { id: 1, parentId: 0, libraryId: 3, type: 'dir' as const, name: 'root', path: '/' },
+      { id: 10, parentId: 1, libraryId: 3, type: 'dir' as const, name: 'docs', path: '/docs' },
+      { id: 11, parentId: 10, libraryId: 3, type: 'file' as const, name: 'a.txt', path: '/docs/a.txt' },
+      { id: 12, parentId: 10, libraryId: 3, type: 'file' as const, name: 'b.txt', path: '/docs/b.txt' },
+    ];
+    const readLibraryMetadata = vi.fn(async input => {
+      const query = input.operation.query;
+      const node = query.path ? nodes.find(item => item.path === query.path) : nodes.find(item => item.id === (query.nodeId || query.directoryId));
+      if (!node) throw new Error('Missing node');
+      return query.kind === 'list' ? { libraryId: 3, directory: node, entries: nodes.filter(item => item.parentId === node.id) }
+        : { libraryId: 3, node };
+    });
+    const readLibraryText = vi.fn(async () => Buffer.from('authorized file content'));
+    let continueReading!: () => void;
+    const continueTurn = new Promise<void>(resolve => { continueReading = resolve; });
+    mocks.streamAgentProviderTurn.mockResolvedValueOnce({ content: '', toolCalls: [{ id: 'first-read', name: 'file.read', input: { path: '/docs/a.txt' } }] })
+      .mockImplementationOnce(async () => {
+        await continueTurn;
+        return { content: '', toolCalls: [{ id: 'second-read', name: 'file.read', input: { path: '/docs/b.txt' } }] };
+      }).mockImplementationOnce(async (_connection, _input, onDelta) => {
+        onDelta('继续读取完成。'); return { content: '继续读取完成。', toolCalls: [] };
+      });
+    const webContents = sender();
+    const orchestrator = createOrchestrator({ readLibraryMetadata, readLibraryText });
+    try {
+      const group = await orchestrator.saveGroup(OWNER_SCOPE, 3,
+        { name: '冻结读范围', directories: [{ nodeId: 10, name: '/docs' }], access: 'read-write' });
+      const started = await orchestrator.start(webContents as never, { ...request(), groupId: group.id, permissionMode: 'full-access' });
+      await vi.waitFor(() => expect(mocks.streamAgentProviderTurn).toHaveBeenCalledTimes(2));
+      expect(readLibraryText).toHaveBeenCalledOnce();
+      const session = (await store.getSession(started.sessionId, OWNER_SCOPE, 3))!;
+      await orchestrator.organizeSession(session.id, OWNER_SCOPE, 3,
+        { groupId: group.id, permissionMode: 'ask', revision: session.revision! });
+      continueReading();
+      await waitForCompletedFinal(webContents, '继续读取完成。', started);
+      expect(readLibraryText).toHaveBeenCalledTimes(2);
+      expect(webContents.send.mock.calls.some(call => call[1]?.type === 'tool-approval-required')).toBe(false);
+      expect((await store.getSession(session.id, OWNER_SCOPE, 3))?.runs[0].libraryAccess?.mode).toBe('full-access');
+    } finally { continueReading(); await orchestrator.shutdown(); }
+  });
+
+  it.each(['ask', 'full-access'] as const)('keeps an active %s Run frozen when the session permission changes for the next Run', async mode => {
+    const fixture = computerTextFixture('ask');
+    let continueTurn!: () => void;
+    const pausedTurn = new Promise<void>(resolve => { continueTurn = resolve; });
+    const toolTurn = (id: string) => ({ content: '', toolCalls: [{ id, name: 'computer.setText', input: fixture.toolInput }] });
+    mocks.streamAgentProviderTurn.mockReset();
+    mocks.streamAgentProviderTurn.mockResolvedValueOnce(toolTurn('current-first'))
+      .mockImplementationOnce(async () => { await pausedTurn; return toolTurn('current-second'); })
+      .mockImplementationOnce(async (_connection, _input, onDelta) => {
+        onDelta('当前任务完成。'); return { content: '当前任务完成。', toolCalls: [] };
+      })
+      .mockResolvedValueOnce(toolTurn('next-first'))
+      .mockImplementationOnce(async (_connection, _input, onDelta) => {
+        onDelta('后续任务完成。'); return { content: '后续任务完成。', toolCalls: [] };
+      });
+    const webContents = sender();
+    const orchestrator = createOrchestrator({ getModelMetadata: async () => ({ supportsImages: true }) });
+    try {
+      const group = await orchestrator.saveGroup(OWNER_SCOPE, 3, { name: '权限组', access: 'read-write', directories: [] });
+      const started = await orchestrator.start(webContents as never, { ...request(), groupId: group.id, permissionMode: mode });
+      const approval = mode === 'ask' ? await pendingWindowApproval(webContents) : undefined;
+      if (!approval) await vi.waitFor(() => expect(mocks.streamAgentProviderTurn).toHaveBeenCalledTimes(2));
+      const before = (await store.getSession(started.sessionId, OWNER_SCOPE, 3))!;
+      const nextMode = mode === 'ask' ? 'full-access' : 'ask';
+      const updated = await orchestrator.organizeSession(started.sessionId, OWNER_SCOPE, 3,
+        { groupId: group.id, permissionMode: nextMode, revision: before.revision! });
+      expect(updated.permissionMode).toBe(nextMode);
+      const after = (await store.getSession(started.sessionId, OWNER_SCOPE, 3))!;
+      expect(after.runs).toEqual(before.runs);
+      expect(after.toolActivities).toEqual(before.toolActivities);
+      await expect(orchestrator.organizeSession(started.sessionId, OWNER_SCOPE, 3,
+        { groupId: null, permissionMode: nextMode, revision: updated.revision! })).rejects.toThrow('正在运行');
+      await expect(orchestrator.archiveSession(started.sessionId, OWNER_SCOPE, 3, true, updated.revision!)).rejects.toThrow('正在运行');
+      if (approval) {
+        expect(fixture.execute).not.toHaveBeenCalled();
+        await approveWindow(orchestrator, webContents, approval);
+      }
+      continueTurn();
+      if (mode === 'ask') {
+        const secondApproval = await pendingWindowApproval(webContents, 1);
+        expect(fixture.execute).toHaveBeenCalledOnce();
+        await approveWindow(orchestrator, webContents, secondApproval);
+      }
+      await waitForCompletedFinal(webContents, '当前任务完成。', started);
+      const previousApprovalCount = webContents.send.mock.calls.filter(call => call[1]?.type === 'tool-approval-required').length;
+      webContents.send.mockClear();
+      const next = await orchestrator.start(webContents as never, { ...request(), sessionId: started.sessionId });
+      if (nextMode === 'ask') await approveWindow(orchestrator, webContents, await pendingWindowApproval(webContents));
+      await waitForCompletedFinal(webContents, '后续任务完成。', next);
+      const final = (await store.getSession(started.sessionId, OWNER_SCOPE, 3))!;
+      expect(final.runs.map(run => run.libraryAccess?.mode)).toEqual([mode, nextMode]);
+      expect(fixture.execute).toHaveBeenCalledTimes(3);
+      expect(previousApprovalCount + webContents.send.mock.calls.filter(call => call[1]?.type === 'tool-approval-required').length)
+        .toBe(mode === 'ask' ? 2 : 1);
+    } finally { continueTurn(); await orchestrator.shutdown(); fixture.restore(); }
+  });
+
+  it('allows only permission changes while an existing session is starting and preserves its already read mode', async () => {
+    const fixture = computerTextFixture('ask');
+    let finishMetadata!: () => void;
+    const metadataReady = new Promise<void>(resolve => { finishMetadata = resolve; });
+    const getModelMetadata = vi.fn(async () => { await metadataReady; return { supportsImages: true }; });
+    const webContents = sender();
+    const orchestrator = createOrchestrator({ getModelMetadata });
+    try {
+      const group = await orchestrator.saveGroup(OWNER_SCOPE, 3, { name: '启动权限组', access: 'read', directories: [] });
+      const session = await store.createSession({ id: 'starting-permission', ownerScope: OWNER_SCOPE, appContext: request().appContext,
+        groupId: group.id, permissionMode: 'ask', title: '启动中', now: new Date().toISOString() });
+      const starting = orchestrator.start(webContents as never, { ...request(), sessionId: session.id });
+      await vi.waitFor(() => expect(getModelMetadata).toHaveBeenCalledOnce());
+      expect((await store.getSession(session.id, OWNER_SCOPE, 3))?.runs).toEqual([]);
+      const updated = await orchestrator.organizeSession(session.id, OWNER_SCOPE, 3,
+        { groupId: group.id, permissionMode: 'full-access', revision: session.revision! });
+      await expect(orchestrator.organizeSession(session.id, OWNER_SCOPE, 3,
+        { groupId: null, permissionMode: 'full-access', revision: updated.revision! })).rejects.toThrow('正在运行');
+      await expect(orchestrator.archiveSession(session.id, OWNER_SCOPE, 3, true, updated.revision!)).rejects.toThrow('正在运行');
+      await expect(orchestrator.deleteGroup(OWNER_SCOPE, 3, group.id, group.revision)).rejects.toThrow('正在运行');
+      finishMetadata();
+      const started = await starting;
+      const approval = await pendingWindowApproval(webContents);
+      expect((await store.getSession(session.id, OWNER_SCOPE, 3))?.runs[0].libraryAccess?.mode).toBe('ask');
+      expect(fixture.execute).not.toHaveBeenCalled();
+      await approveWindow(orchestrator, webContents, approval);
+      await waitForCompletedFinal(webContents, '文字工具验证完成。', started);
+      expect((await store.getSession(session.id, OWNER_SCOPE, 3))?.permissionMode).toBe('full-access');
+    } finally { finishMetadata(); await orchestrator.shutdown(); fixture.restore(); }
   });
 
   it('requires archive before purge and restores grouped history through the owner-bound API', async () => {
@@ -7582,14 +7740,16 @@ describe('Agent orchestrator', () => {
     expect(webContents.send).not.toHaveBeenCalled();
   });
 
-  it('bounds app context strings and selected node IDs in main', async () => {
+  it('bounds app context strings while preserving every valid unique selected node ID in main', async () => {
+    const selectedNodeIds = Array.from({ length: 1_000 }, (_, index) => index + 1);
     mocks.streamAgentProviderTurn.mockImplementationOnce(async (_connection, input, onDelta) => {
       expect(input.systemPrompt).not.toContain('directory-private-tail');
+      expect(input.systemPrompt).toContain(`"selectedNodeIds":${JSON.stringify(selectedNodeIds)}`);
       onDelta('已完成。');
       return { content: '已完成。', toolCalls: [] };
     });
     const webContents = sender();
-    const orchestrator = createOrchestrator();
+    const orchestrator = createOrchestrator({ contextBudget: { contextWindowTokens: 128_000 } });
     const createSession = vi.spyOn(store, 'createSession');
     const started = await orchestrator.start(webContents as never, {
       ...request(),
@@ -7601,7 +7761,7 @@ describe('Agent orchestrator', () => {
         },
         libraryId: 3,
         platform: 'darwin',
-        selectedNodeIds: Array.from({ length: 1_000 }, (_, index) => index + 1),
+        selectedNodeIds: [...selectedNodeIds, 1, 2, 0, -1, NaN, Infinity],
       },
     });
     await vi.waitFor(() => {
@@ -7614,7 +7774,28 @@ describe('Agent orchestrator', () => {
     const persistedContext = createSession.mock.calls[0]?.[0].appContext;
     expect(persistedContext?.activeToolId).toHaveLength(100);
     expect(persistedContext?.currentDirectory?.name).toHaveLength(500);
-    expect(persistedContext?.selectedNodeIds).toHaveLength(200);
+    expect(persistedContext?.selectedNodeIds).toEqual(selectedNodeIds);
+  });
+
+  it('rejects a selection that exceeds the real prompt budget before persistence or provider calls', async () => {
+    const webContents = sender();
+    const orchestrator = createOrchestrator();
+    const createSession = vi.spyOn(store, 'createSession');
+    const createRun = vi.spyOn(store, 'createRun');
+
+    await expect(orchestrator.start(webContents as never, {
+      ...request(),
+      appContext: {
+        ...request().appContext,
+        selectedNodeIds: Array.from({ length: 50_000 }, (_, index) => index + 1),
+      },
+    })).rejects.toThrow('固定输入和安全预留超过模型上下文窗口');
+
+    expect(createSession).not.toHaveBeenCalled();
+    expect(createRun).not.toHaveBeenCalled();
+    expect(mocks.streamAgentProviderTurn).not.toHaveBeenCalled();
+    expect((await store.listSessions(OWNER_SCOPE, 3)).total).toBe(0);
+    expect(webContents.send).not.toHaveBeenCalled();
   });
 
   it('sanitizes user-controlled names in approval previews before persistence or events', async () => {

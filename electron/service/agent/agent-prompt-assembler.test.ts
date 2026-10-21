@@ -259,6 +259,45 @@ describe('Agent prompt assembler', () => {
     expect(toolPrompt).toContain('"currentDirectoryId":8');
   });
 
+  it('preserves the complete selection and distinguishes bounded details in both provider modes', () => {
+    const selectedNodeIds = Array.from({ length: 1_000 }, (_, index) => index + 1);
+    const context = { libraryId: 3, platform: 'darwin' as const, selectedNodeIds };
+    const perception = {
+      collectedAt: '2026-10-21T00:00:00.000Z',
+      selectedNodes: selectedNodeIds.slice(0, 20).map(id => ({ id, name: `private-file-${id}`, type: 'file' as const })),
+    };
+
+    for (const prompt of [
+      buildAgentSystemPrompt(context, perception, ['file.stat']),
+      buildAgentFallbackSystemPrompt(context, perception),
+    ]) {
+      expect(prompt).toContain(`"selectedNodeIds":${JSON.stringify(selectedNodeIds)}`);
+      expect(prompt).toContain('perception.selectedNodes 仅包含部分选中节点详情');
+      expect(prompt).toContain('appContext.selectedNodeIds');
+      expect(prompt).toContain('缺少详情不表示节点未被选中');
+      expect(prompt).toContain('选中本身不授予访问权限');
+      expect(prompt).not.toContain('private-file-');
+    }
+  });
+
+  it.each([
+    { detailIds: [], incomplete: true },
+    { detailIds: [8, 88], incomplete: true },
+    { detailIds: [9, 8], incomplete: false },
+  ])('detects incomplete selection details by ID coverage: $detailIds', ({ detailIds, incomplete }) => {
+    const context = { libraryId: 3, platform: 'darwin' as const, selectedNodeIds: [8, 9] };
+    const perception = {
+      collectedAt: '2026-10-21T00:00:00.000Z',
+      selectedNodes: detailIds.map(id => ({ id, name: `file-${id}`, type: 'file' as const })),
+    };
+    for (const prompt of [
+      buildAgentSystemPrompt(context, perception, ['file.stat']),
+      buildAgentFallbackSystemPrompt(context, perception),
+    ]) {
+      expect(prompt.includes('perception.selectedNodes 仅包含部分选中节点详情')).toBe(incomplete);
+    }
+  });
+
   it('projects fallback perception as scrubbed low-authority messages', () => {
     const messages = buildAgentFallbackContextMessages({
       collectedAt: '2026-08-23T00:00:00.000Z',

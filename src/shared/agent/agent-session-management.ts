@@ -1,6 +1,6 @@
 import type { AgentSessionSummary } from './agent.types';
 
-export type AgentSessionPermissionMode = 'ask' | 'group' | 'full-access';
+export type AgentSessionPermissionMode = 'ask' | 'full-access';
 export interface AgentGroupDirectory { nodeId: number; name: string }
 export interface AgentSessionGroup {
   id: string;
@@ -35,7 +35,7 @@ export interface AgentSessionOrganizationInput {
 }
 export interface AgentLibraryAccessSnapshot {
   version: 1;
-  mode: AgentSessionPermissionMode;
+  mode: AgentSessionPermissionMode | 'group';
   groupId: string | null;
   policyRevision: number;
   access: 'read' | 'read-write';
@@ -63,7 +63,7 @@ export function normalizeAgentSessionGroupInput(value: AgentSessionGroupInput): 
 
 export function normalizeAgentSessionPermissionMode(value: unknown): AgentSessionPermissionMode {
   if (value !== 'ask' && value !== 'group' && value !== 'full-access') throw new Error('会话权限模式无效');
-  return value;
+  return value === 'group' ? 'ask' : value;
 }
 
 export function pickAgentSessionSummary(value: AgentSessionSummary): AgentSessionSummary {
