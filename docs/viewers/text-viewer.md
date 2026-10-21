@@ -2,7 +2,7 @@
 
 底栏保存、另存为、下载使用 Lucide 的 Save、FilePlus2、Download 细线图标，统一 1.25px 描边；保留 28px 点击区、透明常态和悬停中圆角背景，不修改操作行为。
 
-更新时间：2026-08-25
+更新时间：2026-10-21
 适用范围：`src/features/file-viewer/components/text-viewer/` 下的文本预览、编辑、保存和另存为链路。
 
 ## 1. 概述
@@ -13,7 +13,7 @@
 
 - 按文件名扩展名选择基础语法高亮
 - 加载后维护编辑内容和 dirty 状态
-- 使用公共 Viewer Session Registry 恢复选区、顶部行、滚动、字号和换行
+- 使用公共 Viewer Session Registry 恢复选区、顶部行、滚动、字号、缩进宽度和换行
 - 使用 IndexedDB DraftStore 持久化未保存正文，并显式处理恢复/放弃与 revision 冲突
 - 支持编辑器内快捷键字号缩放、自动换行、保存、另存为和下载
 - 保存先核对读取时的正文 SHA-256，再通过带 expectedStorageKey 的条件 API 更新内容，版本冲突保留草稿并刷新远端资源；旧后端不支持条件端点时不退回无条件覆盖
@@ -66,7 +66,7 @@ Markdown 默认进入渲染模式；底部使用单个图标按钮在渲染与 C
 
 `text-viewer` 收到 `url + reloadToken` 后通过 `readTextResource` 复用宿主 `fetchBinary` 读取原始字节，再一次性按 UTF-8 解码；保存前的 revision 核对使用同一路径。普通 `http:fetch` 会自动解析 JSON，不能用于文件正文，否则对象会变成 `[object Object]`、数组和大整数会失真，原有缩进与换行也会丢失。文本读取保留 BOM，遇到截断或无效 UTF-8 则失败，不把残缺内容当作可保存基线。签名 URL 不作为 session 或 draft identity；稳定身份来自账号 scope、`libraryId` 和 `nodeId`。
 
-外部写入通过 FileViewerProvider 更新现存 tab 的链接及 reloadToken，不创建或切换 tab。刷新前必须先 flush 当前内存草稿；失败则保留缓冲区并停止刷新。成功后按新正文 revision 与已保存草稿比较，复用“恢复草稿 / 使用最新文件”的冲突交互，不静默覆盖草稿。
+外部写入通过 FileViewerProvider 更新现存 tab 的链接及 reloadToken，不创建或切换 tab。刷新前必须先 flush 当前内存草稿；失败则保留缓冲区并停止刷新。成功后按新正文 revision 与已保存草稿比较；无本地修改时直接同步最新正文，有真实草稿时在对应文档内显示恢复条，不弹全局恢复 Modal。恢复条保留“恢复草稿 / 使用最新文件”选择，支持只读切换查看两个版本，以及下载或另存为当前查看版本，不阻塞其他文档或 Agent。选择恢复前不允许编辑或保存覆盖；选择恢复也不会自动提交，只有用户再次保存才更新文件。
 
 节点详情暂时没有可靠服务端内容版本时，首次加载的原始正文会计算 SHA-256 作为 draft baseline。存在 draft 时不能静默替换正文：baseline 相同仍要求用户选择恢复或使用当前文件，baseline 不同则显示内容冲突提示。draft 与远端正文完全相同时视为保存后清理中断的残留，可以直接删除。
 
@@ -85,7 +85,7 @@ CodeMirror 的 `basicSetup` 使用模块级稳定配置对象。普通 active ta
 
 两者必须保持同步。只更新 ref 会导致 CodeMirror 仍受旧 state 控制，保存或重渲染后用户看到的内容回退。
 
-每次真实输入都会把 draft 标记为尚未安全落盘，并在 700ms 后写 IndexedDB；tab 失活、组件卸载和 `pagehide` 会立即尽力 flush。写入失败时 dirty 状态保持，adapter 继续投影 `dirty` pin reason，并提示用户及时保存，不能把失败当成已持久化。
+dirty 以当前正文是否等于最近读取或保存成功的基线正文判断；Undo 回基线会恢复 clean，并清除已落盘的旧草稿。CodeMirror 的 `doc.toString()` 将 CRLF / CR 规范成 LF，dirty 基线预先使用相同表示，避免撤销回原文后出现假草稿；恢复读取时仅换行表示不同的残留草稿同样可清理。原始正文 SHA-256 仍按读取结果计算，clean 的普通保存入口直接返回，避免快捷键无意义改写原文件；这不新增编辑后保留原换行符的能力。每次真实输入都会把 draft 标记为尚未安全落盘，并在 700ms 后更新 IndexedDB；tab 失活、组件卸载和 `pagehide` 会立即尽力 flush。写入失败时 dirty 状态保持，adapter 继续投影 `dirty` pin reason，并提示用户及时保存，不能把失败当成已持久化。异步 flush 会追上等待期间的新输入，只有当前正文版本真正落盘才解除 pin；旧资源 flush 使用原文档身份，不使用新 props 的资源身份。初次草稿读取及未选择的恢复状态禁止 clean flush 删除存量草稿，查看版本也不会重写存量草稿。
 
 ### 3.3 保存
 
@@ -101,7 +101,7 @@ CodeMirror 的 `basicSetup` 使用模块级稳定配置对象。普通 active ta
 
 保存时不应该重置当前 viewer 的局部阅读状态，例如选区、滚动、字号和自动换行。关闭再打开仍可在当前 auth runtime 内从 Warm snapshot 恢复这些状态；一次保存动作不能把正在编辑的界面当成重新进入。
 
-保存成功后清除已提交 draft，并以已保存正文的新 SHA-256 作为后续编辑 baseline。如果保存请求进行期间用户继续输入，成功回调不能把编辑器回退到请求开始时的正文；新输入继续保持 dirty，并立即写成基于新 baseline 的 draft。
+保存成功后清除已提交 draft，并以已保存正文的新 SHA-256 作为后续编辑 baseline。如果保存请求进行期间用户继续输入，成功回调不能把编辑器回退到请求开始时的正文；新输入继续按已提交正文重新判断 dirty，并立即写成基于新 baseline 的 draft；即使请求期间 Undo 回请求前的旧基线，也仍保留为相对于已提交正文的未保存修改。返回已提交正文则恢复 clean。旧资源或旧加载代的迟到保存回执不改写当前文档的基线。
 
 保存后的签名 URL 只能通过 `FileViewerContext.updateFileTabResource(tabId, ...)` 静默更新发起保存的现存 tab。该入口不改变 `activeTabId`，目标 tab 已关闭或 node identity 不匹配时直接 no-op；旧保存回调不能调用 `setFileUrl` 重新激活或创建 tab。保存期间后续编辑的 draft flush 返回失败时，只能提示“文件已保存但草稿尚未写入”，不能声称修改已经保留。
 
@@ -111,7 +111,7 @@ CodeMirror 的 `basicSetup` 使用模块级稳定配置对象。普通 active ta
 
 另存为继续在当前文件的资料库目录创建新节点。点击按钮或在编辑器聚焦时按 `Cmd/Ctrl+Shift+S` 后，先打开紧凑名称弹窗；确认后使用 Electron 暂存当前编辑正文，并以 `conflictPolicy: 'auto_rename'` 上传，名称冲突时由后端创建自动重命名副本。
 
-保存入口在异步请求前捕获正文快照，并以同步 in-flight 门禁防止同一事件周期重复提交。普通保存与另存为共享门禁；下载独立防重入。正文加载中、加载失败、草稿待恢复或viewer非活跃时不能提交；另存为弹窗在切换资源/活跃状态时关闭，每个实例使用独立输入框ID。旧资源保存的迟到回执不改写当前资源的草稿/dirty状态。
+保存入口在异步请求前捕获正文快照，并以同步 in-flight 门禁防止同一事件周期重复提交。普通保存与另存为共享门禁；下载独立防重入。正文加载中、加载失败或 viewer 非活跃时不能提交；草稿待恢复时可导出或另存为当前只读查看的版本，普通保存须先明确恢复或放弃；另存为弹窗在切换资源/活跃状态时关闭，每个实例使用独立输入框ID。旧资源保存的迟到回执不改写当前资源的草稿/dirty状态。
 
 2026-09-09 补充组件回归：异步元数据等待期间切换文件仍保存原正文，同周期双提交只上传一次，非活跃弹窗关闭，加载期间禁止另存为/下载。win（ID 3）的合成文本已做暗色状态栏和名称弹窗只读检查，未在本轮执行真实上传或下载写盘。
 
@@ -127,7 +127,7 @@ CodeMirror 的实际横纵滚动容器是 `.cm-scroller`。Text Viewer 在该容
 
 - 底部只显示当前字号数字，不提供加减按钮。桌面端的 `Cmd/Ctrl +`、`Cmd/Ctrl -` 和 `Cmd/Ctrl 0` 由 Electron main 固定应用壳缩放后，通过 `onViewerZoomShortcut` bridge 投影给当前活动 Text Viewer；非 Electron 预览环境保留 CodeMirror keymap 作为 fallback。
 - Text Viewer 必须用 `active` 状态保护 zoom bridge 回调，避免同一库中后台保留的文本 tab 同步改变字号。快捷键只改变活动文档字号，不改变应用页面缩放。
-- 状态栏在操作按钮前显示当前光标 `行:列`、`LF / CRLF / CR`、`UTF-8` 和字号；不显示翻译入口或制表符控制。光标只在 CodeMirror 选区或正文变化时更新，换行符只在加载 / 草稿恢复时扫描正文，普通输入不能反复全量扫描大文本。
+- 状态栏在操作按钮前显示当前光标 `行:列`、`缩进 4 / 缩进 2`、`LF / CRLF / CR`、`UTF-8` 和字号；不显示翻译入口。缩进默认 4 空格，点击在 4 与 2 之间循环切换，同时配置 CodeMirror 的缩进单位与 Tab 显示宽度，影响后续 Tab、自动缩进及选区缩进，不改写已有正文或改变 dirty 状态。缩进按钮复用共享 hover、禁用和键盘焦点样式，保留 28px 热区。光标只在 CodeMirror 选区或正文变化时更新，换行符只在加载 / 草稿恢复时扫描正文，普通输入不能反复全量扫描大文本。
 - 不在底部提供自动换行按钮；已有 session 中的自动换行状态仍按原 schema 恢复，避免局部 UI 调整破坏历史现场。
 - 保存、另存为和下载使用固定 `28px * 28px` 无背景图标按钮，分别采用保存、新增副本和下载语义图标；常态使用弱文本色，悬停显示中圆角中性背景，不显示边框、位移或外投影。
 - 三个图标提示统一使用浏览器原生 `title`，不再套 Semi Tooltip；可访问名称继续保留中文操作名。
@@ -137,7 +137,7 @@ CodeMirror 的实际横纵滚动容器是 `.cm-scroller`。Text Viewer 在该容
 
 Text 的两类恢复数据必须分开：
 
-- Warm snapshot 只保存 `selectionAnchor`、`selectionHead`、`topLine`、行内偏移、横纵滚动、字号和换行，不保存正文。
+- Warm snapshot 只保存 `selectionAnchor`、`selectionHead`、`topLine`、行内偏移、横纵滚动、字号、`indentSize` 和换行，不保存正文。缩进宽度按文件恢复；旧 snapshot 缺少该字段或值无效时使用 4，保持 schema 1 兼容。
 - dirty content 只写 `ViewerDraftStore`。DraftStore 每个 resource slot 保留最新一份草稿，draft key 内保留其内容 revision，用于判断重新打开时是否冲突。
 
 DraftStore 使用 IndexedDB，默认单草稿上限 5 MiB、单账号上限 50 MiB、保留 30 天。普通关闭 tab、资料库释放、退出登录和异常退出采用 hot-exit 语义，只卸载运行实例，不删除已落盘 draft；同一账号重新登录仍能恢复，其他账号因 key 隔离无法读取。用户明确选择“使用最新文件”、保存成功或确认删除节点后才清除对应 draft。软删除、彻底删除和清空回收站统一通过 `file-explorer/services/node-deletion.ts` 收口；只有后端删除成功后才清 draft 并提升资源写入 generation，使旧 Text 组件的延迟 cleanup 不能把已删除 draft 写回。
@@ -192,11 +192,13 @@ CodeMirror 相关依赖必须显式写在 `package.json`，不能依赖本地 `n
 - 打开 `.ts` / `.md` / `.json` / `.py` 中至少一种官方 parser 文件，确认有高亮且可编辑。
 - 打开 `.sh` / `Dockerfile` / `.toml` / `.diff` 中至少一种 legacy parser 文件，确认有高亮且可编辑。
 - 打开 `.txt` / `.log` 等纯文本文件，确认不会白屏且仍可保存。
+- 默认显示“缩进 4”；连续点击切换 4 → 2 → 4，Tab、回车自动缩进与选区缩进同步生效，切换本身不改写正文或标记 dirty；切 tab、关闭重开后按文件恢复选定宽度，其他文本文件保持独立。
 - 编辑器聚焦时验证 `Cmd/Ctrl +`、`Cmd/Ctrl -`、`Cmd/Ctrl 0` 只改变文档字号，应用其他区域尺寸不变。
 - `Cmd/Ctrl+S` 保存后 dirty 标记清除，目录树刷新，当前 tab 不丢失。
 - 在长文本中设置光标/选区、滚到中段并调整字号/换行，切 tab、切工作区及真卸载后恢复现场。
-- 编辑后等待 debounce，再关闭 tab、切资料库或重启应用；重新打开必须显示恢复选择，选择恢复后正文与 dirty 状态正确。
-- 修改远端正文后重新打开旧 draft，必须显示冲突提示；选择使用最新文件会清草稿，选择恢复不会静默保存覆盖。
+- 编辑后等待 debounce，再关闭 tab、切资料库或重启应用；重新打开必须在文档内显示恢复选择，选择恢复后正文与 dirty 状态正确；后台文档不能出现全局恢复弹框。
+- 修改远端正文后重新打开旧 draft，必须在文档内显示冲突提示；查看两个版本与导出不改写草稿，选择使用最新文件会清草稿，选择恢复不会静默保存覆盖。
+- 分别用 LF / CRLF / CR 正文输入后 Undo 回基线，保存按钮禁用并清理旧 draft，普通保存快捷键不改写 clean 文件；初次 draft 读取未完成时卸载不能删除存量 draft。
 - 保存请求期间继续输入，保存成功后新输入仍保留为 dirty draft，编辑器正文不回退。
 - 保存请求期间切到其他 tab 时不被强制切回；关闭原 tab 时保存回调不会重新创建它。
 - 模拟 IndexedDB 容量/不可用错误时显示持久化失败，dirty 状态不消失。
@@ -208,4 +210,6 @@ CodeMirror 相关依赖必须显式写在 `package.json`，不能依赖本地 `n
 
 常规代码变更仍按 `docs/frontend-validation-matrix.md` 执行 `npm run lint`、`npm test` 和 `npm run build`。
 
-当前真实样本已在 Electron 的 `win` 测试库完成跨应用重启恢复、revision 冲突两种选择、保存后草稿清理、保存期间继续编辑、保存期间切换 tab 和关闭原 tab 验收。IndexedDB 容量/不可用故障仍由单元测试与错误分支覆盖，不作为日常手工样本前置条件。
+早期真实样本已在 Electron 的 `win` 测试库完成跨应用重启恢复、revision 冲突两种选择、保存后草稿清理、保存期间继续编辑、保存期间切换 tab 和关闭原 tab 验收。IndexedDB 容量/不可用故障仍由单元测试与错误分支覆盖，不作为日常手工样本前置条件。
+
+2026-10-21：恢复条、Undo clean、异步 flush 与保存中继续输入/Undo 的组件回归已通过；本轮新恢复条的 Electron 亮暗主题与后台 Agent 写入实机路径尚待验证，不沿用早期 Modal 验收结论。

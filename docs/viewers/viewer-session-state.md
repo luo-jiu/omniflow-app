@@ -54,7 +54,7 @@ Viewer Session 治理需要同时解决以下问题：
 | Audio | 有；播放由全局音频服务持有 | 无独立 UI 快照 | 无 | 播放资源和 viewer UI 生命周期未统一分类 |
 | Video | 有；视频元素由全局服务保活 | 公共 registry：播放进度投影、倍速、字幕开关/来源/样式、操作台 | `viewMeta` 播放进度 | 媒体 DOM 和 URL 始终由服务层拥有，不进入 snapshot |
 | PDF | 有 | 公共 registry：页码、缩放、滚动、比例、页锚点 | 设备 Cold | adapter/codec 已接入并通过 80 页 Electron 样本验收；跨重启自动化链路已启用，真实重启样本待验收 |
-| Text | 有 | 公共 registry：选区、顶部行、滚动、字号、换行 | IndexedDB dirty draft | adapter/codec 与 DraftStore 已接入并通过 Electron 草稿恢复、冲突和保存并发验收；后端稳定 revision 尚未提供 |
+| Text | 有 | 公共 registry：选区、顶部行、滚动、字号、缩进宽度、换行 | IndexedDB dirty draft | adapter/codec 与 DraftStore 已接入并通过 Electron 草稿恢复、冲突和保存并发验收；后端稳定 revision 尚未提供 |
 | Comic | 有 | 公共 registry：页锚点、滚动降级、阅读/单双页模式、缩放、页间距、翻页变换 | `viewMeta` 阅读进度 | 页列表和临时图片链接重新加载 |
 | Gallery | 有 | 公共 registry：详情节点、网格锚点 / 比例、图片变换 | 无 | adapter/codec 已接入；临时链接和 HEIC 预览不进入 snapshot |
 | ASMR | 有 | 公共 registry：稳定路径、选择、列表锚点/比例、播放节点和队列父目录 | `viewMeta` 仅承担集合元信息 | 目录列表、封面和临时音频链接重新加载；播放 owner 仍是全局音频服务 |

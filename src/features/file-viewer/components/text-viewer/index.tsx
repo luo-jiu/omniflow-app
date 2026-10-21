@@ -7,7 +7,8 @@ import { Code2, Eye, Save, FilePlus2, Download } from 'lucide-react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { keymap, EditorView, type ViewUpdate } from '@codemirror/view';
-import type { Extension } from '@codemirror/state';
+import { EditorState, type Extension } from '@codemirror/state';
+import { indentUnit } from '@codemirror/language';
 import { useTheme } from '@/hooks/useTheme';
 import {
   fetchNodeDetailById,
@@ -38,9 +39,11 @@ import { resolveTextEditorLanguage } from './language';
 import { saveTextContentToDesktop } from './text-viewer-local-save';
 import {
   createTextContentRevision,
+  DEFAULT_TEXT_INDENT_SIZE,
   parseTextViewerSessionSnapshot,
   TEXT_VIEWER_SESSION_ESTIMATED_BYTES,
   TEXT_VIEWER_SESSION_SCHEMA_VERSION,
+  type TextIndentSize,
   type TextViewerSessionSnapshot,
 } from './text-viewer-session';
 import { resolveTextSaveFeedback, saveTextWithRevision, TextFileConflictError } from './text-viewer-save';
@@ -111,6 +114,11 @@ function resolveLineEnding(content: string): 'CRLF' | 'CR' | 'LF' {
   return 'LF';
 }
 
+function normalizeEditorContent(content: string): string {
+  // CodeMirror's onChange uses doc.toString(), which joins lines with LF.
+  return content.replace(/\r\n?/gu, '\n');
+}
+
 function readCursorPosition(view: EditorView): CursorPosition {
   const head = view.state.selection.main.head;
   const line = view.state.doc.lineAt(head);
@@ -136,8 +144,11 @@ const TextViewer: React.FC<TextViewerProps> = ({
   const [content, setContent] = useState<string | null>(null);
   const [cursorPosition, setCursorPosition] = useState<CursorPosition>({ column: 1, line: 1 });
   const [draftRecovery, setDraftRecovery] = useState<DraftRecoveryState | null>(null);
+  const [draftPreview, setDraftPreview] = useState(false);
+  const [isDiscardingDraft, setIsDiscardingDraft] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [fontSize, setFontSize] = useState(DEFAULT_FONT_SIZE);
+  const [indentSize, setIndentSize] = useState<TextIndentSize>(DEFAULT_TEXT_INDENT_SIZE);
   const [isDirty, setIsDirty] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isDownloading, setIsDownloading] = useState(false);
@@ -151,6 +162,12 @@ const TextViewer: React.FC<TextViewerProps> = ({
   const [wordWrap, setWordWrap] = useState(false);
   const [markdownSourceMode, setMarkdownSourceMode] = useState(false);
   const contentRef = useRef('');
+  const baseEditorContentRef = useRef('');
+  const bufferIdentityRef = useRef<ViewerResourceKey | null>(null);
+  const bufferLoadGenerationRef = useRef(0);
+  const draftRecoveryRef = useRef<DraftRecoveryState | null>(null);
+  const draftHydratingRef = useRef(false);
+  const discardInFlightRef = useRef(false);
   const draftErrorShownRef = useRef(false);
   const draftKeyRef = useRef<ViewerDraftKey | null>(null);
   const draftPersistedRef = useRef(true);
@@ -159,6 +176,7 @@ const TextViewer: React.FC<TextViewerProps> = ({
   const editGenerationRef = useRef(0);
   const editorViewRef = useRef<EditorView | null>(null);
   const fontSizeRef = useRef(DEFAULT_FONT_SIZE);
+  const indentSizeRef = useRef<TextIndentSize>(DEFAULT_TEXT_INDENT_SIZE);
   const isAliveRef = useRef(true);
   const isDirtyRef = useRef(false);
   const latestSessionSnapshotRef = useRef<TextViewerSessionSnapshot | null>(null);
@@ -173,6 +191,7 @@ const TextViewer: React.FC<TextViewerProps> = ({
   const sessionCaptureFrameRef = useRef<number | null>(null);
   const wordWrapRef = useRef(false);
   fontSizeRef.current = fontSize;
+  indentSizeRef.current = indentSize;
   wordWrapRef.current = wordWrap;
 
   const resourceIdentity = useMemo<ViewerResourceKey | null>(() => {
@@ -186,7 +205,7 @@ const TextViewer: React.FC<TextViewerProps> = ({
   }, [accountScope, libraryId, nodeId]);
   const resourceIdentityRef = useRef(resourceIdentity);
   resourceIdentityRef.current = resourceIdentity;
-  const canUseEditorContent = active && content !== null && !isLoading && !errorMessage && draftRecovery === null;
+  const canUseEditorContent = active && content !== null && !isLoading && !errorMessage;
   useEffect(() => { setSaveAsVisible(false); }, [active, resourceIdentity]);
   const isMarkdown = /\.(md|markdown)$/iu.test(String(fileName || ''));
   useEffect(() => { setMarkdownSourceMode(false); }, [resourceIdentity, fileName]);
@@ -217,6 +236,12 @@ const TextViewer: React.FC<TextViewerProps> = ({
     setDirtyState(dirty);
   }, [setDirtyState]);
 
+  const updateDraftRecovery = useCallback((recovery: DraftRecoveryState | null) => {
+    draftRecoveryRef.current = recovery;
+    setDraftRecovery(recovery);
+    setDraftPreview(false);
+  }, []);
+
   const clearDraftTimer = useCallback(() => {
     if (draftTimerRef.current == null) return;
     clearTimeout(draftTimerRef.current);
@@ -234,30 +259,44 @@ const TextViewer: React.FC<TextViewerProps> = ({
 
   const flushDraft = useCallback(async () => {
     clearDraftTimer();
-    if (!isDirtyRef.current) return true;
-    const identity = resourceIdentityRef.current;
-    const draftKey = draftKeyRef.current;
-    if (!identity || !draftKey) {
+    // An unresolved recovery owns the persisted slot. Previewing either version
+    // must never replace or delete it, including inactive/unmount flushes.
+    if (draftRecoveryRef.current || draftHydratingRef.current) return true;
+    const identity = bufferIdentityRef.current;
+    if (!identity) {
+      if (!isDirtyRef.current) return true;
       reportDraftFailure(new Error('Text draft requires a stable resource identity and revision'));
       return false;
     }
-    const generation = editGenerationRef.current;
-    const nextContent = contentRef.current;
-    try {
-      await viewerDraftStore.writeDraft(draftKey, nextContent, {
-        writeGeneration: draftWriteGenerationRef.current,
-      });
-      if (generation === editGenerationRef.current) {
+    for (;;) {
+      const draftKey = draftKeyRef.current;
+      const generation = editGenerationRef.current;
+      const dirty = isDirtyRef.current;
+      if (dirty && !draftKey) {
+        reportDraftFailure(new Error('Text draft requires a stable resource identity and revision'));
+        return false;
+      }
+      try {
+        if (dirty) {
+          await viewerDraftStore.writeDraft(draftKey!, contentRef.current, {
+            writeGeneration: draftWriteGenerationRef.current,
+          });
+        } else {
+          // Undo to the saved baseline also removes any older persisted draft.
+          await viewerDraftStore.deleteDraft(identity);
+        }
+        if (bufferIdentityRef.current !== identity || draftRecoveryRef.current) return true;
+        if (generation !== editGenerationRef.current || draftKeyRef.current !== draftKey) continue;
         setDraftPersistedState(true);
         draftErrorShownRef.current = false;
-      }
-      return true;
-    } catch (error) {
-      if (error instanceof ViewerDraftStoreError && error.code === 'draft-invalidated') {
         return true;
+      } catch (error) {
+        if (error instanceof ViewerDraftStoreError && error.code === 'draft-invalidated') return true;
+        if (bufferIdentityRef.current === identity && generation === editGenerationRef.current) {
+          reportDraftFailure(error);
+        }
+        return false;
       }
-      reportDraftFailure(error);
-      return false;
     }
   }, [clearDraftTimer, reportDraftFailure, setDraftPersistedState]);
 
@@ -273,6 +312,7 @@ const TextViewer: React.FC<TextViewerProps> = ({
     const view = editorViewRef.current;
     let nextSnapshot = latestSessionSnapshotRef.current ?? {
       fontSize: fontSizeRef.current,
+      indentSize: indentSizeRef.current,
       wordWrap: wordWrapRef.current,
       selectionAnchor: 0,
       selectionHead: 0,
@@ -296,6 +336,7 @@ const TextViewer: React.FC<TextViewerProps> = ({
       }
       nextSnapshot = {
         fontSize: fontSizeRef.current,
+        indentSize: indentSizeRef.current,
         wordWrap: wordWrapRef.current,
         selectionAnchor: selection.anchor,
         selectionHead: selection.head,
@@ -308,6 +349,7 @@ const TextViewer: React.FC<TextViewerProps> = ({
       nextSnapshot = {
         ...nextSnapshot,
         fontSize: fontSizeRef.current,
+        indentSize: indentSizeRef.current,
         wordWrap: wordWrapRef.current,
       };
     }
@@ -354,8 +396,10 @@ const TextViewer: React.FC<TextViewerProps> = ({
     pendingSessionSnapshotRef.current = normalized;
     pendingSessionHydrationRef.current = true;
     fontSizeRef.current = normalized.fontSize;
+    indentSizeRef.current = normalized.indentSize;
     wordWrapRef.current = normalized.wordWrap;
     setFontSize(normalized.fontSize);
+    setIndentSize(normalized.indentSize);
     setWordWrap(normalized.wordWrap);
     applySessionSnapshotToEditor(normalized);
   }, [applySessionSnapshotToEditor]);
@@ -425,16 +469,16 @@ const TextViewer: React.FC<TextViewerProps> = ({
     let cancelled = false;
     setIsLoading(true);
     setErrorMessage(null);
-    setDraftRecovery(null);
 
     (async () => {
       try {
         // Preserve the latest in-memory draft before an external reload replaces the buffer.
-        if (isDirtyRef.current && !(await flushDraft())) {
+        if (bufferIdentityRef.current && !(await flushDraft())) {
           if (!cancelled) Toast.warning('草稿暂时无法保存，已保留当前编辑内容');
           return;
         }
         if (cancelled) return;
+        draftHydratingRef.current = true;
         const remoteContent = url.startsWith('data:text/plain;')
           ? new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(
             Uint8Array.from(atob(url.slice(url.indexOf(',') + 1)), char => char.charCodeAt(0)),
@@ -451,6 +495,11 @@ const TextViewer: React.FC<TextViewerProps> = ({
           : (contentHashRevision ?? providedRevision);
         if (cancelled) return;
         baseContentRevisionRef.current = contentHashRevision;
+        baseEditorContentRef.current = normalizeEditorContent(remoteContent);
+        bufferIdentityRef.current = resourceIdentity;
+        bufferLoadGenerationRef.current += 1;
+        editGenerationRef.current += 1;
+        updateDraftRecovery(null);
         loadedUrlRef.current = loadKey;
         const currentDraftKey = resourceIdentity && remoteRevision
           ? createViewerDraftKey(resourceIdentity, remoteRevision)
@@ -467,12 +516,12 @@ const TextViewer: React.FC<TextViewerProps> = ({
         try {
           const draft = await viewerDraftStore.readLatest(resourceIdentity);
           if (cancelled || !draft) return;
-          if (draft.content === remoteContent) {
+          if (normalizeEditorContent(draft.content) === baseEditorContentRef.current) {
             await viewerDraftStore.deleteDraft(resourceIdentity);
             return;
           }
           if (cancelled) return;
-          setDraftRecovery({
+          updateDraftRecovery({
             conflict: draft.key.contentRevision !== remoteRevision,
             draft,
             remoteContent,
@@ -488,7 +537,10 @@ const TextViewer: React.FC<TextViewerProps> = ({
           setErrorMessage('文件加载失败');
         }
       } finally {
-        if (!cancelled) setIsLoading(false);
+        if (!cancelled) {
+          draftHydratingRef.current = false;
+          setIsLoading(false);
+        }
       }
     })();
 
@@ -502,6 +554,7 @@ const TextViewer: React.FC<TextViewerProps> = ({
     resourceIdentity,
     setDraftPersistedState,
     setEditorContent,
+    updateDraftRecovery,
     url,
   ]);
 
@@ -510,6 +563,7 @@ const TextViewer: React.FC<TextViewerProps> = ({
       const expected = pendingSessionSnapshotRef.current;
       if (expected && (
         clampFontSize(fontSize) !== expected.fontSize
+        || indentSize !== expected.indentSize
         || wordWrap !== expected.wordWrap
       )) {
         return;
@@ -517,7 +571,7 @@ const TextViewer: React.FC<TextViewerProps> = ({
       pendingSessionHydrationRef.current = false;
     }
     captureSessionSnapshot();
-  }, [captureSessionSnapshot, fontSize, wordWrap]);
+  }, [captureSessionSnapshot, fontSize, indentSize, wordWrap]);
 
   useEffect(() => {
     if (!active) void flushDraft();
@@ -545,13 +599,14 @@ const TextViewer: React.FC<TextViewerProps> = ({
   }, [clearDraftTimer, flushDraft]);
 
   const handleSave = useCallback(async () => {
-    if (!nodeId || !canUseEditorContent || isSaving || saveInFlightRef.current) return;
+    if (!nodeId || !canUseEditorContent || !isDirtyRef.current || draftRecoveryRef.current || isSaving || saveInFlightRef.current) return;
     saveInFlightRef.current = true;
     setIsSaving(true);
     clearDraftTimer();
     const savedContent = contentRef.current;
-    const saveGeneration = editGenerationRef.current;
+    const savedEditorContent = normalizeEditorContent(savedContent);
     const saveIdentity = resourceIdentityRef.current;
+    const saveLoadGeneration = bufferLoadGenerationRef.current;
     try {
       let savedRevision: string | null = null;
       try {
@@ -562,16 +617,25 @@ const TextViewer: React.FC<TextViewerProps> = ({
       const { detail, savedNode } = await saveTextWithRevision({
         nodeId, libraryId: Number(libraryId), content: savedContent, baseRevision: baseContentRevisionRef.current,
         assertCurrent: () => {
-          if (!isAliveRef.current || resourceIdentityRef.current !== saveIdentity) throw new Error('文件或账号环境已变化，未继续保存');
+          if (!isAliveRef.current || resourceIdentityRef.current !== saveIdentity
+            || bufferLoadGenerationRef.current !== saveLoadGeneration) throw new Error('文件或账号环境已变化，未继续保存');
         },
       });
       const savedNodeId = Number(savedNode?.id || nodeId);
-      if (!isAliveRef.current || resourceIdentityRef.current !== saveIdentity) {
+      if (!isAliveRef.current || resourceIdentityRef.current !== saveIdentity
+        || bufferLoadGenerationRef.current !== saveLoadGeneration) {
         refreshDirectoryInTree(detail.parentId);
         return;
       }
       const identity = saveIdentity;
       baseContentRevisionRef.current = savedRevision;
+      baseEditorContentRef.current = savedEditorContent;
+      editGenerationRef.current += 1;
+      if (identity) {
+        draftKeyRef.current = savedRevision ? createViewerDraftKey(identity, savedRevision) : null;
+      }
+      setDirtyState(normalizeEditorContent(contentRef.current) !== savedEditorContent);
+      setDraftPersistedState(false);
       let draftCleanupFailed = false;
       if (identity) {
         try {
@@ -580,23 +644,25 @@ const TextViewer: React.FC<TextViewerProps> = ({
           draftCleanupFailed = true;
           runtimeLogger.error('清理已保存文本草稿失败:', error);
         }
-        if (!isAliveRef.current || resourceIdentityRef.current !== saveIdentity) {
+        if (!isAliveRef.current || resourceIdentityRef.current !== saveIdentity
+          || bufferLoadGenerationRef.current !== saveLoadGeneration) {
           refreshDirectoryInTree(detail.parentId);
           return;
         }
-        draftKeyRef.current = savedRevision
-          ? createViewerDraftKey(identity, savedRevision)
-          : null;
       }
-      const editedDuringSave = saveGeneration !== editGenerationRef.current;
+      const editedDuringSave = normalizeEditorContent(contentRef.current) !== savedEditorContent;
       let followUpDraftPersisted = true;
       if (editedDuringSave) {
-        setDraftPersistedState(false);
         followUpDraftPersisted = await flushDraft();
       } else {
         setDirtyState(false);
         setDraftPersistedState(true);
         draftErrorShownRef.current = false;
+      }
+      if (!isAliveRef.current || resourceIdentityRef.current !== saveIdentity
+        || bufferLoadGenerationRef.current !== saveLoadGeneration) {
+        refreshDirectoryInTree(detail.parentId);
+        return;
       }
       refreshDirectoryInTree(detail.parentId);
       const feedback = resolveTextSaveFeedback({
@@ -615,6 +681,7 @@ const TextViewer: React.FC<TextViewerProps> = ({
           newUrl
           && isAliveRef.current
           && resourceIdentityRef.current === saveIdentity
+          && bufferLoadGenerationRef.current === saveLoadGeneration
         ) {
           loadedUrlRef.current = `${newUrl}::${reloadToken}::${savedRevision ?? ''}`;
           updateFileTabResource(tabId, {
@@ -716,29 +783,49 @@ const TextViewer: React.FC<TextViewerProps> = ({
   }, [canUseEditorContent, fileName, isDownloading]);
 
   const handleRestoreDraft = useCallback(() => {
-    if (!draftRecovery) return;
-    draftKeyRef.current = draftRecovery.draft.key;
+    if (!draftRecovery || discardInFlightRef.current) return;
+    // Restoring is an explicit choice to continue from this latest file version.
+    // The original remote body remains untouched until a separate save succeeds.
+    draftKeyRef.current = resourceIdentity
+      ? createViewerDraftKey(resourceIdentity, draftRecovery.remoteRevision) : null;
     editGenerationRef.current += 1;
     setEditorContent(draftRecovery.draft.content, true);
-    setDraftPersistedState(true);
+    updateDraftRecovery(null);
+    setDraftPersistedState(false);
+    scheduleDraftFlush();
     draftErrorShownRef.current = false;
-    setDraftRecovery(null);
-  }, [draftRecovery, setDraftPersistedState, setEditorContent]);
+  }, [draftRecovery, resourceIdentity, scheduleDraftFlush, setDraftPersistedState, setEditorContent, updateDraftRecovery]);
+
+  const handlePreviewDraft = useCallback(() => {
+    if (!draftRecovery || discardInFlightRef.current) return;
+    const nextPreview = !draftPreview;
+    setEditorContent(nextPreview ? draftRecovery.draft.content : draftRecovery.remoteContent, false);
+    setDraftPreview(nextPreview);
+  }, [draftPreview, draftRecovery, setEditorContent]);
 
   const handleDiscardDraft = useCallback(async () => {
-    if (!draftRecovery || !resourceIdentity) return;
+    if (!draftRecovery || !resourceIdentity || discardInFlightRef.current) return;
+    const recovery = draftRecovery;
+    const identity = resourceIdentity;
+    discardInFlightRef.current = true;
+    setIsDiscardingDraft(true);
     try {
-      await viewerDraftStore.deleteDraft(resourceIdentity);
-      draftKeyRef.current = createViewerDraftKey(resourceIdentity, draftRecovery.remoteRevision);
-      setEditorContent(draftRecovery.remoteContent, false);
+      await viewerDraftStore.deleteDraft(identity);
+      if (!isAliveRef.current || resourceIdentityRef.current !== identity || draftRecoveryRef.current !== recovery) return;
+      draftKeyRef.current = createViewerDraftKey(identity, recovery.remoteRevision);
+      editGenerationRef.current += 1;
+      setEditorContent(recovery.remoteContent, false);
       setDraftPersistedState(true);
       draftErrorShownRef.current = false;
-      setDraftRecovery(null);
+      updateDraftRecovery(null);
     } catch (error) {
       runtimeLogger.error('放弃文本草稿失败:', error);
-      Toast.error('草稿删除失败，请重试');
+      if (isAliveRef.current && resourceIdentityRef.current === identity) Toast.error('草稿删除失败，请重试');
+    } finally {
+      discardInFlightRef.current = false;
+      if (isAliveRef.current) setIsDiscardingDraft(false);
     }
-  }, [draftRecovery, resourceIdentity, setDraftPersistedState, setEditorContent]);
+  }, [draftRecovery, resourceIdentity, setDraftPersistedState, setEditorContent, updateDraftRecovery]);
 
   const handleSaveRef = useRef(handleSave);
   handleSaveRef.current = handleSave;
@@ -841,12 +928,16 @@ const TextViewer: React.FC<TextViewerProps> = ({
     () => (wordWrap ? EditorView.lineWrapping : []),
     [wordWrap],
   );
+  const indentExtension = useMemo(
+    () => [indentUnit.of(' '.repeat(indentSize)), EditorState.tabSize.of(indentSize)],
+    [indentSize],
+  );
   const textLanguage = useMemo(() => resolveTextEditorLanguage(fileName), [fileName]);
   const extensions = useMemo(() => {
-    const nextExtensions: Extension[] = [saveKeymap, fontTheme, wrapExtension];
+    const nextExtensions: Extension[] = [saveKeymap, fontTheme, wrapExtension, indentExtension];
     if (textLanguage.extension) nextExtensions.push(textLanguage.extension);
     return nextExtensions;
-  }, [fontTheme, saveKeymap, textLanguage, wrapExtension]);
+  }, [fontTheme, indentExtension, saveKeymap, textLanguage, wrapExtension]);
 
   const handleChange = useCallback((value: string) => {
     if (pendingContentRef.current !== null) {
@@ -857,11 +948,12 @@ const TextViewer: React.FC<TextViewerProps> = ({
         return;
       }
     }
+    if (draftRecoveryRef.current) return;
     contentRef.current = value;
     setLineEnding('LF');
     setContent(value);
     editGenerationRef.current += 1;
-    setDirtyState(true);
+    setDirtyState(value !== baseEditorContentRef.current);
     setDraftPersistedState(false);
     scheduleDraftFlush();
   }, [scheduleDraftFlush, setDirtyState, setDraftPersistedState]);
@@ -872,6 +964,29 @@ const TextViewer: React.FC<TextViewerProps> = ({
     <>
       <TextViewerSaveAsModalStyle />
       <TextViewerWrapper>
+      {active && draftRecovery && !isLoading && !errorMessage ? (
+        <section className="draft-recovery-bar" aria-label="草稿恢复">
+          <div className="draft-recovery-copy" role="status">
+            <strong>{draftRecovery.conflict ? '文件已更新，未保存草稿仍保留' : '发现未保存草稿'}</strong>
+            <span>
+              当前只读查看{draftPreview ? '草稿' : '最新文件'}，可以下载或另存为。
+              {draftRecovery.conflict ? '恢复草稿后，只有再次保存才会更新文件。' : '选择恢复草稿后继续编辑。'}
+            </span>
+          </div>
+          <div className="draft-recovery-actions">
+            <Button size="small" theme="borderless" disabled={isDiscardingDraft} onClick={handlePreviewDraft}>
+              {draftPreview ? '查看最新文件' : '查看草稿'}
+            </Button>
+            <Button size="small" theme="borderless" disabled={isDiscardingDraft} onClick={handleRestoreDraft}>
+              恢复草稿
+            </Button>
+            <Button size="small" theme="borderless" loading={isDiscardingDraft} disabled={isDiscardingDraft}
+              onClick={() => void handleDiscardDraft()}>
+              使用最新文件
+            </Button>
+          </div>
+        </section>
+      ) : null}
       {isLoading ? (
         <div className="loading-mask">
           <Spin size="large" tip="正在加载文件..." />
@@ -893,6 +1008,7 @@ const TextViewer: React.FC<TextViewerProps> = ({
             onCreateEditor={handleEditorCreate}
             onUpdate={handleEditorUpdate}
             basicSetup={TEXT_EDITOR_BASIC_SETUP}
+            readOnly={draftRecovery !== null}
           />
         </div>
       )}
@@ -915,6 +1031,17 @@ const TextViewer: React.FC<TextViewerProps> = ({
           >
             {cursorPosition.line}:{cursorPosition.column}
           </span>
+          <button
+            type="button"
+            className="status-item indent-toggle"
+            aria-label={`缩进 ${indentSize}，切换为 ${indentSize === 4 ? 2 : 4} 空格`}
+            title={`切换为 ${indentSize === 4 ? 2 : 4} 空格缩进`}
+            disabled={!canUseEditorContent}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => setIndentSize((previous) => previous === 4 ? 2 : 4)}
+          >
+            缩进 {indentSize}
+          </button>
           <span className="status-item" title="换行符">
             {lineEnding}
           </span>
@@ -939,7 +1066,7 @@ const TextViewer: React.FC<TextViewerProps> = ({
           <Button
             aria-label="保存"
             className="icon-action-btn"
-            disabled={!canUseEditorContent || !isDirty || isSaving}
+            disabled={!canUseEditorContent || draftRecovery !== null || !isDirty || isSaving}
             icon={<Save size={16} strokeWidth={1.25} />}
             loading={isSaving && !saveAsVisible}
             size="small"
@@ -971,22 +1098,6 @@ const TextViewer: React.FC<TextViewerProps> = ({
         </div>
       </div>
 
-      <Modal
-        visible={draftRecovery !== null}
-        title={draftRecovery?.conflict ? '检测到内容冲突' : '发现未保存草稿'}
-        okText="恢复草稿"
-        cancelText="使用最新文件"
-        closable={false}
-        maskClosable={false}
-        onOk={handleRestoreDraft}
-        onCancel={() => void handleDiscardDraft()}
-      >
-        <div className="draft-recovery-copy">
-          {draftRecovery?.conflict
-            ? '文件内容在草稿保存后发生了变化。恢复草稿后再次保存会覆盖当前文件内容。'
-            : '上次编辑的内容尚未保存到文件。请选择恢复草稿或使用当前文件内容。'}
-        </div>
-      </Modal>
       </TextViewerWrapper>
 
       <Modal

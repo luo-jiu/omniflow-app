@@ -1,5 +1,6 @@
 import styled, { createGlobalStyle } from 'styled-components';
 import { workspaceScrollbarStyles } from '@/components/ui/workspace-scrollbar';
+import { interactiveItemStyles } from '@/components/ui/theme-foundation-styles';
 
 export const TextViewerSaveAsModalStyle = createGlobalStyle`
   .text-viewer-save-as-modal {
@@ -90,6 +91,45 @@ export const TextViewerWrapper = styled.div`
   display: flex;
   flex-direction: column;
   background: var(--semi-color-bg-0);
+
+  .draft-recovery-bar {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--app-border);
+    background: var(--app-bg-elevated);
+    color: var(--app-text);
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
+  .draft-recovery-copy {
+    flex: 1 1 260px;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .draft-recovery-copy span {
+    color: var(--app-text-secondary);
+  }
+
+  .draft-recovery-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .draft-recovery-actions .semi-button {
+    height: 28px;
+    padding: 0 8px;
+    font-size: 12px;
+    border-radius: var(--app-radius-medium);
+  }
 
   .editor-stage {
     flex: 1;
@@ -271,6 +311,15 @@ export const TextViewerWrapper = styled.div`
 
   .cursor-position {
     min-width: 48px;
+  }
+
+  .indent-toggle {
+    border: 0;
+    border-radius: var(--app-radius-medium);
+    background: transparent;
+    font-family: inherit;
+    cursor: pointer;
+    ${interactiveItemStyles}
   }
 
   .footer-actions {

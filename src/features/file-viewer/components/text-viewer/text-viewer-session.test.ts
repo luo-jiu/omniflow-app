@@ -17,6 +17,7 @@ describe('Text viewer session payload', () => {
       scrollLeft: -8,
     })).toEqual({
       fontSize: 15,
+      indentSize: 4,
       wordWrap: true,
       selectionAnchor: 4,
       selectionHead: 9,

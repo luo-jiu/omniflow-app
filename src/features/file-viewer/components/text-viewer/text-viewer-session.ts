@@ -1,8 +1,12 @@
 export const TEXT_VIEWER_SESSION_SCHEMA_VERSION = 1;
 export const TEXT_VIEWER_SESSION_ESTIMATED_BYTES = 512;
+export const DEFAULT_TEXT_INDENT_SIZE = 4;
+
+export type TextIndentSize = 2 | 4;
 
 export interface TextViewerSessionSnapshot {
   fontSize: number;
+  indentSize: TextIndentSize;
   wordWrap: boolean;
   selectionAnchor: number;
   selectionHead: number;
@@ -50,6 +54,7 @@ export function parseTextViewerSessionSnapshot(value: unknown): TextViewerSessio
   }
   return {
     fontSize,
+    indentSize: candidate.indentSize === 2 ? 2 : DEFAULT_TEXT_INDENT_SIZE,
     wordWrap: candidate.wordWrap,
     selectionAnchor: normalizeNonNegativeInteger(selectionAnchor),
     selectionHead: normalizeNonNegativeInteger(selectionHead),
