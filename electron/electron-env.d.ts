@@ -588,6 +588,7 @@ interface Window {
   electronPluginManagement: import('../src/shared/plugin-management').PluginManagementBridge;
   electronPluginViewer: import('../src/shared/plugin-viewer').PluginViewerBridge;
   electronEmbeddedBrowser: {
+    onOpenWebUrl: (listener: (payload: { url: string }) => void) => () => void;
     activateTab: (tabId: string | null) => Promise<void>;
     acknowledgeDownloadHandoff: (downloadId: string) => Promise<boolean>;
     cleanupDownloadFile: (tempPath: string) => Promise<boolean>;

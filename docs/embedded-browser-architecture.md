@@ -87,6 +87,8 @@ library detail page
 
 它可以编排浏览器行为，但不应该直接理解 main 里的 view 生命周期细节。
 
+应用文档中的网页链接由当前 `LibraryDetail` 的 `openWebUrl` 追加并激活新 browser tab，原文件/Agent 工作区现场不清空。子 viewer 经 `LibraryWorkspaceControlsContext` 请求打开，不创建另一份 tab owner。主窗口另由 `mainWindowNavigation` 拦截 renderer 发起的非应用文档导航、主 frame 重定向及新窗口请求，仅将 HTTP(S) 地址经 `app:open-web-url` / preload `electronEmbeddedBrowser.onOpenWebUrl` 投影给同一页面回调；renderer 的 `embedded-browser-navigation` service 校验并管理订阅，离开页面时解除。没有当前资料库接收者时仍阻止原导航，不创建无归属网页窗口。应用自身文档重载及 HashRouter 保留；该兜底仅作用于主窗口，不改变浏览器 `WebContentsView` 的站内导航或弹窗策略。
+
 ### 3.2 Renderer 浏览器载体
 
 `EmbeddedBrowserPanel.tsx` 的职责很专一：

@@ -6,7 +6,7 @@ import { registerPluginManagementIpc } from './service/extensions/plugin-managem
 import { registerPluginScheme } from './service/extensions/isolated-view'
 import { registerFirstPartyViewer } from './service/extensions/first-party-viewer'
 import { app, BrowserWindow, ipcMain, Menu, protocol, screen } from 'electron'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import path from 'node:path'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import registerIpcHandlers from './ipc'
@@ -14,6 +14,7 @@ import { createEmbeddedBrowserMainController } from './service/embeddedBrowserMa
 import { isDevToolsToggleShortcut } from './service/embeddedBrowserInputShortcuts'
 import { registerAppearanceIpc } from './service/appearanceIpc'
 import { registerWindowControlIpcHandlers } from './service/windowControlIpc'
+import { installMainWindowNavigationGuard } from './service/mainWindowNavigation'
 import {
   getMainWindowBackgroundColor,
   refreshMainWindowBackground,
@@ -304,6 +305,11 @@ function createWindow() {
   mainWindow = win
   applyMainWindowPlatformBehavior(win)
   syncMainWindowBackground(win)
+  const disposeNavigationGuard = installMainWindowNavigationGuard(
+    win.webContents,
+    VITE_DEV_SERVER_URL || pathToFileURL(path.join(RENDERER_DIST, 'index.html')).href,
+  )
+  win.once('closed', disposeNavigationGuard)
 
   if (persistedWindowState?.maximized) {
     win.maximize()

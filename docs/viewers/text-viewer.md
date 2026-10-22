@@ -50,6 +50,8 @@ A1 外观接入后，TextViewer 从 AppearanceViewContext 消费主 owner 的颜
 
 Markdown 默认进入渲染模式；底部使用单个图标按钮在渲染与 CodeMirror 源码之间切换。渲染模式显示 Eye，源码模式显示 Code2，颜色区分当前模式，不改变正文、草稿或保存状态。
 
+Markdown 的显式链接、自动链接及 GFM 裸 URL 统一取消原生导航，HTTP(S) 地址通过 `LibraryWorkspaceControlsContext.openWebUrl` 交给当前资料库工作区，新建并激活内置浏览器标签。普通点击、Cmd/Ctrl 点击、中键和键盘激活共用该入口，原文件 tab、正文和草稿继续保留。协议相对地址按 HTTPS 打开；相对文件路径、片段链接和其他协议不交给应用壳或系统处理，避免覆盖 HashRouter 或触发本机能力。链接不使用系统外部浏览器，也不在 viewer 中维护浏览器标签。
+
 - 官方 Lezer parser：用于 JavaScript / TypeScript / JSON / Markdown / HTML / CSS / XML / Python / Go / Rust / Java / C/C++ / SQL / YAML / PHP 等主流代码文件。
 - `@codemirror/legacy-modes` stream parser：用于 Shell / PowerShell / Dockerfile / TOML / Ruby / Perl / Lua / diff / nginx / protobuf / Swift / R / CMake / Kotlin / SCSS / Sass / Less / Stylus 等轻量兼容场景。
 - 纯文本：用于 txt / log / csv / tsv / subtitle / ignore 文件等不适合强行套 parser 的内容。
@@ -192,6 +194,7 @@ CodeMirror 相关依赖必须显式写在 `package.json`，不能依赖本地 `n
 - 打开 `.ts` / `.md` / `.json` / `.py` 中至少一种官方 parser 文件，确认有高亮且可编辑。
 - 打开 `.sh` / `Dockerfile` / `.toml` / `.diff` 中至少一种 legacy parser 文件，确认有高亮且可编辑。
 - 打开 `.txt` / `.log` 等纯文本文件，确认不会白屏且仍可保存。
+- Markdown 显式链接、裸 URL、自动链接分别点击后在内置浏览器新标签打开；验证 Cmd/Ctrl 点击、中键及键盘激活，关闭网页后返回原文件且未保存正文仍在。片段、相对文件路径及非 HTTP(S) 链接不能改变应用路由。
 - 默认显示“缩进 4”；连续点击切换 4 → 2 → 4，Tab、回车自动缩进与选区缩进同步生效，切换本身不改写正文或标记 dirty；切 tab、关闭重开后按文件恢复选定宽度，其他文本文件保持独立。
 - 编辑器聚焦时验证 `Cmd/Ctrl +`、`Cmd/Ctrl -`、`Cmd/Ctrl 0` 只改变文档字号，应用其他区域尺寸不变。
 - `Cmd/Ctrl+S` 保存后 dirty 标记清除，目录树刷新，当前 tab 不丢失。

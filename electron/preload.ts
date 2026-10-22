@@ -603,6 +603,11 @@ contextBridge.exposeInMainWorld('electronSystemVideoHost', {
 });
 
 contextBridge.exposeInMainWorld('electronEmbeddedBrowser', {
+  onOpenWebUrl: (listener: (payload: { url: string }) => void) => {
+    const wrapped = (_event: Electron.IpcRendererEvent, payload: { url: string }) => listener(payload);
+    ipcRenderer.on('app:open-web-url', wrapped);
+    return () => ipcRenderer.removeListener('app:open-web-url', wrapped);
+  },
   activateTab: (tabId: string | null) => ipcRenderer.invoke('embedded-browser:activate-tab', tabId),
   acknowledgeDownloadHandoff: (downloadId: string) => ipcRenderer.invoke('embedded-browser:download-handoff:acknowledge', downloadId),
   cleanupDownloadFile: (tempPath: string) => ipcRenderer.invoke('embedded-browser:cleanup-download-file', tempPath),

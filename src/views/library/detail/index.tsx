@@ -27,6 +27,8 @@ import { Avatar, Input, Modal, Popover, Select, Toast } from '@douyinfe/semi-ui'
 import ContextMenu, { type ContextMenuItem } from "@/components/ui/context-menu";
 import { beginDocumentDragSession } from '@/components/ui/document-drag-session';
 import EmbeddedBrowserPanel, { type EmbeddedBrowserHandle } from "@/features/embedded-browser/components/EmbeddedBrowserPanel";
+import { subscribeWebUrlRequests } from '@/features/embedded-browser/services/embedded-browser-navigation';
+import { normalizeWebUrl } from '@/shared/web-url';
 import EmbeddedBrowserAutoFillBar from "@/features/embedded-browser/passwords/components/EmbeddedBrowserAutoFillBar";
 import EmbeddedBrowserPasswordSaveBar from "@/features/embedded-browser/passwords/components/EmbeddedBrowserPasswordSaveBar";
 import { subscribeCredentialAutoFilled, subscribeCredentialCaptured } from "@/features/embedded-browser/passwords/services/embedded-browser-password.api";
@@ -608,9 +610,25 @@ const LibraryDetailContent: React.FC<{ libraryId: number }> = ({ libraryId }) =>
     setSidePanelVisualWidth(restoredWidth);
   }, [cleanupResizeListeners, setSidePanelVisualWidth]);
 
+  const openWebUrl = React.useCallback((input: string) => {
+    const url = normalizeWebUrl(input);
+    if (!url) return;
+    const next = createEmptyBrowserTab();
+    setBrowserTabs((prev) => [...prev, { ...next.tab, title: url, url }]);
+    setActiveBrowserTabId(next.id);
+    setBrowserModeOpen(true);
+    setBookmarkBarVisible(false);
+    setWorkspaceDisplayMode('browser');
+    setBrowserInput(url);
+    setSearchMode('web');
+  }, []);
+
+  React.useEffect(() => subscribeWebUrlRequests(openWebUrl), [openWebUrl]);
+
   const libraryWorkspaceControls = React.useMemo(() => ({
+    openWebUrl,
     setVideoWideMode,
-  }), [setVideoWideMode]);
+  }), [openWebUrl, setVideoWideMode]);
 
   React.useEffect(() => {
     sidePanelCollapsedRef.current = sidePanelCollapsed;

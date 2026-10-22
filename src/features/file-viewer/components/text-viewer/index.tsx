@@ -4,8 +4,6 @@ import { useContext, useCallback, useEffect, useId, useMemo, useRef, useState } 
 import { Button, Input, Modal, Spin, Toast } from '@douyinfe/semi-ui';
 import CodeMirror from '@uiw/react-codemirror';
 import { Code2, Eye, Save, FilePlus2, Download } from 'lucide-react';
-import Markdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
 import { keymap, EditorView, type ViewUpdate } from '@codemirror/view';
 import { EditorState, type Extension } from '@codemirror/state';
 import { indentUnit } from '@codemirror/language';
@@ -36,6 +34,7 @@ import {
   TextViewerWrapper,
 } from './style';
 import { resolveTextEditorLanguage } from './language';
+import MarkdownDocument from './markdown-document';
 import { saveTextContentToDesktop } from './text-viewer-local-save';
 import {
   createTextContentRevision,
@@ -995,7 +994,7 @@ const TextViewer: React.FC<TextViewerProps> = ({
         <div className="state-error">{errorMessage}</div>
       ) : isMarkdown && !markdownSourceMode ? (
         <div className="markdown-stage">
-          <Markdown remarkPlugins={[remarkGfm]}>{content ?? ''}</Markdown>
+          <MarkdownDocument>{content ?? ''}</MarkdownDocument>
         </div>
       ) : (
         <div className="editor-stage">
