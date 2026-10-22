@@ -1,45 +1,17 @@
 import {
-  AGENT_FILE_TEXT_MAX_BYTES, AgentFileMutationError, hasAgentFileBinaryControls,
-  normalizeAgentFileExpectedRevision, normalizeAgentFileMutationTarget,
+  AGENT_FILE_TEXT_MAX_BYTES, AgentFileMutationError,
 } from './agent-file-write';
+import { decodeAgentMutableText } from './agent-file-text-codec';
+import { applyAgentContextPatch, applyAgentContextPatchAsync, parseAgentContextPatch } from './agent-file-context-patch';
+import { AgentFilePatchError, type AgentFilePatchSpec, type AgentFilePatchResult, type AgentFilePatchExecutionOptions } from './agent-file-patch-types';
 
-export const AGENT_FILE_PATCH_MAX_CHARACTERS = 128_000;
-
-export interface AgentFilePatchInput {
-  scope: 'library' | 'host'; path: string; basePath?: string; view: 'saved'; revision: string;
-  patch: string; format: 'unified-v1';
-}
-
-export function normalizeAgentFilePatchInput(value: unknown): AgentFilePatchInput {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new AgentFileMutationError('INVALID_INPUT', '补丁参数无效');
-  }
-  const input = value as Record<string, unknown>;
-  if (Object.keys(input).some(key => !['scope', 'path', 'basePath', 'view', 'revision', 'expectedRevision', 'patch', 'format'].includes(key))
-    || typeof input.patch !== 'string' || !input.patch || input.patch.length > AGENT_FILE_PATCH_MAX_CHARACTERS
-    || hasAgentFileBinaryControls(input.patch) || (input.format !== undefined && input.format !== 'unified-v1')) {
-    throw new AgentFileMutationError('INVALID_PATCH', '只支持单文件、严格上下文的 unified-v1 文本补丁（最多128000字符）');
-  }
-  return { ...normalizeAgentFileMutationTarget(input), revision: normalizeAgentFileExpectedRevision(input, true)!,
-    patch: input.patch, format: 'unified-v1' };
-}
+export { decodeAgentMutableText } from './agent-file-text-codec';
+export * from './agent-file-patch-input';
+export * from './agent-file-patch-types';
 
 interface TextLine { text: string; ending: string; end: number }
 interface PatchLine { kind: ' ' | '+' | '-'; text: string; noNewline: boolean }
 interface PatchHunk { oldStart: number; oldCount: number; newStart: number; newCount: number; lines: PatchLine[] }
-
-export function decodeAgentMutableText(bytes: Uint8Array): string {
-  if (bytes.byteLength > AGENT_FILE_TEXT_MAX_BYTES) {
-    throw new AgentFileMutationError('FILE_TOO_LARGE', '文本超过 8 MiB 修改上限');
-  }
-  let text: string;
-  try { text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes); }
-  catch { throw new AgentFileMutationError('UNSUPPORTED_ENCODING', '只支持有效 UTF-8 文本文件'); }
-  if (text.replace(/^\uFEFF/u, '').startsWith('%PDF-') || hasAgentFileBinaryControls(text)) {
-    throw new AgentFileMutationError('UNSUPPORTED_ENCODING', '只支持修改 UTF-8 文本，不支持二进制文件');
-  }
-  return text;
-}
 
 function patchError(message: string): never { throw new AgentFileMutationError('INVALID_PATCH', message); }
 
@@ -92,9 +64,20 @@ function parsePatch(patch: string, targetPath: string): PatchHunk[] {
 }
 
 /** Exact line matching; untouched line endings/BOM are retained byte for byte for valid UTF-8. */
-export function applyAgentFilePatch(before: Uint8Array, patch: string, targetPath: string): {
+function* applyUnifiedSteps(before: Uint8Array, patch: string, targetPath: string,
+  options: AgentFilePatchExecutionOptions = {}): Generator<void, {
   bytes: Uint8Array; additions: number; deletions: number; hunks: number;
-} {
+}, void> {
+  const deadline = options.deadlineMs ?? Date.now() + 10_000;
+  let work = 0;
+  let scanned = 0;
+  const check = () => {
+    options.signal?.throwIfAborted();
+    if (Date.now() >= deadline) throw new AgentFilePatchError('补丁超过执行时间预算，未修改', {
+      code: 'PATCH_SCAN_TIMEOUT', phase: 'match', nextAction: 'reduce_patch',
+    });
+  };
+  check();
   const decoded = decodeAgentMutableText(before);
   const bom = decoded.startsWith('\uFEFF') ? '\uFEFF' : '';
   const text = bom ? decoded.slice(1) : decoded;
@@ -136,6 +119,11 @@ export function applyAgentFilePatch(before: Uint8Array, patch: string, targetPat
         previousEnding = line.ending;
         cursor++;
         outputCount++;
+        scanned += line.text.length + line.ending.length;
+        if (scanned > (options.maxScanWork ?? 64 * 1024 * 1024)) throw new AgentFilePatchError('补丁超过扫描预算，未修改', {
+          code: 'PATCH_SCAN_LIMIT', phase: 'match', nextAction: 'reduce_patch',
+        });
+        if (++work % 8_192 === 0) { check(); yield; }
       }
       append(text.slice(copyStart, position), Boolean(previousEnding));
     }
@@ -155,6 +143,11 @@ export function applyAgentFilePatch(before: Uint8Array, patch: string, targetPat
         position = original.end;
         previousEnding = original.ending;
         cursor++;
+        scanned += original.text.length + original.ending.length;
+        if (scanned > (options.maxScanWork ?? 64 * 1024 * 1024)) throw new AgentFilePatchError('补丁超过扫描预算，未修改', {
+          code: 'PATCH_SCAN_LIMIT', phase: 'match', nextAction: 'reduce_patch',
+        });
+        if (++work % 8_192 === 0) { check(); yield; }
         if (line.kind === ' ') { append(original.text + original.ending, Boolean(original.ending)); outputCount++; }
         else deletions++;
       }
@@ -165,5 +158,68 @@ export function applyAgentFilePatch(before: Uint8Array, patch: string, targetPat
   if (bytes.byteLength > AGENT_FILE_TEXT_MAX_BYTES) {
     throw new AgentFileMutationError('FILE_TOO_LARGE', '补丁结果超过 8 MiB 修改上限');
   }
+  check();
   return { bytes, additions, deletions, hunks: parsed.length };
+}
+
+/** Existing strict unified-v1 API. Kept for old callers and historical fixtures. */
+export function applyAgentFilePatch(before: Uint8Array, patch: string, targetPath: string): {
+  bytes: Uint8Array; additions: number; deletions: number; hunks: number;
+} {
+  const steps = applyUnifiedSteps(before, patch, targetPath);
+  let next = steps.next();
+  while (!next.done) next = steps.next();
+  return next.value;
+}
+
+function preflightError(error: unknown): never {
+  if (error instanceof AgentFilePatchError) throw error;
+  if (error instanceof AgentFileMutationError) throw new AgentFilePatchError(error.message, {
+    code: error.code, phase: error.code === 'INVALID_PATCH' ? 'parse' : 'match',
+    nextAction: error.code === 'INVALID_PATCH' ? 'fix_input' : 'read_context',
+  });
+  throw error;
+}
+
+export function preflightAgentFilePatch(input: AgentFilePatchSpec): void {
+  try {
+    if (input.format === 'context-v1') {
+      if (input.finalNewline !== undefined && !['preserve', 'ensure', 'remove'].includes(input.finalNewline)) {
+        throw new AgentFilePatchError('finalNewline 无效', { code: 'INVALID_PATCH', phase: 'parse', nextAction: 'fix_input' });
+      }
+      parseAgentContextPatch(input.patch);
+    } else if (input.format === 'unified-v1' && input.finalNewline === undefined) parsePatch(input.patch, input.path);
+    else throw new AgentFilePatchError('补丁格式或尾换行设置无效', { code: 'INVALID_PATCH', phase: 'parse', nextAction: 'fix_input' });
+  } catch (error) { preflightError(error); }
+}
+
+function legacyResult(before: Uint8Array, result: ReturnType<typeof applyAgentFilePatch>): AgentFilePatchResult {
+  return { ...result, changed: result.bytes.length !== before.length || result.bytes.some((byte, index) => byte !== before[index]),
+    matchMode: 'exact', warnings: [], endsWithNewline: result.bytes.at(-1) === 10 || result.bytes.at(-1) === 13 };
+}
+
+/** Synchronous adapter for small fixtures. Production execution should use the cooperative async API. */
+export function applyAgentFilePatchInput(before: Uint8Array, input: AgentFilePatchSpec,
+  options: AgentFilePatchExecutionOptions = {}): AgentFilePatchResult {
+  preflightAgentFilePatch(input);
+  try {
+    if (input.format === 'context-v1') return applyAgentContextPatch(before, input, options);
+    const steps = applyUnifiedSteps(before, input.patch, input.path, options);
+    let next = steps.next();
+    while (!next.done) next = steps.next();
+    return legacyResult(before, next.value);
+  } catch (error) { preflightError(error); }
+}
+
+export async function applyAgentFilePatchAsync(before: Uint8Array, input: AgentFilePatchSpec,
+  options: AgentFilePatchExecutionOptions = {}): Promise<AgentFilePatchResult> {
+  preflightAgentFilePatch(input);
+  try {
+    if (input.format === 'context-v1') return await applyAgentContextPatchAsync(before, input, options);
+    const steps = applyUnifiedSteps(before, input.patch, input.path, options);
+    const yieldControl = options.yieldControl ?? (() => new Promise<void>(resolve => setTimeout(resolve, 0)));
+    let next = steps.next();
+    while (!next.done) { await yieldControl(); options.signal?.throwIfAborted(); next = steps.next(); }
+    return legacyResult(before, next.value);
+  } catch (error) { preflightError(error); }
 }
