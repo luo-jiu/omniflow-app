@@ -80,7 +80,9 @@ async function resolveInput(name: string, input: Record<string, unknown>, contex
     else if (context.appContext.currentDirectory?.id) result.directoryId = context.appContext.currentDirectory.id;
     else result.path = '/';
   }
-  if (name === 'file.patch' && typeof result.path === 'string') result.patch = canonicalPatchHeaders(result.patch, input.path, result.path);
+  if (name === 'file.patch' && input.format !== 'context-v1' && typeof result.path === 'string') {
+    result.patch = canonicalPatchHeaders(result.patch, input.path, result.path);
+  }
   return Object.freeze(result);
 }
 

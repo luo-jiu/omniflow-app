@@ -4,7 +4,16 @@ export const AGENT_TEXT_MAX_BYTES = 8 * 1024 * 1024;
 export const AGENT_READ_DEFAULT_OUTPUT_TOKENS = 10_000;
 export const AGENT_READ_OUTPUT_MAX_BYTES = 1024 * 1024;
 
-export interface AgentDecodedText { revision: string; lines: string[] }
+export interface AgentTextMetadata {
+  encoding: 'utf-8';
+  hasBom: boolean;
+  lineEnding: 'lf' | 'crlf' | 'cr' | 'mixed' | 'none';
+  endsWithNewline: boolean;
+  sizeBytes: number;
+}
+export interface AgentDecodedText extends AgentTextMetadata { revision: string; lines: string[] }
+/** Pagination also accepts extracted document text, which has no raw-file text metadata. */
+export type AgentTextPageSource = Pick<AgentDecodedText, 'revision' | 'lines'>;
 interface AgentTextDecodeBinding {
   get(revision: string): AgentDecodedText | undefined;
   retain(decoded: AgentDecodedText, estimatedBytes: number): void;
@@ -37,15 +46,25 @@ export function decodeAgentText(bytes: Uint8Array) {
   let text: string;
   try { text = new TextDecoder('utf-8', { fatal: true }).decode(bytes); }
   catch { throw new Error('文件不是有效的 UTF-8 文本'); }
+  let endings = 0;
   for (let i = 0; i < text.length; i += 1) {
     const code = text.charCodeAt(i);
     if (code <= 8 || (code >= 14 && code <= 31)) throw new Error('文件包含二进制内容，不能作为文本读取');
+    if (code === 13) {
+      if (text.charCodeAt(i + 1) === 10) { endings |= 1; i += 1; }
+      else endings |= 2;
+    } else if (code === 10) endings |= 4;
   }
   const lines = text ? text.split(/\r\n|\n|\r/u) : [];
   if (lines.at(-1) === '') lines.pop();
-  const decoded = { revision, lines };
+  const lineEnding: AgentTextMetadata['lineEnding'] = endings === 0 ? 'none' : endings === 1 ? 'crlf'
+    : endings === 2 ? 'cr' : endings === 4 ? 'lf' : 'mixed';
+  const decoded: AgentDecodedText = { revision, lines, encoding: 'utf-8', lineEnding,
+    hasBom: bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf,
+    endsWithNewline: bytes.at(-1) === 10 || bytes.at(-1) === 13,
+    sizeBytes: bytes.byteLength };
   // Conservative admission weight for UTF-16 backing and line strings/array slots; not exact V8 heap usage.
-  binding?.retain(decoded, text.length * 4 + lines.length * 48 + 128);
+  binding?.retain(decoded, text.length * 4 + lines.length * 48 + 320);
   return decoded;
 }
 
@@ -54,7 +73,7 @@ export function sliceAgentText(bytes: Uint8Array, query: AgentTextReadQuery, out
 }
 
 export function sliceDecodedAgentText(
-  decoded: ReturnType<typeof decodeAgentText>, query: AgentTextReadQuery,
+  decoded: AgentTextPageSource, query: AgentTextReadQuery,
   outputBytes = AGENT_READ_DEFAULT_OUTPUT_TOKENS * 4,
 ) {
   const { revision, lines } = decoded;

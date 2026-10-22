@@ -1,6 +1,6 @@
 import type { AgentToolExecutionRequest, AgentToolResult } from '@/shared/agent/agent.types';
 import { AgentFileMutationError, normalizeAgentFileWriteInput, type AgentFileMutationSnapshot } from '@/shared/agent/agent-file-write';
-import { applyAgentFilePatch, decodeAgentMutableText, normalizeAgentFilePatchInput } from '@/shared/agent/agent-file-patch';
+import { applyAgentFilePatchAsync, AgentFilePatchError, decodeAgentMutableText, normalizeAgentFilePatchInput, preflightAgentFilePatch } from '@/shared/agent/agent-file-patch';
 import { createAgentOwnerScope, serializeAgentOwnerScope } from '@/shared/agent/agent-owner-scope';
 import { API_CONFIG } from '@/config/api';
 import { auth } from '@/utils/auth';
@@ -79,13 +79,14 @@ export async function executeAgentFileWrite(request: AgentToolExecutionRequest, 
     const libraryId = Number(rawLibrary);
     const input = request.toolName === 'file.patch' ? normalizeAgentFilePatchInput(query) : normalizeAgentFileWriteInput(query);
     if (input.scope !== 'library') throw new WriteValidationError('此执行器仅接受资料库文件目标');
+    if ('patch' in input) preflightAgentFilePatch(input);
     replacing = Boolean(input.revision);
     const resolve = deps.resolvePath || resolveAgentLibraryPath;
     const fileName = input.path.split('/').at(-1)!;
     let contentBytes: Uint8Array = 'content' in input ? new TextEncoder().encode(input.content) : new Uint8Array();
     let content = 'content' in input ? input.content : '';
     let revision = '';
-    let patchStats: { additions: number; deletions: number; hunks: number } | undefined;
+    let patchStats: Record<string, unknown> | undefined;
     let node: { id: unknown; libraryId?: unknown };
     let parentId: number;
     if (input.revision) {
@@ -99,14 +100,23 @@ export async function executeAgentFileWrite(request: AgentToolExecutionRequest, 
       decodeAgentMutableText(bytes);
       if (await hash(bytes) !== input.revision) throw new AgentFileMutationError('REVISION_CONFLICT', '文件内容已变化，请重新file.read后修改；未覆盖');
       if ('patch' in input) {
-        const patched = applyAgentFilePatch(bytes, input.patch, input.path);
+        const patched = await applyAgentFilePatchAsync(bytes, input, { signal: deps.signal });
         contentBytes = patched.bytes;
         content = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(contentBytes);
-        patchStats = { additions: patched.additions, deletions: patched.deletions, hunks: patched.hunks };
+        patchStats = { additions: patched.additions, deletions: patched.deletions, hunks: patched.hunks,
+          matchMode: patched.matchMode, warnings: patched.warnings, endsWithNewline: patched.endsWithNewline };
       }
       revision = await hash(contentBytes);
       check();
       parentId = target.parentId;
+      if (revision === input.revision) {
+        return { committed: false, result: { ok: true, message: `${fileName} 内容未变化`, data: {
+          scope: 'library', path: input.path, fileName, revision, beforeRevision: input.revision, afterRevision: revision,
+          sizeBytes: contentBytes.length, changed: false, outcome: 'unchanged',
+          writeCommitState: 'uncommitted', mutationCommitState: 'uncommitted', operationId: request.executionId,
+          ...(patchStats || {}), view: 'saved', destination: { kind: 'library', nodeId: target.id, parentId },
+        } } };
+      }
       if (!deps.prepareMutation) throw new WriteValidationError('当前运行时未接入文件改动记录，未写入');
       await deps.prepareMutation({ scope: 'library', path: input.path, fileName, libraryId, nodeId: target.id,
         parentId, identity: `library:${libraryId}:${target.id}`, beforeBytes: bytes.slice(),
@@ -156,6 +166,7 @@ export async function executeAgentFileWrite(request: AgentToolExecutionRequest, 
     if (!Number.isSafeInteger(node.id) || Number(node.id) <= 0 || (node.libraryId !== undefined && node.libraryId !== libraryId)) throw new Error('invalid write receipt');
     const result: AgentToolResult = { ok: true, message: `已保存 ${fileName}`, data: {
       scope: 'library', path: input.path, fileName, revision, sizeBytes: contentBytes.length,
+      changed: true, outcome: 'written', ...(input.revision ? { beforeRevision: input.revision } : {}), afterRevision: revision,
       writeCommitState: 'committed', mutationCommitState: 'committed', operationId: request.executionId,
       ...(patchStats || {}), view: 'saved', destination: { kind: 'library', nodeId: Number(node.id), parentId },
     } };
@@ -181,7 +192,9 @@ export async function executeAgentFileWrite(request: AgentToolExecutionRequest, 
             : attempted ? '文件上传失败，未提交；请检查存储可达性后重试。' : '无法准备文件写入，请检查资料库路径、存储可达性和权限。',
     data: { writeCommitState: unknown ? 'commit_unknown' : 'uncommitted',
       mutationCommitState: unknown ? 'commit_unknown' : 'uncommitted', operationId: request.executionId,
-      ...(error instanceof AgentFileMutationError ? { code: error.code } : {}) } } };
+      ...(error instanceof AgentFileMutationError ? { code: error.code } : {}),
+      ...(error instanceof AgentFilePatchError ? error.diagnostic : {}),
+      ...(error instanceof AgentFileMutationError && error.code === 'REVISION_CONFLICT' ? { phase: 'version', nextAction: 'reread' } : {}) } } };
   } finally {
     if (abortListener) deps.signal?.removeEventListener('abort', abortListener);
     if (stagedPath) {

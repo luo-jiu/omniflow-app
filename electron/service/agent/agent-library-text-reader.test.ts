@@ -20,15 +20,21 @@ describe('library text authority', () => {
     const authorize = authority();
     const fetchText = vi.fn().mockResolvedValueOnce(new Response('hello', { headers: { etag: '"v1"' } }))
       .mockResolvedValueOnce(new Response(null, { status: 304, headers: { etag: '"v1"' } }))
-      .mockResolvedValueOnce(new Response('world', { headers: { etag: '"v2"' } }));
+      .mockResolvedValueOnce(new Response('\uFEFFworld\r\n', { headers: { etag: '"v2"' } }));
     const first = decodeAgentText(await reader.read(request, authorize, fetchText));
     const cached = decodeAgentText(await reader.read(request, authorize, fetchText));
     expect(cached).toBe(first);
+    expect(cached).toMatchObject({ encoding: 'utf-8', hasBom: false, lineEnding: 'none', endsWithNewline: false, sizeBytes: 5 });
     expect(Object.isFrozen(cached.lines)).toBe(true);
     expect(reader.decodeMetrics()).toEqual({ hits: 1, stores: 1 });
     expect(reader.retainedBytes()).toBeGreaterThan(5);
+    authorize.mockImplementation(async request => {
+      request.signal.throwIfAborted();
+      return { operation: 'stage-library-node', version: 1, node: { ...node, fileSize: 10 }, downloadUrl: 'https://fixture.test/a' };
+    });
     const changed = decodeAgentText(await reader.read(request, authorize, fetchText));
     expect(changed.lines).toEqual(['world']);
+    expect(changed).toMatchObject({ encoding: 'utf-8', hasBom: true, lineEnding: 'crlf', endsWithNewline: true, sizeBytes: 10 });
     expect(changed.revision).not.toBe(first.revision);
     expect(authorize).toHaveBeenCalledTimes(6);
     reader.releaseRun('decode-run');

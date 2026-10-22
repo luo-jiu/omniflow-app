@@ -5,6 +5,7 @@ import { IpcRequestError } from '@/service/request/ipcRequest';
 import { UploadCommitUnknownError } from '@/modules/upload-center/services/upload-direct';
 import { UploadSessionExpiredError, UploadSessionNotFoundError } from '@/modules/upload-center/services/upload-session.api';
 import { executeAgentFileWrite } from './agent-file-write';
+import { AGENT_FILE_PATCH_EOF_FIXTURES } from '@/shared/agent/agent-file-patch.fixtures';
 
 const digest = (text: string) => createHash('sha256').update(text).digest('hex');
 function request(revision?: string): AgentToolExecutionRequest {
@@ -31,6 +32,62 @@ function dependencies() {
   };
 }
 describe('direct library file writes', () => {
+  it.each(AGENT_FILE_PATCH_EOF_FIXTURES.filter(fixture => !fixture.coreOnly).flatMap(fixture =>
+    (['preserve', 'ensure', 'remove'] as const).map(finalNewline => ({ ...fixture, finalNewline }))))('applies shared bytes fixture $name / $finalNewline through conditional library save', async fixture => {
+      const deps = dependencies();
+      deps.readBytes.mockResolvedValueOnce(new TextEncoder().encode(fixture.before));
+      const value = request(); value.toolName = 'file.patch';
+      value.input = { libraryId: 3, path: '/docs/test.cpp', revision: digest(fixture.before), format: 'context-v1',
+        patch: fixture.patch, finalNewline: fixture.finalNewline };
+      const output = await executeAgentFileWrite(value, deps);
+      const after = fixture.expected[fixture.finalNewline];
+      if (after === null) {
+        expect(output.result).toMatchObject({ ok: false, data: { code: fixture.expectedErrorCode || 'PATCH_FINAL_NEWLINE_CONFLICT', phase: 'finalize', writeCommitState: 'uncommitted' } });
+        expect(deps.prepareMutation).not.toHaveBeenCalled(); expect(deps.update).not.toHaveBeenCalled();
+      } else if (after === fixture.before) {
+        expect(output.result).toMatchObject({ ok: true, data: { changed: false, outcome: 'unchanged', writeCommitState: 'uncommitted' } });
+        expect(deps.prepareMutation).not.toHaveBeenCalled(); expect(deps.update).not.toHaveBeenCalled();
+      } else {
+        expect(output.result).toMatchObject({ ok: true, data: { changed: true, revision: digest(after), writeCommitState: 'committed' } });
+        expect(deps.update).toHaveBeenCalledWith(expect.objectContaining({ content: after, expectedStorageKey: 'old-binding' }));
+        expect(deps.prepareMutation).toHaveBeenCalledWith(expect.objectContaining({ beforeBytes: new TextEncoder().encode(fixture.before),
+          afterBytes: new TextEncoder().encode(after) }));
+      }
+    });
+  it.each(['file.write', 'file.patch'])('returns an explicit no-op for %s without entering any side effect', async toolName => {
+    const deps = dependencies();
+    const value = request(digest('old'));
+    value.toolName = toolName;
+    value.input = { libraryId: 3, path: '/docs/test.cpp', revision: digest('old'), ...(toolName === 'file.patch'
+      ? { format: 'context-v1', patch: '@@\n-old\n+old\n' } : { content: 'old' }) };
+    expect(await executeAgentFileWrite(value, deps)).toMatchObject({ committed: false, result: { ok: true, data: {
+      changed: false, outcome: 'unchanged', beforeRevision: digest('old'), afterRevision: digest('old'),
+      writeCommitState: 'uncommitted', mutationCommitState: 'uncommitted',
+    } } });
+    for (const effect of [deps.prepareMutation, deps.beforeCommit, deps.update, deps.stage, deps.upload, deps.onCommitted]) {
+      expect(effect).not.toHaveBeenCalled();
+    }
+  });
+  it('preflights malformed context before reading storage or preparing a journal', async () => {
+    const deps = dependencies();
+    const value = request();
+    value.toolName = 'file.patch';
+    value.input = { libraryId: 3, path: '/docs/test.cpp', revision: digest('old'), format: 'context-v1', patch: '@@ function\n-old\n+new\n' };
+    expect((await executeAgentFileWrite(value, deps)).result).toMatchObject({ ok: false, data: { phase: 'parse', writeCommitState: 'uncommitted' } });
+    expect(deps.readBytes).not.toHaveBeenCalled();
+    expect(deps.resolvePath).not.toHaveBeenCalled();
+    expect(deps.prepareMutation).not.toHaveBeenCalled();
+  });
+  it('does not prepare or save a valid early hunk when a later hunk cannot match', async () => {
+    const deps = dependencies();
+    const before = 'alpha\nbeta\ngamma\n';
+    deps.readBytes.mockResolvedValueOnce(new TextEncoder().encode(before));
+    const value = request(); value.toolName = 'file.patch';
+    value.input = { libraryId: 3, path: '/docs/test.cpp', revision: digest(before), format: 'context-v1',
+      patch: '@@\n-alpha\n+ALPHA\n@@\n-missing\n+other\n' };
+    expect((await executeAgentFileWrite(value, deps)).result).toMatchObject({ ok: false, data: { phase: 'match', writeCommitState: 'uncommitted' } });
+    expect(deps.prepareMutation).not.toHaveBeenCalled(); expect(deps.update).not.toHaveBeenCalled();
+  });
   it('does not stage or upload when no storage provider is reachable', async () => {
     const deps = dependencies();
     deps.selectProvider.mockRejectedValueOnce(new Error('offline'));

@@ -1,7 +1,30 @@
 import { describe, expect, it } from 'vitest';
-import { AGENT_TEXT_MAX_BYTES, collectAgentTextStream, sliceAgentText } from './agent-text-reader';
+import { AGENT_TEXT_MAX_BYTES, collectAgentTextStream, decodeAgentText, sliceAgentText } from './agent-text-reader';
 
 describe('bounded text reading', () => {
+  it.each([
+    { text: '', lineEnding: 'none', endsWithNewline: false, hasBom: false, lines: [] },
+    { text: '\uFEFF', lineEnding: 'none', endsWithNewline: false, hasBom: true, lines: [] },
+    { text: '旧', lineEnding: 'none', endsWithNewline: false, hasBom: false, lines: ['旧'] },
+    { text: '旧\n', lineEnding: 'lf', endsWithNewline: true, hasBom: false, lines: ['旧'] },
+    { text: '\uFEFF旧\r\n文\r\n', lineEnding: 'crlf', endsWithNewline: true, hasBom: true, lines: ['旧', '文'] },
+    { text: '旧\r文', lineEnding: 'cr', endsWithNewline: false, hasBom: false, lines: ['旧', '文'] },
+    { text: '旧\r文\n', lineEnding: 'mixed', endsWithNewline: true, hasBom: false, lines: ['旧', '文'] },
+    { text: '\r\n\n', lineEnding: 'mixed', endsWithNewline: true, hasBom: false, lines: ['', ''] },
+  ])('reports raw text metadata for $lineEnding/$hasBom/$endsWithNewline', ({ text, ...expected }) => {
+    const bytes = Buffer.from(text);
+    expect(decodeAgentText(bytes)).toMatchObject({ ...expected, encoding: 'utf-8', sizeBytes: bytes.byteLength });
+  });
+
+  it('does not infer EOF state from displayed lines', () => {
+    const noEof = decodeAgentText(Buffer.from('old'));
+    const withEof = decodeAgentText(Buffer.from('old\n'));
+    expect(noEof.lines).toEqual(withEof.lines);
+    expect(noEof.endsWithNewline).toBe(false);
+    expect(withEof.endsWithNewline).toBe(true);
+    expect(noEof.revision).not.toBe(withEof.revision);
+  });
+
   it('uses one-based lines, normalizes CRLF and exposes exact continuation', () => {
     const bytes = Buffer.from('one\r\n二\r\nthree\n');
     const first = sliceAgentText(bytes, { path: '/a', limit: 2 });

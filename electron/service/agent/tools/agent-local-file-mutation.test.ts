@@ -11,6 +11,8 @@ import { createAgentToolRegistry, type AgentToolDispatchContext } from '../agent
 import { createAgentToolBroker } from '../agent-tool-broker';
 import { fileWriteTool } from './file-write-tool';
 import { filePatchTool } from './file-patch-tool';
+import * as localFile from './agent-local-file';
+import { AGENT_FILE_PATCH_EOF_FIXTURES } from '../../../../src/shared/agent/agent-file-patch.fixtures';
 
 const digest = (text: string) => crypto.createHash('sha256').update(text).digest('hex');
 let directory: string;
@@ -27,6 +29,93 @@ function runtime() {
 }
 
 describe('guarded host saved mutations', () => {
+  it.each(AGENT_FILE_PATCH_EOF_FIXTURES.filter(fixture => !fixture.coreOnly).flatMap(fixture =>
+    (['preserve', 'ensure', 'remove'] as const).map(finalNewline => ({ ...fixture, finalNewline }))))('applies shared bytes fixture $name / $finalNewline to an isolated host file', async fixture => {
+      const file = path.join(directory, 'a.txt'); await writeFile(file, fixture.before);
+      const { context, hooks, commit } = runtime();
+      const result = await executeAgentHostFileMutation(normalizeAgentFilePatchInput({ scope: 'host', path: file,
+        revision: digest(fixture.before), format: 'context-v1', patch: fixture.patch, finalNewline: fixture.finalNewline }), context);
+      const after = fixture.expected[fixture.finalNewline];
+      if (after === null) {
+        expect(result).toMatchObject({ ok: false, data: { code: fixture.expectedErrorCode || 'PATCH_FINAL_NEWLINE_CONFLICT', phase: 'finalize', writeCommitState: 'uncommitted' } });
+        expect(await readFile(file, 'utf8')).toBe(fixture.before);
+        expect(hooks.prepare).not.toHaveBeenCalled(); expect(commit.begin).not.toHaveBeenCalled();
+      } else {
+        expect(result).toMatchObject({ ok: true, data: { revision: digest(after), changed: after !== fixture.before,
+          writeCommitState: after === fixture.before ? 'uncommitted' : 'committed' } });
+        expect(await readFile(file, 'utf8')).toBe(after);
+      }
+      expect(await readdir(directory)).toEqual(['a.txt']);
+    });
+  it.each(['file.write', 'file.patch'])('keeps bytes and inode unchanged for a %s no-op without preparing a journal', async name => {
+    const file = path.join(directory, 'a.txt');
+    await writeFile(file, 'old');
+    const original = await stat(file);
+    const { context, hooks, commit } = runtime();
+    const input = name === 'file.patch'
+      ? normalizeAgentFilePatchInput({ scope: 'host', path: file, revision: digest('old'), format: 'context-v1', patch: '@@\n-old\n+old\n' })
+      : normalizeAgentFileWriteInput({ scope: 'host', path: file, revision: digest('old'), content: 'old' });
+    expect(await executeAgentHostFileMutation(input, context)).toMatchObject({ ok: true, data: { changed: false, outcome: 'unchanged',
+      beforeRevision: digest('old'), afterRevision: digest('old'), writeCommitState: 'uncommitted', mutationCommitState: 'uncommitted' } });
+    expect(await readFile(file, 'utf8')).toBe('old');
+    expect((await stat(file)).ino).toBe(original.ino);
+    for (const effect of [hooks.prepare, hooks.settle, commit.begin, commit.settle]) expect(effect).not.toHaveBeenCalled();
+    expect(await readdir(directory)).toEqual(['a.txt']);
+  });
+  it.each(['file.write', 'file.patch'].flatMap(name => ['abort', 'deadline'].map(cancellation => ({ name, cancellation }))))('preserves actual $name no-op when $cancellation happens during handle cleanup', async ({ name, cancellation }) => {
+      const file = path.join(directory, 'a.txt'); await writeFile(file, 'old\n');
+      const before = await stat(file);
+      const { context, controller, hooks, commit } = runtime();
+      const registry = createAgentToolRegistry([fileWriteTool, filePatchTool]);
+      const frozen = registry.createSnapshot();
+      const broker = createAgentToolBroker({ toolRegistry: registry });
+      let announceClosing!: () => void, releaseClose!: () => void;
+      const closing = new Promise<void>(resolve => { announceClosing = resolve; });
+      const release = new Promise<void>(resolve => { releaseClose = resolve; });
+      const originalOpen = localFile.openAgentLocalFile;
+      const openedFile = vi.spyOn(localFile, 'openAgentLocalFile').mockImplementation(async (...args) => {
+        const opened = await originalOpen(...args);
+        const originalClose = opened.fileHandle.close.bind(opened.fileHandle);
+        opened.fileHandle.close = async () => { announceClosing(); await release; return originalClose(); };
+        return opened;
+      });
+      vi.useFakeTimers();
+      let running: Promise<unknown> | undefined;
+      try {
+        const dispatch = { ...context, runCapabilitySnapshot: { getTool: (requested: string) => frozen.get(requested) } } as unknown as AgentToolDispatchContext;
+        const input = { scope: 'host', path: file, revision: digest('old\n'), ...(name === 'file.patch'
+          ? { format: 'context-v1', patch: '@@\n-old\n+old\n' } : { content: 'old\n' }) };
+        running = broker.executeMain(name, input, dispatch, 10_000, frozen, 35_000);
+        const result = expect(running).resolves.toMatchObject({ ok: true, data: { operationId: hooks.operationId,
+          changed: false, outcome: 'unchanged', revision: digest('old\n'), beforeRevision: digest('old\n'), afterRevision: digest('old\n'),
+          writeCommitState: 'uncommitted', mutationCommitState: 'uncommitted' } });
+        await closing;
+        if (cancellation === 'abort') controller.abort();
+        else await vi.advanceTimersByTimeAsync(10_000);
+        releaseClose();
+        await result;
+        expect(await readFile(file, 'utf8')).toBe('old\n');
+        expect((await stat(file)).ino).toBe(before.ino);
+        expect((await stat(file)).mtimeMs).toBe(before.mtimeMs);
+        for (const effect of [hooks.prepare, hooks.settle, commit.begin, commit.settle]) expect(effect).not.toHaveBeenCalled();
+        expect(await readdir(directory)).toEqual(['a.txt']);
+        expect(vi.getTimerCount()).toBe(0);
+      } finally {
+        controller.abort(); releaseClose();
+        await running?.catch(() => undefined);
+        openedFile.mockRestore(); vi.useRealTimers();
+      }
+    });
+  it('does not partially write or prepare after a later context hunk fails', async () => {
+    const file = path.join(directory, 'a.txt');
+    const before = 'alpha\nbeta\ngamma\n'; await writeFile(file, before);
+    const { context, hooks, commit } = runtime();
+    expect(await executeAgentHostFileMutation(normalizeAgentFilePatchInput({ scope: 'host', path: file, revision: digest(before),
+      format: 'context-v1', patch: '@@\n-alpha\n+ALPHA\n@@\n-missing\n+other\n' }), context))
+      .toMatchObject({ ok: false, data: { phase: 'match', writeCommitState: 'uncommitted' } });
+    expect(await readFile(file, 'utf8')).toBe(before);
+    expect(hooks.prepare).not.toHaveBeenCalled(); expect(commit.begin).not.toHaveBeenCalled();
+  });
   it('creates and patches a real temporary file through Registry → Broker → main tool → private journal hooks', async () => {
     const registry = createAgentToolRegistry([fileWriteTool, filePatchTool]);
     const frozen = registry.createSnapshot();

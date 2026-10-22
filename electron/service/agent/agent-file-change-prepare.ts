@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 import type { AgentFileChangePrepareRequest } from '../../../src/shared/agent/agent-file-changes';
 import { AGENT_FILE_TEXT_MAX_BYTES, type AgentFileWriteInput, type AgentFileMutationSnapshot } from '../../../src/shared/agent/agent-file-write';
-import { applyAgentFilePatch, decodeAgentMutableText, type AgentFilePatchInput } from '../../../src/shared/agent/agent-file-patch';
+import { applyAgentFilePatchAsync, applyAgentFilePatchInput, decodeAgentMutableText, type AgentFilePatchInput } from '../../../src/shared/agent/agent-file-patch';
 
 function decode(value: unknown): Buffer {
   if (typeof value !== 'string' || value.length > Math.ceil(AGENT_FILE_TEXT_MAX_BYTES / 3) * 4
@@ -14,7 +14,7 @@ function decode(value: unknown): Buffer {
   decodeAgentMutableText(bytes);
   return bytes;
 }
-export function decodeAgentFileChangeSnapshot(
+function decodeSnapshot(
   source: AgentFileChangePrepareRequest['snapshot'], input: AgentFileWriteInput | AgentFilePatchInput,
 ): AgentFileMutationSnapshot {
   if (!source || typeof source !== 'object' || Array.isArray(source)
@@ -28,11 +28,33 @@ export function decodeAgentFileChangeSnapshot(
     || beforeRevision !== input.revision
     || (before !== null && (!Number.isSafeInteger(source.nodeId) || Number(source.nodeId) < 1))
     || (before === null && source.nodeId !== undefined)) throw new Error('文件快照版本或节点与获准调用不匹配');
-  const expectedAfter = 'patch' in input
-    ? before === null ? undefined : applyAgentFilePatch(before, input.patch, input.path).bytes
-    : Buffer.from(input.content, 'utf8');
-  if (!expectedAfter || !Buffer.from(expectedAfter).equals(after)) throw new Error('文件快照内容与获准写入不匹配');
   return { scope: 'library', path: input.path, fileName: path.posix.basename(input.path),
     ...(source.nodeId ? { nodeId: source.nodeId } : {}), beforeBytes: before, afterBytes: after,
     ...(beforeRevision ? { beforeRevision } : {}), afterRevision: source.afterRevision };
+}
+
+function assertExpectedAfter(snapshot: AgentFileMutationSnapshot, expectedAfter: Uint8Array | undefined) {
+  if (!expectedAfter || !Buffer.from(expectedAfter).equals(snapshot.afterBytes)) throw new Error('文件快照内容与获准写入不匹配');
+  return snapshot;
+}
+
+/** Synchronous compatibility for existing small-fixture consumers. Production uses the abortable variant. */
+export function decodeAgentFileChangeSnapshot(
+  source: AgentFileChangePrepareRequest['snapshot'], input: AgentFileWriteInput | AgentFilePatchInput,
+): AgentFileMutationSnapshot {
+  const snapshot = decodeSnapshot(source, input);
+  const expected = 'patch' in input ? snapshot.beforeBytes === null ? undefined
+    : applyAgentFilePatchInput(snapshot.beforeBytes, input).bytes : Buffer.from(input.content, 'utf8');
+  return assertExpectedAfter(snapshot, expected);
+}
+
+export async function decodeAgentFileChangeSnapshotAsync(
+  source: AgentFileChangePrepareRequest['snapshot'], input: AgentFileWriteInput | AgentFilePatchInput, signal?: AbortSignal,
+): Promise<AgentFileMutationSnapshot> {
+  signal?.throwIfAborted();
+  const snapshot = decodeSnapshot(source, input);
+  const expected = 'patch' in input ? snapshot.beforeBytes === null ? undefined
+    : (await applyAgentFilePatchAsync(snapshot.beforeBytes, input, { signal })).bytes : Buffer.from(input.content, 'utf8');
+  signal?.throwIfAborted();
+  return assertExpectedAfter(snapshot, expected);
 }

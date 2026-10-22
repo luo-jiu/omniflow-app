@@ -1,7 +1,7 @@
-import { AGENT_READ_OUTPUT_MAX_BYTES, sliceDecodedAgentText, type AgentTextReadQuery, type decodeAgentText } from './agent-text-reader';
+import { AGENT_READ_OUTPUT_MAX_BYTES, sliceDecodedAgentText, type AgentTextReadQuery, type AgentTextPageSource } from './agent-text-reader';
 import { projectAgentToolResultForProvider } from './agent-tool-result-projection';
 
-export function packAgentTextResult(decoded: ReturnType<typeof decodeAgentText>, query: AgentTextReadQuery,
+export function packAgentTextResult(decoded: AgentTextPageSource, query: AgentTextReadQuery,
   budget: number, metadata: Record<string, unknown> = {}) {
   const fileName = query.path.replace(/\\/g, '/').split('/').pop() || query.path;
   const build = (size: number) => {

@@ -5,6 +5,7 @@ import type {
   AgentToolExecutionRequest,
 } from '@/shared/agent/agent.types';
 import { executeAgentRendererTool } from './agent-tool-executor';
+import * as fileWriteExecutor from './agent-file-write';
 
 function request(): AgentToolExecutionRequest {
   return {
@@ -65,6 +66,26 @@ function extractedArtifact() {
 }
 
 describe('Agent renderer tool executor', () => {
+  it('keeps cancellation and access errors from non-file tools as rejections', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    await expect(executeAgentRendererTool(request(), { signal: controller.signal }))
+      .rejects.toMatchObject({ name: 'AbortError' });
+    const denied = new Error('access denied');
+    await expect(executeAgentRendererTool({ ...request(), requireAccessCheck: true }, {
+      beforeCommit: async () => { throw denied; },
+    })).rejects.toBe(denied);
+  });
+
+  it('does not classify an error from the file adapter as a preflight failure', async () => {
+    const error = new Error('adapter completion failed');
+    const execute = vi.spyOn(fileWriteExecutor, 'executeAgentFileWrite').mockRejectedValueOnce(error);
+    try {
+      await expect(executeAgentRendererTool({ ...request(), toolName: 'file.write' }))
+        .rejects.toBe(error);
+    } finally { execute.mockRestore(); }
+  });
+
   it('verifies the actual target and saved node without changing the current UI directory', async () => {
     const readLibraryNode = vi.fn(async (_libraryId: number, nodeId: number) => nodeId === 20
       ? { id: 20, libraryId: 3, parentId: 2, name: '音乐', type: 'dir' as const, path: '/音乐' }

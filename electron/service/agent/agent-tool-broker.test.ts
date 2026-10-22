@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { describe, expect, it, vi } from 'vitest';
 
 import { createAgentToolBroker, normalizeAgentToolResult } from './agent-tool-broker';
@@ -12,6 +13,9 @@ import {
 import type { AgentToolResult } from '../../../src/shared/agent/agent.types';
 import { fileWriteTool } from './tools/file-write-tool';
 import { filePatchTool } from './tools/file-patch-tool';
+import { executeAgentFileWrite, type AgentFileWriteDependencies } from '../../../src/features/agent/services/agent-file-write';
+import { executeAgentRendererTool } from '../../../src/features/agent/services/agent-tool-executor';
+import { completeAgentToolExecution } from '../../../src/features/agent/services/agent.api';
 
 const OWNER_SCOPE = {
   accountScope: 'user:7',
@@ -61,6 +65,174 @@ function brokerDeferred<T>() {
   return { promise, resolve };
 }
 
+describe('main-authorized renderer file no-op settlement', () => {
+  const executionId = '6fb7d6e4-589d-4d53-8a28-f81d5c6c45f9';
+  const revision = 'a'.repeat(64);
+  const identity = { executionId, libraryId: 3, ownerScope: OWNER_SCOPE, runId: 'run-1', sessionId: 'session-1' };
+  const receipt = (): AgentToolResult => ({ ok: true, data: { operationId: executionId,
+    revision, beforeRevision: revision, afterRevision: revision, changed: false, outcome: 'unchanged',
+    writeCommitState: 'uncommitted', mutationCommitState: 'uncommitted' } });
+
+  it.each(['abort', 'deadline'])('seals a missing no-op after the bounded %s settlement window', async cancellation => {
+    vi.useFakeTimers();
+    try {
+      const controller = new AbortController();
+      const broker = createAgentToolBroker({ createId: () => executionId });
+      const prepared = broker.prepareRendererExecution({ ...prepareInput(controller.signal), timeoutMs: 1_000,
+        executionInput: { revision }, toolName: 'file.patch', fileNoopSettlement: { expectedRevision: revision } });
+      const rejected = expect(prepared.outcome).rejects.toThrow(cancellation === 'abort' ? '取消' : '超时');
+      if (cancellation === 'abort') controller.abort();
+      else await vi.advanceTimersByTimeAsync(1_000);
+      await vi.advanceTimersByTimeAsync(29_999);
+      expect(() => broker.claimRendererCapability(77, { ...identity, capability: 'file.patch.unavailable' }, 'file.patch')).toThrow('取消');
+      await vi.advanceTimersByTimeAsync(1);
+      await rejected;
+      expect(() => broker.completeRendererExecution(77, { ...identity, result: receipt() })).toThrow('不存在或已经失效');
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it.each([
+    { toolName: 'file.patch', executionInput: {}, config: revision },
+    { toolName: 'file.patch', executionInput: { revision: 'invalid' }, config: revision },
+    { toolName: 'file.patch', executionInput: { revision }, config: 'invalid' },
+    { toolName: 'file.patch', executionInput: { revision }, config: 'b'.repeat(64) },
+    { toolName: 'file.write', executionInput: { mode: 'create', revision }, config: revision },
+    { toolName: 'file.delete', executionInput: { revision }, config: revision },
+  ])('does not enable no-op settlement for an invalid main opt-in: $toolName $executionInput $config', async ({ toolName, executionInput, config }) => {
+    const controller = new AbortController();
+    const broker = createAgentToolBroker({ createId: () => executionId });
+    const prepared = broker.prepareRendererExecution({ ...prepareInput(controller.signal), executionInput, toolName,
+      fileNoopSettlement: { expectedRevision: config } });
+    controller.abort();
+    await expect(prepared.outcome).rejects.toThrow('取消');
+    expect(() => broker.completeRendererExecution(77, { ...identity, result: receipt() })).toThrow('不存在或已经失效');
+  });
+
+  it('accepts a legacy expectedRevision request while freezing its main-owned no-op revision', async () => {
+    const controller = new AbortController();
+    const broker = createAgentToolBroker({ createId: () => executionId });
+    const config = { expectedRevision: revision };
+    const executionInput = { expectedRevision: revision };
+    const prepared = broker.prepareRendererExecution({ ...prepareInput(controller.signal), executionInput,
+      toolName: 'file.patch', fileNoopSettlement: config });
+    config.expectedRevision = 'b'.repeat(64);
+    executionInput.expectedRevision = 'b'.repeat(64);
+    controller.abort();
+    broker.completeRendererExecution(77, { ...identity, result: receipt() });
+    await expect(prepared.outcome).resolves.toMatchObject({ result: receipt() });
+  });
+
+  it('does not grant commit or access authority while retaining only a cancelled no-op settlement', async () => {
+    const controller = new AbortController();
+    const verifyAccess = vi.fn(async () => undefined);
+    const broker = createAgentToolBroker({ createId: () => executionId });
+    const prepared = broker.prepareRendererExecution({ ...prepareInput(controller.signal), verifyAccess,
+      executionInput: { revision }, toolName: 'file.patch', fileNoopSettlement: { expectedRevision: revision } });
+    const capability = broker.claimRendererCapability(77, { ...identity, capability: 'file.patch.preparation' }, 'file.patch');
+    controller.abort();
+    expect(() => capability.beginCriticalSettlement()).toThrow('取消');
+    expect(() => broker.claimRendererCapability(77, { ...identity, capability: 'file.patch.another' }, 'file.patch')).toThrow('取消');
+    expect(() => broker.reportRendererProgress(77, { ...identity, phase: 'committing', progress: { message: '保存' } })).toThrow('取消');
+    expect(() => broker.markRendererExecutionCommitted(77, { ...identity,
+      result: { ok: true, data: { operationId: executionId, writeCommitState: 'committed', mutationCommitState: 'committed' } } })).toThrow('取消');
+    await expect(broker.verifyRendererAccess(77, identity)).rejects.toThrow();
+    expect(verifyAccess).not.toHaveBeenCalled();
+    broker.completeRendererExecution(77, { ...identity, result: receipt() });
+    await expect(prepared.outcome).resolves.toMatchObject({ result: receipt() });
+  });
+
+  it.each([
+    { ok: false },
+    { data: { operationId: 'c522be36-13dd-4ab3-adf3-59773ad25683' } },
+    { data: { revision: 'b'.repeat(64), beforeRevision: 'b'.repeat(64), afterRevision: 'b'.repeat(64) } },
+    { data: { changed: true } },
+    { data: { writeCommitState: undefined } },
+    { data: { deleteCommitState: 'committed' } },
+  ])('rejects an ordinary or mismatched post-cancel result and ends the no-op wait immediately: %j', async patch => {
+    vi.useFakeTimers();
+    try {
+      const controller = new AbortController();
+      const broker = createAgentToolBroker({ createId: () => executionId });
+      const prepared = broker.prepareRendererExecution({ ...prepareInput(controller.signal), executionInput: { revision },
+        toolName: 'file.patch', fileNoopSettlement: { expectedRevision: revision } });
+      const rejected = expect(prepared.outcome).rejects.toThrow('取消');
+      controller.abort();
+      const valid = receipt();
+      const result = { ...valid, ...patch, data: { ...(valid.data as Record<string, unknown>), ...patch.data } };
+      expect(() => broker.completeRendererExecution(77, { ...identity, result })).toThrow('取消');
+      await rejected;
+      expect(() => broker.completeRendererExecution(77, { ...identity, result: receipt() })).toThrow('不存在或已经失效');
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it.each(['file.write', 'file.patch'].flatMap(toolName =>
+    ['entry-abort', 'access-abort', 'access-rejected'].map(failure => ({ toolName, failure })),
+  ))('settles $toolName through the renderer executor and API immediately after $failure', async ({ toolName, failure }) => {
+    vi.useFakeTimers();
+    const controller = new AbortController();
+    try {
+      const startedAt = Date.now();
+      const accessEntered = brokerDeferred<void>();
+      const accessReleased = brokerDeferred<void>();
+      const verifyAccess = vi.fn(async () => {
+        accessEntered.resolve();
+        await accessReleased.promise;
+        if (failure === 'access-rejected') throw new Error('文件访问权限已失效');
+      });
+      const broker = createAgentToolBroker({ createId: () => executionId });
+      const prepared = broker.prepareRendererExecution({ ...prepareInput(controller.signal), verifyAccess,
+        executionInput: { libraryId: 3, revision, path: '/a.txt', ...(toolName === 'file.write'
+          ? { content: 'old\n' } : { format: 'context-v1', patch: '@@\n-old\n+old\n' }) },
+        toolName, fileNoopSettlement: { expectedRevision: revision } });
+      const verifyToolAccess = vi.fn((input: typeof identity) => broker.verifyRendererAccess(77, input));
+      const completeToolExecution = vi.fn(async (input: Parameters<typeof completeAgentToolExecution>[0]) =>
+        broker.completeRendererExecution(77, input));
+      vi.stubGlobal('window', { electronAgent: { verifyToolAccess, completeToolExecution } });
+      const prepareMutation = vi.fn(), update = vi.fn(), readBytes = vi.fn(), onCommitted = vi.fn();
+      const assertOwner = vi.fn(), resolvePath = vi.fn();
+      const rejected = failure === 'access-rejected' ? undefined : expect(prepared.outcome).rejects.toThrow('取消');
+      if (failure === 'entry-abort') controller.abort();
+      const rendering = executeAgentRendererTool(prepared.request, {
+        signal: controller.signal, assertOwner, prepareMutation, resolvePath, onCommitted,
+        ...{ update, readBytes },
+      });
+      if (failure !== 'entry-abort') {
+        await accessEntered.promise;
+        if (failure === 'access-abort') controller.abort();
+        accessReleased.resolve();
+      }
+      const renderer = await rendering;
+      expect(renderer).toEqual({ committed: false, result: {
+        ok: false, message: failure === 'access-rejected' ? '文件访问权限已失效' : '文件保存已取消，未提交。',
+        data: { operationId: executionId, writeCommitState: 'uncommitted', mutationCommitState: 'uncommitted' },
+      } });
+      const completion = { ...identity, result: renderer.result };
+      if (failure === 'access-rejected') {
+        await expect(completeAgentToolExecution(completion)).resolves.toBe(true);
+        await expect(prepared.outcome).resolves.toEqual({ result: renderer.result });
+      } else {
+        await expect(completeAgentToolExecution(completion)).rejects.toThrow('取消');
+        await rejected;
+      }
+      expect(completeToolExecution).toHaveBeenCalledOnce();
+      expect(completeToolExecution).toHaveBeenCalledWith(completion);
+      if (failure === 'entry-abort') {
+        expect(verifyToolAccess).not.toHaveBeenCalled();
+        expect(verifyAccess).not.toHaveBeenCalled();
+      } else {
+        expect(verifyToolAccess).toHaveBeenCalledOnce();
+        expect(verifyToolAccess).toHaveBeenCalledWith(identity);
+        expect(verifyAccess).toHaveBeenCalledOnce();
+      }
+      for (const effect of [assertOwner, resolvePath, prepareMutation, update, readBytes, onCommitted]) expect(effect).not.toHaveBeenCalled();
+      expect(Date.now()).toBe(startedAt);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { controller.abort(); vi.unstubAllGlobals(); vi.useRealTimers(); }
+  });
+});
+
 describe('trusted file mutation main settlement', () => {
   const operationId = '83fc584b-037d-4c82-8883-a609846ea0d4';
   const receipt = (state: 'committed' | 'uncommitted' | 'commit_unknown'): AgentToolResult => ({
@@ -68,6 +240,158 @@ describe('trusted file mutation main settlement', () => {
   });
   const toolInput = (name: string) => name === 'file.write' ? { path: '/a.txt', content: 'new' }
     : { path: '/a.txt', revision: 'a'.repeat(64), patch: '@@ -1 +1 @@\n-old\n+new\n' };
+  const noopReceipt = (): AgentToolResult => ({ ok: true, data: { operationId, changed: false, outcome: 'unchanged',
+    revision: 'a'.repeat(64), beforeRevision: 'a'.repeat(64), afterRevision: 'a'.repeat(64),
+    writeCommitState: 'uncommitted', mutationCommitState: 'uncommitted' } });
+
+  it.each(['file.write', 'file.patch'].flatMap(name => ['abort', 'deadline'].map(cancellation => ({ name, cancellation }))))('preserves an actual library $name no-op through both Brokers when $cancellation wins before main completion', async ({ name, cancellation }) => {
+      vi.useFakeTimers();
+      const controller = new AbortController();
+      try {
+        const registry = createAgentToolRegistry([fileWriteTool, filePatchTool]); const snapshot = registry.createSnapshot();
+        const broker = createAgentToolBroker({ toolRegistry: registry });
+        const source = 'old\n', revision = createHash('sha256').update(source).digest('hex');
+        const hooks = { operationId, prepare: vi.fn(async () => undefined), settle: vi.fn(async () => undefined) };
+        const prepareMutation = vi.fn(async () => undefined), beforeCommit = vi.fn(async () => undefined);
+        const update = vi.fn(), onCommitted = vi.fn(), onCancel = vi.fn();
+        const context = { appContext: prepareInput(controller.signal).appContext, onProgress: vi.fn(), signal: controller.signal,
+          fileMutation: hooks, runCapabilitySnapshot: { getTool: (requested: string) => snapshot.get(requested) },
+          executeLibraryFileMutation: async (input: unknown, signal: AbortSignal) => {
+            const execution = broker.prepareRendererExecution({ ...prepareInput(signal), toolName: name, onCancel,
+              executionInput: { ...(input as Record<string, unknown>), libraryId: 3 },
+              fileNoopSettlement: { expectedRevision: revision } });
+            expect(execution.request).not.toHaveProperty('fileNoopSettlement');
+            const renderer = await executeAgentFileWrite(execution.request, {
+              signal, assertOwner: vi.fn(), prepareMutation, beforeCommit, update, onCommitted,
+              resolvePath: async () => ({ id: 9, parentId: 10, libraryId: 3, type: 'file', name: 'a', ext: 'txt', path: '/a.txt' }),
+              detail: async () => ({ id: 9, parentId: 10, libraryId: 3, type: 'file', name: 'a', ext: 'txt',
+                storageKey: 'synthetic-binding', fileSize: source.length }) as Awaited<ReturnType<NonNullable<AgentFileWriteDependencies['detail']>>>,
+              readBytes: async () => new TextEncoder().encode(source),
+            });
+            if (cancellation === 'abort') controller.abort();
+            else await vi.advanceTimersByTimeAsync(10_000);
+            broker.completeRendererExecution(77, { executionId: execution.request.executionId, libraryId: 3,
+              ownerScope: OWNER_SCOPE, runId: 'run-1', sessionId: 'session-1', result: renderer.result });
+            const outcome = await execution.outcome;
+            return { ...outcome.result, data: { ...(outcome.result.data as Record<string, unknown>), operationId } };
+          } } as unknown as AgentToolDispatchContext;
+        const input = { path: '/a.txt', revision, ...(name === 'file.patch'
+          ? { format: 'context-v1', patch: '@@\n-old\n+old\n' } : { content: source }) };
+        await expect(broker.executeMain(name, input, context, 10_000, snapshot, 35_000)).resolves.toMatchObject({
+          ok: true, data: { operationId, changed: false, outcome: 'unchanged', revision, beforeRevision: revision, afterRevision: revision,
+            writeCommitState: 'uncommitted', mutationCommitState: 'uncommitted' },
+        });
+        for (const effect of [hooks.prepare, hooks.settle, prepareMutation, beforeCommit, update, onCommitted]) expect(effect).not.toHaveBeenCalled();
+        expect(onCancel).toHaveBeenCalledOnce();
+        expect(vi.getTimerCount()).toBe(0);
+      } finally { controller.abort(); vi.useRealTimers(); }
+    });
+
+  it('keeps ordinary, invalid and operation-mismatched uncommitted results subject to cancellation', async () => {
+    const valid = noopReceipt(); const data = valid.data as Record<string, unknown>;
+    const results: AgentToolResult[] = [
+      { ok: false, data }, { ok: true, data: { operationId, mutationCommitState: 'uncommitted', writeCommitState: 'uncommitted' } },
+      { ok: true, data: { ...data, changed: true } }, { ok: true, data: { ...data, outcome: 'written' } },
+      { ok: true, data: { ...data, operationId: 'another-operation' } }, { ok: true, data: { ...data, revision: 'invalid' } },
+      { ok: true, data: { ...data, revision: 'b'.repeat(64), beforeRevision: 'b'.repeat(64), afterRevision: 'b'.repeat(64) } },
+      { ok: true, data: { ...data, beforeRevision: 'b'.repeat(64) } }, { ok: true, data: { ...data, afterRevision: undefined } },
+      { ok: true, data: { ...data, writeCommitState: undefined } }, { ok: true, data: { ...data, deleteCommitState: 'committed' } },
+    ];
+    for (const result of results) {
+      const controller = new AbortController();
+      const registry = createAgentToolRegistry([filePatchTool]); const snapshot = registry.createSnapshot();
+      const context = { appContext: prepareInput(controller.signal).appContext, onProgress: vi.fn(), signal: controller.signal,
+        fileMutation: { operationId, prepare: vi.fn(), settle: vi.fn() },
+        runCapabilitySnapshot: { getTool: (name: string) => snapshot.get(name) },
+        executeLibraryFileMutation: async () => { controller.abort(); return result; } } as unknown as AgentToolDispatchContext;
+      await expect(createAgentToolBroker({ toolRegistry: registry }).executeMain('file.patch', toolInput('file.patch'), context, 10_000, snapshot))
+        .rejects.toThrow('取消');
+    }
+  });
+
+  it.each([
+    { input: {}, accepted: false },
+    { input: { mode: 'create' }, accepted: false },
+    { input: { mode: 'create', revision: 'a'.repeat(64) }, accepted: false },
+    { input: { revision: 'invalid' }, accepted: false },
+    { input: { revision: 'a'.repeat(64), expectedRevision: 'a'.repeat(64) }, accepted: false },
+    { input: { expectedRevision: 'a'.repeat(64) }, accepted: true },
+  ])('binds cancelled main no-op acceptance to the frozen request revision: $input', async ({ input, accepted }) => {
+    const controller = new AbortController();
+    const registry = createAgentToolRegistry([fileWriteTool]); const snapshot = registry.createSnapshot();
+    const context = { appContext: prepareInput(controller.signal).appContext, onProgress: vi.fn(), signal: controller.signal,
+      fileMutation: { operationId, prepare: vi.fn(), settle: vi.fn() },
+      runCapabilitySnapshot: { getTool: (name: string) => snapshot.get(name) } } as unknown as AgentToolDispatchContext;
+    const execute = vi.fn(async () => { controller.abort(); return noopReceipt(); });
+    const running = createAgentToolBroker({ toolRegistry: { execute } }).executeMain('file.write', input, context);
+    if (accepted) await expect(running).resolves.toMatchObject(noopReceipt());
+    else await expect(running).rejects.toThrow('取消');
+  });
+
+  it('does not let an executor replace the frozen request revision before cancellation settlement', async () => {
+    const controller = new AbortController();
+    const registry = createAgentToolRegistry([filePatchTool]); const snapshot = registry.createSnapshot();
+    const input = toolInput('file.patch');
+    const context = { appContext: prepareInput(controller.signal).appContext, onProgress: vi.fn(), signal: controller.signal,
+      fileMutation: { operationId, prepare: vi.fn(), settle: vi.fn() },
+      runCapabilitySnapshot: { getTool: (name: string) => snapshot.get(name) },
+      executeLibraryFileMutation: async () => {
+        input.revision = 'b'.repeat(64);
+        controller.abort();
+        return { ok: true, data: { ...(noopReceipt().data as Record<string, unknown>),
+          revision: 'b'.repeat(64), beforeRevision: 'b'.repeat(64), afterRevision: 'b'.repeat(64) } };
+      } } as unknown as AgentToolDispatchContext;
+    await expect(createAgentToolBroker({ toolRegistry: registry }).executeMain('file.patch', input, context, 10_000, snapshot)).rejects.toThrow('取消');
+  });
+
+  it('does not preserve a cancelled no-op from an untrusted file tool registration', async () => {
+    const controller = new AbortController();
+    const registry = createAgentToolRegistry([{ ...filePatchTool, registrationId: 'test:untrusted-file-patch@1' }]);
+    const snapshot = registry.createSnapshot();
+    const context = { appContext: prepareInput(controller.signal).appContext, onProgress: vi.fn(), signal: controller.signal,
+      fileMutation: { operationId, prepare: vi.fn(), settle: vi.fn() },
+      runCapabilitySnapshot: { getTool: (name: string) => snapshot.get(name) },
+      executeLibraryFileMutation: async () => { controller.abort(); return noopReceipt(); } } as unknown as AgentToolDispatchContext;
+    await expect(createAgentToolBroker({ toolRegistry: registry }).executeMain('file.patch', toolInput('file.patch'), context, 10_000, snapshot))
+      .rejects.toThrow('取消');
+  });
+
+  it.each(['abort', 'deadline'])('does not replace a sealed %s with a late canonical no-op', async cancellation => {
+    vi.useFakeTimers();
+    const completion = brokerDeferred<AgentToolResult>();
+    const started = brokerDeferred<void>();
+    const controller = new AbortController();
+    try {
+      const registry = createAgentToolRegistry([filePatchTool]); const snapshot = registry.createSnapshot();
+      const context = { appContext: prepareInput(controller.signal).appContext, onProgress: vi.fn(), signal: controller.signal,
+        fileMutation: { operationId, prepare: vi.fn(), settle: vi.fn() },
+        runCapabilitySnapshot: { getTool: (name: string) => snapshot.get(name) },
+        executeLibraryFileMutation: async () => { started.resolve(); return completion.promise; } } as unknown as AgentToolDispatchContext;
+      const running = createAgentToolBroker({ toolRegistry: registry }).executeMain('file.patch', toolInput('file.patch'), context, 1_000, snapshot, 50);
+      const rejected = expect(running).rejects.toThrow(cancellation === 'deadline' ? '超时' : '取消');
+      await started.promise;
+      if (cancellation === 'abort') controller.abort();
+      else await vi.advanceTimersByTimeAsync(1_000);
+      await vi.advanceTimersByTimeAsync(50);
+      await rejected;
+      completion.resolve(noopReceipt());
+      await Promise.resolve();
+      await expect(running).rejects.toThrow(cancellation === 'deadline' ? '超时' : '取消');
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { completion.resolve(noopReceipt()); vi.useRealTimers(); }
+  });
+
+  it.each(['committed', 'uncommitted', 'commit_unknown'] as const)('retains explicit %s independently of the result ok flag', async state => {
+    const registry = createAgentToolRegistry([filePatchTool]); const snapshot = registry.createSnapshot();
+    const actual = { ...receipt(state), ok: state !== 'committed' };
+    const context = { appContext: prepareInput(new AbortController().signal).appContext, onProgress: vi.fn(), signal: new AbortController().signal,
+      runCapabilitySnapshot: { getTool: (name: string) => snapshot.get(name) },
+      executeLibraryFileMutation: async (_input: unknown, _signal: AbortSignal, commit?: AgentMainCommitSettlement) => {
+        commit!.begin(receipt('commit_unknown')); commit!.settle(actual); return actual;
+      } } as unknown as AgentToolDispatchContext;
+    const broker = createAgentToolBroker({ toolRegistry: registry });
+    await expect(broker.executeMain('file.patch', toolInput('file.patch'), context, 10_000, snapshot)).resolves.toEqual(actual);
+  });
 
   it.each(['file.write', 'file.patch'])('injects main-owned settlement into actual registered %s and preserves post-cancel receipts', async name => {
     for (const state of ['committed', 'uncommitted', 'commit_unknown'] as const) {

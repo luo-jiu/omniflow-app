@@ -8,6 +8,7 @@ import {
   appendBoundedAIServiceStreamText,
 } from '../aiServiceStreamLimits';
 import type { AgentReasoningEffort } from '@/shared/agent/agent.types';
+import { AGENT_TOOL_ARGUMENT_MAX_CHARACTERS } from '../../../src/shared/agent/agent-tool-input-limits';
 import { resolveAgentAdapterEffort, resolveAgentModelAdapter, type AgentModelAdapter } from './agent-model-adapter';
 import {
   AGENT_PROVIDER_TOOL_NAME_MAX_LENGTH,
@@ -75,7 +76,7 @@ export interface ResolvedAgentProviderStreamLimits {
 export const DEFAULT_AGENT_PROVIDER_STREAM_LIMITS: Readonly<ResolvedAgentProviderStreamLimits> = Object.freeze({
   maxAssistantContentCharacters: 64_000,
   maxEventBufferCharacters: 128_000,
-  maxToolArgumentCharacters: 64_000,
+  maxToolArgumentCharacters: AGENT_TOOL_ARGUMENT_MAX_CHARACTERS,
   maxToolArgumentTotalCharacters: 128_000,
 });
 

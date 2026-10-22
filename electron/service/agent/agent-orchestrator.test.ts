@@ -1,5 +1,10 @@
 import crypto from 'node:crypto';
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import type { AgentFileChangeStore } from './agent-file-change-store';
+import { createAgentFileChangeStore } from './agent-file-change-store';
+import { bootstrapAgentPersistenceDatabase } from './agent-persistence-runtime';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type {
@@ -94,6 +99,9 @@ import { resolveAgentSkillActivationResult } from './skills/skill-activate-tool'
 import { createAIServiceRunSessionRegistry } from '../aiServiceRunSession';
 import { validateComputerText } from '../../../src/shared/computer-use/computer-use-contract';
 import * as agentRipgrepExecutable from './agent-ripgrep-executable';
+import { executeAgentFileWrite, type AgentFileWriteDependencies } from '../../../src/features/agent/services/agent-file-write';
+import { executeAgentRendererTool } from '../../../src/features/agent/services/agent-tool-executor';
+import { completeAgentToolExecution } from '../../../src/features/agent/services/agent.api';
 
 const OWNER_SCOPE = {
   accountScope: 'user:7',
@@ -331,6 +339,354 @@ describe('Agent orchestrator', () => {
     await expect(orchestrator.listFileChanges({ ...prepare, runIds: ['other-run'] })).rejects.toThrow('不属于');
     await orchestrator.listFileChanges({ ...prepare, runIds: [started.runId] });
     expect(changes.list).toHaveBeenCalled();
+  });
+
+  it('wires an actual renderer no-op into the production journal reader and registered verification tool', async () => {
+    const source = 'old\n';
+    const revision = crypto.createHash('sha256').update(source).digest('hex');
+    const changes: AgentFileChangeStore = { prepare: vi.fn(async () => undefined), settle: vi.fn(async () => undefined),
+      list: vi.fn(async () => ({ changes: [], truncated: false, coverage: 'structured-file-writes' as const })),
+      read: vi.fn(), sweep: vi.fn(async () => undefined), close: vi.fn(async () => undefined) };
+    const readLibraryMetadata = vi.fn(async () => ({ libraryId: 3,
+      node: { id: 88, parentId: 0, libraryId: 3, name: 'notes', ext: 'txt', path: '/notes.txt', type: 'file' as const } }));
+    let sessionId = '';
+    mocks.streamAgentProviderTurn
+      .mockResolvedValueOnce({ content: '', toolCalls: [{ id: 'unchanged-patch', name: 'file.patch', input: {
+        path: '/notes.txt', revision, format: 'context-v1', patch: '@@\n-old\n+old\n',
+      } }] })
+      .mockImplementationOnce(async () => {
+        const mutation = (await store.getSession(sessionId, OWNER_SCOPE, 3))!.toolActivities[0];
+        const data = mutation.result!.data as Record<string, unknown>;
+        expect(mutation.status).toBe('completed');
+        readLibraryMetadata.mockClear();
+        return { content: '', toolCalls: [String(data.operationId), mutation.id].map((operationId, index) => ({
+          id: `verify-no-op-${index}`, name: 'operation.verify', input: { operationId },
+        })) };
+      })
+      .mockImplementationOnce(async (_connection, _input, onDelta) => {
+        onDelta('内容未变化。'); return { content: '内容未变化。', toolCalls: [] };
+      });
+    const webContents = sender();
+    const orchestrator = createOrchestrator({ getFileChangeStore: async () => changes, readLibraryMetadata,
+      readLibraryText: vi.fn(async () => Buffer.from(source)) });
+    try {
+      const started = await orchestrator.start(webContents as never, request()); sessionId = started.sessionId;
+      const approval = await pendingWindowApproval(webContents);
+      await orchestrator.resolveToolApproval(webContents.id, { approvalId: approval.approvalId, approved: true,
+        libraryId: 3, ownerScope: OWNER_SCOPE, ...started });
+      await vi.waitFor(() => expect(webContents.send.mock.calls.map(call => call[1]))
+        .toContainEqual(expect.objectContaining({ type: 'tool-execution-requested' })));
+      const execution = webContents.send.mock.calls.map(call => call[1])
+        .find(event => event.type === 'tool-execution-requested').execution as AgentToolExecutionRequest;
+      const prepareMutation = vi.fn(async () => undefined), beforeCommit = vi.fn(async () => undefined);
+      const update = vi.fn(), onCommitted = vi.fn();
+      const output = await executeAgentFileWrite(execution, {
+        assertOwner: vi.fn(), prepareMutation, beforeCommit, update, onCommitted,
+        resolvePath: async () => ({ id: 88, parentId: 0, libraryId: 3, type: 'file', name: 'notes', ext: 'txt', path: '/notes.txt' }),
+        detail: async () => ({ id: 88, parentId: 0, libraryId: 3, type: 'file', name: 'notes', ext: 'txt',
+          storageKey: 'synthetic-storage-binding', fileSize: source.length }) as Awaited<ReturnType<NonNullable<AgentFileWriteDependencies['detail']>>>,
+        readBytes: async () => new TextEncoder().encode(source),
+      });
+      expect(output).toMatchObject({ committed: false, result: { ok: true,
+        data: { changed: false, outcome: 'unchanged', operationId: execution.executionId } } });
+      orchestrator.completeToolExecution(webContents.id, { executionId: execution.executionId, libraryId: 3,
+        ownerScope: OWNER_SCOPE, ...started, result: output.result });
+      await waitForCompletedFinal(webContents, '内容未变化。', started);
+      const snapshot = await store.getSession(started.sessionId, OWNER_SCOPE, 3);
+      expect(snapshot?.toolActivities[0].result).toMatchObject({ ok: true, data: {
+        mutationCommitState: 'uncommitted', writeCommitState: 'uncommitted', changed: false, outcome: 'unchanged',
+        operationId: expect.not.stringMatching(execution.executionId),
+      } });
+      expect(snapshot?.toolActivities.slice(1)).toEqual([0, 1].map(() => expect.objectContaining({
+        status: 'completed', result: expect.objectContaining({ ok: true, data: expect.objectContaining({
+          status: 'not_committed', journalStatus: 'uncommitted', changed: false, outcome: 'unchanged', node: null,
+        }) }),
+      })));
+      for (const effect of [changes.prepare, changes.settle, prepareMutation, beforeCommit, update, onCommitted, readLibraryMetadata]) {
+        expect(effect).not.toHaveBeenCalled();
+      }
+    } finally { await orchestrator.shutdown(); }
+  });
+
+  it.each(['file.write', 'file.patch'])('persists an actual renderer %s no-op when stopped before its completion IPC', async toolName => {
+    const source = 'old\n';
+    const revision = crypto.createHash('sha256').update(source).digest('hex');
+    const changes: AgentFileChangeStore = { prepare: vi.fn(async () => undefined), settle: vi.fn(async () => undefined),
+      list: vi.fn(async () => ({ changes: [], truncated: false, coverage: 'structured-file-writes' as const })),
+      read: vi.fn(), sweep: vi.fn(async () => undefined), close: vi.fn(async () => undefined) };
+    mocks.streamAgentProviderTurn.mockResolvedValueOnce({ content: '', toolCalls: [{ id: 'cancel-no-op', name: toolName,
+      input: { path: '/notes.txt', revision, ...(toolName === 'file.patch'
+        ? { format: 'context-v1', patch: '@@\n-old\n+old\n' } : { content: source }) } }] });
+    const webContents = sender();
+    const orchestrator = createOrchestrator({ getFileChangeStore: async () => changes });
+    try {
+      const started = await orchestrator.start(webContents as never, request());
+      const approval = await pendingWindowApproval(webContents);
+      await orchestrator.resolveToolApproval(webContents.id, { approvalId: approval.approvalId, approved: true,
+        libraryId: 3, ownerScope: OWNER_SCOPE, ...started });
+      await vi.waitFor(() => expect(webContents.send.mock.calls.map(call => call[1]))
+        .toContainEqual(expect.objectContaining({ type: 'tool-execution-requested' })));
+      const execution = webContents.send.mock.calls.map(call => call[1])
+        .find(event => event.type === 'tool-execution-requested').execution as AgentToolExecutionRequest;
+      const prepareMutation = vi.fn(async () => undefined), beforeCommit = vi.fn(async () => undefined);
+      const update = vi.fn(), onCommitted = vi.fn();
+      const output = await executeAgentFileWrite(execution, {
+        assertOwner: vi.fn(), prepareMutation, beforeCommit, update, onCommitted,
+        resolvePath: async () => ({ id: 88, parentId: 0, libraryId: 3, type: 'file', name: 'notes', ext: 'txt', path: '/notes.txt' }),
+        detail: async () => ({ id: 88, parentId: 0, libraryId: 3, type: 'file', name: 'notes', ext: 'txt',
+          storageKey: 'synthetic-storage-binding', fileSize: source.length }) as Awaited<ReturnType<NonNullable<AgentFileWriteDependencies['detail']>>>,
+        readBytes: async () => new TextEncoder().encode(source),
+      });
+      expect(output).toMatchObject({ committed: false, result: { ok: true, data: { outcome: 'unchanged' } } });
+      expect(orchestrator.stop(started.sessionId, webContents.id)).toBe(true);
+      expect(orchestrator.completeToolExecution(webContents.id, { executionId: execution.executionId, libraryId: 3,
+        ownerScope: OWNER_SCOPE, ...started, result: output.result })).toBe(true);
+      await vi.waitFor(() => expect(webContents.send.mock.calls.map(call => call[1]))
+        .toContainEqual(expect.objectContaining({ type: 'cancelled', runId: started.runId, sessionId: started.sessionId })));
+      const snapshot = await store.getSession(started.sessionId, OWNER_SCOPE, 3);
+      expect(snapshot?.toolActivities).toEqual([expect.objectContaining({ status: 'completed', result: expect.objectContaining({
+        ok: true, data: expect.objectContaining({ changed: false, outcome: 'unchanged', revision,
+          beforeRevision: revision, afterRevision: revision, writeCommitState: 'uncommitted', mutationCommitState: 'uncommitted',
+          operationId: expect.not.stringMatching(execution.executionId) }),
+      }) })]);
+      for (const effect of [changes.prepare, changes.settle, prepareMutation, beforeCommit, update, onCommitted]) {
+        expect(effect).not.toHaveBeenCalled();
+      }
+      expect(mocks.streamAgentProviderTurn).toHaveBeenCalledOnce();
+    } finally { await orchestrator.shutdown(); }
+  });
+
+  it.each(['file.write', 'file.patch'])('finishes %s cancelled during the outer renderer access recheck before starting the next Run', async toolName => {
+    vi.useFakeTimers();
+    const actualAccess = await vi.importActual<typeof import('./agent-library-access')>('./agent-library-access');
+    let pauseRendererRecheck = false;
+    let announceRecheck!: () => void, releaseRecheck!: () => void;
+    const recheckEntered = new Promise<void>(resolve => { announceRecheck = resolve; });
+    const recheckReleased = new Promise<void>(resolve => { releaseRecheck = resolve; });
+    mocks.createAgentLibraryAccessGuard.mockImplementation(options => {
+      const guard = actualAccess.createAgentLibraryAccessGuard(options);
+      return { ...guard, authorizeTool: async (...args: Parameters<typeof guard.authorizeTool>) => {
+        if (pauseRendererRecheck) {
+          pauseRendererRecheck = false;
+          announceRecheck();
+          await recheckReleased;
+        }
+        return guard.authorizeTool(...args);
+      } };
+    });
+    const revision = crypto.createHash('sha256').update('old\n').digest('hex');
+    mocks.streamAgentProviderTurn
+      .mockResolvedValueOnce({ content: '', toolCalls: [{ id: 'cancel-access-recheck', name: toolName,
+        input: { path: '/notes.txt', revision, ...(toolName === 'file.patch'
+          ? { format: 'context-v1', patch: '@@\n-old\n+new\n' } : { content: 'new\n' }) } }] })
+      .mockImplementationOnce(async (_connection, _input, onDelta) => {
+        onDelta('下一轮已完成。'); return { content: '下一轮已完成。', toolCalls: [] };
+      });
+    const webContents = sender();
+    const rendererController = new AbortController();
+    webContents.send.mockImplementation((_channel, event) => {
+      if (event.type === 'tool-execution-cancelled') rendererController.abort();
+    });
+    const getFileChangeStore = vi.fn();
+    const readLibraryText = vi.fn();
+    const orchestrator = createOrchestrator({ getFileChangeStore, readLibraryText });
+    const verifyToolAccess = vi.fn((input: Parameters<typeof orchestrator.verifyToolAccess>[1]) => (
+      orchestrator.verifyToolAccess(webContents.id, input)
+    ));
+    const completeToolExecution = vi.fn(async (input: Parameters<typeof orchestrator.completeToolExecution>[1]) => (
+      orchestrator.completeToolExecution(webContents.id, input)
+    ));
+    vi.stubGlobal('window', { ...globalThis.window, electronAgent: { verifyToolAccess, completeToolExecution } });
+    try {
+      const started = await orchestrator.start(webContents as never, { ...request(), permissionMode: 'full-access' });
+      await vi.waitFor(() => expect(webContents.send.mock.calls.map(call => call[1]))
+        .toContainEqual(expect.objectContaining({ type: 'tool-execution-requested', runId: started.runId })));
+      const execution = webContents.send.mock.calls.map(call => call[1])
+        .find(event => event.type === 'tool-execution-requested').execution as AgentToolExecutionRequest;
+      expect(execution.requireAccessCheck).toBe(true);
+      const resolvePath = vi.fn(), prepareMutation = vi.fn(), onCommitted = vi.fn();
+      pauseRendererRecheck = true;
+      const output = executeAgentRendererTool(execution, {
+        signal: rendererController.signal, resolvePath, prepareMutation, onCommitted,
+      });
+      await recheckEntered;
+      expect(verifyToolAccess).toHaveBeenCalledOnce();
+      const stoppedAt = Date.now();
+      expect(orchestrator.stop(started.sessionId, webContents.id)).toBe(true);
+      expect(rendererController.signal.aborted).toBe(true);
+      let nextStarted: Awaited<ReturnType<typeof orchestrator.start>> | undefined;
+      let nextStartError: unknown;
+      void orchestrator.start(webContents as never, {
+        ...request(), sessionId: started.sessionId, userPrompt: '新的问题', permissionMode: 'full-access',
+      }).then(value => { nextStarted = value; }, error => { nextStartError = error; });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(nextStarted).toBeUndefined();
+      expect(nextStartError).toBeUndefined();
+
+      releaseRecheck();
+      const outcome = await output;
+      expect(outcome).toMatchObject({ committed: false, result: { ok: false, data: {
+        operationId: execution.executionId, writeCommitState: 'uncommitted', mutationCommitState: 'uncommitted',
+      } } });
+      // The renderer hook still sends mutation completions after cancellation.
+      // Broker rejects this cancelled call while immediately closing its no-op wait.
+      await expect(completeAgentToolExecution({ executionId: execution.executionId, libraryId: 3,
+        ownerScope: OWNER_SCOPE, ...started, result: outcome.result })).rejects.toMatchObject({ name: 'AbortError' });
+      expect(completeToolExecution).toHaveBeenCalledOnce();
+      await vi.waitFor(() => {
+        expect(nextStartError).toBeUndefined();
+        expect(nextStarted).toBeDefined();
+      });
+      expect(nextStarted).toMatchObject({ sessionId: started.sessionId });
+      expect(nextStarted!.runId).not.toBe(started.runId);
+      await waitForCompletedFinal(webContents, '下一轮已完成。', nextStarted!);
+      expect(Date.now() - stoppedAt).toBeLessThan(1_000);
+      const events = webContents.send.mock.calls.map(call => call[1]);
+      const cancelledIndex = events.findIndex(event => event.type === 'cancelled' && event.runId === started.runId);
+      const nextStartedIndex = events.findIndex(event => event.type === 'started' && event.runId === nextStarted!.runId);
+      expect(cancelledIndex).toBeGreaterThanOrEqual(0);
+      expect(nextStartedIndex).toBeGreaterThan(cancelledIndex);
+      const snapshot = (await store.getSession(started.sessionId, OWNER_SCOPE, 3))!;
+      expect(snapshot.runs.map(run => run.status)).toEqual(['cancelled', 'completed']);
+      expect(snapshot.toolActivities).toEqual([expect.objectContaining({ status: 'cancelled',
+        finishedAt: expect.any(String), result: expect.objectContaining({ ok: false }) })]);
+      for (const effect of [resolvePath, prepareMutation, onCommitted, getFileChangeStore, readLibraryText]) {
+        expect(effect).not.toHaveBeenCalled();
+      }
+      expect(mocks.streamAgentProviderTurn).toHaveBeenCalledTimes(2);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      releaseRecheck(); orchestrator.releaseOwner(webContents.id);
+      await vi.advanceTimersByTimeAsync(35_001);
+      await orchestrator.shutdown(0);
+      vi.unstubAllGlobals(); vi.useRealTimers();
+    }
+  });
+
+  it('settles a prepared file journal as uncommitted when cancelled before commit begin', async () => {
+    const content = 'new\n';
+    const afterRevision = crypto.createHash('sha256').update(content).digest('hex');
+    let cancelBeforeBegin: () => void = () => undefined;
+    let restoreSignal: () => void = () => undefined;
+    const changes: AgentFileChangeStore = { prepare: vi.fn(async (_identity, _snapshot, signal) => {
+      const throwIfAborted = signal.throwIfAborted.bind(signal);
+      const check = vi.spyOn(signal, 'throwIfAborted').mockImplementationOnce(() => {
+        cancelBeforeBegin(); throwIfAborted();
+      });
+      restoreSignal = () => check.mockRestore();
+    }), settle: vi.fn(async () => undefined),
+    list: vi.fn(async () => ({ changes: [], truncated: false, coverage: 'structured-file-writes' as const })),
+    read: vi.fn(), sweep: vi.fn(async () => undefined), close: vi.fn(async () => undefined) };
+    mocks.streamAgentProviderTurn.mockResolvedValueOnce({ content: '', toolCalls: [{ id: 'cancel-prepared-write',
+      name: 'file.write', input: { path: '/notes.txt', content } }] });
+    const webContents = sender();
+    const orchestrator = createOrchestrator({ getFileChangeStore: async () => changes });
+    try {
+      const started = await orchestrator.start(webContents as never, request());
+      cancelBeforeBegin = () => { orchestrator.stop(started.sessionId, webContents.id); };
+      const approval = await pendingWindowApproval(webContents);
+      await orchestrator.resolveToolApproval(webContents.id, { approvalId: approval.approvalId, approved: true,
+        libraryId: 3, ownerScope: OWNER_SCOPE, ...started });
+      await vi.waitFor(() => expect(webContents.send.mock.calls.map(call => call[1]))
+        .toContainEqual(expect.objectContaining({ type: 'tool-execution-requested' })));
+      const execution = webContents.send.mock.calls.map(call => call[1])
+        .find(event => event.type === 'tool-execution-requested').execution as AgentToolExecutionRequest;
+      await expect(orchestrator.prepareFileChange(webContents.id, { ownerScope: OWNER_SCOPE, libraryId: 3,
+        ...started, executionId: execution.executionId, snapshot: { path: '/notes.txt', beforeBase64: null,
+          afterBase64: Buffer.from(content).toString('base64'), afterRevision } })).rejects.toThrow();
+      await vi.waitFor(() => expect(changes.settle).toHaveBeenCalledWith(expect.any(Object), expect.objectContaining({
+        ok: false, data: expect.objectContaining({ mutationCommitState: 'uncommitted', writeCommitState: 'uncommitted' }),
+      })));
+      expect(changes.prepare).toHaveBeenCalledOnce(); expect(changes.settle).toHaveBeenCalledOnce();
+      await vi.waitFor(() => expect(webContents.send.mock.calls.map(call => call[1]))
+        .toContainEqual(expect.objectContaining({ type: 'cancelled', runId: started.runId, sessionId: started.sessionId })));
+    } finally { restoreSignal(); await orchestrator.shutdown(); }
+  });
+
+  it.each([false, true])('settles a preparation returning after cancellation and releases its lease (Broker sealed=%s)', async brokerSealed => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'agent-cancelled-prepare-'));
+    const databasePath = path.join(directory, 'agent.sqlite3');
+    const snapshots = path.join(directory, 'snapshots');
+    await bootstrapAgentPersistenceDatabase(databasePath);
+    const sessions = await createSQLiteAgentSessionStore(databasePath);
+    let clock = Date.now();
+    const durableChanges = await createAgentFileChangeStore(databasePath, snapshots, () => clock);
+    let releasePreparation!: () => void;
+    const release = new Promise<void>(resolve => { releasePreparation = resolve; });
+    let announcePrepared!: () => void;
+    const prepared = new Promise<void>(resolve => { announcePrepared = resolve; });
+    const prepare = vi.fn<AgentFileChangeStore['prepare']>(async (...args) => {
+      await durableChanges.prepare(...args);
+      announcePrepared();
+      await release; // Simulates cancellation while the final SQLite transaction is returning.
+    });
+    const settle = vi.fn<AgentFileChangeStore['settle']>((...args) => durableChanges.settle(...args));
+    const changes = { ...durableChanges, prepare, settle };
+    const content = 'new\n';
+    const afterRevision = crypto.createHash('sha256').update(content).digest('hex');
+    mocks.streamAgentProviderTurn.mockResolvedValueOnce({ content: '', toolCalls: [{ id: 'cancel-in-flight-prepare',
+      name: 'file.write', input: { path: '/notes.txt', content } }] });
+    const webContents = sender();
+    const broker = createAgentToolBroker();
+    if (brokerSealed) {
+      const executeMain = broker.executeMain.bind(broker);
+      vi.spyOn(broker, 'executeMain').mockImplementation((name, input, context, timeoutMs, registry, cancellationMs) => {
+        expect(cancellationMs).toBe(35_000);
+        return executeMain(name, input, context, timeoutMs, registry, 10);
+      });
+    }
+    const orchestrator = createOrchestrator({ toolBroker: broker,
+      getSessionStore: async () => sessions, getFileChangeStore: async () => changes });
+    try {
+      const started = await orchestrator.start(webContents as never, request());
+      const approval = await pendingWindowApproval(webContents);
+      await orchestrator.resolveToolApproval(webContents.id, { approvalId: approval.approvalId, approved: true,
+        libraryId: 3, ownerScope: OWNER_SCOPE, ...started });
+      await vi.waitFor(() => expect(webContents.send.mock.calls.map(call => call[1]))
+        .toContainEqual(expect.objectContaining({ type: 'tool-execution-requested' })));
+      const execution = webContents.send.mock.calls.map(call => call[1])
+        .find(event => event.type === 'tool-execution-requested').execution as AgentToolExecutionRequest;
+      const preparationRejected = expect(orchestrator.prepareFileChange(webContents.id, { ownerScope: OWNER_SCOPE, libraryId: 3,
+        ...started, executionId: execution.executionId, snapshot: { path: '/notes.txt', beforeBase64: null,
+          afterBase64: Buffer.from(content).toString('base64'), afterRevision } })).rejects.toThrow();
+      await prepared;
+      expect(orchestrator.stop(started.sessionId, webContents.id)).toBe(true);
+      await new Promise<void>(resolve => { setImmediate(resolve); });
+      expect(prepare.mock.calls[0][2].aborted).toBe(true);
+      expect(settle).not.toHaveBeenCalled();
+      let sealedResult: AgentToolResult | undefined;
+      if (brokerSealed) {
+        // The Broker must finish the Run within its existing budget even while prepare is pending.
+        await vi.waitFor(() => expect(webContents.send.mock.calls.map(call => call[1]))
+          .toContainEqual(expect.objectContaining({ type: 'cancelled', runId: started.runId, sessionId: started.sessionId })));
+        sealedResult = (await sessions.getSession(started.sessionId, OWNER_SCOPE, 3))!.toolActivities[0].result;
+        expect(sealedResult).toMatchObject({ ok: false, message: 'Agent Tool 已取消' });
+        expect(settle).not.toHaveBeenCalled();
+      }
+      releasePreparation();
+      await preparationRejected;
+      await vi.waitFor(() => expect(settle).toHaveBeenCalledOnce());
+      expect(settle).toHaveBeenCalledWith(expect.any(Object), expect.objectContaining({
+        ok: false, data: expect.objectContaining({ mutationCommitState: 'uncommitted', writeCommitState: 'uncommitted' }),
+      }));
+      const identity = prepare.mock.calls[0][0];
+      expect((await durableChanges.list(identity, [started.runId])).changes)
+        .toEqual([expect.objectContaining({ state: 'uncommitted', available: true })]);
+      clock += 15 * 24 * 60 * 60 * 1_000;
+      await durableChanges.sweep();
+      expect((await durableChanges.list(identity, [started.runId])).changes)
+        .toEqual([expect.objectContaining({ state: 'uncommitted', available: false })]);
+      expect(await readdir(snapshots)).toEqual([]);
+      await vi.waitFor(() => expect(webContents.send.mock.calls.map(call => call[1]))
+        .toContainEqual(expect.objectContaining({ type: 'cancelled', runId: started.runId, sessionId: started.sessionId })));
+      if (brokerSealed) expect((await sessions.getSession(started.sessionId, OWNER_SCOPE, 3))!.toolActivities[0].result).toEqual(sealedResult);
+    } finally {
+      releasePreparation();
+      await orchestrator.shutdown();
+      await durableChanges.close();
+      await sessions.close();
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   it('rejects a relative host write without a base before approval or filesystem dispatch', async () => {

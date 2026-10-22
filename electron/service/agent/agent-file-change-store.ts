@@ -7,6 +7,7 @@ import type { AgentToolResult } from '../../../src/shared/agent/agent.types';
 import type { AgentFileMutationSnapshot } from '../../../src/shared/agent/agent-file-write';
 import type { AgentFileChangeScope, AgentFileChangeSummary, AgentFileChangeList, AgentFileDiffRequest, AgentFileDiffResult } from '../../../src/shared/agent/agent-file-changes';
 import { normalizeAgentOwnerScope } from '../../../src/shared/agent/agent-owner-scope';
+import { normalizeAgentMutationCommitState } from '../../../src/shared/agent/agent-mutation-commit-state';
 import { agentDatabaseSchemaCoordinator } from './storage/agent-database-schema-coordinator';
 import { createAgentFileDiffRuntime, type AgentFileDiffRuntimeOptions } from './agent-file-diff-runtime';
 
@@ -225,8 +226,8 @@ export async function createAgentFileChangeStore(databasePath: string, root: str
   async function settle(identity: AgentFileMutationIdentity, result: AgentToolResult) {
     return serial(async () => {
       const data = result.data && typeof result.data === 'object' ? result.data as Record<string, unknown> : {};
-      const requestedState = data.writeCommitState || data.mutationCommitState;
-      const state = typeof requestedState === 'string' && ['committed', 'uncommitted', 'commit_unknown'].includes(requestedState) ? requestedState : 'commit_unknown';
+      const { status } = normalizeAgentMutationCommitState(data);
+      const state = status === 'unknown' ? 'commit_unknown' : status;
       const params = scopeParams(identity);
       const key = JSON.stringify([...params, identity.operationId, identity.runId, identity.toolRunId]);
       const lease = [...active].find(([, identityKey]) => identityKey === key);

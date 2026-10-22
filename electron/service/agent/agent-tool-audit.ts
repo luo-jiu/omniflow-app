@@ -8,6 +8,7 @@ import { COMPUTER_TEXT_MAX_UNICODE_SCALARS, COMPUTER_TEXT_MAX_UTF8_BYTES,
   validateComputerText } from '../../../src/shared/computer-use/computer-use-contract';
 import { toAgentProviderToolName } from './agent-provider-tool-name';
 import { getAgentComputerStepTitle } from '../../../src/shared/agent/agent-computer-step-title';
+import { AGENT_TOOL_ARGUMENT_MAX_CHARACTERS } from '../../../src/shared/agent/agent-tool-input-limits';
 
 const REDACTED = '[REDACTED]';
 const TRUNCATED = '[TRUNCATED]';
@@ -20,7 +21,7 @@ const MAX_AUDIT_STRING_CHARACTERS = 320;
 const MAX_KEY_CHARACTERS = 80;
 const MAX_SCAN_DEPTH = 16;
 const MAX_SCAN_NODES = 4_096;
-const MAX_SCAN_STRING_CHARACTERS = 64_000;
+const MAX_SCAN_STRING_CHARACTERS = AGENT_TOOL_ARGUMENT_MAX_CHARACTERS;
 const UNSAFE_AUDIT_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 const COMPUTER_ID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u;
 

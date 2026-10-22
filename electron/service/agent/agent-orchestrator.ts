@@ -1,7 +1,8 @@
 import type { AgentFileChangePrepareRequest, AgentFileChangeListRequest, AgentFileDiffRequest } from '../../../src/shared/agent/agent-file-changes';
 import { normalizeAgentFileWriteInput, type AgentFileMutationHooks, type AgentFileMutationSnapshot } from '../../../src/shared/agent/agent-file-write';
 import { normalizeAgentFilePatchInput } from '../../../src/shared/agent/agent-file-patch';
-import { decodeAgentFileChangeSnapshot } from './agent-file-change-prepare';
+import { decodeAgentFileChangeSnapshotAsync } from './agent-file-change-prepare';
+import { isAgentBuiltinFileMutationTool } from './agent-file-mutation-tool';
 import { getAgentFileChangeStore } from './agent-file-change-runtime';
 import { resolveAgentFileToolInput } from './agent-file-path-resolver';
 import type { AgentFileChangeStore, AgentFileMutationIdentity } from './agent-file-change-store';
@@ -123,6 +124,7 @@ import {
   normalizeAgentActiveContextSummary,
 } from './agent-active-context-summary';
 import { createAgentContextManager, type AgentContextManager } from './agent-context-manager';
+import { readAgentOperationJournal } from './agent-operation-journal';
 import {
   assertAgentCurrentRunFitsContext,
   estimateAgentFixedInputTokens,
@@ -1780,7 +1782,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     }
     await toolBroker.verifyRendererAccess(ownerWebContentsId, input);
     const capability = toolBroker.claimRendererCapability(ownerWebContentsId, { ...input, capability: 'prepare-file-change' }, pending.toolName);
-    const snapshot = decodeAgentFileChangeSnapshot(input.snapshot, pending.input);
+    const snapshot = await decodeAgentFileChangeSnapshotAsync(input.snapshot, pending.input, capability.signal);
     await pending.prepare(snapshot, capability.signal);
     capability.signal.throwIfAborted();
     pending.begin();
@@ -2315,10 +2317,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         authority: { sender, ownerScope: input.ownerScope, libraryId: Number(input.appContext.libraryId), sessionId, runId, toolRunId,
           signal: AbortSignal.any([signal, operationSignal]), operation: { operation: 'stage-library-node', nodeId, includeDownloadUrl: true } } };
     };
-    const isFileMutation = tool?.name === call.name && tool.executor === 'main' && tool.kind === 'business'
-      && !tool.pluginSource && !tool.pluginOperation
-      && (call.name === 'file.write' && tool.registrationId === 'builtin:file.write@2'
-        || call.name === 'file.patch' && tool.registrationId === 'builtin:file.patch@1');
+    const isFileMutation = isAgentBuiltinFileMutationTool(tool, call.name);
     const mutationIdentity: AgentFileMutationIdentity = { ownerScope: input.ownerScope,
       libraryId: Number(input.appContext.libraryId), sessionId, runId, toolRunId, operationId: crypto.randomUUID() };
     const fileMutation: AgentFileMutationHooks | undefined = isFileMutation ? {
@@ -2340,22 +2339,29 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
           ownerScope: input.ownerScope, ownerWebContentsId: sender.id, onProgress: persistAndEmitProgress,
           onCancel: cancelRendererExecution, runId, sessionId, signal: operationSignal,
           timeoutMs: tool?.timeoutMs || 120_000, toolName: call.name,
+          ...(normalized.revision ? { fileNoopSettlement: { expectedRevision: normalized.revision } } : {}),
         });
+        let prepared = false;
+        let preparation: Promise<void> | undefined;
         let began = false;
         let acceptedReceipt: AgentToolResult | undefined;
         const unknown: AgentToolResult = { ok: false, message: '文件写入提交状态暂时无法确认，请检查改动记录，勿自动重试',
           data: { operationId: fileMutation.operationId, writeCommitState: 'commit_unknown', mutationCommitState: 'commit_unknown' } };
         pendingFileMutations.set(execution.request.executionId, {
           ownerWebContentsId: sender.id, identity: mutationIdentity, toolName: call.name, input: normalized, hooks: fileMutation,
-          prepare: async (snapshot, prepareSignal) => {
-            if (snapshot.beforeBytes !== null) {
-              if (!executionContext.readLibraryMetadata || !executionContext.readLibraryText) throw new Error('当前运行时无法验证保存版本');
-              const metadata = await executionContext.readLibraryMetadata({ kind: 'resolve', path: normalized.path }, prepareSignal);
-              if (!metadata.node || metadata.node.id !== snapshot.nodeId || metadata.node.type !== 'file') throw new Error('写入文件节点已变化');
-              const current = await executionContext.readLibraryText(metadata.node.id, prepareSignal);
-              if (crypto.createHash('sha256').update(current).digest('hex') !== snapshot.beforeRevision) throw new Error('保存版本已变化，请重新读取');
-            }
-            await fileMutation.prepare(snapshot, prepareSignal);
+          prepare: (snapshot, prepareSignal) => {
+            preparation = (async () => {
+              if (snapshot.beforeBytes !== null) {
+                if (!executionContext.readLibraryMetadata || !executionContext.readLibraryText) throw new Error('当前运行时无法验证保存版本');
+                const metadata = await executionContext.readLibraryMetadata({ kind: 'resolve', path: normalized.path }, prepareSignal);
+                if (!metadata.node || metadata.node.id !== snapshot.nodeId || metadata.node.type !== 'file') throw new Error('写入文件节点已变化');
+                const current = await executionContext.readLibraryText(metadata.node.id, prepareSignal);
+                if (crypto.createHash('sha256').update(current).digest('hex') !== snapshot.beforeRevision) throw new Error('保存版本已变化，请重新读取');
+              }
+              await fileMutation.prepare(snapshot, prepareSignal);
+              prepared = true;
+            })();
+            return preparation;
           },
           begin: () => { commit.begin(unknown); began = true; },
         });
@@ -2364,7 +2370,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
           const outcome = await execution.outcome;
           const result = { ...outcome.result, data: { ...(outcome.result.data && typeof outcome.result.data === 'object' ? outcome.result.data : {}), operationId: fileMutation.operationId } };
           if (began) { commit.settle(result); acceptedReceipt = result; }
-          await fileMutation.settle(result);
+          if (prepared) await fileMutation.settle(result);
           if (outcome.perception) await acceptRendererPerception(outcome.perception);
           return result;
         } catch (error) {
@@ -2375,7 +2381,11 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
           if (began && !acceptedReceipt) {
             try { commit.settle(result); acceptedReceipt = result; } catch { /* Already sealed: retain unknown. */ }
           }
-          await fileMutation.settle(acceptedReceipt || result).catch(() => undefined);
+          // A cancelled renderer can finish before an in-flight journal transaction does.
+          // Drain only preparations that actually started so their durable lease is settled;
+          // no-op executions never acquire a journal lease or invoke settlement.
+          await preparation?.catch(() => undefined);
+          if (prepared) await fileMutation.settle(acceptedReceipt || result).catch(() => undefined);
           if (began) return acceptedReceipt || unknown;
           throw error;
         } finally { pendingFileMutations.delete(execution.request.executionId); }
@@ -2476,35 +2486,10 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
           sessionId, runId, toolRunId, signal: requestSignal,
           operation: { operation: 'stage-library-node', nodeId, includeDownloadUrl: true } }); } } : {}),
       sessionId,
-      readOperationJournal: async (operationId: string, operationSignal: AbortSignal) => {
-        throwIfAborted(operationSignal);
-        const journalSession = await resolveSessionStore().then(store => store.getSession(
-          sessionId,
-          input.ownerScope,
-          Number(input.appContext.libraryId),
-        ));
-        throwIfAborted(operationSignal);
-        const activity = journalSession?.toolActivities.find(candidate => {
-          const data = candidate.result?.data;
-          return candidate.id === operationId
-            || (data && typeof data === 'object' && !Array.isArray(data)
-              && (data as Record<string, unknown>).operationId === operationId);
-        });
-        if (!activity) return undefined;
-        const data = activity.result?.data;
-        const commitState = data && typeof data === 'object' && !Array.isArray(data)
-          ? String((data as Record<string, unknown>).mutationCommitState
-            || (data as Record<string, unknown>).writeCommitState
-            || (data as Record<string, unknown>).deleteCommitState
-            || (data as Record<string, unknown>).uploadCommitState
-            || '')
-          : '';
-        const status = commitState === 'committed' || activity.result?.ok === true
-          ? 'committed'
-          : commitState === 'uncommitted' ? 'uncommitted'
-            : commitState === 'commit_unknown' ? 'commit_unknown' : 'unknown';
-        return { operationId, toolName: activity.call.name, status, ...(activity.result ? { result: activity.result } : {}) };
-      },
+      readOperationJournal: (operationId: string, operationSignal: AbortSignal) => readAgentOperationJournal({
+        operationId, signal: operationSignal,
+        readSession: async () => (await resolveSessionStore()).getSession(sessionId, input.ownerScope, Number(input.appContext.libraryId)),
+      }),
       ...(options.readLibraryMetadata ? { readLibraryMetadata: async (query, requestSignal) => {
         await accessGuard?.authorizeQuery(query, false, toolRunId);
         const libraryId = Number(input.appContext.libraryId);

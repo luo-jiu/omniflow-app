@@ -661,6 +661,33 @@ describe('AgentToolActivityCard approval transitions and mixed groups', () => {
     expect(renderer.root.findByProps({ 'data-tool-icon': 'edit' })).toBeDefined();
   });
 
+  it.each([['failed', '失败'], ['cancelled', '已取消'], ['interrupted', '已中断']] as const)(
+    'keeps saved file receipts visible for %s tools while preserving the execution outcome', (status, label) => {
+      for (const name of ['file.write', 'file.patch']) {
+        const renderer = renderCard(shellActivity({ call: { id: 'write-call', name, input: {} }, preparation: undefined,
+          status, result: { ok: false, message: '保存后的刷新已停止', data: { fileName: 'result.txt',
+            writeCommitState: 'committed', mutationCommitState: 'committed' } } }));
+        const header = renderer.root.findByProps({ className: 'agent-activity-header' });
+        expect(textContent(header)).toContain(`已保存result.txt${label}`);
+        if (status === 'failed') act(() => header.props.onClick());
+        expect(textContent(renderer.root)).toContain('保存后的刷新已停止');
+      }
+    },
+  );
+
+  it('uses the saved receipt in the collapsed group summary even when the final tool failed', () => {
+    const activity = shellActivity({ call: { id: 'patch-call', name: 'file.patch', input: {} }, preparation: undefined,
+      status: 'failed', result: { ok: false, message: '保存后的刷新已停止',
+        data: { fileName: 'result.txt', writeCommitState: 'committed' } } });
+    let renderer!: TestRenderer.ReactTestRenderer;
+    act(() => { renderer = TestRenderer.create(<AgentToolActivityGroup activities={[activity]}
+      approvalBusyIds={new Set()} interactionBusyIds={new Set()} libraryId={3}
+      onResolveApproval={vi.fn()} ownerScope={OWNER_SCOPE} />); });
+    renderers.push(renderer);
+    expect(textContent(renderer.root.findByProps({ className: 'agent-activity-group-title agent-activity-group-live' })))
+      .toBe('已保存 result.txt');
+  });
+
   it('replaces a pending approval with its real business step without an approval receipt row', () => {
     const onResolveApproval = vi.fn();
     const pending = shellActivity({ call: { id: 'write-call', name: 'file.write', input: {} }, preparation: undefined,
@@ -682,7 +709,7 @@ describe('AgentToolActivityCard approval transitions and mixed groups', () => {
     expect(renderer.root.findAllByType(AgentConfirmationCard)).toHaveLength(0);
     expect(textContent(renderer.root.findByProps({ className: 'agent-activity-header' }))).toBe('正在保存文件');
     act(() => renderer.update(<AgentToolActivityCard {...props} activity={{ ...approved, status: 'completed',
-      result: { ok: true, data: { fileName: 'result.txt' } } }} />));
+      result: { ok: true, data: { fileName: 'result.txt', writeCommitState: 'committed', mutationCommitState: 'committed' } } }} />));
     expect(textContent(renderer.root)).toBe('已保存result.txt');
     expect(renderer.root.findAllByProps({ className: 'agent-activity-header' })).toHaveLength(1);
     expect(JSON.stringify(renderer.toJSON())).not.toContain('approval preview sentinel');
@@ -718,7 +745,7 @@ describe('AgentToolActivityCard approval transitions and mixed groups', () => {
       shellActivity({ call: { id: 'read', name: 'file.read', input: {} }, preparation: undefined,
         result: { ok: true, data: { fileName: 'source.txt' } } }),
       shellActivity({ call: { id: 'write', name: 'file.write', input: {} }, preparation: undefined, permissionBehavior: 'ask', approval,
-        result: { ok: true, data: { fileName: 'output.txt' } } }),
+        result: { ok: true, data: { fileName: 'output.txt', writeCommitState: 'committed', mutationCommitState: 'committed' } } }),
       shellActivity({ permissionBehavior: 'ask', approval }),
       shellActivity({ call: { id: 'plugin', name: 'example.inspect', input: {} }, preparation: undefined, approval,
         pluginSource: { pluginId: 'example', pluginVersion: '1', packageFingerprint: 'a', toolId: 'inspect', registrationId: 'plugin:inspect' },

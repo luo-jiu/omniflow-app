@@ -7,7 +7,7 @@ import {
   AGENT_FILE_TEXT_MAX_BYTES, AgentFileMutationError,
   type AgentFileMutationSnapshot, type AgentFileWriteInput,
 } from '../../../../src/shared/agent/agent-file-write';
-import { applyAgentFilePatch, decodeAgentMutableText, type AgentFilePatchInput } from '../../../../src/shared/agent/agent-file-patch';
+import { applyAgentFilePatchAsync, AgentFilePatchError, decodeAgentMutableText, preflightAgentFilePatch, type AgentFilePatchInput } from '../../../../src/shared/agent/agent-file-patch';
 import type { AgentToolExecutionContext } from '../agent-tool-registry';
 import { normalizeAgentLocalPathExpression, openAgentLocalFile, verifyAgentLocalFileSnapshot,
   verifyOpenedAgentLocalFileUnchanged, type AgentOpenedLocalFile } from './agent-local-file';
@@ -73,6 +73,7 @@ export async function executeAgentHostFileMutation(
   let result: AgentToolResult;
   try {
     context.signal.throwIfAborted();
+    if (isPatch(input)) preflightAgentFilePatch(input);
     const expression = normalizeAgentLocalPathExpression(input.path);
     const parentPath = path.dirname(expression.absolutePath);
     const canonicalParent = await realpath(parentPath);
@@ -104,15 +105,23 @@ export async function executeAgentHostFileMutation(
           throw new AgentFileMutationError('TARGET_EXISTS', '同名文件已存在，未覆盖；修改前请 file.read 取得 revision');
         } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
       }
-      const patch = isPatch(input) ? applyAgentFilePatch(beforeBytes!, input.patch, input.path) : undefined;
+      const patch = isPatch(input) ? await applyAgentFilePatchAsync(beforeBytes!, input, { signal: context.signal }) : undefined;
       const afterBytes = patch?.bytes || new TextEncoder().encode((input as AgentFileWriteInput).content);
       const revision = digest(afterBytes);
       data = { ...data, path: expression.displayPath, fileName: path.basename(targetPath), revision,
+        changed: true, outcome: 'written', afterRevision: revision,
+        ...(input.revision ? { beforeRevision: input.revision } : {}),
         sizeBytes: afterBytes.byteLength, ...(patch ? { additions: patch.additions, deletions: patch.deletions, hunks: patch.hunks } : {}),
+        ...(patch ? { matchMode: patch.matchMode, endsWithNewline: patch.endsWithNewline } : {}),
         ...(opened ? { beforeIdentity: opened.snapshot.identityHash } : {}),
         concurrencyGuarantee: 'application-serialized; external-writers-best-effort',
         metadataGuarantee: 'mode-and-owner; extended-metadata-not-guaranteed',
-        warnings: replacing ? ['原子替换保留普通 mode 和 owner；ACL、扩展属性与其他扩展元数据尚未保障。'] : [] };
+        warnings: [...(patch?.warnings || []), ...(replacing ? ['原子替换保留普通 mode 和 owner；ACL、扩展属性与其他扩展元数据尚未保障。'] : [])] };
+      if (beforeBytes !== null && revision === input.revision) {
+        context.signal.throwIfAborted();
+        return { ...resultFor('uncommitted', operationId, { ...data, changed: false, outcome: 'unchanged', warnings: patch?.warnings || [] },
+          `${path.basename(targetPath)} 内容未变化`), ok: true };
+      }
       const snapshot: AgentFileMutationSnapshot = { scope: 'host', path: expression.displayPath,
         fileName: path.basename(targetPath), identity: opened?.snapshot.identityHash || `host:${targetPath}`,
         beforeBytes: beforeBytes?.slice() ?? null, afterBytes: afterBytes.slice(),
@@ -184,7 +193,9 @@ export async function executeAgentHostFileMutation(
         : state === 'committed' ? '文件已经保存，后续核对未完成'
           : context.signal.aborted ? '文件保存已取消，未提交'
             : errno === 'EEXIST' ? '同名文件已存在，未覆盖' : '无法准备或提交本机文件，请检查路径、身份与权限；未写入';
-    result = resultFor(state, operationId, { ...data, code }, message);
+    result = resultFor(state, operationId, { ...data, code,
+      ...(error instanceof AgentFilePatchError ? error.diagnostic : {}),
+      ...(code === 'REVISION_CONFLICT' ? { phase: 'version', nextAction: 'reread' } : {}) }, message);
   } finally {
     if (opened) await opened.fileHandle.close().catch(() => undefined);
     if (temporaryHandle) await temporaryHandle.close().catch(() => undefined);

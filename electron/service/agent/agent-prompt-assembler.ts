@@ -110,7 +110,7 @@ function agentFileRoutingPrompt(capabilities: readonly string[]): string {
   const available = new Set(capabilities);
   const rules: string[] = [];
   if (available.has('file.upload')) {
-    rules.push(`用户给出明确本机文件路径和资料库目录，且无需修改、转换或生成新文件时，默认使用 ${providerToolName('file.upload')} 直接完成“本机文件 -> 资料库目录”的原样传输；不要再打开系统文件选择器${available.has('file.stage') ? `，也不要先调用 ${providerToolName('file.stage')}` : ''}。`);
+    rules.push(`明确“本机文件 -> 资料库目录”且无需修改、转换或生成新文件时，使用 ${providerToolName('file.upload')} 原样传输；不要再打开系统文件选择器${available.has('file.stage') ? `，不要先调用 ${providerToolName('file.stage')}` : ''}。`);
   }
   if (available.has('file.upload') && available.has('shell.run') && !available.has('file.read')) {
     rules.push(`需要先查看或检查原文件时，先用 ${providerToolName('shell.run')} 直接读取原路径，确认无需修改后仍使用 ${providerToolName('file.upload')}。`);
@@ -119,17 +119,17 @@ function agentFileRoutingPrompt(capabilities: readonly string[]): string {
     rules.push(`查看、读取、概括或分析用户明确给出的宿主绝对路径时，直接使用 ${providerToolName('shell.run')}，并显式传入 executionContext=host；命令引用该精确路径，cwd 使用文件父目录或省略，不能把文件路径当作 cwd。可以按任务使用本机只读命令，例如 cat、head、tail、file 或 stat；这些只是示例，不是命令白名单。${available.has('file.stage') ? `不要先调用 ${providerToolName('file.stage')}` : '不要先创建 Run 工作副本'}，也不要打开文件选择器。host 下的 cwd、~ 和 PATH 由主进程冻结为宿主语义；run-workspace 下才使用虚拟 home。`);
   }
   if (available.has('file.stage') && available.has('shell.run')) {
-    rules.push(`需要让 CLI 编译、测试、校验或处理资料库已有文件时，优先用 ${providerToolName('file.stage')} 暂存已保存文件的原始字节，再用 ${providerToolName('shell.run')} 的 executionContext=run-workspace 处理；${available.has('file.write') ? `${providerToolName('file.write')} 是保存正文的工具，不代替这条原文件传递路线。` : ''}避免根据 ${available.has('file.read') ? `${providerToolName('file.read')} 的带行号正文` : '模型看到的正文'}在 Shell 命令中重述整份源文件。来源尚未确定时先定位节点；暂存返回的 contentHash 标识所处理版本，logicalPath 可能因重名变化，使用实际返回路径。`);
-    rules.push('暂存 logicalPath 相对 Run 工作区根；例如返回 input/main.cpp，cwd=work 时应引用 ../input/main.cpp，不能引用 work/input/main.cpp，也不能把逻辑路径当作宿主路径。直接使用原暂存源码，辅助测试入口和临时构建结果放 work 或 tmp；只有要交付的产物才放 output。仅验证不需要发布或回写原文件；若暂存不可用而选择重建文本等替代方式，明确实际验证的对象与差别，不把重建副本称为原始字节。');
+    rules.push(`CLI处理资料库文件时，优先用 ${providerToolName('file.stage')} 暂存已保存文件的原始字节，再用 ${providerToolName('shell.run')}（executionContext=run-workspace）。${available.has('file.write') ? `${providerToolName('file.write')} 保存正文，不能替代暂存；` : ''}不要用${available.has('file.read') ? ` ${providerToolName('file.read')} 带行号正文` : '模型看到的正文'}重建源码。来源未知先定位；contentHash标识暂存版本，logicalPath 可能因重名变化，使用实际返回路径。`);
+    rules.push('暂存 logicalPath 相对 Run 工作区根：input/main.cpp在cwd=work 时应引用 ../input/main.cpp，不是work/input/main.cpp或宿主路径。辅助测试入口和临时构建结果放 work 或 tmp，交付产物放output。仅验证不需要发布或回写原文件；重建文本等替代方式须明确实际验证的对象与差别，不冒充原始字节。');
     if (available.has('file.publish')) {
       rules.push(`需要工作副本来修改、转换或生成新文件并交付时，使用“${providerToolName('file.stage')} -> ${providerToolName('shell.run')} -> ${providerToolName('file.publish')}”处理链；只在用户需要保存或入库产物时发布，不因编译、测试成功就发布。`);
     }
   }
   if (available.has('file.write')) {
-    rules.push(`${providerToolName('file.write')} 在 library/host 创建或完整替换文本。只操作 saved 版本，看不到未保存草稿；成功即保存。新建不传revision且不覆盖，替换用file.read的revision和完整正文；不要写入行号。冲突重新读取，commit_unknown先核对不重试。`);
+    rules.push(`${providerToolName('file.write')} 创建或完整替换library/host saved文本，看不到草稿。新建不传revision且不覆盖；替换用file.read的revision和完整正文，不写L行号前缀。冲突重读，commit_unknown先核对不重试。`);
   }
   if (available.has('file.patch')) {
-    rules.push(`${providerToolName('file.patch')} 用读取的revision应用精确unified-v1单文件补丁，避免重述全文；不模糊匹配。`);
+    rules.push(`${providerToolName('file.patch')} 用format=context-v1和file.read的revision修改saved文件；@@独占一行，不写hunk数字/header/L行号前缀；语法、EOF策略和限额见Tool。按诊断补上下文，冲突重读；提交成功不等于代码正确。`);
   }
   if (available.has('file.delete')) {
     rules.push(`删除资料库文件用 ${providerToolName('file.delete')} 移入回收站；目录删除须用户明确要求才传recursive。源离线不是删除理由。权限由运行时确认，commit_unknown先核对原目录/回收站，不重试。`);
@@ -153,25 +153,25 @@ function agentFileRoutingPrompt(capabilities: readonly string[]): string {
     rules.push(`${providerToolName('library.batch')} 提交已明确的多项操作，核对results/counts；保留部分成功，冲突或commit_unknown逐项核对，不重做整批。`);
   }
   if (available.has('operation.verify')) {
-    rules.push(`写操作返回 commit_unknown 或网络中断时，使用 ${providerToolName('operation.verify')} 重新读取实际节点状态；先核对再重试，不凭错误消息判断，也不要重复整批操作。`);
+    rules.push(`写操作commit_unknown时用 ${providerToolName('operation.verify')} 凭operationId核对权威账本；当前节点/路径不能证明file.write/patch已提交，正文hash只能说明当前内容。retryAllowed=false时不自动重放或换通道重写；changed=false/outcome=unchanged不称新保存。`);
   }
   if (available.has('file.list')) {
-    rules.push(`${providerToolName('file.list')} 可以按目录 ID 或资料库绝对路径分页浏览其他目录，不需要用户先展开目录树；hasMore=true 时保持查询条件并使用 nextCursor 续页。`);
+    rules.push(`${providerToolName('file.list')} 按目录ID或资料库绝对路径分页浏览，无需展开目录树；hasMore=true保持查询条件，用nextCursor续页。`);
   }
   if (available.has('file.search') && available.has('file.resolve')) {
-    rules.push(`名称或位置不明确时使用 ${providerToolName('file.search')} 搜索元数据；已给出 /音乐 这样的完整路径时，可以直接按 path 列目录或读文件，不要固定串联 search、resolve、stat。只有确实需要节点 ID 时才使用 ${providerToolName('file.resolve')}。查询发现的节点可继续交给文件和媒体工具，未知历史 ID 先用 ${providerToolName('file.stat')} 重新确认。`);
+    rules.push(`位置未知用 ${providerToolName('file.search')} 搜元数据；完整路径可直接列目录/读文件，不固定串联search/resolve/stat。确需ID才用 ${providerToolName('file.resolve')}；结果可交给文件/媒体工具，历史未知ID用 ${providerToolName('file.stat')} 确认。`);
   }
   if (available.has('library.document.inspect')) {
-    rules.push(`资料库中搜索到唯一明确的 PDF、DOCX、XLSX 或 PPTX 后，直接把搜索结果的 nodeId 或 path 交给 ${providerToolName('library.document.inspect')}，不要再向用户询问已经搜索到的路径。inspect 后按格式调用对应的 document.read/query/view；多个候选或格式不支持时才向用户说明并请求选择。`);
+    rules.push(`唯一明确的PDF/DOCX/XLSX/PPTX以结果nodeId/path直接调用 ${providerToolName('library.document.inspect')}，再按格式read/query/view，不重复询问已知路径；多候选或不支持再询问。`);
   }
   if (available.has('file.read')) {
-    rules.push(`${providerToolName('file.read')} 读正文，stat只读元数据；scope=library/host。offset/column从1开始，默认尽量读完（10000 tokens及剩余上下文预算）；hasMore时按nextOffset/nextColumn和revision续读。不必固定先stat或逐行读取。content含行号，二进制/PDF用对应工具。目录查询是元数据搜索，不能用 | 表示管道。`);
+    rules.push(`${providerToolName('file.read')} 读正文，stat只读元数据；不必先stat。默认尽量读完（10000 tokens及剩余预算），hasMore按nextOffset/nextColumn/revision续读。L行号前缀仅展示；BOM、换行和大小元数据来自原字节，不从展示文本猜EOF。二进制/PDF用对应工具；目录查询不支持管道。`);
   }
   if (available.has('file.grep')) {
     rules.push(`${providerToolName('file.grep')} 搜正文，literal或mode=regex（rust-regex-v1，无PCRE2/回溯引用/lookaround/多行）。hasMore携nextCursor续搜，complete=false或skippedFiles>0不能声称全范围无匹配。缺rg仅literal可等价降级。`);
   }
   if (available.has('media.extractAudio')) {
-    rules.push(`${providerToolName('media.extractAudio')} 支持 directoryPath 或 parentId 指定当前资料库的目标目录，可直接传入用户给出的 /音乐 等路径。不要仅因目标不在当前 UI 目录就先暂存、本机提取再发布；这些替代方案只在任务本身确实需要时选择。`);
+    rules.push(`${providerToolName('media.extractAudio')} 用directoryPath/parentId指定资料库任意目标目录（如/音乐）；不因UI目录不同而暂存/本机提取/发布，按任务需要选择。`);
   }
   if (available.has('file.upload') || available.has('file.publish')) {
     rules.push('Tool 支持资料库绝对目录路径时直接提交完整路径，由受控路径解析器逐段精确校验；目录不存在、重名或类型不符时明确失败，不自行模糊匹配或创建目录。');

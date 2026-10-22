@@ -7,6 +7,7 @@ import { equalAgentPreparedActionPublic, normalizeAgentPreparedActionPublic } fr
 import { getAgentComputerStepTitle } from '@/shared/agent/agent-computer-step-title';
 import { normalizeWindowMenuOperations } from '@/shared/computer-use/window-menu-contract';
 import { normalizeComputerElementOperations } from '@/shared/computer-use/computer-use-contract';
+import { normalizeAgentMutationCommitState } from '@/shared/agent/agent-mutation-commit-state';
 import { committedAgentFileParents, getPluginOperationPreparedAction } from './agent-published-file';
 import { COMPUTER_INPUT_LABELS, COMPUTER_MENU_LABELS, formatComputerInputShortcut } from './agent-computer-input-display';
 
@@ -348,6 +349,16 @@ export function buildAgentToolSummary(activity: AgentToolActivitySnapshot, libra
       : `${activity.status === 'running' ? '正在' : '准备'}${getAgentToolTitle(activity)}`,
     ...(activity.call.name === 'file.read' ? { subject: path.replace(/\\/g, '/').split('/').pop() || undefined } : {}) };
   }
+  if (!activity.pluginSource && ['completed', 'failed', 'cancelled', 'interrupted'].includes(activity.status)
+    && (activity.call.name === 'file.write' || activity.call.name === 'file.patch')) {
+    const subject = textValue(data?.fileName) || undefined;
+    const { status } = normalizeAgentMutationCommitState(data);
+    if (status === 'commit_unknown' || status === 'unknown') return { label: '保存待核对', subject };
+    if (status === 'committed') return { label: '已保存', subject };
+    if (activity.result?.ok === true && data?.changed === false && data?.outcome === 'unchanged'
+      && data.writeCommitState === 'uncommitted' && data.mutationCommitState === 'uncommitted') return { label: '未修改', subject };
+    return { label: '文件未保存', subject };
+  }
   if (activity.status !== 'completed') return { label: getAgentToolTitle(activity) };
   if (activity.call.name === 'computer.windows' && stepTitle && activity.result?.ok === true) return { label: stepTitle };
   if (activity.call.name === 'computer.observe') return { label: stepTitle && computerObservationResult(activity, libraryId)
@@ -370,12 +381,6 @@ export function buildAgentToolSummary(activity: AgentToolActivitySnapshot, libra
       ? stepTitle || `已发送${COMPUTER_INPUT_LABELS[action.operation]}` : getAgentToolTitle(activity),
     ...(action?.kind === 'computer.input' && action.operation === 'shortcut'
       ? { subject: formatComputerInputShortcut(action.shortcut) } : {}) };
-  }
-  if (activity.call.name === 'file.write' || activity.call.name === 'file.patch') {
-    const subject = textValue(data?.fileName) || undefined;
-    if (data?.writeCommitState === 'commit_unknown' || data?.mutationCommitState === 'commit_unknown') return { label: '保存待核对', subject };
-    if (activity.result?.ok !== true || data?.writeCommitState === 'uncommitted' || data?.mutationCommitState === 'uncommitted') return { label: '文件未保存', subject };
-    return { label: '已保存', subject };
   }
   if (activity.call.name === 'file.grep') return {
     label: data?.complete === false && !data?.hasMore ? '已搜索正文 · 结果不完整' : '已搜索正文',

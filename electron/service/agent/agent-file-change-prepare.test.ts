@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { AgentFileChangePrepareRequest } from '../../../src/shared/agent/agent-file-changes';
 import { AGENT_FILE_TEXT_MAX_BYTES, normalizeAgentFileWriteInput } from '../../../src/shared/agent/agent-file-write';
 import { normalizeAgentFilePatchInput } from '../../../src/shared/agent/agent-file-patch';
-import { decodeAgentFileChangeSnapshot } from './agent-file-change-prepare';
+import { decodeAgentFileChangeSnapshot, decodeAgentFileChangeSnapshotAsync } from './agent-file-change-prepare';
 
 type Snapshot = AgentFileChangePrepareRequest['snapshot'];
 const hash = (text: string | Uint8Array) => crypto.createHash('sha256').update(text).digest('hex');
@@ -22,6 +22,30 @@ function patch(before: string, text = '@@ -1 +1 @@\n-old\n+new\n') {
 }
 
 describe('private file mutation snapshot validation', () => {
+  it('recomputes context-v1 and explicit EOF policy in the production async snapshot guard', async () => {
+    const input = normalizeAgentFilePatchInput({ path: target, revision: hash('a\nb'), format: 'context-v1',
+      finalNewline: 'ensure', patch: '@@\n-a\n+A\n' });
+    const valid = await decodeAgentFileChangeSnapshotAsync(source('a\nb', 'A\nb\n'), input);
+    expect(Buffer.from(valid.afterBytes).toString()).toBe('A\nb\n');
+    await expect(decodeAgentFileChangeSnapshotAsync(source('a\nb', 'A\nb'), input)).rejects.toThrow('内容');
+    await expect(decodeAgentFileChangeSnapshotAsync(source('a\nb', 'A\nchanged\n'), input)).rejects.toThrow('内容');
+  });
+  it('propagates EOF conflict before authorizing any renderer snapshot', async () => {
+    const input = normalizeAgentFilePatchInput({ path: target, revision: hash('a\n\nb'), format: 'context-v1',
+      finalNewline: 'remove', patch: '@@\n-b\n' });
+    await expect(decodeAgentFileChangeSnapshotAsync(source('a\n\nb', 'a'), input))
+      .rejects.toMatchObject({ code: 'PATCH_FINAL_NEWLINE_CONFLICT', diagnostic: { phase: 'finalize' } });
+  });
+  it('allows cancellation during a large production snapshot recomputation', async () => {
+    const before = 'head\n' + '\n'.repeat(2_000_000);
+    const input = normalizeAgentFilePatchInput({ path: target, revision: hash(before), format: 'context-v1', patch: '@@\n-head\n+HEAD\n' });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 0);
+    try {
+      await expect(decodeAgentFileChangeSnapshotAsync(source(before, before.replace('head', 'HEAD')), input, controller.signal))
+        .rejects.toMatchObject({ name: 'AbortError' });
+    } finally { clearTimeout(timer); }
+  });
   it('distinguishes a newly created file from replacement of an existing empty file', () => {
     const created = decodeAgentFileChangeSnapshot(source(null, ''), write(null, ''));
     expect(created).toMatchObject({ scope: 'library', path: target, fileName: 'a.txt', beforeBytes: null, afterRevision: hash('') });

@@ -49,7 +49,7 @@ export async function readAgentFileBytes(query: Pick<AgentTextReadQuery, 'scope'
 export const fileContentTool: AgentTool = {
   name: 'file.read', risk: 'read', timeoutMs: 30_000,
   presentation: { groupKind: 'resource-read', operationKind: 'stat' },
-  description: '读取已保存UTF-8正文（源最多8MiB），scope默认library。直接给path；PDF/二进制用文档工具。offset/column从1开始，column按Unicode字符；省略limit读到末尾，指定则为行数。输出默认10000tokens且受上下文预算约束。content带行号；hasMore时用nextOffset/nextColumn/revision续读。',
+  description: '读取library/host已保存UTF-8（最多8MiB），默认library。offset/column从1开始，column按Unicode字符；limit是行数，省略尽量读完。默认10000tokens，受剩余预算约束。返回原字节revision/sizeBytes/encoding/hasBom/lineEnding/endsWithNewline；L行号前缀不属于正文。hasMore按nextOffset/nextColumn/revision续读；PDF/二进制用文档工具。',
   inputSchema: { type: 'object', additionalProperties: false, required: ['path'], properties: {
     scope: { type: 'string', enum: ['library', 'host'] },
     path: { type: 'string', minLength: 1, maxLength: 4096 },
@@ -68,6 +68,7 @@ export const fileContentTool: AgentTool = {
     const requested = query.maxOutputTokens ?? AGENT_READ_DEFAULT_OUTPUT_TOKENS;
     if (!Number.isSafeInteger(requested) || requested < 1) throw new Error('输出预算无效');
     const budget = Math.min(requested, context.readOutputTokenBudget ?? AGENT_READ_DEFAULT_OUTPUT_TOKENS);
-    return packAgentTextResult(decoded, query, budget);
+    const { encoding, hasBom, lineEnding, endsWithNewline, sizeBytes } = decoded;
+    return packAgentTextResult(decoded, query, budget, { encoding, hasBom, lineEnding, endsWithNewline, sizeBytes });
   },
 };

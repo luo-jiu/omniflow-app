@@ -141,6 +141,7 @@ export interface AgentToolExecutionContext {
     operationId: string;
     toolName: string;
     status: 'committed' | 'uncommitted' | 'commit_unknown' | 'unknown';
+    receiptIssue?: 'invalid_commit_state' | 'conflicting_commit_states';
     result?: AgentToolResult;
   } | undefined>;
   operateAttachment?: (operation: 'inspect' | 'view' | 'query', query: import('./documents/attachment-documents').AgentAttachmentQuery) => Promise<unknown>;

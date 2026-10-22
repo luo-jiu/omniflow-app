@@ -9,6 +9,31 @@ import type { AgentSkillSummaryV1 } from './skills/agent-skill.types';
 import { resourceOrganizationSkill } from './skills/agent-skill-catalog';
 
 describe('Agent prompt assembler', () => {
+  it('teaches a line-count-free context patch and distinguishes saved-byte metadata from display text', () => {
+    const context = { libraryId: 3, platform: 'darwin' as const, selectedNodeIds: [] };
+    const prompt = buildAgentSystemPrompt(context, undefined, ['file.read', 'file.patch']);
+    expect(prompt).toContain('format=context-v1');
+    expect(prompt).toContain('@@独占一行');
+    expect(prompt).toContain('不写hunk数字');
+    expect(prompt).toContain('语法、EOF策略和限额见Tool');
+    expect(prompt).toContain('换行和大小元数据来自原字节');
+    expect(prompt).toContain('L行号前缀仅展示');
+    expect(prompt).toContain('提交成功不等于代码正确');
+    const unavailable = buildAgentSystemPrompt(context, undefined, ['file.list']);
+    expect(unavailable).not.toContain('context-v1');
+    expect(unavailable).not.toContain('endsWithNewline');
+  });
+
+  it('does not equate current content with an unknown write receipt or replay it automatically', () => {
+    const prompt = buildAgentSystemPrompt({ libraryId: 3, platform: 'darwin', selectedNodeIds: [] },
+      undefined, ['file.patch', 'operation.verify']);
+    expect(prompt).toContain('凭operationId核对权威账本');
+    expect(prompt).toContain('正文hash只能说明当前内容');
+    expect(prompt).toContain('不自动重放或换通道重写');
+    expect(prompt).toContain('changed=false');
+    expect(prompt).toContain('不称新保存');
+  });
+
   it('keeps Chinese replies in standard Simplified Chinese unless requested otherwise', () => {
     const prompt = buildAgentSystemPrompt({
       libraryId: 3,
@@ -190,7 +215,7 @@ describe('Agent prompt assembler', () => {
     }, undefined, ['file.list']);
 
     expect(prompt).toContain('资源类型、来源、目标和期望结果');
-    expect(prompt).toContain('file_list 可以按目录 ID 或资料库绝对路径分页浏览其他目录');
+    expect(prompt).toContain('file_list 按目录ID或资料库绝对路径分页浏览');
     expect(prompt).toContain('"capabilities":["file_list"]');
     expect(prompt).not.toContain('使用 file_upload');
     expect(prompt).not.toContain('file_stage -> shell_run -> file_publish');

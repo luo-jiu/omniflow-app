@@ -297,15 +297,27 @@ export async function executeAgentRendererTool(
   request: AgentToolExecutionRequest,
   dependencies: AgentRendererToolExecutorDependencies = {},
 ): Promise<AgentRendererToolOutcome> {
-  throwIfAborted(dependencies.signal);
-  if (request.requireAccessCheck) {
-    const beforeCommit = dependencies.beforeCommit;
-    dependencies = { ...dependencies, beforeCommit: async () => {
-      throwIfAborted(dependencies.signal);
-      if (beforeCommit) await beforeCommit();
-      await verifyAgentToolAccess(request);
+  try {
+    throwIfAborted(dependencies.signal);
+    if (request.requireAccessCheck) {
+      const beforeCommit = dependencies.beforeCommit;
+      dependencies = { ...dependencies, beforeCommit: async () => {
+        throwIfAborted(dependencies.signal);
+        if (beforeCommit) await beforeCommit();
+        await verifyAgentToolAccess(request);
+      } };
+      await dependencies.beforeCommit!();
+    }
+  } catch (error) {
+    if (request.toolName !== 'file.write' && request.toolName !== 'file.patch') throw error;
+    // Only preflight failures are known to be uncommitted. Return a completion
+    // so cancellation can close the Broker's no-op wait before its deadline.
+    return { committed: false, result: {
+      ok: false,
+      message: isAbortError(error, dependencies.signal) ? '文件保存已取消，未提交。'
+        : error instanceof Error ? error.message : '文件写入检查失败，未提交。',
+      data: { operationId: request.executionId, writeCommitState: 'uncommitted', mutationCommitState: 'uncommitted' },
     } };
-    await dependencies.beforeCommit!();
   }
   if (request.toolName === 'file.write' || request.toolName === 'file.patch') {
     return executeAgentFileWrite(request, { ...dependencies,

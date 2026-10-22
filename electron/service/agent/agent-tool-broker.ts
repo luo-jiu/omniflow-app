@@ -1,4 +1,7 @@
 import crypto from 'node:crypto';
+import { isAgentBuiltinFileMutationTool } from './agent-file-mutation-tool';
+import { normalizeAgentMutationCommitState } from '../../../src/shared/agent/agent-mutation-commit-state';
+import { normalizeAgentFileExpectedRevision } from '../../../src/shared/agent/agent-file-write';
 import { isAgentRendererMutationTool } from '../../../src/shared/agent/agent-library-actions';
 import { normalizeAgentLibraryNode } from '../../../src/shared/agent/agent-library-query';
 import { normalizeAgentNodeConfigFields } from '../../../src/shared/agent/agent-node-config';
@@ -59,6 +62,8 @@ interface AgentToolBrokerOptions {
 }
 
 interface PrepareRendererExecutionInput {
+  /** Main-only opt-in for a trusted file replacement's bounded no-op settlement. */
+  fileNoopSettlement?: { expectedRevision: string };
   verifyAccess?: () => Promise<void>;
   appContext: AgentAppContext;
   executionInput: unknown;
@@ -80,12 +85,15 @@ interface PendingRendererExecution {
   claimedCapabilities: Set<string>;
   committedResult?: AgentToolResult;
   executionInput: unknown;
+  fileNoopRevision?: string;
+  hasCriticalSettlement: () => boolean;
   libraryId: number;
   ownerScope: AgentOwnerScope;
   ownerWebContentsId: number;
   onProgress: (progress: AgentToolProgress) => void;
   markCommitted: (result: AgentToolResult) => void;
   resolve: (outcome: AgentToolExecutionOutcome) => void;
+  rejectCancelledNoop: () => void;
   runId: string;
   sessionId: string;
   signal: AbortSignal;
@@ -171,7 +179,7 @@ export function normalizeAgentToolResult(input: AgentToolResult): AgentToolResul
   };
 }
 
-function normalizeMainCommitResult(input: AgentToolResult, operationId?: string): AgentToolResult {
+function normalizeMainCommitResult(input: AgentToolResult, operationId?: string, independentOk = false): AgentToolResult {
   if (!input || typeof input !== 'object' || Array.isArray(input)
     || ![Object.prototype, null].includes(Object.getPrototypeOf(input))
     || !Object.prototype.hasOwnProperty.call(input, 'ok') || typeof input.ok !== 'boolean') {
@@ -181,11 +189,34 @@ function normalizeMainCommitResult(input: AgentToolResult, operationId?: string)
   const data = result.data;
   if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('无效的 Agent Tool 提交回执');
   const { mutationCommitState: state, operationId: id } = data as Record<string, unknown>;
+  const normalizedState = normalizeAgentMutationCommitState(data);
   if (typeof id !== 'string' || !MAIN_COMMIT_OPERATION_ID.test(id)
     || (operationId !== undefined && id !== operationId)
     || typeof state !== 'string' || !['committed', 'uncommitted', 'commit_unknown'].includes(state)
-    || result.ok !== (state === 'committed')) throw new Error('无效的 Agent Tool 提交回执');
+    || normalizedState.receiptIssue || normalizedState.status !== state
+    || (!independentOk && result.ok !== (state === 'committed'))) throw new Error('无效的 Agent Tool 提交回执');
   return result;
+}
+
+/** A completed read/compare fact survives cleanup cancellation without beginning a commit. */
+function fileNoopExpectedRevision(input: unknown): string | undefined {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return undefined;
+  const value = input as Record<string, unknown>;
+  if (value.mode === 'create') return undefined;
+  try { return normalizeAgentFileExpectedRevision(value, true); } catch { return undefined; }
+}
+
+function normalizeMainFileNoopResult(input: AgentToolResult, operationId?: string, expectedRevision?: string): AgentToolResult | undefined {
+  if (!operationId || !expectedRevision) return undefined;
+  try {
+    const result = normalizeMainCommitResult(input, operationId, true);
+    const data = result.data as Record<string, unknown>;
+    if (result.ok && data.changed === false && data.outcome === 'unchanged'
+      && data.mutationCommitState === 'uncommitted' && data.writeCommitState === 'uncommitted'
+      && typeof data.revision === 'string' && /^[a-f0-9]{64}$/u.test(data.revision)
+      && data.revision === expectedRevision && data.beforeRevision === data.revision && data.afterRevision === data.revision) return result;
+  } catch { /* Ordinary or invalid uncommitted results remain subject to cancellation. */ }
+  return undefined;
 }
 
 export function createAgentToolBroker(options: AgentToolBrokerOptions = {}) {
@@ -201,6 +232,9 @@ export function createAgentToolBroker(options: AgentToolBrokerOptions = {}) {
     runToolRegistry?: AgentToolRegistryExecutor | AgentToolRegistrySnapshot,
     cancellationSettleTimeoutMs = MAIN_CANCELLATION_SETTLE_TIMEOUT_MS,
   ): Promise<AgentToolResult> {
+    // Snapshot request identity before any executor or cancellation callback can run.
+    const noopRevision = fileNoopExpectedRevision(input);
+    const noopOperationId = context.fileMutation?.operationId;
     const boundedTimeoutMs = Math.max(1, Math.min(timeoutMs, MAX_MAIN_EXECUTION_TIMEOUT_MS));
     const boundedCancellationSettleTimeoutMs = Math.max(1, Math.min(
       cancellationSettleTimeoutMs,
@@ -254,9 +288,7 @@ export function createAgentToolBroker(options: AgentToolBrokerOptions = {}) {
       const expectedRegistrationId = registeredTool?.registrationId;
       const computerInput = ['computer.click', 'computer.setText', 'computer.scroll', 'computer.input', 'computer.menu'].includes(name);
       const fileMutationTool = ['file.write', 'file.patch'].includes(name);
-      const fileMutation = fileMutationTool && registeredTool?.name === name
-        && registeredTool.registrationId === (name === 'file.write' ? 'builtin:file.write@2' : 'builtin:file.patch@1') && registeredTool.kind === 'business'
-        && !registeredTool.pluginSource && !registeredTool.pluginOperation;
+      const fileMutation = isAgentBuiltinFileMutationTool(registeredTool, name);
       const supportsCommitSettlement = (fileMutation || (!computerInput && !fileMutationTool && (registeredTool?.pluginOperation === 'rename' || registeredTool?.pluginOperation === 'file-output'))
         || (computerInput && registeredTool?.name === name && registeredTool.registrationId === `builtin:${name}@1`
           && registeredTool.kind === 'business' && !registeredTool.pluginSource && !registeredTool.pluginOperation
@@ -266,7 +298,7 @@ export function createAgentToolBroker(options: AgentToolBrokerOptions = {}) {
         begin: fallback => {
           if (settled || cancellationError || controller.signal.aborted) throw abortError('Agent Tool 提交请求已失效');
           if (commitFallback) throw new Error('Agent Tool 提交已经开始');
-          const normalized = normalizeMainCommitResult(fallback);
+          const normalized = normalizeMainCommitResult(fallback, undefined, fileMutation);
           if ((normalized.data as Record<string, unknown>).mutationCommitState !== 'commit_unknown') {
             throw new Error('Agent Tool 提交开始必须保留未知回执');
           }
@@ -274,7 +306,7 @@ export function createAgentToolBroker(options: AgentToolBrokerOptions = {}) {
         },
         settle: receipt => {
           if (settled || !commitFallback || commitReceipt) throw new Error('Agent Tool 提交回执不存在或已经结束');
-          commitReceipt = normalizeMainCommitResult(receipt, (commitFallback.data as Record<string, unknown>).operationId as string);
+          commitReceipt = normalizeMainCommitResult(receipt, (commitFallback.data as Record<string, unknown>).operationId as string, fileMutation);
           if (cancellationError) finish(() => resolve(commitReceipt as AgentToolResult));
         },
       } : undefined;
@@ -291,10 +323,13 @@ export function createAgentToolBroker(options: AgentToolBrokerOptions = {}) {
         ? executionRegistry.execute(name, input, executionContext)
         : executionRegistry.execute(name, input, executionContext, expectedRegistrationId)
       ).then(
-        result => finish(() => (
-          commitReceipt || commitFallback ? resolve((commitReceipt || commitFallback) as AgentToolResult)
-            : cancellationError ? reject(cancellationError) : resolve(result)
-        )),
+        result => finish(() => {
+          if (commitReceipt || commitFallback) { resolve((commitReceipt || commitFallback) as AgentToolResult); return; }
+          const unchanged = cancellationError && fileMutation
+            ? normalizeMainFileNoopResult(result, noopOperationId, noopRevision) : undefined;
+          if (cancellationError && !unchanged) reject(cancellationError);
+          else resolve(unchanged || result);
+        }),
         error => finish(() => commitReceipt || commitFallback
           ? resolve((commitReceipt || commitFallback) as AgentToolResult) : reject(cancellationError || error)),
       );
@@ -306,6 +341,9 @@ export function createAgentToolBroker(options: AgentToolBrokerOptions = {}) {
     request: AgentToolExecutionRequest;
   } {
     const executionId = createId();
+    const fileNoopRevision = ['file.write', 'file.patch'].includes(input.toolName)
+      && input.fileNoopSettlement?.expectedRevision === fileNoopExpectedRevision(input.executionInput)
+      ? input.fileNoopSettlement?.expectedRevision : undefined;
     const timeoutMs = Math.max(
       MIN_RENDERER_EXECUTION_TIMEOUT_MS,
       Math.min(input.timeoutMs, MAX_RENDERER_EXECUTION_TIMEOUT_MS),
@@ -335,11 +373,12 @@ export function createAgentToolBroker(options: AgentToolBrokerOptions = {}) {
         cancellationError = error;
         executionController.abort();
         notifyCancellation();
+        if (settled) return;
         if (committedResult) {
           finish(() => resolve({ result: committedResult as AgentToolResult }));
           return;
         }
-        if (criticalSettlement) {
+        if (criticalSettlement || fileNoopRevision) {
           scheduleTimeout(RENDERER_COMMIT_SETTLE_TIMEOUT_MS, finishCriticalSettlement);
           return;
         }
@@ -372,12 +411,15 @@ export function createAgentToolBroker(options: AgentToolBrokerOptions = {}) {
       pendingExecutions.set(executionId, {
         beginCriticalSettlement: () => {
           if (settled) throw new Error('Agent Tool 执行请求不存在或已经失效');
+          if (executionController.signal.aborted) throw abortError();
           criticalSettlement = true;
         },
         cancel: handleAbort,
         claimedCapabilities: new Set(),
         verifyAccess: input.verifyAccess,
         executionInput: input.executionInput,
+        fileNoopRevision,
+        hasCriticalSettlement: () => criticalSettlement,
         libraryId: Number(input.appContext.libraryId),
         ownerScope: input.ownerScope,
         ownerWebContentsId: input.ownerWebContentsId,
@@ -394,6 +436,9 @@ export function createAgentToolBroker(options: AgentToolBrokerOptions = {}) {
           scheduleTimeout(RENDERER_COMMIT_SETTLE_TIMEOUT_MS);
         },
         resolve: value => finish(() => resolve(value)),
+        rejectCancelledNoop: () => {
+          if (fileNoopRevision && !criticalSettlement && cancellationError) finish(() => reject(cancellationError));
+        },
         runId: input.runId,
         sessionId: input.sessionId,
         signal: executionController.signal,
@@ -509,16 +554,21 @@ export function createAgentToolBroker(options: AgentToolBrokerOptions = {}) {
     const result = normalizeAgentToolResult(input.result);
     const data = result.data as { writeCommitState?: string; deleteCommitState?: string; mutationCommitState?: string } | undefined;
     const state = pending.toolName === 'file.delete' ? data?.deleteCommitState : ['file.write', 'file.patch'].includes(pending.toolName) ? data?.writeCommitState : data?.mutationCommitState;
-    const writeSettled = isAgentRendererMutationTool(pending.toolName) && !result.ok
+    const writeSettled = pending.hasCriticalSettlement() && isAgentRendererMutationTool(pending.toolName) && !result.ok
       && (state === 'uncommitted' || state === 'commit_unknown');
-    if (pending.signal.aborted && !pending.committedResult && !writeSettled) throw abortError();
+    const unchanged = pending.fileNoopRevision
+      ? normalizeMainFileNoopResult(input.result, executionId, pending.fileNoopRevision) : undefined;
+    if (pending.signal.aborted && !pending.committedResult && !writeSettled && !unchanged) {
+      pending.rejectCancelledNoop();
+      throw abortError();
+    }
     const committedResult = pending.committedResult && pending.toolName === 'node.configure'
       ? settleNodeConfiguration(pending, executionId, result)
       : pending.committedResult && isAgentRendererMutationTool(pending.toolName) && result.ok && result.message
         ? { ...pending.committedResult, message: result.message } : pending.committedResult;
     pending.resolve({
       perception: options.normalizePerception?.(input.perception),
-      result: committedResult || result,
+      result: committedResult || unchanged || result,
     });
     return true;
   }
@@ -540,6 +590,7 @@ export function createAgentToolBroker(options: AgentToolBrokerOptions = {}) {
     ) {
       throw new Error('当前窗口无权提交该 Agent Tool 写入结果');
     }
+    if (pending.signal.aborted && !pending.hasCriticalSettlement()) throw abortError();
     const result = normalizeAgentToolResult(input.result);
     if (!result.ok) throw new Error('Agent Tool 已提交结果必须为成功状态');
     if (pending.committedResult) throw new Error('Agent Tool 写入结果已经提交');

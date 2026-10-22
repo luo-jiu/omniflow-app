@@ -27,12 +27,37 @@ function completedActivity(
 }
 
 describe('saved file mutation summaries', () => {
+  it.each(['file.write', 'file.patch'])('shows a successful %s no-op as unchanged', name => {
+    expect(buildAgentToolSummary(completedActivity(name, { fileName: 'result.txt', changed: false, outcome: 'unchanged',
+      writeCommitState: 'uncommitted', mutationCommitState: 'uncommitted' }), 3))
+      .toEqual({ label: '未修改', subject: 'result.txt' });
+    expect(buildAgentToolSummary(completedActivity(name, { fileName: 'result.txt', changed: false, outcome: 'unchanged',
+      writeCommitState: 'commit_unknown', mutationCommitState: 'uncommitted' }), 3))
+      .toEqual({ label: '保存待核对', subject: 'result.txt' });
+  });
   it.each(['file.write', 'file.patch'])('shows %s saves consistently for either scope', name => {
     expect(getAgentToolNameTitle(name)).toBe('保存文件');
     for (const scope of ['host', 'library']) {
       const activity = completedActivity(name, { scope, fileName: 'result.txt', writeCommitState: 'committed' });
       expect(buildAgentToolSummary(activity, 3)).toEqual({ label: '已保存', subject: 'result.txt' });
       expect(buildAgentToolSummary({ ...activity, status: 'running' }, 3)).toEqual({ label: '正在保存文件' });
+    }
+  });
+
+  it.each(['file.write', 'file.patch'])('uses %s receipts for every terminal status without completing an active tool', name => {
+    const activity = completedActivity(name, { fileName: 'result.txt', mutationCommitState: 'committed' });
+    activity.result!.ok = false;
+    for (const status of ['completed', 'failed', 'cancelled', 'interrupted'] as const) {
+      expect(buildAgentToolSummary({ ...activity, status }, 3)).toEqual({ label: '已保存', subject: 'result.txt' });
+    }
+    for (const [status, label] of [['running', '正在保存文件'], ['preparing', '准备保存文件'],
+      ['awaiting_approval', '保存文件'], ['awaiting_interaction', '保存文件']] as const) {
+      expect(buildAgentToolSummary({ ...activity, status }, 3)).toEqual({ label });
+    }
+    const pluginSource = { pluginId: 'example', pluginVersion: '1', packageFingerprint: 'a', toolId: name,
+      registrationId: 'plugin:example' };
+    for (const status of ['completed', 'failed', 'cancelled', 'interrupted'] as const) {
+      expect(buildAgentToolSummary({ ...activity, status, pluginSource }, 3).label).not.toBe('已保存');
     }
   });
 
@@ -45,7 +70,12 @@ describe('saved file mutation summaries', () => {
     }
     const failedReceipt = completedActivity(name, { fileName: 'result.txt' });
     failedReceipt.result!.ok = false;
-    expect(buildAgentToolSummary(failedReceipt, 3)).toEqual({ label: '文件未保存', subject: 'result.txt' });
+    expect(buildAgentToolSummary(failedReceipt, 3)).toEqual({ label: '保存待核对', subject: 'result.txt' });
+    expect(buildAgentToolSummary(completedActivity(name, { fileName: 'result.txt', writeCommitState: 'committed',
+      mutationCommitState: 'uncommitted' }), 3)).toEqual({ label: '保存待核对', subject: 'result.txt' });
+    const committedFailure = completedActivity(name, { fileName: 'result.txt', writeCommitState: 'committed' });
+    committedFailure.result!.ok = false;
+    expect(buildAgentToolSummary(committedFailure, 3)).toEqual({ label: '已保存', subject: 'result.txt' });
   });
 });
 

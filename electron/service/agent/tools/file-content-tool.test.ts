@@ -25,7 +25,8 @@ describe('file.read', () => {
     expect((large.data as { content: string }).content.length).toBeGreaterThan(20000);
     expect(projectAgentToolResultForProvider(large, 10000).truncated).toBe(false);
     const small = await fileContentTool.execute!({ scope: 'host', path: file }, { ...context(), readOutputTokenBudget: 1000 });
-    expect(small.data).toMatchObject({ hasMore: true, nextOffset: 1 });
+    expect(small.data).toMatchObject({ hasMore: true, nextOffset: 1, encoding: 'utf-8', hasBom: false,
+      lineEnding: 'none', endsWithNewline: false, sizeBytes: 120000 });
     expect(projectAgentToolResultForProvider(small, 1000).truncated).toBe(false);
   });
   it('uses the same line contract for host and library paths', async () => {
@@ -38,9 +39,29 @@ describe('file.read', () => {
     const library = await fileContentTool.execute!({ path: '/read.txt', limit: 1 }, ctx);
     expect(host.data).toMatchObject({ content: 'L1: hello', fileName: 'read.txt', nextOffset: 2 });
     expect(library.data).toMatchObject({ content: 'L1: hello', fileName: 'read.txt', nextOffset: 2 });
+    for (const result of [host, library]) expect(result.data).toMatchObject({ encoding: 'utf-8', hasBom: false,
+      lineEnding: 'lf', endsWithNewline: false, sizeBytes: 11 });
     expect(ctx.readLibraryText).toHaveBeenCalledWith(10, ctx.signal);
     await symlink(file, path.join(directory, 'link'));
     await expect(fileContentTool.execute!({ scope: 'host', path: path.join(directory, 'link') }, context())).rejects.toThrow('符号链接');
+  });
+  it('exposes BOM and original CRLF bytes through both file namespaces', async () => {
+    directory = await mkdtemp(path.join(tmpdir(), 'agent-read-metadata-'));
+    const file = path.join(directory, 'bom.txt');
+    const bytes = Buffer.from('\uFEFF旧\r\n文\r\n');
+    await writeFile(file, bytes);
+    const node = { id: 10, libraryId: 3, parentId: 20, name: 'bom.txt', type: 'file' as const, path: '/bom.txt' };
+    const libraryContext = { ...context(), readLibraryMetadata: vi.fn(async () => ({ libraryId: 3, node })),
+      readLibraryText: vi.fn(async () => bytes) };
+    const results = await Promise.all([
+      fileContentTool.execute!({ scope: 'host', path: file }, context()),
+      fileContentTool.execute!({ scope: 'library', path: '/bom.txt' }, libraryContext),
+    ]);
+    for (const result of results) {
+      expect(result.data).toMatchObject({ content: 'L1: 旧\nL2: 文', encoding: 'utf-8', hasBom: true,
+        lineEnding: 'crlf', endsWithNewline: true, sizeBytes: bytes.length });
+      expect(projectAgentToolResultForProvider(result, 1000).truncated).toBe(false);
+    }
   });
   it('requires approval for host reads outside full access', async () => {
     expect((await assessFileScope({ scope: 'host', path: '/tmp/a' }, context())).behavior).toBe('ask');

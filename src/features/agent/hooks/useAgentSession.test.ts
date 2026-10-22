@@ -11,7 +11,9 @@ import type {
   AgentSessionSnapshot,
   AgentToolApprovalSnapshot,
   AgentToolActivitySnapshot,
+  AgentToolExecutionRequest,
 } from '@/shared/agent/agent.types';
+import type { AgentRendererToolOutcome } from '../services/agent-tool-executor';
 import { useAgentSession } from './useAgentSession';
 
 const apiMocks = vi.hoisted(() => ({
@@ -534,6 +536,39 @@ describe('useAgentSession event coordination', () => {
       collectedAt: '2026-08-23T00:00:00.000Z',
       selectedNodes: [],
     });
+  });
+
+  it.each(['file.write', 'file.patch'])('forwards a cancelled %s preflight completion without marking it committed', async toolName => {
+    apiMocks.getAgentSession.mockResolvedValueOnce(sessionSnapshot());
+    const rendering = deferred<AgentRendererToolOutcome>();
+    executorMocks.executeAgentRendererTool.mockReturnValueOnce(rendering.promise);
+    const hook = renderSessionHook();
+    try {
+      await act(async () => { await hook.current.restore('session-1'); });
+      const request: AgentToolExecutionRequest = {
+        appContext: { currentDirectory: { id: 10, name: '视频' }, libraryId: 3, platform: 'darwin', selectedNodeIds: [] },
+        executionId: 'cancelled-file-preflight', input: { libraryId: 3, path: '/a.txt', revision: 'a'.repeat(64) },
+        ownerScope: OWNER_SCOPE, requireAccessCheck: true, runId: 'run-1', sessionId: 'session-1', toolName,
+      };
+      act(() => listener?.({ type: 'tool-execution-requested', execution: request, runId: 'run-1', sessionId: 'session-1' }));
+      expect(executorMocks.executeAgentRendererTool).toHaveBeenCalledOnce();
+      const signal = executorMocks.executeAgentRendererTool.mock.calls[0][1].signal as AbortSignal;
+      expect(signal.aborted).toBe(false);
+      act(() => listener?.({ type: 'tool-execution-cancelled', executionId: request.executionId, runId: 'run-1', sessionId: 'session-1' }));
+      expect(signal.aborted).toBe(true);
+      const result = { ok: false, message: '文件保存已取消，未提交。', data: {
+        operationId: request.executionId, writeCommitState: 'uncommitted', mutationCommitState: 'uncommitted',
+      } };
+      apiMocks.completeAgentToolExecution.mockRejectedValueOnce(Object.assign(new Error('Agent Tool 已取消'), { name: 'AbortError' }));
+      await act(async () => { rendering.resolve({ committed: false, result }); });
+      expect(apiMocks.completeAgentToolExecution).toHaveBeenCalledOnce();
+      expect(apiMocks.completeAgentToolExecution).toHaveBeenCalledWith({
+        executionId: request.executionId, libraryId: 3, ownerScope: OWNER_SCOPE,
+        perception: undefined, result, runId: 'run-1', sessionId: 'session-1',
+      });
+      expect(apiMocks.markAgentToolExecutionCommitted).not.toHaveBeenCalled();
+      expect(hook.current.error).toBeNull();
+    } finally { hook.unmount(); }
   });
 
   it('applies events that arrive while a session snapshot is being restored', async () => {
