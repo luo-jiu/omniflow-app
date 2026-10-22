@@ -39,6 +39,8 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
     font-size: 13px;
     scrollbar-width: thin;
     scrollbar-color: transparent transparent;
+    /* Keep both thumbs visible briefly after the last interaction ends. */
+    transition: scrollbar-color 0s linear 500ms;
   }
 
   .tree-container::-webkit-scrollbar {
@@ -60,6 +62,7 @@ export const DirectorySidebarWrapper = styled.aside<{ $isDragging?: boolean }>`
   .tree-container:active,
   .is-side-panel-resizing & .tree-container {
     scrollbar-color: var(--app-scrollbar-thumb) var(--app-scrollbar-track);
+    transition-delay: 0s;
   }
 
   .tree-container:hover::-webkit-scrollbar-thumb,
