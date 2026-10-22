@@ -2,6 +2,39 @@
 
 2026-10-20阶段提交沿用各节已有验证，按用户要求不重跑全量检查；历史“未提交”描述指对应测试发生时点。
 
+## Agent 无数字上下文补丁第一批（2026-10-22）
+
+**第一批工程验收通过，第二批真实模型对照仍未执行。** 首次验收未通过的长行阻塞、无账本误报提交、no-op 取消丢回执三项反例已独立复验关闭。后续复验发现的 renderer 入口取消额外等待 30 秒也已修复：只在文件 adapter 之前的入口取消 / 首次权限复验失败时返回失败、未提交回执，沿现有 completion 链结束等待；执行后的异常和已形成 no-op 仍按原结算规则处理。以下历史门禁与 GUI smoke 的证据保持原范围。
+
+最终全量 `npm run lint`、`npm test -- --maxWorkers=2 --minWorkers=1`（**547 文件 / 7,091 项通过**，3 文件 / 7 项沿用跳过）、`npm run build`、`git diff --check` 通过，日志 `/tmp/omniflow-file-preflight-close-km6r5A/{lint,tests,build}.log`。构建使用与当前实现及测试字节一致的隔离源码副本，避免覆盖运行中的开发窗口产物。真实 executor → API → Broker 回归覆盖 write / patch 的入口取消、权限复验中取消和权限拒绝：不推进测试时钟即可结束、零文件访问 / 提交、零残留 timer；hook 验证取消后仍发送回执。生产 Orchestrator、真实访问 guard 与内存 SQLite 另验证停止后立刻发送下一条消息，先等旧 Run 收口，再于不足 1 秒的测试时钟内完成下一 Run，终态保持 cancelled / completed。修复前 executor 的隔离负面对照如期失败；adapter 异常与非文件工具错误不会被误判为未提交。独立代码复核未发现问题。
+
+2026-10-22 阶段提交前再次核对最终源码：lint、547 文件 / 7,091 项测试（沿用 7 项跳过）、隔离副本 build 及 diff 检查通过，日志与源码指纹保存在 `/tmp/omniflow-phase-commit-vr8wj99p/`。提交前比对 1,759 份源码 / 配置指纹一致；补丁引擎单独暂存树另经 TypeScript 与 124 项共享补丁测试，确认不依赖后续接入提交才能编译。代码按链接导航、滚动条、补丁引擎、工具与回执接入分批提交，契约与验收记录单独提交；本次没有新增 GUI 或真实模型验收结论。
+
+前轮全量 `npm run lint`、`npm test -- --maxWorkers=2 --minWorkers=1`（**547 文件 / 7,080 项通过**，3 文件 / 7 项沿用跳过）、`npm run build`、`git diff --check` 通过。日志 `/tmp/omniflow-context-reaccept-{lint,tests,build}-20261022.log`，原脚本结果 `/tmp/omniflow-context-reaccept-{regex,integration}-20261022.log`。新增 54 项回归包含：
+
+- 以当前源码重新打包原 context 复现依赖，未改原复现脚本；60,000 空格后接非空白从约 1.49 秒降为约 8ms 返回 mismatch，50ms 取消 timer 在约 51ms 触发（本机并行门禁下单次观测，不作性能保证）。长空白尾部、精确长行比较、UTF-8 分块边界、扫描预算、真实 timer 取消和让出后 deadline 回归通过。
+- 原集成脚本的缺账本查询保持 `commit_unknown / journalStatus=unknown / retryAllowed=false / node=null`。缺 reader、reader 异常、未知工具，以及真实双 Session SQLite 关闭重开后查旧 operationId / ToolRun ID 均不探节点、不升级提交态；已有节点操作兼容核对不改封存回执。
+- 原 host close 注入取消保留 `ok=true / unchanged / uncommitted`，`mutationHooks=0`、正文 `old\n`。真实两工具的停止 / 超时路径均保留 inode / mtime / 字节、零 journal / Diff；取消后经 SQLite 关闭重开、生产 journal 与注册 verify 仍为未提交。
+- 补齐真实 Registry→main Broker→renderer Broker→生产 library adapter→completion→main 的停止 / 超时链，及生产 orchestrator 两工具生成 no-op 后停止、再回传 IPC 的接线；Run 保持 cancelled、ToolRun completed/uncommitted、零文件变更记录。规范回执必须匹配执行 ID、冻结的 revision / expectedRevision；create、错版本、普通 / 无效回执不能绕过取消。30 秒封存后迟到 no-op 不复活，等待期间不授予新的访问或提交能力。
+
+上述复验仅使用合成 library 3 上下文、临时 SQLite / 私有快照和隔离 host 目录，未修改真实资料库正文。入口取消竞争以生产模块和 hook 的确定性注入验证，本轮未重做 GUI；先前非首 win / 本机 MinIO 与草稿 / Diff 的证据如下。正式模型配置、manifest、预算仍未冻结，不能据此宣布第二批或成功率收益通过。
+
+`file.patch@2 / context-v1` 已接入共享引擎、library / host adapter、main 授权快照重算与真实 Registry / 双 Provider。保留旧 unified 严格语义；新增读取原字节元数据、显式 EOF 策略、唯一上下文定位与结构化恢复诊断。正文 32,000、完整 JSON 64,000 UTF-16 units，源 / 结果各 8 MiB；增量扫描可取消并受工作量 / deadline 约束。
+
+全量 `npm run lint`、`npm test -- --maxWorkers=2 --minWorkers=1`（**547 文件 / 7,026 项通过**，3 文件 / 7 项沿用跳过）、`npm run build` 通过。日志 `/tmp/omniflow-context-patch-{lint,tests,build}-final-20261022.log`。没有上调上下文窗口或删工具；生产估算器核对 read / patch Tool 与完整文件路由较基线合计净减 26 tokens，32k 至少保留 1,024 tokens 的任务余量回归通过。
+
+确定性证据包括 19 组共享字节 fixtures 经双 adapter，真实 Registry / Provider / Broker、ToolRun SQLite 关闭重开、operationId / ToolRun 双查及 `operation.verify`。no-op 成功但未提交、不创建变更记录；冲突 / 非法 / 缺失提交态不按 ok 或 completed 升级。失败 / 取消 / 中断后的明确已提交回执仍显示“已保存”，执行失败原因保留。独立复核发现并修复 CR / LF 拼接吞空行、在途快照准备跨取消时漏结算 lease、UI 终态漏消费提交态三项问题；取消超过 Broker 收口期限后，迟到准备仅释放真实快照 lease，不改已封存 ToolRun。
+
+macOS 复用已有开发窗口、非首个 **win / library 3** 与本机 MinIO，gpt-6.1-sol 高、询问访问，专用会话 `cf5ef2ad-b361-4312-8203-510502c03888`：
+
+- 仅新建 `/agent-context-patch-qa-20261022-wnMh2Z.txt`，精确保存 `alpha\nbeta\n`；读回得到 UTF-8、无 BOM、LF、尾换行 true、11 bytes。
+- 编辑器加入 `draft-only\n` 且不保存，回 Agent 无全局恢复弹框。新一轮读回仍是保存的两行；真实 context-v1 补丁 `beta → gamma` 一次成功，读回 `alpha\ngamma\n`、12 bytes。
+- 实际执行 `-gamma/+gamma` no-op，UI 显示“未修改”；SQLite 规范 ToolRun 为 completed / ok=true、两提交态均 uncommitted、前后 revision 相同。真实 `operation.verify(operationId)` 返回 `not_committed / journalStatus=uncommitted / outcome=unchanged`。该 operationId 没有文件变更记录，会话仅有新建和真实替换两项记录。
+- “改动 1”独立入口显示 `-beta / +gamma`；返回文件模式只有文档内恢复条。最新正文为 `alpha/gamma`，只读草稿仍为 `alpha/beta/draft-only`；没有恢复、保存或丢弃草稿。私有 before / after 快照经独立只读核对，精确等于对应字节。
+- 同一会话另以 `scope=host` 对本轮隔离临时目录 `omniflow-context-patch-qa-20261022.*` 的 `host.txt` 完成 read → context-v1 patch → read。审批展示完整规范路径，真实磁盘独立核对为 `alpha\ngamma\n`、12 bytes，SHA-256 与 library after 一致；“改动 1”显示“本机 · 已提交”及 `-beta / +gamma`。没有使用 Shell、stage 或 publish，host 的 mode / owner 与外部写者竞争限制仍按原契约报告。三轮 Run 均 completed，保留合成文件、草稿和会话供复核。
+
+本节实机是指定新格式和操作的合成 smoke，不是模型自主选路或成功率对照。正式多模型对照的 manifest、实际配置、费用预算和 1,728 次任务尚未冻结或执行，第二批保持未验收。Windows/Linux、完整签名发行包与真实存储故障注入未手验。
+
 ## Markdown 链接与主窗口导航（2026-10-22）
 
 Markdown 显式链接、自动链接和 GFM 裸 URL 统一取消默认导航，由当前资料库的页面 owner 新建内置浏览器标签。主窗口同步拦截非应用文档导航、主 frame 重定向和新窗口请求，仅将 HTTP(S) URL 投影给同一入口；非网页协议及无当前资料库接收者时保持阻止。应用自身重载和 HashRouter、第三方浏览器 view 的现有导航行为不变。

@@ -6,6 +6,8 @@
 
 适用范围：内置 Agent 的资料库 / 本机文件定位、读取、检索、修改、编辑器草稿协作、改动记录与独立 Diff 页面。本文承接 [编码工具能力评估](./built-in-agent-coding-tooling-assessment.md)，不替代既有 [Agent 架构](./built-in-agent-architecture.md)、[Shell 架构](./built-in-agent-shell-architecture.md)、[宿主执行契约](./built-in-agent-host-execution-contract.md)、[UI 契约](./built-in-agent-ui-contract.md) 及 [Viewer 状态专题](./viewers/viewer-session-state.md)。
 
+2026-10-22 补充：[文件修改可靠性方案](agent-file-editing-reliability-plan.md)第一批已接入 @2 无数字上下文补丁、EOF 元数据、结构化恢复与 no-op 提交态核对；首次验收发现的三项反例已修复，并补齐真实 renderer 取消链路，通过原脚本及本轮 7,080 项全量测试，待独立复验。当前契约见[写入专题](built-in-agent-file-write.md)，证据与缺口见[验证矩阵](frontend-validation-matrix.md#agent-无数字上下文补丁第一批2026-10-22)；第二批真实模型对照收益仍未验收。
+
 ## 1. 推荐结论与边界
 
 推荐采用**一套模型工具、一套公共文件语义、两个存储 adapter**。保留 `file.*`，把 `library` 和 `host` 当作明确命名空间；统一文本解码、分页、搜索规则、补丁和 Diff，底层分别接资料库条件提交与本机文件系统。不要求两种存储具有相同的事务、延迟或在线能力。
@@ -33,7 +35,7 @@
 | `file.read` | 两 scope，读取已保存 UTF-8 正文，源文件最多 8 MiB；资料库按 Run 复用解码文本和行数组，可直接读路径 | 不读编辑器草稿；仍完整读源再分页，没有网络 Range / 持久行索引 |
 | `file.grep` | 两 scope 共用 literal / `rust-regex-v1`、include/exclude Glob、Unicode 列、版本与游标；host 文件候选使用 rg 枚举，正文快照经 stdin 匹配 | 无正文流式扫描、全文索引或共同 gitignore profile |
 | `file.write` | 两 scope 的 saved 新建 / 全文替换；正文最多 32,000 个 JS UTF-16 code units；替换要求 revision，创建不覆盖同名文件 | 不处理 working、批量事务或自动回滚 |
-| `file.patch` | 两 scope 的 saved 单文件 `unified-v1` 严格上下文补丁；要求 revision，保留 BOM 与未修改区段的换行字节 | 补丁不能创建 / 删除 / 改名；无模糊匹配、dryRun 或 patchPlan |
+| `file.patch` | 两 scope 的 saved 单文件补丁；新调用显式 context-v1 / revision，连续上下文唯一定位，删除行精确；保留 BOM / 未改行字节，显式 EOF 策略后置。历史 unified-v1 保持严格 | 不能创建 / 删除 / 改名；只有上下文 ASCII 尾空白有限容错，歧义拒绝；无 dryRun 或持久 patchPlan |
 | 文件刷新 / 草稿 | 保留原节点事件刷新；dirty 与基线比较，恢复改为文档内只读比较 / 恢复条 | 未迁移共享 DocumentSession；事件和 remount 仍不是完整版本协调协议 |
 | Diff | main 持久化实际快照与提交状态；独立“改动”入口，支持单次 / 受限 library 净 Diff，worker 计算、可取消分页和有界缓存 | host 只看单次；无模型 `file.diff`、并排 / 虚拟 Diff 或完整 Shell 捕获 |
 
@@ -73,7 +75,7 @@ Agent 资料库提交成功
 
 ### 2.4 saved 修改、历史 Diff 与本轮自动化
 
-修改工具共用严格文本补丁与既有权限 / 提交监督，不给普通 Shell 增加新流程门禁。library executor 继续复用当前内容 API 与 `expectedStorageKey` 条件提交；host 接入 main 的普通单链接文件读取、同路径应用内串行、同目录临时文件、提交前身份 / hash 复验与替换。host 保留普通 mode / owner，ACL、xattrs 等扩展元数据未保障；外部进程的 compare→rename 窗口仍存在，不能宣称文件系统 CAS。`file.patch` 输入上限 128,000 UTF-16 code units，源 / 结果文本各不超过 8 MiB。
+修改工具共用文本补丁引擎与既有权限 / 提交监督，不给普通 Shell 增加新流程门禁。library executor 继续复用当前内容 API 与 `expectedStorageKey` 条件提交；host 接入 main 的普通单链接文件读取、同路径应用内串行、同目录临时文件、提交前身份 / hash 复验与替换。host 保留普通 mode / owner，ACL、xattrs 等扩展元数据未保障；外部进程的 compare→rename 窗口仍存在，不能宣称文件系统 CAS。context-v1 正文最多 32,000 UTF-16 code units，完整 JSON 参数含转义最多 64,000；历史 unified parser 保留原 128,000 正文上限，但生产调用仍受总参数预算约束。源 / 结果文本各不超过 8 MiB。
 
 私有 journal 由 main 的 `agent-file-change-store` 持有，按 backend/account/library/session/run/toolRun 关联，原文不进入 Tool result / Provider 历史。写快照前先持久化 cleanup 占位与计费；准备成功后落 durable unknown，再允许真实提交。结算仅结束一次 active lease；缺少确定回执保留 unknown，重启或迟到成功不自动改写归属，不自动重放。快照有 SHA-256 校验，历史 after 不读取当前文件替代。
 
@@ -302,7 +304,7 @@ saved 单文件的严格补丁、两 adapter、准备快照与提交结算已进
 
 ### 8.1 补丁处理
 
-v1 已固定 `unified-v1`：单文件、行号与上下文严格匹配、无尾换行显式表示。目标在结构化参数中确定，patch header 不得改指另一文件；不支持多文件 header 偷渡、路径逃逸、模糊空白修复或上下文多解时任选一处。当前 patch 只修改现有文件，新建与全文替换走 file.write，删除 / rename 未纳入该方言。
+历史 v1 固定 `unified-v1`：单文件、行号与上下文严格匹配、无尾换行显式表示。@2 新调用首选 `context-v1`，省去数字并明确 EOF 策略；精确兼容和验收边界见[写入专题](built-in-agent-file-write.md)。目标仍在结构化参数中确定，旧 patch header 不得改指另一文件；不支持多文件 header 偷渡、路径逃逸或上下文多解时任选一处。当前 patch 只修改现有文件，新建与全文替换走 file.write，删除 / rename 未纳入该方言。
 
 执行顺序：解析目标与权限 → 权威读取 before → 校验 identity/revision → 完整校验 patch → 生成 after bytes → 封存快照 / prepared operation → 受监督提交 → 核对回执 → 记录事实 → 发版本事件。模型只需读相关区段，执行器必须核对完整基线。
 
@@ -446,7 +448,7 @@ Git diff 可以补充当前工作区观察，不能证明作者、操作时间�
 | 批次 | 当前状态与落点 | 尚未完成 / 验收边界 |
 | --- | --- | --- |
 | A：契约与独立问题修复 | saved 修改输入 / 版本错误、双 scope 提示、相对 path / basePath resolver 与审批前冻结、TextViewer dirty / 文档内恢复条 | 完整 resourceRef / FileExecutionContext、持久项目根与跨设备身份未实现；跨窗口及平台实机未验 |
-| B：公共修改与记录基础 | saved 两 adapter、公共 unified-v1 parser、library 条件 executor、main 私有 journal / 配额 / TTL / outbox；真实 library 新建 / patch / 读回及 host 相对路径 read / patch / read 通过 | 无新后端 receipt、强外部 CAS、批量事务或完整 extended metadata；真实故障注入未验 |
+| B：公共修改与记录基础 | saved 两 adapter、公共 context-v1 / legacy unified-v1 引擎、library 条件 executor、main 私有 journal / 配额 / TTL / outbox；既有真实 library / host 主链与本轮 @2 验证分别见矩阵 | 无新后端 receipt、强外部 CAS、批量事务或完整 extended metadata；真实模型对照及真实故障注入未验 |
 | C：独立 Diff UI | Agent 只读入口、最近 Run 列表、单次 / 受限 library 净 Diff、可取消 worker、文本分页与版本绑定缓存、未知 / 过期 / 截断投影 | host 只单次；无并排 / 虚拟 Diff、语义 hunk 懒计算或模型 file.diff；实机范围另记 |
 | D：共享文档 | 未实现；继续使用原 TextViewer / DraftStore owner | DocumentSession、working broker、bufferRevision、跨窗口文档 lease 与后续默认 working 迁移均属未来 |
 | E：检索与性能 | 共同 literal/regex / include/exclude、固定随包 rg、host 原生候选枚举 / search 先筛选 / 并发元数据、资料库 Run decoded / 行数组缓存、明确 fallback / unavailable；合成 benchmark 已记录 | 无正文流式读取、持久行索引或 workspace / 资料库全文索引；续页仍重新枚举目录 |

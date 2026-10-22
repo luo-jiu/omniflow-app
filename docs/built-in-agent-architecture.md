@@ -1,10 +1,12 @@
 # 内置 Agent 架构
 
-## 内外文件工具与独立改动记录（2026-10-21）
+## 内外文件工具与独立改动记录（2026-10-22）
 
-`file.write@2` 与 `file.patch@1` 已统一为可信 main Tool，按显式 `scope=library|host` 分流；模型依据目标和上下文自主选择，两端工具不会在失败时静默切换。默认 library 仅用于参数兼容。当前只操作 saved，编辑器未保存草稿不进入 Agent 文件读取，也不会被顺带保存。详细语义和未实现的后续方案见 [统一文件工具](agent-unified-file-tools-research.md) 与 [写入契约](built-in-agent-file-write.md)。
+`file.write@2` 与 `file.patch@2` 为可信 main Tool，按显式 `scope=library|host` 分流；新 patch 首选无数字 context-v1，历史 unified-v1 与冻结旧 Run 继续兼容。模型依据目标和上下文自主选择，两端工具不会在失败时静默切换。默认 library 仅用于参数兼容。当前只操作 saved，编辑器未保存草稿不进入 Agent 文件读取，也不会被顺带保存。no-op 成功完成但未提交，无文件变更记录；显式提交态独立于 ok / completed，正文 unknown 不按节点元数据升级。详细语义、独立 Diff 与未验收范围见 [统一文件工具](agent-unified-file-tools-research.md)、[写入契约](built-in-agent-file-write.md)和[可靠性方案](agent-file-editing-reliability-plan.md)。
 
 main 为每次结构化写入绑定 operationId/owner/library/Session/Run/ToolRun。host executor 直接封存 before/after；library 仍经标准 renderer broker，提交前通过一次性 `agent:file-change:prepare` 私有能力校验正文、版本与目标，main 重新读取权威节点/保存版本再落快照。正文不进入普通 Tool result 或模型历史，原始模型写入参数仍按既有审计规则处理。Broker 同步接受规范提交回执后再异步结算 journal；取消后已经封存的 unknown 不接受迟到成功覆写。
+
+带版本的可信 library 替换由 main 显式启用 no-op 取消结算；renderer 停止后仅在原 30 秒窗口内接受与 executionId 和冻结输入 revision 一致的规范 unchanged/uncommitted 回执，main 再映射为本次 operationId。host 句柄清理期间取消使用同一事实保留规则。该分支不 begin、不创建文件 journal，不授予取消后的访问 / 提交能力，封存后的迟到结果无效。缺账本或账本不可读的核对保持未知，不能凭旧节点存在补造提交证据。
 
 SQLite `agent_file_changes` 保存独立提交事实；私有快照目录保存原始字节。每文件8 MiB、Run64 MiB、owner512 MiB，记录数Run1000/owner20000；已结算快照7天、unknown14天，活跃lease不清理。过期保留摘要；Session删除与cleanup outbox同事务，物理删除失败保持占用记录并重试。该存储是本机有限保留的审阅历史，不是资料库备份或同步版本库。启动不重放未知写入，WAL/NORMAL不承诺突然掉电零丢失。
 
