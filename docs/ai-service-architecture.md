@@ -1,6 +1,6 @@
 # AI 服务架构
 
-更新时间：2026-08-20
+更新时间：2026-10-23
 适用范围：`src/features/ai-services/`、`electron/service/aiServiceStore*`、`electron/ipc/aiService.ts` 及其 preload bridge。
 
 ## 1. 概述
@@ -63,7 +63,8 @@ preload 通过 `window.electronAIService` 暴露：
 - `reorder(orderedIds)` -> `ai-service:reorder`
 - `duplicate(id)` -> `ai-service:duplicate`
 - `delete(id)` -> `ai-service:delete`
-- `listModels()` -> `ai-service:list-models`
+- `listModels({ forceRefresh?: boolean }?)` -> `ai-service:list-models`
+- `getModelCapabilities(model)` -> `ai-service:model-capabilities`：返回精确连接版本与模型的只读 Fast 请求能力，不发网络请求。
 - `beginRun(profileId)` -> `ai-service:run:begin`
 - `endRun(runSessionId)` -> `ai-service:run:end`
 - `complete(input)` -> `ai-service:complete`
@@ -82,7 +83,7 @@ preload 通过 `window.electronAIService` 暴露：
   - `Authorization: Bearer <API Key>`（Key 为空时省略）
   - `GET /models`
   - `POST /chat/completions`
-  - 显式推理强度使用 `reasoning_effort: low | medium | high`
+  - 显式推理强度使用 `reasoning_effort`；OpenAI 精确命中内置目录时按型号允许 `low | medium | high | xhigh | max`，其他连接保留 `low | medium | high`
 - `claude`
   - `x-api-key` 与 `anthropic-version: 2023-06-01`
   - `GET /models`
@@ -91,7 +92,11 @@ preload 通过 `window.electronAIService` 暴露：
 
 因此 UI 可以保留统一的“读取模型”动作，但不能假设所有厂商只有 URL 前缀不同。新增 provider 时必须在主进程适配请求头、请求体和响应解析，不在业务工具里增加分支。
 
-推理强度由具体 AI 工具选择，不属于 provider 档案。`auto` 表示省略推理字段；字幕工具同时不提供固定 `temperature`，让模型或服务端采用默认行为。显式选择 `low / medium / high` 时由主进程按上述协议映射，并忽略可能同时提供的 `temperature`。这个字段只表达请求偏好，模型是否支持仍以 provider 响应为准。
+模型菜单与 Agent 共用 main 的 `aiServiceModelDiscoveryCache` 成功发现快照：按 provider、Base URL 和凭据 SHA256 隔离，最多 32 个连接、5 分钟新鲜度，只保留 ID 与经过白名单校验的模型元数据。模型列表成功读取后发布到这里，Agent 优先复用；AI 服务层不依赖 Agent 执行模块。普通列表请求优先返回五分钟内的缓存并合并同连接在途请求；过期后重新读取，网络请求限时十秒。显式 `forceRefresh: true` 绕过缓存、启动新请求并报告真实失败，失败或畸形响应不清空已有成功结果；合法空目录会清空旧身份，请求序号防止旧响应覆盖较新成功。Agent 独立发现的超时、失败冷却与静默回退由自己的 wrapper 管理，不扩散到普通 AI 工具。
+
+随包发布的 `src/shared/ai-model-catalog.json` 固定 Codex SHA，提供单 Agent 推理档位和 Fast 服务档位。推理档位仅要求 OpenAI 服务商与精确模型 ID 命中，可同步计算，打开推理菜单不触发网络请求；未命中或其他服务商保留自动/低/中/高，切换后不支持的偏好归自动。Ultra 与子代理能力不进入目录；不把静态表全部变成账号的可选模型。目录中的窗口数据在本次组件提交中尚未接入预算解析，仍沿用现有模型预算规则。
+
+推理强度由具体 AI 工具选择，不属于 provider 档案。`auto` 表示省略推理字段；字幕工具同时不提供固定 `temperature`，让模型或服务端采用默认行为。显式选择当前型号支持的档位时由主进程按上述协议映射，并忽略可能同时提供的 `temperature`。这个字段只表达请求偏好，模型是否支持仍以 provider 响应为准。
 
 ## 6. UI 与任务边界
 
@@ -110,7 +115,29 @@ preload 通过 `window.electronAIService` 暴露：
 
 它不直接访问文件系统、`safeStorage` 或原始 IPC channel；所有调用先经过 `ai-service.api.ts`。
 
-`AI 字幕翻译` 只保存模型、推理强度、上下文窗口和预设提示词。Base URL、API Key 和 provider 类型均来自 AI 服务档案，不在字幕配置中重复维护。
+`AI 字幕翻译` 只保存模型、推理强度、Fast 偏好、上下文窗口和预设提示词。Base URL、API Key 和 provider 类型均来自 AI 服务档案，不在字幕配置中重复维护。
+
+### 6.1 模型与推理选择器（2026-10-23）
+
+Agent 与字幕共用 `AIModelSettingsControl`：一个 256px 宽、默认 96px 高的浮层，顶部档位与模型名、右上重置，下方离散滑杆；浮层与底部触发按钮中轴对齐，仅在 overlay / viewport 交集边缘按 12px 安全边距夹紧，窄视口相应收缩。点击模型名在同一浮层显示模型列表，选择后回到滑杆。重置只将推理强度归自动，保留模型。字幕额外的“上下文窗口”仍是前后字幕条数 0～10，不是 token 预算。
+
+`ReasoningEffortSlider` 只持有本次手势预览；拖动松手才调用原偏好 owner，pointercancel、丢失捕获、窗口失焦、工作区隐藏及 Escape 丢弃预览。圆球位置与填充宽度使用相同的 160ms 缓出过渡，快速反向接续当前画面，减少动效时关闭过渡；不以动画延迟偏好提交。箭头 / Home / End 可逐档选择，Enter 完成；不会新增 Run 或服务配置状态源。浮层复用应用 portal 与主题表面，模型列表加载失败保留旧列表，显式刷新贯通 `forceRefresh`。推理档位依然同步取共享本地目录。
+
+最高受支持档位的 `ReasoningStarfield` 独立绘制蓝紫色场和 14 个缓慢漂移白点；仅在该档位开启 Fast 时显示横穿粒子及进入 / 退出过渡。其他档位（含拖动预览）不挂载效果层，离开最高档立即释放动画；Fast 偏好与请求仍独立生效。Fast 闪电关闭时描边、开启时使用当前强调色实心填充。装饰使用单 WebGL 画布，不逐帧更新 React；无效果、隐藏和离开视口停止帧循环，减少动效只绘静态色场，不生成白点动画。WebGL 失败时最高档使用静态渐变兜底；卸载释放 GPU、observer、监听与帧任务。
+
+取证目标为本机 `/Applications/ChatGPT.app/Contents/Resources/app.asar`（内部 `openai-codex-electron`，26.1016.62342，SHA256 `5b5cf52887cfd4de19cb5862155a8ef6cf58830c0a2fc592b72060cfcc3be869`）。REA 静态模块 `webview/assets/impl-791cfbad45b4.js`（SHA256 `bb9128732af275cf7c3e36a0910cc301802caa09a6a2bf4e56689d1cf52a80a9`）与 `impl-9597edf4b611.css` 证明：普通星点约 1.28～3.2 秒调整目标，横向偏移不超过锚点 ±4px；Fast 约 1.58～2.375 秒匀速从右向左横穿，没有长拖尾。“加速感”来自原星点 / 刻度退出、流动层接管。该方向是所核对版本的实际坐标，不根据录屏推测。父证据 `ev_af2ef50e5988aeee44d869fce0ed2c9b3f8944898875871e3905980f9339bb8b`、摘要 `ev_a47f3e4e1121571958d0798b8401371afdc55cb4e32009f75aad1d2b5aa68ad8`，8788 AST 节点、解析无失败；部分无关 unpacked native 文件与 ASAR integrity 元数据不符，采用 record-and-continue 静态分析，不能声称整包完整性或全应用行为已验证。OmniFlow 按这些参数独立重写组件，不携带上游 bundle。
+
+### 6.2 Fast 请求边界
+
+Fast 与推理档位分开保存，仅 OpenAI provider 开放。服务档位与推理档位共用 `src/shared/ai-model-catalog.json`：精确匹配的已知型号直接使用内置 `service_tiers`，不要求官方域名，也不要求先成功读取 `/models`。自定义连接的 ID-only 列表、目录缺失或过期不会抹掉已知型号的本地能力；未知型号、大小写 / 后缀别名不会模糊套表。
+
+当前连接五分钟内的成功目录若为精确型号提供合法 `service_tiers`，该字段优先于本地表；`priority` / `fast` 可请求加速，显式空数组或仅 `default` 保留否决含义。字段缺失或解析失败回退本地；未知型号仍必须有新鲜远端能力。连接身份继续按 provider / URL / 凭据隔离，读取能力不主动发网络请求。renderer 对 profile ID、更新时间、模型及请求代次作一致性核对，隐藏 / 切来源后迟到响应失效，打开选择器轻量重读，刷新模型才强制网络发现。
+
+该规则修正了首版误加的“非官方 URL 必须远端声明”限制。对照固定 Codex SHA `d6817454d76885e9d0e118bbf82e507aed6f715a`：`models-manager/src/manager.rs` 初始化载入内置 `models.json`；普通自定义 `base_url` 不清空该目录，TUI 根据精确型号的 `service_tiers` 和 feature 显示命令，app-server `model/list` 投影相同字段。其远程目录是完整 `ModelInfo` 协议，不等同普通 OpenAI ID 列表；显式 `model_catalog_url` 才禁止内置补齐。OmniFlow 未实现该独立目录配置，采用上面的字段级远端覆盖，不能称为完全复制 Codex 的整项替换 / 权威目录规则。此处依据 CLI / app-server 源码，既有桌面 REA 滑杆取证不替代目录来源证明。
+
+main 重新验证请求，优先发送 `service_tier: priority`，仅声明 fast 的连接使用 `fast`。显式关闭且连接支持时发送 `default`，不支持的连接不附加字段；旧调用缺少 fastMode 时保留旧协议。显式开启却不支持时在发请求前拒绝，不静默降级。Agent 冻结请求选项，持久化 requested / effective Fast 偏好；续轮与协议回退沿同一冻结档位。字幕批处理沿原 RunSession 冻结能力，避免目录 TTL 导致同一批中途换档。Fast 开关覆盖 Agent 主请求及工具续轮、字幕请求；辅助会话摘要、Run 内压缩与标题继续省略 service_tier，遵循服务端默认策略，不能称为强制 default。
+
+这表示请求优先处理，不保证服务端实际加速或固定倍数；响应仍可能回退到 default，不能用本地开关或动画证明实际服务档位。能力与协议依据为 OpenAI [Fast mode](https://developers.openai.com/api/docs/guides/fast-mode) 及所核对 Codex 目录，具体自动化与实机范围见验证矩阵。
 
 ## 7. 验证
 

@@ -255,7 +255,8 @@ contextBridge.exposeInMainWorld('electronAIService', {
   reorder: (orderedIds: string[]): Promise<AIServiceSnapshot> => ipcRenderer.invoke('ai-service:reorder', orderedIds),
   duplicate: (id: string): Promise<AIServiceSnapshot> => ipcRenderer.invoke('ai-service:duplicate', id),
   delete: (id: string): Promise<AIServiceSnapshot> => ipcRenderer.invoke('ai-service:delete', id),
-  listModels: (): Promise<string[]> => ipcRenderer.invoke('ai-service:list-models'),
+  listModels: (options?: { forceRefresh?: boolean }): Promise<string[]> => ipcRenderer.invoke('ai-service:list-models', options),
+  getModelCapabilities: (model: string): Promise<import('../src/shared/ai-fast-mode').AIServiceModelCapabilities> => ipcRenderer.invoke('ai-service:model-capabilities', model),
   beginRun: (profileId: string): Promise<AIServiceRunSessionHandle> => (
     ipcRenderer.invoke('ai-service:run:begin', profileId)
   ),

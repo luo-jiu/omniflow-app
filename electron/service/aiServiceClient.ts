@@ -1,4 +1,8 @@
 import { net } from 'electron'
+import { aiServiceModelDiscoveryCache } from './aiServiceModelDiscoveryCache'
+import { normalizeAIServiceReasoningEffort } from '../../src/shared/ai-model-catalog'
+import { normalizeAIServiceFastMode, type AIServiceModelCapabilities, type AIServiceRequestTier } from '../../src/shared/ai-fast-mode'
+import { getAIServiceFastTier } from './aiServiceFastMode'
 import type {
   AIServiceChatCompletionInput,
   AIServiceCompletionInput,
@@ -58,10 +62,6 @@ async function requestJson(
   return body
 }
 
-function normalizeReasoningEffort(value: unknown): AIServiceCompletionInput['reasoningEffort'] {
-  return value === 'low' || value === 'medium' || value === 'high' ? value : 'auto'
-}
-
 function normalizeTemperature(value: unknown): number | undefined {
   if (value === undefined || value === null || value === '') return undefined
   const parsed = Number(value)
@@ -69,21 +69,56 @@ function normalizeTemperature(value: unknown): number | undefined {
   return Math.max(0, Math.min(2, parsed))
 }
 
-export async function listActiveAIServiceModels(): Promise<string[]> {
+const pendingModelLists = new Map<string, Promise<string[]>>()
+
+export function getActiveAIServiceModelCapabilities(model: string): AIServiceModelCapabilities {
+  if (typeof model !== 'string' || !model.trim() || model.length > 200) throw new Error('模型名称无效')
   const profile = getActiveAIServiceRuntimeProfile()
-  const body = await requestJson(buildAIServiceModelsRequest(profile), '获取模型列表失败')
-  return extractAIServiceModelIds(body)
+  const modelId = model.trim()
+  return { profileId: profile.id, profileUpdatedAt: profile.configurationRevision, model: modelId,
+    fastMode: getAIServiceFastTier(profile, modelId) !== undefined }
+}
+
+export async function listActiveAIServiceModels(options?: { forceRefresh?: boolean }): Promise<string[]> {
+  const profile = getActiveAIServiceRuntimeProfile()
+  const cached = aiServiceModelDiscoveryCache.read(profile)
+  const sortedIds = (models: ReadonlyMap<string, unknown>) => (
+    [...models.keys()].sort((left, right) => left.localeCompare(right, 'zh-Hans-CN'))
+  )
+  if (options?.forceRefresh !== true && cached && cached.expiresAt > Date.now()) {
+    return sortedIds(cached.models)
+  }
+  const discovery = aiServiceModelDiscoveryCache.begin(profile)
+  const previous = pendingModelLists.get(discovery.connectionKey)
+  if (options?.forceRefresh !== true && previous) return previous
+  const pending = (async () => {
+    const body = await requestJson(
+      buildAIServiceModelsRequest(profile), '获取模型列表失败', AbortSignal.timeout(10_000),
+    )
+    const snapshot = aiServiceModelDiscoveryCache.publish(discovery, body)
+    return snapshot ? sortedIds(snapshot.models) : extractAIServiceModelIds(body)
+  })()
+  pendingModelLists.set(discovery.connectionKey, pending)
+  try {
+    return await pending
+  } finally {
+    if (pendingModelLists.get(discovery.connectionKey) === pending) {
+      pendingModelLists.delete(discovery.connectionKey)
+    }
+  }
 }
 
 export async function completeWithAIServiceProfile(
   input: AIServiceCompletionInput,
   runtimeConnection?: AIServiceRuntimeConnection,
   signal?: AbortSignal,
+  resolveFrozenRequestTier?: (model: string, fastMode: unknown) => AIServiceRequestTier | undefined,
 ): Promise<string> {
   const normalized: AIServiceCompletionInput = {
+    fastMode: normalizeAIServiceFastMode(input?.fastMode),
     model: String(input?.model || '').trim(),
     profileId: String(input?.profileId || '').trim(),
-    reasoningEffort: normalizeReasoningEffort(input?.reasoningEffort),
+    reasoningEffort: normalizeAIServiceReasoningEffort(input?.reasoningEffort),
     systemPrompt: String(input?.systemPrompt || ''),
     temperature: normalizeTemperature(input?.temperature),
     userPrompt: String(input?.userPrompt || ''),
@@ -98,7 +133,8 @@ export async function completeWithAIServiceProfile(
 
   const profile = runtimeConnection || getAIServiceRuntimeProfile(normalized.profileId)
   const body = await requestJson(
-    buildAIServiceCompletionRequest(profile, normalized),
+    buildAIServiceCompletionRequest(profile, normalized, resolveFrozenRequestTier
+      ? { serviceTier: resolveFrozenRequestTier(normalized.model, normalized.fastMode) } : undefined),
     'AI 请求失败',
     signal,
   )
@@ -109,6 +145,7 @@ export async function completeWithAIServiceProfile(
 
 function normalizeChatInput(input: AIServiceChatCompletionInput): AIServiceChatCompletionInput {
   return {
+    fastMode: normalizeAIServiceFastMode(input?.fastMode),
     maxOutputTokens: resolveAIServiceOutputTokenLimit(input?.maxOutputTokens),
     messages: Array.isArray(input?.messages)
       ? input.messages
@@ -121,7 +158,7 @@ function normalizeChatInput(input: AIServiceChatCompletionInput): AIServiceChatC
       : [],
     model: String(input?.model || '').trim(),
     profileId: String(input?.profileId || '').trim(),
-    reasoningEffort: normalizeReasoningEffort(input?.reasoningEffort),
+    reasoningEffort: normalizeAIServiceReasoningEffort(input?.reasoningEffort),
     systemPrompt: String(input?.systemPrompt || ''),
     temperature: normalizeTemperature(input?.temperature),
   }

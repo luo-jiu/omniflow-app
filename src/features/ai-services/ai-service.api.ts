@@ -4,6 +4,7 @@ import type {
   AIServiceSaveInput,
   AIServiceSnapshot,
 } from './ai-service.types';
+import type { AIServiceModelCapabilities } from '@/shared/ai-fast-mode';
 
 function bridge() {
   if (!window.electronAIService) {
@@ -40,8 +41,12 @@ export function deleteAIServiceProfile(id: string): Promise<AIServiceSnapshot> {
   return bridge().delete(id);
 }
 
-export function fetchActiveAIServiceModels(): Promise<string[]> {
-  return bridge().listModels();
+export function fetchActiveAIServiceModels(options?: { forceRefresh?: boolean }): Promise<string[]> {
+  return bridge().listModels(options);
+}
+
+export function fetchAIServiceModelCapabilities(model: string): Promise<AIServiceModelCapabilities> {
+  return bridge().getModelCapabilities(model);
 }
 
 export function beginAIServiceRun(profileId: string): Promise<AIServiceRunSessionHandle> {

@@ -1,5 +1,6 @@
 import { getFileLink, uploadLocalPathAndCreateNode } from '@/features/file-explorer/services/file.api';
 import type { SelectedTreeNode } from '@/features/file-explorer';
+import { normalizeAIServiceReasoningEffort } from '@/shared/ai-model-catalog';
 import {
   beginAIServiceRun,
   completeWithAIService,
@@ -102,11 +103,8 @@ export function loadSubtitleTranslationPreferences(): SubtitleTranslationConfig 
       contextWindow: normalizeContextWindow(parsed.contextWindow, fallback.contextWindow),
       model: String(parsed.model ?? fallback.model),
       presetPrompt: String(parsed.presetPrompt ?? fallback.presetPrompt),
-      reasoningEffort: parsed.reasoningEffort === 'low'
-        || parsed.reasoningEffort === 'medium'
-        || parsed.reasoningEffort === 'high'
-        ? parsed.reasoningEffort
-        : 'auto' as const,
+      reasoningEffort: normalizeAIServiceReasoningEffort(parsed.reasoningEffort),
+      ...(typeof parsed.fastMode === 'boolean' ? { fastMode: parsed.fastMode } : {}),
     };
     localStorage.setItem(SUBTITLE_TRANSLATION_PREFERENCES_KEY, JSON.stringify(normalized));
     localStorage.removeItem(LEGACY_SUBTITLE_TRANSLATION_PREFERENCES_KEY);
@@ -124,6 +122,7 @@ export function saveSubtitleTranslationPreferences(config: SubtitleTranslationCo
     model: String(config.model || ''),
     presetPrompt: String(config.presetPrompt || ''),
     reasoningEffort: config.reasoningEffort,
+    ...(typeof config.fastMode === 'boolean' ? { fastMode: config.fastMode } : {}),
   }));
   localStorage.removeItem(LEGACY_SUBTITLE_TRANSLATION_PREFERENCES_KEY);
 }
@@ -195,8 +194,8 @@ export async function loadSubtitleFromLibraryNode(
   };
 }
 
-export function fetchAvailableTranslationModels(): Promise<string[]> {
-  return fetchActiveAIServiceModels();
+export function fetchAvailableTranslationModels(options?: { forceRefresh?: boolean }): Promise<string[]> {
+  return options?.forceRefresh ? fetchActiveAIServiceModels(options) : fetchActiveAIServiceModels();
 }
 
 export async function beginSubtitleTranslationRun(serviceProfileId: string): Promise<string> {
@@ -224,6 +223,7 @@ export async function translateSubtitleRow(
     model,
     profileId: serviceProfileId,
     reasoningEffort: config.reasoningEffort,
+    ...(typeof config.fastMode === 'boolean' ? { fastMode: config.fastMode } : {}),
     runSessionId,
     systemPrompt: buildSystemPrompt(config),
     userPrompt: buildTranslationPrompt(

@@ -53,6 +53,25 @@ describe('Agent model preferences', () => {
     });
   });
 
+  it.each(['xhigh', 'max'] as const)('preserves the %s reasoning preference', (reasoningEffort) => {
+    saveAgentModelPreferences({ model: 'gpt-6.1-sol', reasoningEffort });
+    expect(loadAgentModelPreferences()).toEqual({ model: 'gpt-6.1-sol', reasoningEffort });
+  });
+
+  it('drops unsupported Ultra from stored preferences', () => {
+    localStorage.setItem('agent-model-preferences:v1', JSON.stringify({ model: 'gpt-6.1-sol', reasoningEffort: 'ultra' }));
+    expect(loadAgentModelPreferences()).toEqual({ model: 'gpt-6.1-sol', reasoningEffort: 'auto' });
+  });
+
+  it('persists Fast independently from reasoning and accepts only an explicit boolean', () => {
+    saveAgentModelPreferences({ model: 'gpt-6.1-sol', reasoningEffort: 'low', fastMode: true });
+    expect(loadAgentModelPreferences()).toEqual({ model: 'gpt-6.1-sol', reasoningEffort: 'low', fastMode: true });
+    saveAgentModelPreferences({ model: 'gpt-6.1-sol', reasoningEffort: 'max', fastMode: false });
+    expect(loadAgentModelPreferences()).toEqual({ model: 'gpt-6.1-sol', reasoningEffort: 'max', fastMode: false });
+    localStorage.setItem('agent-model-preferences:v1', JSON.stringify({ model: 'gpt-6.1-sol', fastMode: 'true' }));
+    expect(loadAgentModelPreferences().fastMode).toBeUndefined();
+  });
+
   it('falls back when stored preferences are invalid', () => {
     localStorage.setItem('agent-model-preferences:v1', '{');
 

@@ -8,6 +8,7 @@ import {
 import styled from 'styled-components';
 
 import AIModelSettingsControl from '@/features/ai-services/components/AIModelSettingsControl';
+import type { AIServiceProviderType } from '@/features/ai-services/ai-service.types';
 
 import type { RunnerSnapshot } from './subtitle-translation.runner';
 import type { SubtitleTranslationConfig } from './types';
@@ -125,13 +126,16 @@ type SubtitleTranslationComposerProps = {
   config: SubtitleTranslationConfig;
   disabled: boolean;
   fileName: string;
+  fastModeAvailable?: boolean;
   isRunnerActive: boolean;
   loadingModels: boolean;
   modelSourceKey: string;
+  providerType?: AIServiceProviderType;
   retranslateDisabled: boolean;
   runnerSnapshot: RunnerSnapshot;
   onConfigChange: (nextConfig: SubtitleTranslationConfig) => void;
-  onLoadModels: () => Promise<boolean>;
+  onLoadModels: (options?: { forceRefresh?: boolean }) => Promise<boolean>;
+  onOpenModelSettings?: () => void;
   onRetranslateAll: () => void;
   onStartTranslation: () => void;
   onStopTranslation: () => void;
@@ -142,13 +146,16 @@ const SubtitleTranslationComposer: React.FC<SubtitleTranslationComposerProps> = 
   config,
   disabled,
   fileName,
+  fastModeAvailable,
   isRunnerActive,
   loadingModels,
   modelSourceKey,
+  providerType,
   retranslateDisabled,
   runnerSnapshot,
   onConfigChange,
   onLoadModels,
+  onOpenModelSettings,
   onRetranslateAll,
   onStartTranslation,
   onStopTranslation,
@@ -175,7 +182,12 @@ const SubtitleTranslationComposer: React.FC<SubtitleTranslationComposerProps> = 
           loadingModels={loadingModels}
           model={config.model}
           modelSourceKey={modelSourceKey}
+          providerType={providerType}
           reasoningEffort={config.reasoningEffort}
+          fastMode={Boolean(fastModeAvailable && config.fastMode)}
+          fastModeAvailable={fastModeAvailable}
+          onFastModeChange={fastMode => onConfigChange({ ...config, fastMode })}
+          onOpenSettings={onOpenModelSettings}
           onLoadModels={onLoadModels}
           onModelChange={(model) => onConfigChange({ ...config, model })}
           onReasoningEffortChange={(reasoningEffort) => onConfigChange({

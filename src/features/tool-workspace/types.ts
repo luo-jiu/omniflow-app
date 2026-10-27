@@ -74,6 +74,7 @@ export interface SubtitleTranslationConfig {
   model: string;
   presetPrompt: string;
   reasoningEffort: AIServiceReasoningEffort;
+  fastMode?: boolean;
 }
 
 export interface SubtitleTranslationDraft {

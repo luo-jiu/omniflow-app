@@ -3,7 +3,8 @@ import type { AIServiceProviderType } from '@/shared/ai-service-provider-types';
 export { AI_SERVICE_PROVIDER_TYPES } from '@/shared/ai-service-provider-types';
 export type { AIServiceProviderType } from '@/shared/ai-service-provider-types';
 
-export type AIServiceReasoningEffort = 'auto' | 'low' | 'medium' | 'high';
+import type { AIServiceReasoningEffort } from '@/shared/ai-model-catalog';
+export type { AIServiceReasoningEffort } from '@/shared/ai-model-catalog';
 
 export interface AIServiceProfile {
   baseUrl: string;
@@ -30,6 +31,7 @@ export interface AIServiceSaveInput {
 }
 
 export interface AIServiceCompletionInput {
+  fastMode?: boolean;
   model: string;
   profileId: string;
   reasoningEffort?: AIServiceReasoningEffort;
@@ -45,6 +47,7 @@ export interface AIServiceChatMessage {
 }
 
 export interface AIServiceChatCompletionInput {
+  fastMode?: boolean;
   maxOutputTokens?: number;
   messages: AIServiceChatMessage[];
   model: string;

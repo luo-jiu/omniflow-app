@@ -36,6 +36,8 @@ export type AgentProviderMessage =
   | { content: string; name: string; role: 'tool'; toolCallId: string; attachments?: import('../../../src/shared/agent/agent-attachments').AgentAttachment[]; images?: string[] };
 
 export interface AgentProviderTurnInput {
+  /** Main-only, frozen after connection capability validation. */
+  serviceTier?: import('../../../src/shared/ai-fast-mode').AIServiceRequestTier;
   modelAdapter?: AgentModelAdapter;
   maxOutputTokens: number;
   messages: AgentProviderMessage[];
@@ -305,6 +307,7 @@ export function buildAgentProviderRequestBody(
     ...outputTokenFields,
     messages: buildOpenAIMessages(input, toolNames),
     model: input.model,
+    ...(connection.providerType === 'openai' && input.serviceTier ? { service_tier: input.serviceTier } : {}),
     ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
     stream: true,
     ...(connection.providerType === 'openai' || connection.providerType === 'deepseek'

@@ -61,7 +61,6 @@ import type {
   AgentPluginOperationReconcileRequest,
   AgentPreparedActionPublic,
   AgentPerceptionSnapshot,
-  AgentReasoningEffort,
   AgentRunSnapshot,
   AgentSessionCursor,
   AgentSessionPage,
@@ -85,6 +84,8 @@ import {
   normalizeAgentPreparedActionPublic,
 } from '../../../src/shared/agent/agent-prepared-action';
 import { streamAIServiceProfile } from '../aiServiceClient';
+import { resolveAIServiceRequestTier } from '../aiServiceFastMode';
+import { normalizeAIServiceFastMode, type AIServiceRequestTier } from '../../../src/shared/ai-fast-mode';
 import {
   resolveAIServiceOutputTokenLimit,
   type AIServiceRuntimeConnection,
@@ -139,6 +140,7 @@ import { agentFileAuthorityBroker, type AgentFileAuthorityBrokerRequestInput } f
 import { normalizeAgentLibraryReadResult, type AgentLibraryReadResult } from '../../../src/shared/agent/agent-library-query';
 import { agentModelCatalog } from './agent-model-catalog';
 import { resolveAgentAdapterEffort, resolveAgentModelAdapter, restrictAgentToolsForModel, restrictAgentSkillsForModel, type AgentModelAdapter } from './agent-model-adapter';
+import { normalizeAIServiceReasoningEffort } from '../../../src/shared/ai-model-catalog';
 import type { AgentModelMetadata } from './agent-model-context';
 import {
   buildAgentFallbackContextMessages,
@@ -532,10 +534,6 @@ function normalizeContext(input: AgentAppContext): AgentAppContext {
     platform,
     selectedNodeIds,
   };
-}
-
-function normalizeReasoningEffort(value: unknown): AgentReasoningEffort {
-  return value === 'low' || value === 'medium' || value === 'high' ? value : 'auto';
 }
 
 function estimateContinuationTokensBeforeSideEffects(input: {
@@ -3218,6 +3216,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     windowSource: AgentContextUsageSnapshot['windowSource'],
     resolveComputerTextAuditSource: AgentComputerTextAuditSourceResolver,
     continuationInstruction = '',
+    frozenServiceTier?: AIServiceRequestTier,
   ): Promise<void> {
     const sessionId = session.id;
     const providerMaxOutputTokens = resolveAgentProviderOutputTokens(contextBudget);
@@ -3496,6 +3495,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
             modelAdapter,
           );
           const providerTurnInput = {
+            serviceTier: frozenServiceTier,
             modelAdapter,
             maxOutputTokens: providerMaxOutputTokens,
             messages,
@@ -3556,6 +3556,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
             throw error;
           }
           const fallbackInput = {
+            serviceTier: frozenServiceTier,
             modelAdapter,
             maxOutputTokens: providerMaxOutputTokens,
             messages: [...fallbackContextMessages, ...plainMessages],
@@ -4193,7 +4194,9 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
     }
     const profileId = String(input?.profileId || '').trim();
     const model = String(input?.model || '').trim();
-    let reasoningEffort = normalizeReasoningEffort(input?.reasoningEffort);
+    const requestedReasoningEffort = normalizeAIServiceReasoningEffort(input?.reasoningEffort);
+    const requestedFastMode = normalizeAIServiceFastMode(input?.fastMode);
+    let reasoningEffort = requestedReasoningEffort;
     if (!userPrompt && !input.attachmentIds?.length && !resumeRunId) throw new Error('请求内容不能为空');
     if (userPrompt.length > 100_000) throw new Error('请求内容过长');
     if (containsAgentSensitiveData(userPrompt)) {
@@ -4308,6 +4311,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       const runtimeConnection = { ...resolveRuntimeProfile(profileId) };
       const metadata = options.getModelMetadata ? await options.getModelMetadata(runtimeConnection, model)
         : options.resolveContextBudget ? undefined : await agentModelCatalog.get(runtimeConnection, model);
+      const frozenServiceTier = resolveAIServiceRequestTier(runtimeConnection, model, requestedFastMode);
       const modelAdapter = resolveAgentModelAdapter(runtimeConnection, model, metadata);
       if (modelAdapter.supportsImages === false && attachments.some(item => item.kind === 'image')) {
         throw new Error('当前模型不支持图片输入，请选择支持视觉的模型');
@@ -4420,6 +4424,8 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         now: startedAt,
         profileId,
         reasoningEffort,
+        requestedReasoningEffort,
+        ...(requestedFastMode !== undefined ? { requestedFastMode, fastMode: frozenServiceTier === 'priority' || frozenServiceTier === 'fast' } : {}),
         sessionId: session.id,
         skillCatalogRevision: capabilitySnapshot.skillRevision,
         toolCatalogRevision: capabilitySnapshot.toolRevision,
@@ -4473,7 +4479,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
         sessionId: session.id,
         userPrompt,
       }, runtimeConnection, controller, contextBudget, recalledMemories, capabilitySnapshot, modelAdapter, windowSource,
-      resolveComputerTextAuditSource, continuationInstruction);
+      resolveComputerTextAuditSource, continuationInstruction, frozenServiceTier);
       return { runId, sessionId: session.id, session: pickAgentSessionSummary(session) };
     } catch (error) {
       let confirmedUncreated = !runCreated && !runCreationAttempted;

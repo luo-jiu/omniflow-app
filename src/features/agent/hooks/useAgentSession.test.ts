@@ -182,7 +182,7 @@ function renderSessionHook(onRefreshDirectory?: (id: number) => Promise<void> | 
   let current: ReturnType<typeof useAgentSession> | null = null;
   const onSessionChanged = vi.fn();
   const onSessionTitleChanged = vi.fn();
-  function Harness({ scope = OWNER_SCOPE, libraryId = 3 }: { scope?: AgentOwnerScope; libraryId?: number }) {
+  function Harness({ scope = OWNER_SCOPE, libraryId = 3, fastMode }: { scope?: AgentOwnerScope; libraryId?: number; fastMode?: boolean }) {
     current = useAgentSession({
       appContext: {
         currentDirectory: { id: 10, name: '视频' },
@@ -197,6 +197,7 @@ function renderSessionHook(onRefreshDirectory?: (id: number) => Promise<void> | 
       ownerScope: scope,
       profileId: 'profile-a',
       reasoningEffort: 'medium',
+      fastMode,
     });
     return null;
   }
@@ -213,11 +214,21 @@ function renderSessionHook(onRefreshDirectory?: (id: number) => Promise<void> | 
     onSessionChanged,
     onSessionTitleChanged,
     changeScope: (scope: AgentOwnerScope, libraryId: number) => act(() => renderer.update(React.createElement(Harness, { scope, libraryId }))),
+    changeFastMode: (fastMode: boolean) => act(() => renderer.update(React.createElement(Harness, { fastMode }))),
     unmount: () => act(() => renderer.unmount()),
   };
 }
 
 describe('useAgentSession event coordination', () => {
+  it.each([true, false])('passes an explicit Fast preference to the next submission: %s', async fastMode => {
+    apiMocks.startAgentChat.mockRejectedValueOnce(new Error('test stops before a run'));
+    const hook = renderSessionHook();
+    try {
+      hook.changeFastMode(fastMode);
+      await act(async () => { await hook.current.submit('Fast request projection'); });
+      expect(apiMocks.startAgentChat).toHaveBeenCalledWith(expect.objectContaining({ fastMode, reasoningEffort: 'medium' }));
+    } finally { hook.unmount(); }
+  });
   it('uses the existing draft owner for synchronous compare-and-set and rejects stale or cross-scope writes', async () => {
     apiMocks.getAgentSession.mockResolvedValue(sessionSnapshot());
     const hook = renderSessionHook(vi.fn());

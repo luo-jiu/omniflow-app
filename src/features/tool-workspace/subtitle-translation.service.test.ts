@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const { completeWithAIService } = vi.hoisted(() => ({
   completeWithAIService: vi.fn().mockResolvedValue('translated'),
@@ -13,10 +13,34 @@ vi.mock('@/features/ai-services/ai-service.api', () => ({
 
 import {
   loadSubtitleFromDroppedFile,
+  loadSubtitleTranslationPreferences,
+  saveSubtitleTranslationPreferences,
   MAX_DROPPED_SUBTITLE_FILE_BYTES,
   selectSingleDroppedSubtitleFile,
   translateSubtitleRow,
 } from './subtitle-translation.service';
+
+afterEach(() => vi.unstubAllGlobals());
+
+describe('subtitle reasoning preferences', () => {
+  it.each([true, false])('retains an explicit Fast preference: %s', fastMode => {
+    const setItem = vi.fn();
+    vi.stubGlobal('localStorage', { getItem: vi.fn(() => JSON.stringify({ model: 'model-a', reasoningEffort: 'low', fastMode })), setItem, removeItem: vi.fn() });
+    const config = loadSubtitleTranslationPreferences();
+    expect(config.fastMode).toBe(fastMode);
+    saveSubtitleTranslationPreferences(config);
+    expect(JSON.parse(setItem.mock.calls.at(-1)![1])).toMatchObject({ fastMode, reasoningEffort: 'low' });
+  });
+  it.each([
+    ['xhigh', 'xhigh'], ['max', 'max'], ['ultra', 'auto'],
+  ])('restores %s as %s', (stored, expected) => {
+    vi.stubGlobal('localStorage', {
+      getItem: vi.fn(() => JSON.stringify({ model: 'gpt-6.1-sol', reasoningEffort: stored })),
+      setItem: vi.fn(), removeItem: vi.fn(),
+    });
+    expect(loadSubtitleTranslationPreferences().reasoningEffort).toBe(expected);
+  });
+});
 
 const SRT_CONTENT = `1
 00:00:01,000 --> 00:00:02,000
@@ -96,6 +120,7 @@ describe('translateSubtitleRow', () => {
       model: 'model-a',
       presetPrompt: '请翻译成日语。',
       reasoningEffort: 'auto',
+      fastMode: true,
     }, [{
       endMs: 2000,
       endTimestamp: '00:00:02,000',
@@ -110,6 +135,7 @@ describe('translateSubtitleRow', () => {
 
     expect(completeWithAIService).toHaveBeenCalledWith(expect.objectContaining({
       runSessionId: 'run-session-id',
+      fastMode: true,
       systemPrompt: expect.stringContaining('请翻译成日语。'),
     }));
     const request = completeWithAIService.mock.calls.at(-1)?.[0];

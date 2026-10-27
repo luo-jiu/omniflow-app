@@ -521,6 +521,79 @@ describe('SQLite Agent session store', () => {
   const stores: AgentSessionStore[] = [];
   const temporaryDirectories: string[] = [];
 
+  it('migrates optional Fast columns and preserves frozen intent through reopening', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'agent-fast-mode-'));
+    temporaryDirectories.push(directory);
+    const databasePath = path.join(directory, 'sessions.sqlite3');
+    const store = await createStore(databasePath);
+    await createSession(store, 'fast-session', 3, 'Fast');
+    await store.createRun({ id: 'old-fast-run', sessionId: 'fast-session', model: 'model', profileId: 'profile',
+      reasoningEffort: 'auto', userPrompt: 'test', now: timestamp(1) });
+    await store.updateRun('old-fast-run', { status: 'completed', updatedAt: timestamp(2) });
+    await store.close(); stores.splice(stores.indexOf(store), 1);
+    await executeDatabaseSql(databasePath, 'ALTER TABLE agent_runs DROP COLUMN requested_fast_mode; ALTER TABLE agent_runs DROP COLUMN fast_mode');
+    const migrated = await createStore(databasePath);
+    const oldRun = (await migrated.getSession('fast-session', OWNER_SCOPE, 3))!.runs[0];
+    expect(oldRun).not.toHaveProperty('fastMode');
+    expect(oldRun).not.toHaveProperty('requestedFastMode');
+    for (const [index, fastMode] of [true, false].entries()) {
+      const run = await migrated.createRun({ id: `new-fast-${index}`, sessionId: 'fast-session', model: 'model', profileId: 'profile',
+        reasoningEffort: 'auto', requestedFastMode: fastMode, fastMode, userPrompt: 'test', now: timestamp(index + 3) });
+      expect(run).toMatchObject({ requestedFastMode: fastMode, fastMode });
+      await migrated.updateRun(run.id, { status: 'completed', updatedAt: timestamp(index + 5) });
+    }
+    await migrated.close(); stores.splice(stores.indexOf(migrated), 1);
+    const reopened = await createStore(databasePath);
+    expect((await reopened.getSession('fast-session', OWNER_SCOPE, 3))!.runs.slice(1))
+      .toMatchObject([{ requestedFastMode: true, fastMode: true }, { requestedFastMode: false, fastMode: false }]);
+  });
+
+  it('preserves requested and effective reasoning separately through reopening while older Runs remain optional', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'agent-reasoning-effort-'));
+    temporaryDirectories.push(directory);
+    const databasePath = path.join(directory, 'sessions.sqlite3');
+    const store = await createStore(databasePath);
+    await createSession(store, 'reasoning-session', 3, 'Reasoning');
+    const efforts = [
+      { reasoningEffort: 'max', requestedReasoningEffort: 'max' },
+      { reasoningEffort: 'auto', requestedReasoningEffort: 'high' },
+      { reasoningEffort: 'high' },
+    ] as const;
+    for (const [index, effort] of efforts.entries()) {
+      await store.createRun({ id: `reasoning-run-${index}`, sessionId: 'reasoning-session', model: 'model', profileId: 'profile',
+        ...effort,
+        userPrompt: 'test', now: timestamp(index + 1) });
+      await store.updateRun(`reasoning-run-${index}`, { status: 'completed', updatedAt: timestamp(index + 4) });
+    }
+    await store.close(); stores.splice(stores.indexOf(store), 1);
+    const reopened = await createStore(databasePath);
+    const runs = (await reopened.getSession('reasoning-session', OWNER_SCOPE, 3))!.runs;
+    expect(runs[0]).toMatchObject({ reasoningEffort: 'max', requestedReasoningEffort: 'max' });
+    expect(runs[1]).toMatchObject({ reasoningEffort: 'auto', requestedReasoningEffort: 'high' });
+    expect(runs[2]).toMatchObject({ reasoningEffort: 'high' });
+    expect(runs[2]).not.toHaveProperty('requestedReasoningEffort');
+  });
+
+  it('adds the requested reasoning column to an existing database without changing old Run effort', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'agent-reasoning-migration-'));
+    temporaryDirectories.push(directory);
+    const databasePath = path.join(directory, 'sessions.sqlite3');
+    const store = await createStore(databasePath);
+    await createSession(store, 'reasoning-session', 3, 'Reasoning');
+    await store.createRun({ id: 'old-reasoning-run', sessionId: 'reasoning-session', model: 'model', profileId: 'profile',
+      reasoningEffort: 'high', userPrompt: 'test', now: timestamp(1) });
+    await store.updateRun('old-reasoning-run', { status: 'completed', updatedAt: timestamp(2) });
+    await store.close(); stores.splice(stores.indexOf(store), 1);
+    await executeDatabaseSql(databasePath, 'ALTER TABLE agent_runs DROP COLUMN requested_reasoning_effort');
+    const reopened = await createStore(databasePath);
+    const oldRun = (await reopened.getSession('reasoning-session', OWNER_SCOPE, 3))!.runs[0];
+    expect(oldRun.reasoningEffort).toBe('high');
+    expect(oldRun).not.toHaveProperty('requestedReasoningEffort');
+    const nextRun = await reopened.createRun({ id: 'new-reasoning-run', sessionId: 'reasoning-session', model: 'model', profileId: 'profile',
+      reasoningEffort: 'max', requestedReasoningEffort: 'max', userPrompt: 'test', now: timestamp(3) });
+    expect(nextRun).toMatchObject({ reasoningEffort: 'max', requestedReasoningEffort: 'max' });
+  });
+
   it('persists context usage through later updates and reopening without inventing it for legacy runs', async () => {
     const directory = await mkdtemp(path.join(tmpdir(), 'agent-context-usage-'));
     temporaryDirectories.push(directory);

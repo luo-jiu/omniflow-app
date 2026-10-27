@@ -12,6 +12,26 @@ import {
 } from './aiServiceClientModel'
 
 describe('aiServiceClientModel', () => {
+  it.each(['xhigh', 'max'] as const)('serializes the exact-model %s effort for completion and streaming requests', reasoningEffort => {
+    const connection = { apiKey: 'test-key', baseUrl: 'https://example.test/v1', providerType: 'openai' as const };
+    const input = { model: 'gpt-6.1-sol', profileId: 'profile', reasoningEffort, systemPrompt: 'rules', userPrompt: 'task' };
+    expect(JSON.parse(buildAIServiceCompletionRequest(connection, input).body!).reasoning_effort).toBe(reasoningEffort);
+    expect(JSON.parse(buildAIServiceStreamingChatRequest(connection, { ...input, messages: [{ role: 'user', content: 'task' }] }).body!).reasoning_effort).toBe(reasoningEffort);
+    for (const model of ['gpt-6.1-sol-custom', 'GPT-6.1-SOL']) {
+      expect(JSON.parse(buildAIServiceCompletionRequest(connection, { ...input, model }).body!)).not.toHaveProperty('reasoning_effort');
+    }
+    expect(JSON.parse(buildAIServiceCompletionRequest({ ...connection, providerType: 'claude' }, input).body!)).not.toHaveProperty('output_config');
+  });
+
+  it('omits unsupported or tampered effort values while retaining automatic Provider defaults', () => {
+    const connection = { apiKey: 'test-key', baseUrl: 'https://example.test/v1', providerType: 'openai' as const };
+    for (const [model, reasoningEffort] of [['gpt-5.5', 'max'], ['gpt-6.1-sol', 'ultra'], ['gpt-6.1-sol', 'auto']] as const) {
+      const input = { model, profileId: 'profile', reasoningEffort: reasoningEffort as never, systemPrompt: 'rules', userPrompt: 'task' };
+      expect(JSON.parse(buildAIServiceCompletionRequest(connection, input).body!)).not.toHaveProperty('reasoning_effort');
+      expect(JSON.parse(buildAIServiceStreamingChatRequest(connection, { ...input, messages: [{ role: 'user', content: 'task' }] }).body!)).not.toHaveProperty('reasoning_effort');
+    }
+  });
+
   it('builds an OpenAI-compatible model request from the active connection', () => {
     expect(buildAIServiceModelsRequest({
       apiKey: 'secret',

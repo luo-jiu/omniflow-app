@@ -65,6 +65,7 @@ interface UseAgentSessionInput {
   ownerScope: AgentOwnerScope | null;
   profileId: string;
   reasoningEffort: AgentReasoningEffort;
+  fastMode?: boolean;
 }
 
 function createMessageId(prefix: string): string {
@@ -119,6 +120,7 @@ export function useAgentSession({
   ownerScope,
   profileId,
   reasoningEffort,
+  fastMode,
 }: UseAgentSessionInput) {
   const [messages, setMessages] = React.useState<AgentMessage[]>([]);
   const [draft, setDraftState] = React.useState('');
@@ -856,6 +858,7 @@ export function useAgentSession({
         perception,
         profileId,
         reasoningEffort,
+        ...(typeof fastMode === 'boolean' ? { fastMode } : {}),
         sessionId: sessionIdRef.current || undefined,
         userPrompt,
       });
@@ -911,6 +914,7 @@ export function useAgentSession({
     ownerScopeKey,
     profileId,
     reasoningEffort,
+    fastMode,
     recoverFailedDraft,
     runs,
     sessionScopeKey,

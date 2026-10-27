@@ -47,6 +47,9 @@ const views: Record<BuiltInToolId, React.ComponentType<ToolContributionContext>>
   'subtitle-translation': ({ subtitleTranslation }) => (
     <ToolWorkspaceSubtitle
       activeServiceId={subtitleTranslation.activeServiceId}
+      activeServiceProviderType={subtitleTranslation.activeServiceProviderType}
+      fastModeAvailable={subtitleTranslation.fastModeAvailable}
+      onOpenModelSettings={subtitleTranslation.handlers.onOpenModelSettings}
       activeRowId={subtitleTranslation.activeRowId}
       availableModels={subtitleTranslation.availableModels}
       config={subtitleTranslation.config}

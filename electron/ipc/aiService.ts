@@ -6,6 +6,7 @@ import type {
 } from '@/features/ai-services/ai-service.types'
 import {
   completeWithAIServiceProfile,
+  getActiveAIServiceModelCapabilities,
   listActiveAIServiceModels,
 } from '../service/aiServiceClient'
 import {
@@ -73,9 +74,13 @@ export function registerAIServiceIpc(
     requireMainWindow(event)
     return removeAIServiceProfile(id)
   })
-  ipcMain.handle('ai-service:list-models', (event) => {
+  ipcMain.handle('ai-service:list-models', (event, input?: { forceRefresh?: boolean }) => {
     requireMainWindow(event)
-    return listActiveAIServiceModels()
+    return listActiveAIServiceModels({ forceRefresh: input?.forceRefresh === true })
+  })
+  ipcMain.handle('ai-service:model-capabilities', (event, model: string) => {
+    requireMainWindow(event)
+    return getActiveAIServiceModelCapabilities(model)
   })
   ipcMain.handle('ai-service:run:begin', (event, profileId: string): AIServiceRunSessionHandle => {
     const sender = requireMainWindow(event)
@@ -101,6 +106,7 @@ export function registerAIServiceIpc(
         input,
         runRequest?.connection,
         runRequest?.signal,
+        runRequest?.resolveRequestTier,
       )
     } finally {
       runRequest?.release()

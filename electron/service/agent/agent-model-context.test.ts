@@ -141,7 +141,8 @@ describe('resolveAgentModelContextBudget', () => {
   });
 
   it('ignores invalid metadata and rejects invalid user overrides', () => {
-    expect(parseAgentModelMetadata({ data: [{ id: 'a', context_window: -1 }, { id: 'b', context_length: '200000' }] }).size).toBe(0);
+    const metadata = parseAgentModelMetadata({ data: [{ id: 'a', context_window: -1 }, { id: 'b', context_length: '200000' }] });
+    expect([...metadata.values()]).toEqual([{ listedModelId: 'a' }, { listedModelId: 'b' }]);
     for (const override of [{ contextWindowTokens: -1 }, { contextWindowTokens: Infinity }, { outputReserveTokens: 1_000_000 }]) {
       expect(() => resolveAgentModelContextBudget({ baseUrl: 'https://example.com', model: 'a', providerType: 'openai', override })).toThrow();
     }

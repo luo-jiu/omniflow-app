@@ -60,7 +60,7 @@ export type AgentToolApprovalStatus =
   | 'cancelled'
   | 'interrupted';
 
-export type AgentReasoningEffort = 'auto' | 'low' | 'medium' | 'high';
+export type AgentReasoningEffort = import('../ai-model-catalog').AIServiceReasoningEffort;
 
 export type AgentRunStatus =
   | 'preparing'
@@ -100,6 +100,10 @@ export interface AgentRunSnapshot {
   plan?: AgentRunPlanSnapshot;
   profileId: string;
   reasoningEffort: AgentReasoningEffort;
+  requestedReasoningEffort?: AgentReasoningEffort;
+  /** Requested and normalized request intent; not proof of the provider's actual serving tier. */
+  requestedFastMode?: boolean;
+  fastMode?: boolean;
   revision: number;
   sessionId: string;
   skillCatalogRevision?: number;
@@ -241,6 +245,7 @@ export function isAgentConversationMessage(
 }
 
 export interface AgentChatRequest {
+  fastMode?: boolean;
   groupId?: string | null;
   permissionMode?: import('./agent-session-management').AgentSessionPermissionMode;
   resumeRunId?: string;

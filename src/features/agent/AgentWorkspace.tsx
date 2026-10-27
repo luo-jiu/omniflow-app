@@ -6,6 +6,7 @@ import { Toast } from '@douyinfe/semi-ui';
 import styled, { css } from 'styled-components';
 
 import AIModelSettingsControl from '@/features/ai-services/components/AIModelSettingsControl';
+import { useAIModelCapabilities } from '@/features/ai-services/use-ai-model-capabilities';
 import { openCompactConfirm } from '@/components/ui/compact-confirm';
 import { workspaceScrollbarStyles } from '@/components/ui/workspace-scrollbar';
 import type { SelectedTreeNode } from '@/features/file-explorer';
@@ -450,6 +451,7 @@ export default function AgentWorkspace({
     [libraryId, rootNodeId, selectedTreeNode, selectedNodeIds],
   );
   const activeProfile = aiServices?.profiles.find(profile => profile.id === aiServices.activeProfileId) || null;
+  const modelCapabilities = useAIModelCapabilities(activeProfile, modelPreferences.model, workspaceActive, models);
   const {
     error: memoryLoadError,
     hasMore: memoriesHasMore,
@@ -540,6 +542,7 @@ export default function AgentWorkspace({
     ownerScope,
     profileId: aiServices?.activeProfileId || '',
     reasoningEffort: modelPreferences.reasoningEffort,
+    fastMode: modelCapabilities.fastModeAvailable && modelPreferences.fastMode === true,
   });
   const restoreSession = session.restore;
   const resetSession = session.reset;
@@ -707,7 +710,7 @@ export default function AgentWorkspace({
     saveAgentModelPreferences(nextPreferences);
   }, []);
 
-  const handleLoadModels = React.useCallback(async (): Promise<boolean> => {
+  const handleLoadModels = React.useCallback(async (options?: { forceRefresh?: boolean }): Promise<boolean> => {
     const requestId = ++modelRequestId.current;
     if (!activeProfile) {
       Toast.warning('请先在 AI 服务配置中启用一个服务');
@@ -715,7 +718,7 @@ export default function AgentWorkspace({
     }
     setLoadingModels(true);
     try {
-      const nextModels = await fetchActiveAIServiceModels();
+      const nextModels = options?.forceRefresh ? await fetchActiveAIServiceModels(options) : await fetchActiveAIServiceModels();
       if (requestId !== modelRequestId.current) return false;
       setModels(nextModels);
       if (!modelPreferences.model && nextModels.length > 0) {
@@ -1285,8 +1288,13 @@ export default function AgentWorkspace({
               disabled={sessionBusy || loadingConfig}
               loadingModels={loadingModels}
               model={modelPreferences.model}
-              modelSourceKey={activeProfile?.id || ''}
+              modelSourceKey={activeProfile ? `${activeProfile.id}:${activeProfile.updatedAt}` : ''}
+              providerType={activeProfile?.providerType}
               reasoningEffort={modelPreferences.reasoningEffort}
+              fastMode={modelCapabilities.fastModeAvailable && modelPreferences.fastMode === true}
+              fastModeAvailable={modelCapabilities.fastModeAvailable}
+              onOpenSettings={modelCapabilities.refresh}
+              onFastModeChange={fastMode => persistModelPreferences({ ...modelPreferences, fastMode })}
               onLoadModels={handleLoadModels}
               onModelChange={(model) => persistModelPreferences({
                 ...modelPreferences,

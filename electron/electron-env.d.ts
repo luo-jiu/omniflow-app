@@ -259,7 +259,8 @@ interface Window {
     reorder: (orderedIds: string[]) => Promise<import('@/features/ai-services/ai-service.types').AIServiceSnapshot>;
     duplicate: (id: string) => Promise<import('@/features/ai-services/ai-service.types').AIServiceSnapshot>;
     delete: (id: string) => Promise<import('@/features/ai-services/ai-service.types').AIServiceSnapshot>;
-    listModels: () => Promise<string[]>;
+    listModels: (options?: { forceRefresh?: boolean }) => Promise<string[]>;
+    getModelCapabilities: (model: string) => Promise<import('../src/shared/ai-fast-mode').AIServiceModelCapabilities>;
     beginRun: (
       profileId: string,
     ) => Promise<import('@/features/ai-services/ai-service.types').AIServiceRunSessionHandle>;

@@ -3,6 +3,8 @@ import type {
   AIServiceCompletionInput,
   AIServiceProviderType,
 } from '@/features/ai-services/ai-service.types'
+import { resolveAIServiceModelReasoningEffort } from '../../src/shared/ai-model-catalog'
+import { resolveAIServiceRequestTier } from './aiServiceFastMode'
 
 export interface AIServiceRuntimeConnection {
   apiKey: string
@@ -77,12 +79,16 @@ export function buildAIServiceModelsRequest(
 export function buildAIServiceCompletionRequest(
   connection: AIServiceRuntimeConnection,
   input: AIServiceCompletionInput,
+  frozenRequest?: { serviceTier?: import('../../src/shared/ai-fast-mode').AIServiceRequestTier },
 ): AIServiceRequestSpec {
-  const reasoningEffort = input.reasoningEffort && input.reasoningEffort !== 'auto'
-    ? input.reasoningEffort
+  const serviceTier = frozenRequest ? frozenRequest.serviceTier : resolveAIServiceRequestTier(connection, input.model, input.fastMode)
+  const supportedEffort = resolveAIServiceModelReasoningEffort(connection.providerType, input.model, input.reasoningEffort)
+  const reasoningEffort = supportedEffort !== 'auto'
+    ? supportedEffort
     : null
   const common = {
     model: input.model,
+    ...(serviceTier ? { service_tier: serviceTier } : {}),
     ...(!reasoningEffort && input.temperature !== undefined
       ? { temperature: input.temperature }
       : {}),
@@ -116,11 +122,14 @@ function buildAIServiceChatBody(
   input: AIServiceChatCompletionInput,
   stream: boolean,
 ): Record<string, unknown> {
-  const reasoningEffort = input.reasoningEffort && input.reasoningEffort !== 'auto'
-    ? input.reasoningEffort
+  const serviceTier = resolveAIServiceRequestTier(connection, input.model, input.fastMode)
+  const supportedEffort = resolveAIServiceModelReasoningEffort(connection.providerType, input.model, input.reasoningEffort)
+  const reasoningEffort = supportedEffort !== 'auto'
+    ? supportedEffort
     : null
   const common = {
     model: input.model,
+    ...(serviceTier ? { service_tier: serviceTier } : {}),
     ...(stream ? { stream: true } : {}),
     ...(!reasoningEffort && input.temperature !== undefined
       ? { temperature: input.temperature }

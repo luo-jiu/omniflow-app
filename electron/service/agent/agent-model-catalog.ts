@@ -1,24 +1,23 @@
-import { createHash } from 'node:crypto';
 import { net } from 'electron';
 import { buildAIServiceModelsRequest, type AIServiceRuntimeConnection } from '../aiServiceClientModel';
 import { AI_SERVICE_HTTP_BODY_LIMITS, readBoundedAIServiceResponseText } from '../aiServiceStreamLimits';
-import { parseAgentModelMetadata, type AgentModelMetadata } from './agent-model-context';
+import {
+  aiServiceModelDiscoveryCache, createAIServiceModelDiscoveryCache,
+  type AIServiceModelDiscoveryCache, type AIServiceModelMetadata,
+} from '../aiServiceModelDiscoveryCache';
 
-export function createAgentModelCatalog() {
-  const cache = new Map<string, { expiresAt: number; models: Map<string, AgentModelMetadata> }>();
-  const pending = new Map<string, Promise<Map<string, AgentModelMetadata>>>();
-  async function read(connection: AIServiceRuntimeConnection): Promise<Map<string, AgentModelMetadata>> {
-    // Credentials partition in-memory entries without being retained as cache keys.
-    const key = createHash('sha256').update(JSON.stringify([
-      connection.providerType, connection.baseUrl, connection.apiKey,
-    ])).digest('hex');
-    const cached = cache.get(key);
+export function createAgentModelCatalog(discoveryCache: AIServiceModelDiscoveryCache = createAIServiceModelDiscoveryCache()) {
+  const retryAt = new Map<string, number>();
+  const pending = new Map<string, Promise<ReadonlyMap<string, AIServiceModelMetadata>>>();
+  async function read(connection: AIServiceRuntimeConnection): Promise<ReadonlyMap<string, AIServiceModelMetadata>> {
+    const cached = discoveryCache.read(connection);
     if (cached && cached.expiresAt > Date.now()) return cached.models;
+    const ticket = discoveryCache.begin(connection);
+    const key = ticket.connectionKey;
+    if ((retryAt.get(key) ?? 0) > Date.now()) return cached?.models ?? new Map();
     const inFlight = pending.get(key);
     if (inFlight) return inFlight;
     const request = (async () => {
-      let models = cached?.models ?? new Map<string, AgentModelMetadata>();
-      let ttl = 30_000;
       try {
         const spec = buildAIServiceModelsRequest(connection);
         const response = await net.fetch(spec.url, {
@@ -31,12 +30,14 @@ export function createAgentModelCatalog() {
         const text = await readBoundedAIServiceResponseText(
           response, AI_SERVICE_HTTP_BODY_LIMITS.jsonBytes, '模型目录',
         );
-        models = parseAgentModelMetadata(JSON.parse(text));
-        ttl = 5 * 60_000;
-      } catch { /* Discovery failure must not block an otherwise usable model. */ }
-      if (cache.size >= 32) cache.delete(cache.keys().next().value as string);
-      cache.set(key, { expiresAt: Date.now() + ttl, models });
-      return models;
+        if (!discoveryCache.publish(ticket, JSON.parse(text))) throw new Error('Invalid model catalog');
+        retryAt.delete(key);
+      } catch {
+        // A failed discovery must not erase a successful UI refresh that completed in parallel.
+        if (retryAt.size >= 32 && !retryAt.has(key)) retryAt.delete(retryAt.keys().next().value as string);
+        retryAt.set(key, Date.now() + 30_000);
+      }
+      return discoveryCache.read(connection)?.models ?? new Map<string, AIServiceModelMetadata>();
     })();
     pending.set(key, request);
     try { return await request; } finally { pending.delete(key); }
@@ -46,4 +47,4 @@ export function createAgentModelCatalog() {
   } };
 }
 
-export const agentModelCatalog = createAgentModelCatalog();
+export const agentModelCatalog = createAgentModelCatalog(aiServiceModelDiscoveryCache);

@@ -2,6 +2,7 @@ import React from 'react';
 import { Toast } from '@douyinfe/semi-ui';
 
 import { fetchAIServiceProfiles } from '@/features/ai-services/ai-service.api';
+import { useAIModelCapabilities } from '@/features/ai-services/use-ai-model-capabilities';
 import type { AIServiceProfile } from '@/features/ai-services/ai-service.types';
 import type { SelectedTreeNode } from '@/features/file-explorer';
 
@@ -94,7 +95,9 @@ export function useSubtitleTranslation(input: UseSubtitleTranslationInput) {
   const [config, setConfig] = React.useState<SubtitleTranslationConfig>(() => loadSubtitleTranslationPreferences());
   const [activeService, setActiveService] = React.useState<AIServiceProfile | null>(null);
   const [availableModels, setAvailableModels] = React.useState<string[]>([]);
+  const modelCapabilities = useAIModelCapabilities(activeService, config.model, active, availableModels);
   const [loadingModels, setLoadingModels] = React.useState(false);
+  const modelRequestIdRef = React.useRef(0);
   const [importing, setImporting] = React.useState(false);
   const [savingLocal, setSavingLocal] = React.useState(false);
   const [savingLibrary, setSavingLibrary] = React.useState(false);
@@ -120,7 +123,11 @@ export function useSubtitleTranslation(input: UseSubtitleTranslationInput) {
   ), [draft.fileName, draft.sourceType, libraryId, subtitleDatasetVersion]);
 
   React.useEffect(() => {
+    modelRequestIdRef.current += 1;
+    setLoadingModels(false);
     if (!active) return;
+    setActiveService(null);
+    setAvailableModels([]);
     let disposed = false;
     void fetchAIServiceProfiles()
       .then((snapshot) => {
@@ -136,6 +143,7 @@ export function useSubtitleTranslation(input: UseSubtitleTranslationInput) {
       });
     return () => {
       disposed = true;
+      modelRequestIdRef.current += 1;
     };
   }, [active]);
 
@@ -226,8 +234,8 @@ export function useSubtitleTranslation(input: UseSubtitleTranslationInput) {
     }
     singleTranslationRequestScope.invalidateRequests();
     setActiveRowId(null);
-    subtitleTranslationRunner.start(config, draft.rows, libraryId, activeService.id, scope);
-  }, [activeService, config, draft.rows, libraryId, singleTranslationRequestScope]);
+    subtitleTranslationRunner.start({ ...config, fastMode: modelCapabilities.fastModeAvailable && config.fastMode === true }, draft.rows, libraryId, activeService.id, scope);
+  }, [activeService, config, draft.rows, libraryId, singleTranslationRequestScope, modelCapabilities.fastModeAvailable]);
 
   const handleStartTranslation = React.useCallback(() => {
     startTranslation('untranslated');
@@ -259,14 +267,17 @@ export function useSubtitleTranslation(input: UseSubtitleTranslationInput) {
     Toast.success(`已合并 ${removedCount} 条重复行，剩余 ${merged.length} 条`);
   }, [draft.fileFormat, draft.rows, libraryId, onDraftUpdate, singleTranslationRequestScope]);
 
-  const handleLoadModels = React.useCallback(async (): Promise<boolean> => {
+  const handleLoadModels = React.useCallback(async (options?: { forceRefresh?: boolean }): Promise<boolean> => {
+    if (!active) return false;
     if (!activeService) {
       Toast.warning('请先在 AI 服务配置中启用一个服务');
       return false;
     }
+    const requestId = ++modelRequestIdRef.current;
     setLoadingModels(true);
     try {
-      const modelIds = await fetchAvailableTranslationModels();
+      const modelIds = options?.forceRefresh ? await fetchAvailableTranslationModels(options) : await fetchAvailableTranslationModels();
+      if (requestId !== modelRequestIdRef.current) return false;
       setAvailableModels(modelIds);
       if (!config.model && modelIds.length > 0) {
         const nextConfig = { ...config, model: modelIds[0] };
@@ -274,12 +285,12 @@ export function useSubtitleTranslation(input: UseSubtitleTranslationInput) {
       }
       return true;
     } catch (error: any) {
-      Toast.error(error?.message || '获取模型列表失败');
+      if (requestId === modelRequestIdRef.current) Toast.error(error?.message || '获取模型列表失败');
       return false;
     } finally {
-      setLoadingModels(false);
+      if (requestId === modelRequestIdRef.current) setLoadingModels(false);
     }
-  }, [activeService, config, persistConfig]);
+  }, [active, activeService, config, persistConfig]);
 
   const handleImportLocal = React.useCallback(async () => {
     subtitleTranslationRunner.stop(libraryId);
@@ -393,7 +404,7 @@ export function useSubtitleTranslation(input: UseSubtitleTranslationInput) {
 
     try {
       const translatedText = await translateSubtitleRow(
-        config,
+        { ...config, fastMode: modelCapabilities.fastModeAvailable && config.fastMode === true },
         draft.rows,
         rowIndex,
         activeService.id,
@@ -422,7 +433,7 @@ export function useSubtitleTranslation(input: UseSubtitleTranslationInput) {
         setActiveRowId((current) => (current === rowId ? null : current));
       }
     }
-  }, [activeService, config, draft.rows, singleTranslationRequestScope, updateRow]);
+  }, [activeService, config, draft.rows, singleTranslationRequestScope, updateRow, modelCapabilities.fastModeAvailable]);
 
   const handleTranslateSingleSync = React.useCallback((rowId: string) => {
     void handleTranslateSingle(rowId);
@@ -480,6 +491,8 @@ export function useSubtitleTranslation(input: UseSubtitleTranslationInput) {
 
   return {
     activeServiceId: activeService?.id || '',
+    activeServiceProviderType: activeService?.providerType,
+    fastModeAvailable: modelCapabilities.fastModeAvailable,
     activeRowId,
     availableModels,
     config,
@@ -504,6 +517,7 @@ export function useSubtitleTranslation(input: UseSubtitleTranslationInput) {
       onImportSelectedLibraryFile: () => void handleImportSelectedLibraryFile(),
       onMergeAdjacentDuplicates: handleMergeAdjacentDuplicates,
       onLoadModels: handleLoadModels,
+      onOpenModelSettings: modelCapabilities.refresh,
       onRetranslateAll: handleRetranslateAll,
       onSaveLibrary: () => void handleSaveLibrary(),
       onSaveLocal: () => void handleSaveLocal(),

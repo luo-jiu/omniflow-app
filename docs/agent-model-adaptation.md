@@ -1,6 +1,6 @@
 # Agent 模型执行适配
 
-更新时间：2026-09-08
+更新时间：2026-10-23
 
 ## 当前实现
 
@@ -10,13 +10,15 @@
 
 ## 本地可信配置
 
+共享目录固定 Codex SHA，过滤 Ultra，OmniFlow 仍只运行单 Agent。`gpt-6.1-sol` 支持到 Max，`gpt-5.5` 支持到 xhigh；`auto` 继续省略字段，不采用 Codex 默认强度。新增档位不扩大输出 token 限额。菜单可离线解析档位，main 在每次 Run 冻结实际适配结果；远端明确能力可继续收紧，不依赖 renderer 校验。Run 同时保存 `requestedReasoningEffort`（用户请求）与 `reasoningEffort`（实际生效），兼容旧记录缺少请求值。
+
 OpenAI 推理模型的窗口与并行调用默认值参考本地 Codex 源码 `4b0d9669cc`（2026-09-08）的 models-manager/models.json，包含 gpt-6-astra 等精确 ID。它们是客户端默认值，不证明相同名称的中转模型具有相同服务规格。
 
 模型匹配同时检查 Provider 类型；只允许精确 ID 和明确日期后缀，不用宽泛前缀把自定义别名归类成官方模型。其他已列出的 OpenAI、Claude 和 DeepSeek 配置为应用维护的协议适配，不凭空补写未知上下文规格。
 
 | 配置类别 | 当前行为 |
 |---|---|
-| 本地目录中的 OpenAI 推理模型 | 保留 low/medium/high reasoning_effort；可提出批量工具调用，实际执行仍由运行时控制 |
+| 本地目录中的 OpenAI 推理模型 | 精确 ID 按共享目录保留 low/medium/high/xhigh/max 中已声明的 reasoning_effort；可提出批量工具调用，实际执行仍由运行时控制 |
 | GPT-4o / GPT-4.1 已列出变体 | 不发送 reasoning_effort |
 | Claude Opus / Sonnet 4.6 | effort 使用 output_config |
 | 已列出的旧 Claude 路由 | 不发送尚未适配的 effort 字段 |
@@ -24,22 +26,23 @@ OpenAI 推理模型的窗口与并行调用默认值参考本地 Codex 源码 `4
 | deepseek-reasoner | 当前适配器没有往返 reasoning_content 的工具续接契约，保守采用纯文本模式；不是宣称模型本身永远不支持工具 |
 | 未知模型 / 自定义别名 | 保持现有 Provider 协议回退，不注入猜测的模型专用提示词；仍保留显式工具协议拒绝后的降级机制 |
 
-模型特定指令是本地维护的简短使用提示，不复制 Codex 整份系统提示词，不替代 OmniFlow 的业务、安全、资源范围和权限规则。当前请求只支持文本消息、已有 JSON Tool 协议与现有推理档位；不会因目录声明视觉、code mode、补丁语法或更高推理档位就自动开启未实现的能力。
+模型特定指令是本地维护的简短使用提示，不复制 Codex 整份系统提示词，不替代 OmniFlow 的业务、安全、资源范围和权限规则。当前请求支持已有文本 / 图片消息、JSON Tool 协议与现有推理档位；不会因目录声明 code mode、新补丁协议或更高推理档位就自动开启未实现的能力。
 
 ## 服务端元数据边界
 
 沿用按 Provider、Base URL、凭据摘要隔离的目录缓存。继续接受经过数值校验的上下文和输出上限，新增以下白名单：
 
+- `supports_image_input`：严格布尔值，用于收窄已有图片输入能力。
 - `supports_tool_calling`：严格布尔值。
 - `supports_parallel_tool_calls`：严格布尔值。
 - `shell_type=disabled`：只用于禁用 Shell，不解释其他工具实现类型。
-- `supported_reasoning_levels`：最多 16 项的受控档位字符串或 effort 对象，只与当前支持的 low/medium/high 取交集；空数组明确不发送 effort，非法列表忽略。
+- `supported_reasoning_levels`：最多 16 项的受控档位字符串或 effort 对象，只与当前型号支持的 low/medium/high/xhigh/max 取交集；空数组明确不发送 effort，非法列表忽略。
 
 这些字段可以收窄本地适配，不能授予新工具、放宽权限或开启未实现协议。true 不会覆盖本地的工具禁用限制。base_instructions、model_messages、任意 tool schema、可执行代码或远端提示词全部忽略。没有这些扩展字段的普通兼容 `/models` 仍可使用本地配置或协议回退。
 
 ## 请求与执行
 
-- Run 在启动前只解析一次元数据和适配。无法发送的推理档位规范化为 auto，Run 记录有效值，不把不支持的字段继续传给供应商。
+- Run 在启动前只解析一次元数据和适配。无法发送的推理档位规范化为 auto，Run 分别记录请求值与有效值，不把不支持的字段继续传给供应商。
 - OpenAI-compatible 路由使用现有 chat/completions 和函数工具编码，Claude 使用现有 messages / tool_use / tool_result 编码；不新增或推测 Responses、code mode 等传输能力。
 - 并行调用字段只在有工具且适配有明确值时发送；Claude 的关闭并行采用 tool_choice.disable_parallel_tool_use。模型允许一轮产生多个调用，不代表运行时已经并行执行命令，当前执行顺序与既有副作用防护保持不变。
 - 模型限制通过每个 Run 的 Tool snapshot 包装器应用，不修改全局注册表。查询、验证、执行和 main preparation 签发入口都不能访问被排除的工具；依赖缺失必需工具的 Skill 一并隐藏。
@@ -48,7 +51,7 @@ OpenAI 推理模型的窗口与并行调用默认值参考本地 Codex 源码 `4
 
 ## 界面与剩余边界
 
-本轮不改模型选择器的数据来源，不把内置目录全部显示成“当前账号可用”。Composer 的推理档位 UI、模型能力来源展示、自定义模型配置编辑、真实多供应商验证尚未扩展；当前不支持的档位只在启动时规范化。辅助摘要和其他非 Agent AI 工作流仍沿用各自的协议适配。
+本轮不改模型选择器的数据来源，不把内置目录全部显示成“当前账号可用”。Composer 与字幕的推理档位 UI 已共用本地目录；模型能力来源展示、自定义模型配置编辑和真实多供应商验证尚未扩展。不支持的档位在菜单切换时归自动，main 启动时仍独立规范化。辅助摘要和其他非 Agent AI 工作流仍沿用各自的协议适配。
 
 真实供应商可能重映射模型 ID、缺少能力元数据或不支持某些兼容字段。自动化不能替代每条真实路由的验收，不能将本地目录视为供应商最新规格承诺。
 

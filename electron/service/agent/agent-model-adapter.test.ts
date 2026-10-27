@@ -25,6 +25,24 @@ describe('trusted model adaptation', () => {
     expect(buildAgentProviderRequestBody(claude, { ...input, model: 'claude-3-7-sonnet-20250219' })).not.toHaveProperty('output_config');
     expect(buildAgentProviderRequestBody({ ...openai, providerType: 'deepseek' }, { ...input, model: 'deepseek-chat' })).not.toHaveProperty('reasoning_effort');
   });
+  it.each(['xhigh', 'max'] as const)('serializes %s only for an exact OpenAI catalog model and keeps remote restrictions', effort => {
+    const expandedInput = { ...input, model: 'gpt-6.1-sol', reasoningEffort: effort };
+    expect(buildAgentProviderRequestBody(openai, expandedInput).reasoning_effort).toBe(effort);
+    for (const model of ['GPT-6.1-SOL', 'gpt-6.1-sol-2026-10-23', 'gpt-6.1-sol-custom']) {
+      expect(buildAgentProviderRequestBody(openai, { ...expandedInput, model })).not.toHaveProperty('reasoning_effort');
+    }
+    expect(buildAgentProviderRequestBody({ ...openai, providerType: 'claude' }, expandedInput)).not.toHaveProperty('output_config');
+    const restricted = resolveAgentModelAdapter(openai, expandedInput.model, { reasoningEfforts: ['high'] });
+    expect(buildAgentProviderRequestBody(openai, { ...expandedInput, modelAdapter: restricted })).not.toHaveProperty('reasoning_effort');
+  });
+  it('keeps gpt-5.5 at xhigh and never sends ultra from a tampered request or remote metadata', () => {
+    expect(buildAgentProviderRequestBody(openai, { ...input, reasoningEffort: 'xhigh' }).reasoning_effort).toBe('xhigh');
+    expect(buildAgentProviderRequestBody(openai, { ...input, reasoningEffort: 'max' })).not.toHaveProperty('reasoning_effort');
+    const metadata = parseAgentModelMetadata({ data: [{ id: 'gpt-6.1-sol', supported_reasoning_levels: ['xhigh', 'max', 'ultra'] }] }).get('gpt-6.1-sol');
+    expect(metadata?.reasoningEfforts).toEqual(['xhigh', 'max']);
+    const adapter = resolveAgentModelAdapter(openai, 'gpt-6.1-sol', metadata);
+    expect(buildAgentProviderRequestBody(openai, { ...input, model: 'gpt-6.1-sol', modelAdapter: adapter, reasoningEffort: 'ultra' as never })).not.toHaveProperty('reasoning_effort');
+  });
   it('parses only bounded capability fields and never imports remote prompts or tool definitions', () => {
     const metadata = parseAgentModelMetadata({ models: [{ slug: 'gpt-5.5', supports_tool_calling: false,
       supports_parallel_tool_calls: false, shell_type: 'disabled', supported_reasoning_levels: [{ effort: 'low' }],

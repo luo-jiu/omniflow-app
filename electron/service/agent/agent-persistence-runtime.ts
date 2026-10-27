@@ -118,6 +118,7 @@ const REQUIRED_AGENT_DATABASE_COLUMNS = {
     'profile_id',
     'model',
     'reasoning_effort',
+    'requested_reasoning_effort',
     'current_step',
     'error',
     'plan_json',

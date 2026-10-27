@@ -2,6 +2,7 @@ import crypto from 'node:crypto'
 
 import type { AIServiceRunSessionHandle } from '@/features/ai-services/ai-service.types'
 import type { AIServiceRuntimeConnection } from './aiServiceClientModel'
+import { createFrozenAIServiceRequestTierResolver } from './aiServiceFastMode'
 
 interface BeginAIServiceRunSessionInput {
   connection: AIServiceRuntimeConnection;
@@ -10,12 +11,14 @@ interface BeginAIServiceRunSessionInput {
 }
 
 interface StoredAIServiceRunSession extends AIServiceRunSessionHandle {
+  resolveRequestTier: ReturnType<typeof createFrozenAIServiceRequestTierResolver>;
   activeRequests: Set<AbortController>;
   connection: AIServiceRuntimeConnection;
   ownerWebContentsId: number;
 }
 
 interface AIServiceRunRequestHandle {
+  resolveRequestTier: ReturnType<typeof createFrozenAIServiceRequestTierResolver>;
   connection: AIServiceRuntimeConnection;
   release: () => void;
   signal: AbortSignal;
@@ -37,6 +40,7 @@ export function createAIServiceRunSessionRegistry() {
     generatedId: string = crypto.randomUUID(),
   ): AIServiceRunSessionHandle {
     const session: StoredAIServiceRunSession = {
+      resolveRequestTier: createFrozenAIServiceRequestTierResolver(input.connection),
       activeRequests: new Set(),
       connection: copyConnection(input.connection),
       id: generatedId,
@@ -64,6 +68,7 @@ export function createAIServiceRunSessionRegistry() {
     session.activeRequests.add(controller)
     let released = false
     return {
+      resolveRequestTier: session.resolveRequestTier,
       connection: copyConnection(session.connection),
       release: () => {
         if (released) return

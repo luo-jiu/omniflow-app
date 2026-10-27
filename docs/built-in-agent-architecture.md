@@ -234,7 +234,7 @@ agent_shell_workspaces
 ```
 
 - `agent_sessions`：按 `backend_scope + account_scope + library_id` 隔离，保存标题、最新安全上下文、消息预览和生命周期时间。
-- `agent_runs`：一次用户提交对应一个 Run，保存 provider 配置 ID、模型、推理强度、状态、当前步骤、错误、可空的受限计划快照、稳定的 `capability_identity`、`tool_catalog_revision`、`skill_catalog_revision` 和从 `1` 起单调递增的 `revision`。诊断身份不包含 Probe 的 `checkedAt`，也不保存完整 Capability / Tool / Skill 定义。
+- `agent_runs`：一次用户提交对应一个 Run，保存 provider 配置 ID、模型、实际推理强度及可空的请求推理强度 `requestedReasoningEffort`、状态、当前步骤、错误、可空的受限计划快照、稳定的 `capability_identity`、`tool_catalog_revision`、`skill_catalog_revision` 和从 `1` 起单调递增的 `revision`。诊断身份不包含 Probe 的 `checkedAt`，也不保存完整 Capability / Tool / Skill 定义。
 - 主动停止后的继续在同一Session内创建新的执行Run，使用可空且不可变的`resumes_run_id`引用最后一个cancelled Run；不修改旧终态、不复用旧工具权限。该列由现有schema初始化原地添加，不变更schema版本或重置历史。插入trigger校验同Session、原目标不变、来源cancelled且为最新Run，防止重复分支；readRun和getSession都投影resumesRunId。UI按该关系合并逻辑任务，Provider仍保留逐Run审计与目标记录。详见`agent-run-reliability.md`。
 - `agent_messages`：按 Session 内单调递增的 `sequence` 排序。user / tool 保存普通消息；assistant 保存稳定 `turn_ordinal`、`phase / status`、revision 和终态时间。Provider delta 只存在于 main 内存 writer 与实时事件，SQLite 只在 commentary、final、失败、取消或中断边界提交 item；失败、取消和崩溃不保存当前半句话。
 - `agent_context_checkpoints`：append-only 的派生摘要记录，保存 base checkpoint、覆盖到的消息和 `sequence`、模型来源及 `started / completed / failed / interrupted` 状态。只有 `completed` 能进入 provider 投影；它不改变 Session 排序、预览、消息数或任何 Run / ToolRun 事实。

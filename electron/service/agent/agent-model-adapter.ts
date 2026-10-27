@@ -4,8 +4,9 @@ import type { AgentModelMetadata } from './agent-model-context';
 import type { AgentToolRegistrySnapshot } from './agent-tool-registry';
 import type { AgentSkillSnapshotV1 } from './skills/agent-skill.types';
 import { findAgentModelProfile } from './agent-model-profiles';
+import { getAIServiceModelReasoningEfforts, type AIServiceExplicitReasoningEffort } from '../../../src/shared/ai-model-catalog';
 
-type Effort = 'low' | 'medium' | 'high';
+type Effort = AIServiceExplicitReasoningEffort;
 export interface AgentModelAdapter {
   readonly supportsImages?: boolean;
   readonly identity: string;
@@ -27,7 +28,8 @@ export function resolveAgentModelAdapter(
   const profile = findAgentModelProfile(connection.providerType, model);
   const noEffort = profile && ['openai-standard', 'claude-standard', 'deepseek-chat', 'deepseek-reasoner'].includes(profile.family);
   const reasoningParameter: AgentModelAdapter['reasoningParameter'] = noEffort ? 'none' : connection.providerType === 'claude' ? 'output_config' : 'reasoning_effort';
-  const efforts: Effort[] = noEffort ? [] : ['low', 'medium', 'high'];
+  const efforts: Effort[] = noEffort ? [] : getAIServiceModelReasoningEfforts(connection.providerType, model)
+    .filter((effort): effort is Effort => effort !== 'auto');
   const reasoningEfforts = Object.freeze(metadata?.reasoningEfforts === undefined ? efforts
     : efforts.filter(effort => metadata.reasoningEfforts!.includes(effort)));
   // The current message adapter does not round-trip reasoning_content required by this route.

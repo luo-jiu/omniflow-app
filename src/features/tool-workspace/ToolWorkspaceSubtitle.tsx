@@ -19,6 +19,7 @@ import {
 } from '@douyinfe/semi-icons';
 
 import type { SelectedTreeNode } from '@/features/file-explorer';
+import type { AIServiceProviderType } from '@/features/ai-services/ai-service.types';
 import { workspaceScrollbarStyles } from '@/components/ui/workspace-scrollbar';
 import { buttonStyles, focusVisibleStyles, interactiveItemStyles, textToneStyles } from '@/components/ui/theme-foundation-styles';
 
@@ -744,6 +745,8 @@ const VirtualSubtitleTable: React.FC<VirtualSubtitleTableProps> = React.memo(({
 
 type ToolWorkspaceSubtitleProps = {
   activeServiceId: string;
+  activeServiceProviderType?: AIServiceProviderType;
+  fastModeAvailable?: boolean;
   activeRowId: string | null;
   availableModels: string[];
   config: SubtitleTranslationConfig;
@@ -766,7 +769,8 @@ type ToolWorkspaceSubtitleProps = {
   onImportLocal: () => void;
   onImportSelectedLibraryFile: () => void;
   onMergeAdjacentDuplicates: () => void;
-  onLoadModels: () => Promise<boolean>;
+  onLoadModels: (options?: { forceRefresh?: boolean }) => Promise<boolean>;
+  onOpenModelSettings?: () => void;
   onRetranslateAll: () => void;
   onSaveLibrary: () => void;
   onSaveLocal: () => void;
@@ -779,6 +783,8 @@ type ToolWorkspaceSubtitleProps = {
 
 const ToolWorkspaceSubtitle: React.FC<ToolWorkspaceSubtitleProps> = ({
   activeServiceId,
+  activeServiceProviderType,
+  fastModeAvailable,
   activeRowId,
   availableModels,
   config,
@@ -802,6 +808,7 @@ const ToolWorkspaceSubtitle: React.FC<ToolWorkspaceSubtitleProps> = ({
   onImportSelectedLibraryFile,
   onMergeAdjacentDuplicates,
   onLoadModels,
+  onOpenModelSettings,
   onRetranslateAll,
   onSaveLibrary,
   onSaveLocal,
@@ -974,6 +981,9 @@ const ToolWorkspaceSubtitle: React.FC<ToolWorkspaceSubtitleProps> = ({
           isRunnerActive={isRunnerActive}
           loadingModels={loadingModels}
           modelSourceKey={activeServiceId}
+          providerType={activeServiceProviderType}
+          fastModeAvailable={fastModeAvailable}
+          onOpenModelSettings={onOpenModelSettings}
           runnerSnapshot={runnerSnapshot}
           onConfigChange={onConfigChange}
           onLoadModels={onLoadModels}

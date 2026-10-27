@@ -54,6 +54,8 @@ vi.mock('./capabilities/agent-capability-runtime', () => ({
 }));
 
 import { createAgentOrchestrator } from './agent-orchestrator';
+import { aiServiceModelDiscoveryCache } from '../aiServiceModelDiscoveryCache';
+import { buildAgentProviderRequestBody } from './agent-provider-model';
 import { createAgentToolBroker } from './agent-tool-broker';
 import { AGENT_INTERACTION_TIMEOUT_MS, AGENT_INTERACTION_SETTLEMENT_GRACE_MS,
   interactionRequestTool } from './tools/interaction-request-tool';
@@ -283,6 +285,57 @@ describe('Agent orchestrator', () => {
       ...options,
     });
   }
+
+  it('freezes validated Fast across real provider body construction, tool continuation and Run persistence', async () => {
+    const connection = { apiKey: 'orchestrator-fast-key', baseUrl: 'https://orchestrator-fast.example/v1', providerType: 'openai' as const };
+    const model = 'gpt-6.1-sol';
+    const getModelMetadata = vi.fn(async () => {
+      const snapshot = aiServiceModelDiscoveryCache.publish(aiServiceModelDiscoveryCache.begin(connection),
+        { data: [{ id: model, service_tiers: [{ id: 'priority' }] }] });
+      return snapshot?.models.get(model);
+    });
+    mocks.streamAgentProviderTurn.mockImplementationOnce(async (frozenConnection, input) => {
+      expect(buildAgentProviderRequestBody(frozenConnection, input).service_tier).toBe('priority');
+      aiServiceModelDiscoveryCache.publish(aiServiceModelDiscoveryCache.begin(connection), { data: [{ id: model, service_tiers: [] }] });
+      return { content: '', toolCalls: [{ id: 'fast-list', name: 'file.list', input: {} }] };
+    }).mockImplementationOnce(async (frozenConnection, input, onDelta) => {
+      expect(buildAgentProviderRequestBody(frozenConnection, input).service_tier).toBe('priority');
+      onDelta('Fast 已完成。'); return { content: 'Fast 已完成。', toolCalls: [] };
+    });
+    const webContents = sender();
+    const started = await createOrchestrator({ getRuntimeProfile: () => connection, getModelMetadata })
+      .start(webContents as never, { ...request(), model, fastMode: true });
+    await waitForCompletedFinal(webContents, 'Fast 已完成。', started);
+    expect(getModelMetadata).toHaveBeenCalledOnce();
+    expect((await store.getSession(started.sessionId, OWNER_SCOPE, 3))!.runs[0])
+      .toMatchObject({ requestedFastMode: true, fastMode: true });
+  });
+
+  it.each(['absent', 'id-only'] as const)('uses bundled Fast through the real Agent request and persistence with %s proxy metadata', async discovery => {
+    const connection = { apiKey: `bundled-agent-${discovery}`, baseUrl: 'https://bundled-agent.example/v1', providerType: 'openai' as const };
+    const model = 'gpt-6-astra';
+    const getModelMetadata = vi.fn(async () => discovery === 'id-only'
+      ? aiServiceModelDiscoveryCache.publish(aiServiceModelDiscoveryCache.begin(connection), { data: [{ id: model }] })?.models.get(model)
+      : undefined);
+    mocks.streamAgentProviderTurn.mockImplementationOnce(async (frozenConnection, input, onDelta) => {
+      expect(buildAgentProviderRequestBody(frozenConnection, input)).toMatchObject({ model, service_tier: 'priority' });
+      onDelta('本地档位已应用。'); return { content: '本地档位已应用。', toolCalls: [] };
+    });
+    const webContents = sender();
+    const started = await createOrchestrator({ getRuntimeProfile: () => connection, getModelMetadata })
+      .start(webContents as never, { ...request(), model, fastMode: true });
+    await waitForCompletedFinal(webContents, '本地档位已应用。', started);
+    expect(getModelMetadata).toHaveBeenCalledOnce();
+    expect((await store.getSession(started.sessionId, OWNER_SCOPE, 3))!.runs[0])
+      .toMatchObject({ requestedFastMode: true, fastMode: true });
+  });
+
+  it('rejects an unconfirmed Fast request before invoking the provider', async () => {
+    const orchestrator = createOrchestrator({ getModelMetadata: async () => undefined });
+    await expect(orchestrator.start(sender() as never, { ...request(), model: 'unknown-fast-model', fastMode: true }))
+      .rejects.toThrow('尚未确认');
+    expect(mocks.streamAgentProviderTurn).not.toHaveBeenCalled();
+  });
 
   it.each([
     { toolName: 'file.write', relative: false }, { toolName: 'file.patch', relative: false },
@@ -1895,6 +1948,27 @@ describe('Agent orchestrator', () => {
     await waitForCompletedFinal(webContents, '仅文本回答。', started);
     expect(getModelMetadata).toHaveBeenCalledTimes(1);
     expect(mocks.streamAgentProviderTurn).toHaveBeenCalledTimes(1);
+    expect((await store.getSession(started.sessionId, OWNER_SCOPE, 3))?.runs[0])
+      .toMatchObject({ requestedReasoningEffort: 'high', reasoningEffort: 'auto' });
+  });
+
+  it.each([
+    { model: 'gpt-6.1-sol', requested: 'xhigh', effective: 'xhigh' },
+    { model: 'gpt-6.1-sol', requested: 'max', effective: 'max' },
+    { model: 'gpt-5.5', requested: 'max', effective: 'auto' },
+    { model: 'gpt-4o', requested: 'high', effective: 'auto' },
+    { model: 'gpt-6.1-sol', requested: 'ultra', effective: 'auto' },
+  ] as const)('freezes requested $requested and effective $effective reasoning for $model', async ({ model, requested, effective }) => {
+    mocks.streamAgentProviderTurn.mockImplementationOnce(async (_connection, input, onDelta) => {
+      expect(input.reasoningEffort).toBe(effective);
+      onDelta('强度已应用。'); return { content: '强度已应用。', toolCalls: [] };
+    });
+    const webContents = sender();
+    const started = await createOrchestrator({ getModelMetadata: async () => undefined }).start(webContents as never,
+      { ...request(), model, reasoningEffort: requested as never });
+    await waitForCompletedFinal(webContents, '强度已应用。', started);
+    expect((await store.getSession(started.sessionId, OWNER_SCOPE, 3))?.runs[0])
+      .toMatchObject({ requestedReasoningEffort: requested === 'ultra' ? 'auto' : requested, reasoningEffort: effective });
   });
 
   it('refuses unexpected tool calls from a model restricted to text mode', async () => {

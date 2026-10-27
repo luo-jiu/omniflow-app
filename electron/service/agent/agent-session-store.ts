@@ -1,5 +1,6 @@
 import { mkdir } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
+import { isAIServiceReasoningEffort } from '../../../src/shared/ai-model-catalog';
 import { normalizeAgentSessionGroupInput, normalizeAgentSessionPermissionMode,
   type AgentSessionGroup, type AgentSessionGroupInput, type AgentSessionDirectorySummary,
   type AgentSessionListFilter, type AgentSessionOrganizationInput, type AgentLibraryAccessSnapshot,
@@ -952,6 +953,9 @@ const TOOL_RUNTIME_COLUMNS = [
 ] as const;
 
 const RUN_RUNTIME_COLUMNS = [
+  ['requested_fast_mode', 'INTEGER'],
+  ['fast_mode', 'INTEGER'],
+  ['requested_reasoning_effort', 'TEXT'],
   ['library_access_json', 'TEXT'],
   ['resumes_run_id', 'TEXT'],
   ['attachments_json', 'TEXT'],
@@ -1070,6 +1074,9 @@ interface RunRow {
   plan_json: string | null;
   profile_id: string;
   reasoning_effort: AgentReasoningEffort;
+  requested_reasoning_effort: AgentReasoningEffort | null;
+  requested_fast_mode: number | null;
+  fast_mode: number | null;
   revision: number;
   session_id: string;
   skill_catalog_revision: number;
@@ -1151,6 +1158,9 @@ export interface CreateAgentRunInput {
   now: string;
   profileId: string;
   reasoningEffort: AgentReasoningEffort;
+  requestedReasoningEffort?: AgentReasoningEffort;
+  requestedFastMode?: boolean;
+  fastMode?: boolean;
   sessionId: string;
   skillCatalogRevision?: number;
   toolCatalogRevision?: number;
@@ -1672,6 +1682,9 @@ function toRunSnapshot(row: RunRow): AgentRunSnapshot {
     ...(plan ? { plan } : {}),
     profileId: row.profile_id,
     reasoningEffort: row.reasoning_effort,
+    ...(isAIServiceReasoningEffort(row.requested_reasoning_effort) ? { requestedReasoningEffort: row.requested_reasoning_effort } : {}),
+    ...(row.requested_fast_mode === 0 || row.requested_fast_mode === 1 ? { requestedFastMode: row.requested_fast_mode === 1 } : {}),
+    ...(row.fast_mode === 0 || row.fast_mode === 1 ? { fastMode: row.fast_mode === 1 } : {}),
     revision: Number(row.revision),
     sessionId: row.session_id,
     skillCatalogRevision: Number(row.skill_catalog_revision),
@@ -3266,6 +3279,9 @@ export async function initializeAgentSessionDatabaseSchema(
         profile_id TEXT NOT NULL,
         model TEXT NOT NULL,
         reasoning_effort TEXT NOT NULL,
+        requested_reasoning_effort TEXT,
+        requested_fast_mode INTEGER,
+        fast_mode INTEGER,
         current_step TEXT,
         error TEXT,
         plan_json TEXT,
@@ -3514,6 +3530,9 @@ export async function createSQLiteAgentSessionStore(
         profile_id,
         model,
         reasoning_effort,
+        requested_reasoning_effort,
+        requested_fast_mode,
+        fast_mode,
         skill_catalog_revision,
         tool_catalog_revision,
         plan_json,
@@ -3882,12 +3901,18 @@ export async function createSQLiteAgentSessionStore(
     },
 
     async createRun(input) {
+      if ([input.fastMode, input.requestedFastMode].some(value => value !== undefined && typeof value !== 'boolean')) {
+        throw new Error('Agent Fast 模式无效');
+      }
+      if (input.requestedReasoningEffort !== undefined && !isAIServiceReasoningEffort(input.requestedReasoningEffort)) {
+        throw new Error('Agent 请求推理档位无效');
+      }
       await run(database, `
         INSERT INTO agent_runs (
           id, session_id, capability_identity, status, user_prompt, profile_id, model,
-          reasoning_effort, skill_catalog_revision, tool_catalog_revision,
+          reasoning_effort, requested_reasoning_effort, requested_fast_mode, fast_mode, skill_catalog_revision, tool_catalog_revision,
           current_step, created_at, updated_at, attachments_json, resumes_run_id, library_access_json
-        ) VALUES (?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, '请求 AI 服务', ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, ?, ?, ?, '请求 AI 服务', ?, ?, ?, ?, ?)
       `, [
         input.id,
         input.sessionId,
@@ -3896,6 +3921,9 @@ export async function createSQLiteAgentSessionStore(
         input.profileId,
         input.model,
         input.reasoningEffort,
+        input.requestedReasoningEffort ?? null,
+        input.requestedFastMode === undefined ? null : Number(input.requestedFastMode),
+        input.fastMode === undefined ? null : Number(input.fastMode),
         normalizeCatalogRevision(input.skillCatalogRevision),
         normalizeCatalogRevision(input.toolCatalogRevision),
         input.now,
@@ -4392,6 +4420,9 @@ export async function createSQLiteAgentSessionStore(
           profile_id,
           model,
           reasoning_effort,
+          requested_reasoning_effort,
+          requested_fast_mode,
+          fast_mode,
           skill_catalog_revision,
           tool_catalog_revision,
           plan_json,
