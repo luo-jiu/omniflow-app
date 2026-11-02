@@ -105,7 +105,7 @@ describe('Reasoning effort slider', () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
-  it('mounts the effect only at the highest available step, including drag previews', () => {
+  it('mounts ordinary stars only at the highest available step, including drag previews', () => {
     const mounted = vi.fn(); const disposed = vi.fn();
     function Effect() { React.useEffect(() => { mounted(); return disposed; }, []); return null; }
     const element = (value: AIServiceReasoningEffort, preview: AIServiceReasoningEffort | null = null) => <ReasoningEffortSlider active options={options} value={value} preview={preview}
@@ -121,6 +121,23 @@ describe('Reasoning effort slider', () => {
     act(() => view!.update(element('auto')));
     expect(disposed).toHaveBeenCalledTimes(2);
     act(() => { view!.unmount(); view = undefined; }); expect(disposed).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps one Fast effect alive through previews and cancellation, then releases it when hidden', () => {
+    const mounted = vi.fn(); const disposed = vi.fn(); const onChange = vi.fn();
+    function Effect() { React.useEffect(() => { mounted(); return disposed; }, []); return null; }
+    const element = (preview: AIServiceReasoningEffort | null, active = true) => <ReasoningEffortSlider active={active} options={options}
+      value="high" preview={preview} fastMode onPreview={vi.fn()} onChange={onChange} trackEffect={<Effect />} />;
+    act(() => { view = TestRenderer.create(element(null)); });
+    expect(mounted).toHaveBeenCalledOnce();
+    for (const preview of ['max', 'auto', 'medium', null] as const) {
+      act(() => view!.update(element(preview)));
+      expect(mounted).toHaveBeenCalledOnce();
+      expect(disposed).not.toHaveBeenCalled();
+    }
+    expect(onChange).not.toHaveBeenCalled();
+    act(() => view!.update(element(null, false)));
+    expect(disposed).toHaveBeenCalledOnce();
   });
 
   it.each(['blur', 'visibilitychange'])('cancels a drag when the window loses availability: %s', event => {

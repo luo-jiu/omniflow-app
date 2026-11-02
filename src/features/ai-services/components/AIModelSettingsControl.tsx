@@ -193,7 +193,8 @@ export default function AIModelSettingsControl({ availableModels, contextWindow,
           <svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M3.2 4.2A5.5 5.5 0 1 1 2.6 10M3.2 1.8v3.4h3.4" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" /></svg>
         </button>
         <div className="picker-slider"><ReasoningEffortSlider active={visible} options={reasoningOptions} value={selectedEffort}
-          preview={preview} onPreview={setPreview} onChange={onReasoningEffortChange} trackEffect={<ReasoningStarfield active={visible} maximum={maximum} fastMode={fastModeAvailable && fastMode} />} /></div>
+          preview={preview} onPreview={setPreview} onChange={onReasoningEffortChange} fastMode={fastModeAvailable && fastMode}
+          trackEffect={<ReasoningStarfield active={visible} maximum={maximum} fastMode={fastModeAvailable && fastMode} />} /></div>
         {contextWindow ? <label className="picker-context"><span>上下文窗口</span><InputNumber aria-label="上下文窗口"
           hideButtons min={0} max={10} precision={0} value={contextWindow.value} onNumberChange={value => contextWindow.onChange(Number(value) || 0)} /></label> : null}
       </> : <>

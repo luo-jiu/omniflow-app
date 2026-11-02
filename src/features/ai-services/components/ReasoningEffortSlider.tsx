@@ -12,17 +12,16 @@ const Slider = styled.div`
   }
   .reasoning-slider-fill { position: absolute; inset: 0 auto 0 0; border-radius: inherit; background: var(--semi-color-primary); transition: width 160ms cubic-bezier(.2, .8, .2, 1); }
   &[data-maximum='true'] .reasoning-slider-fill {
-    width: 100% !important;
     background: linear-gradient(100deg, #3e4ae5, #7b5aeb 48%, #aa72ee 70%, #6450d9);
   }
-  .reasoning-slider-effect { position: absolute; inset: 0; overflow: hidden; pointer-events: none; border-radius: inherit; }
+  .reasoning-slider-effect, .reasoning-slider-dots { position: absolute; inset: 0; overflow: hidden; pointer-events: none; border-radius: inherit; transition: clip-path 160ms cubic-bezier(.2, .8, .2, 1); }
   .reasoning-slider-dot { position: absolute; top: 50%; width: 4px; height: 4px; border-radius: 50%; transform: translate(-50%, -50%); background: color-mix(in srgb, var(--app-text) 30%, transparent); }
   .reasoning-slider-dot[data-filled='true'] { background: #ffffff60; }
   .reasoning-slider-thumb { position: absolute; top: 0; width: 28px; height: 28px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px #00000020; transform: translateX(-50%); pointer-events: none; transition: left 160ms cubic-bezier(.2, .8, .2, 1); }
   &:focus-visible .reasoning-slider-thumb { outline: 2px solid var(--semi-color-focus-border); outline-offset: 3px; }
   &[aria-disabled='true'] { cursor: default; }
   @media (prefers-reduced-motion: reduce) {
-    .reasoning-slider-fill, .reasoning-slider-thumb { transition: none; }
+    .reasoning-slider-fill, .reasoning-slider-thumb, .reasoning-slider-effect, .reasoning-slider-dots { transition: none; }
   }
 `;
 
@@ -39,12 +38,15 @@ export interface ReasoningEffortSliderProps {
   onPreview: (value: AIServiceReasoningEffort | null) => void;
   onChange: (value: AIServiceReasoningEffort) => void;
   trackEffect?: React.ReactNode;
+  fastMode?: boolean;
 }
 
-export default function ReasoningEffortSlider({ active, options, value, preview, onPreview, onChange, trackEffect }: ReasoningEffortSliderProps) {
+export default function ReasoningEffortSlider({ active, options, value, preview, onPreview, onChange, trackEffect, fastMode = false }: ReasoningEffortSliderProps) {
   const drag = React.useRef<{ pointerId: number; element: HTMLDivElement; initialValue: AIServiceReasoningEffort } | null>(null);
   const index = Math.max(0, options.indexOf(preview ?? value));
   const maximum = options.length > 1 && index === options.length - 1;
+  const hasEffect = maximum || fastMode;
+  const selectedPosition = position(index, options.length);
   const release = React.useCallback(() => {
     const current = drag.current;
     drag.current = null;
@@ -98,10 +100,13 @@ export default function ReasoningEffortSlider({ active, options, value, preview,
       if (options[nextIndex] !== value) onChange(options[nextIndex]);
     }}>
     <div className="reasoning-slider-track" aria-hidden="true">
-      <div className="reasoning-slider-fill" style={{ width: position(index, options.length) }} />
-      {active && maximum ? <div className="reasoning-slider-effect">{trackEffect}</div> : null}
-      {!maximum ? options.map((effort, dotIndex) => <span key={effort} className="reasoning-slider-dot" data-filled={dotIndex <= index} style={{ left: position(dotIndex, options.length) }} />) : null}
+      <div className="reasoning-slider-fill" style={{ width: selectedPosition }} />
+      {/* Keep the canvas at track width so dragging only reveals it, without rescaling or restarting particles. */}
+      {active && hasEffect ? <div className="reasoning-slider-effect" style={{ clipPath: `inset(0 ${position(options.length - 1 - index, options.length)} 0 0)` }}>{trackEffect}</div> : null}
+      <div className="reasoning-slider-dots" style={{ clipPath: `inset(0 0 0 ${hasEffect ? selectedPosition : '0px'})` }}>
+        {options.map((effort, dotIndex) => <span key={effort} className="reasoning-slider-dot" data-filled={dotIndex <= index} style={{ left: position(dotIndex, options.length) }} />)}
+      </div>
     </div>
-    <div className="reasoning-slider-thumb" aria-hidden="true" style={{ left: position(index, options.length) }} />
+    <div className="reasoning-slider-thumb" aria-hidden="true" style={{ left: selectedPosition }} />
   </Slider>;
 }

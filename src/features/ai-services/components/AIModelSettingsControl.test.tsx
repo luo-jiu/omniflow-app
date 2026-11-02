@@ -54,7 +54,7 @@ describe('Model picker', () => {
     expect(JSON.stringify(current.toJSON())).not.toContain('Fast');
   });
 
-  it('shows Fast particles only at the current model highest supported effort', () => {
+  it('keeps ordinary stars at maximum effort and supports Fast particles at lower efforts', () => {
     const input = props({ model: 'gpt-5.5', reasoningEffort: 'xhigh' }); const current = render(input);
     expect(current.root.findAllByProps({ 'data-starfield': true })).toHaveLength(0);
     open(current);
@@ -65,10 +65,19 @@ describe('Model picker', () => {
     act(() => current.update(<AIModelSettingsControl {...input} reasoningEffort="high" />));
     expect(current.root.findAllByProps({ 'data-starfield': true })).toHaveLength(0);
     act(() => current.update(<AIModelSettingsControl {...input} reasoningEffort="high" fastMode fastModeAvailable />));
-    expect(current.root.findAllByProps({ 'data-starfield': true })).toHaveLength(0);
+    expect(current.root.findAllByProps({ 'data-starfield': true })).toHaveLength(1);
+    expect(current.root.findByType(ReasoningStarfield).props.maximum).toBe(false);
+    expect(current.root.findByType(ReasoningStarfield).props.fastMode).toBe(true);
+    act(() => current.root.findByType(ReasoningEffortSlider).props.onPreview('low'));
+    expect(current.root.findByType(ReasoningStarfield).props.maximum).toBe(false);
+    expect(current.root.findByType(ReasoningStarfield).props.fastMode).toBe(true);
+    expect(input.onReasoningEffortChange).not.toHaveBeenCalled();
+    act(() => current.root.findByType(ReasoningEffortSlider).props.onPreview(null));
     act(() => current.update(<AIModelSettingsControl {...input} fastMode fastModeAvailable />));
     expect(current.root.findByType(ReasoningStarfield).props.fastMode).toBe(true);
     expect(current.root.findByType(ReasoningStarfield).props.active).toBe(true);
+    act(() => current.update(<AIModelSettingsControl {...input} reasoningEffort="low" fastMode />));
+    expect(current.root.findAllByProps({ 'data-starfield': true })).toHaveLength(0);
     act(() => current.root.findByType(Popover).props.onVisibleChange(false));
     expect(current.root.findAllByProps({ 'data-starfield': true })).toHaveLength(0);
   });

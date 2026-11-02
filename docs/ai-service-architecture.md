@@ -123,7 +123,7 @@ Agent 与字幕共用 `AIModelSettingsControl`：一个 256px 宽、默认 96px 
 
 `ReasoningEffortSlider` 只持有本次手势预览；拖动松手才调用原偏好 owner，pointercancel、丢失捕获、窗口失焦、工作区隐藏及 Escape 丢弃预览。圆球位置与填充宽度使用相同的 160ms 缓出过渡，快速反向接续当前画面，减少动效时关闭过渡；不以动画延迟偏好提交。箭头 / Home / End 可逐档选择，Enter 完成；不会新增 Run 或服务配置状态源。浮层复用应用 portal 与主题表面，模型列表加载失败保留旧列表，显式刷新贯通 `forceRefresh`。推理档位依然同步取共享本地目录。
 
-最高受支持档位的 `ReasoningStarfield` 独立绘制蓝紫色场和 14 个缓慢漂移白点；仅在该档位开启 Fast 时显示横穿粒子及进入 / 退出过渡。其他档位（含拖动预览）不挂载效果层，离开最高档立即释放动画；Fast 偏好与请求仍独立生效。Fast 闪电关闭时描边、开启时使用当前强调色实心填充。装饰使用单 WebGL 画布，不逐帧更新 React；无效果、隐藏和离开视口停止帧循环，减少动效只绘静态色场，不生成白点动画。WebGL 失败时最高档使用静态渐变兜底；卸载释放 GPU、observer、监听与帧任务。
+最高受支持档位的 `ReasoningStarfield` 独立绘制蓝紫色场和 14 个缓慢漂移白点。开启 Fast 后，各档位的已选区间均显示横穿粒子，滑块右侧保留未选档位圆点；低于最高档时继续使用主题主色底。画布保持整条轨道宽度，以与滑块相同的 160ms 过渡裁切到已选区间，右侧圆点使用互补裁切；拖动预览只改变可见范围，不缩放、重挂载画布或重启粒子。Fast 关闭时，低档恢复普通填充和圆点，最高档恢复星空；Fast 偏好与请求仍独立生效。Fast 闪电关闭时描边、开启时使用当前强调色实心填充。装饰使用单 WebGL 画布，不逐帧更新 React；无效果、隐藏和离开视口停止帧循环，减少动效只绘静态色场，不生成白点动画。WebGL 失败时最高档使用静态渐变兜底；卸载释放 GPU、observer、监听与帧任务。
 
 取证目标为本机 `/Applications/ChatGPT.app/Contents/Resources/app.asar`（内部 `openai-codex-electron`，26.1016.62342，SHA256 `5b5cf52887cfd4de19cb5862155a8ef6cf58830c0a2fc592b72060cfcc3be869`）。REA 静态模块 `webview/assets/impl-791cfbad45b4.js`（SHA256 `bb9128732af275cf7c3e36a0910cc301802caa09a6a2bf4e56689d1cf52a80a9`）与 `impl-9597edf4b611.css` 证明：普通星点约 1.28～3.2 秒调整目标，横向偏移不超过锚点 ±4px；Fast 约 1.58～2.375 秒匀速从右向左横穿，没有长拖尾。“加速感”来自原星点 / 刻度退出、流动层接管。该方向是所核对版本的实际坐标，不根据录屏推测。父证据 `ev_af2ef50e5988aeee44d869fce0ed2c9b3f8944898875871e3905980f9339bb8b`、摘要 `ev_a47f3e4e1121571958d0798b8401371afdc55cb4e32009f75aad1d2b5aa68ad8`，8788 AST 节点、解析无失败；部分无关 unpacked native 文件与 ASAR integrity 元数据不符，采用 record-and-continue 静态分析，不能声称整包完整性或全应用行为已验证。OmniFlow 按这些参数独立重写组件，不携带上游 bundle。
 
