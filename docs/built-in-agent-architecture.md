@@ -70,6 +70,8 @@ Active Context 超预算时先尝试 OpenCode 式旧正文清理，再对符合�
 
 上下文计量由 Run 内 main ledger 持有，既有调度预算与 UI 使用同一低估校正；快照持久化到 agent_runs.context_usage_json，经既有 revision-aware Run 更新恢复。缺失 usage 不作 0，压缩后重新建立输入基准，详见 [上下文计量](agent-context-accounting.md)。
 
+2026-10-23 Composer 接入模型左侧圆环与占用比例，仍只读最近匹配 Run 快照。跨 Run 摘要从仅字符限制升级为完整请求 token 预检；候选规划和实际调用共用预算，保留最多四批及 checkpoint 原子完成。当前 Run 摘要同步遵守有效输入比例、模型输出预留及原ledger低估校正。Codex 窗口表以独立静态快照随包发布，仅 OpenAI 服务商且当前连接 `/models` ID 精确匹配时应用；窗口来源与执行适配分离。稳定提示前移、动态安全上下文置后以改善缓存前缀，仍完整发送当前事实。最新 Codex/OpenCode 的原生、摘要、缓存与后台路线比较，以及未实施范围见 [上下文与压缩研究](agent-context-compaction-research.md)。
+
 模型提示词、请求参数、负向能力收窄与 Run 冻结策略见 [模型执行适配](agent-model-adaptation.md)。远端模型目录不会提供应用系统指令或扩大工具权限，适配提示词计入所有续接与副作用前预算。
 
 文件名 glob 与独立 `file.grep` 正文搜索的执行、权限、输出与续搜边界见 [文件与正文搜索](agent-file-search.md)。它们复用既有元数据及正文读取通道，不扩展后端 CLI/HTTP 能力。

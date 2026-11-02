@@ -35,6 +35,8 @@ import AgentMemoryManager, {
 import AgentSessionManager from './components/AgentSessionManager';
 import AgentTimeline from './components/AgentTimeline';
 import AgentSubmitButton from './components/AgentSubmitButton';
+import AgentContextUsage from './components/AgentContextUsage';
+import { selectAgentContextUsageRun } from './agent-context-usage-presentation';
 import AgentPermissionControl from './components/AgentPermissionControl';
 import AgentSessionPeek from './components/AgentSessionPeek';
 import { useAgentComposerAutoHeight } from './hooks/useAgentComposerAutoHeight';
@@ -772,6 +774,12 @@ export default function AgentWorkspace({
   const contextText = `选中：${selectedNodeLabel}`;
   const contextSuffix = multipleSelected && labelNode ? ' 等' : '';
   const contextLabel = `${contextText}${contextSuffix}`;
+  const contextUsageRun = React.useMemo(() => (
+    loadingConfig || resume.loading || resume.failed || session.isPreparing ? undefined
+      : selectAgentContextUsageRun({ runs: session.runs, sessionId: session.sessionId,
+        model: modelPreferences.model, reasoningEffort: modelPreferences.reasoningEffort, profile: activeProfile })
+  ), [loadingConfig, resume.loading, resume.failed, session.isPreparing, session.runs, session.sessionId,
+    modelPreferences.model, modelPreferences.reasoningEffort, activeProfile]);
   const canSubmit = Boolean(
     ownerScope && (session.draft.trim() || session.attachments.entries.length) && session.attachments.ready && modelPreferences.model && activeProfile && !loadingConfig
     && !resume.loading && !resume.failed,
@@ -1283,6 +1291,7 @@ export default function AgentWorkspace({
               <span className="agent-context-text">{contextText}</span>
               {contextSuffix ? <span className="agent-context-suffix">{contextSuffix}</span> : null}
             </span>
+            <AgentContextUsage run={contextUsageRun} busy={session.isBusy} />
             <AIModelSettingsControl
               availableModels={models}
               disabled={sessionBusy || loadingConfig}

@@ -7,8 +7,11 @@ import type {
 import type { AIServiceRuntimeConnection } from '../aiServiceClientModel';
 import {
   AGENT_CONVERSATION_SUMMARY_LIMITS,
-  AGENT_CONVERSATION_SUMMARY_MAX_OUTPUT_TOKENS,
+  buildAgentSummarySystemPrompt,
+  parseAgentConversationSummary,
 } from './agent-conversation-summary';
+import { createAgentContextProjection, estimateAgentProviderTurnTokens, getAgentProviderRequestTokenLimit,
+  resolveAgentContextBudget } from './agent-context-projection';
 import {
   createAgentContextManager,
   type PrepareAgentContextInput,
@@ -37,6 +40,16 @@ const SUMMARY = JSON.stringify({
   unresolvedAndNextSteps: ['继续处理当前请求。'],
   version: 1,
 });
+
+function largeSummary(kind: 'cjk' | 'escaped' | 'surrogate'): string {
+  const fields = ['constraintsAndPreferences', 'decisionsAndRationale', 'goalsAndIntent', 'taskContext', 'unresolvedAndNextSteps'];
+  return JSON.stringify({ version: 1, ...Object.fromEntries(fields.map((field, fieldIndex) => [
+    field, Array.from({ length: 8 }, (_, index) => kind === 'escaped'
+      ? `${'\\'.repeat(149 - index)}${'"'.repeat(index + 1)}`
+      : String.fromCodePoint(0x4e00 + fieldIndex * 8 + index)
+        + (kind === 'surrogate' ? '\ud800'.repeat(68) + '文'.repeat(81) : '文'.repeat(149))),
+  ])) });
+}
 
 function message(
   id: string,
@@ -102,7 +115,7 @@ function input(
 ): PrepareAgentContextInput {
   const oldText = `Authorization: Bearer super-secret-token\n${'old '.repeat(3_000)}`;
   return {
-    fixedInputTokens: 500,
+    fixedInputTokens: 12_000,
     libraryId: 3,
     messages: [
       message('m1', 'run-1', 'user', oldText),
@@ -135,7 +148,7 @@ function storeWith(overrides: Partial<AgentSessionStore>): AgentSessionStore {
 
 function compactBudget() {
   return {
-    contextWindowTokens: 6_000,
+    contextWindowTokens: 16_000,
     outputReserveTokens: 1_000,
     recentHistoryTokens: 1_000,
     summaryReserveTokens: 500,
@@ -245,7 +258,7 @@ describe('Agent context manager', () => {
     );
     const summaryInput = summarize.mock.calls[0]?.[0];
     expect(summaryInput?.maxOutputTokens)
-      .toBe(AGENT_CONVERSATION_SUMMARY_MAX_OUTPUT_TOKENS);
+      .toBe(compactBudget().outputReserveTokens);
     expect(summaryInput?.systemPrompt).toContain('没有任何 Tool');
     expect(summaryInput?.messages[0].content).not.toContain('super-secret-token');
     expect(summaryInput?.messages[0].content).toContain('[REDACTED]');
@@ -376,8 +389,10 @@ describe('Agent context manager', () => {
     const longInput = input(store);
     longInput.messages[0].content = 'a'.repeat(18_000);
     longInput.messages[1].content = 'b'.repeat(18_000);
+    const originalMessages = structuredClone(longInput.messages);
+    const fallback = createAgentContextProjection({ ...longInput, budget: compactBudget() });
 
-    await manager.prepare(longInput);
+    const projection = await manager.prepare(longInput);
 
     expect(summarize).toHaveBeenCalledTimes(2);
     expect(completeContextCheckpoint).not.toHaveBeenCalled();
@@ -386,6 +401,122 @@ describe('Agent context manager', () => {
       expect.any(String),
       'failed',
     );
+    expect(projection).toEqual(fallback);
+    expect(longInput.messages).toEqual(originalMessages);
+  });
+
+  it('splits non-ASCII history using the real request budget and preserves every source fragment', async () => {
+    const completeContextCheckpoint = vi.fn();
+    const summarize = vi.fn(async (_request: {
+      maxOutputTokens: number;
+      messages: Array<{ content: string; role: 'user' }>;
+      systemPrompt: string;
+    }) => { void _request; return SUMMARY; });
+    const store = storeWith({
+      beginContextCheckpoint: vi.fn(async () => startedCheckpoint()),
+      completeContextCheckpoint,
+      readContextCheckpointState: vi.fn(async () => ({ consecutiveFailureCount: 0 })),
+    });
+    const budget = { ...compactBudget(), contextWindowTokens: 16_384, effectiveContextWindowPercent: 95 };
+    const contextInput = { ...input(store), budget };
+    contextInput.messages[0].content = '中文'.repeat(12_000);
+    contextInput.messages[1].content = '历史回答';
+    const originalMessages = structuredClone(contextInput.messages);
+    const manager = createAgentContextManager({ summarize: summarize as never });
+
+    await manager.prepare(contextInput);
+
+    expect(summarize.mock.calls.length).toBeGreaterThan(1);
+    expect(summarize.mock.calls.length).toBeLessThanOrEqual(4);
+    const limit = getAgentProviderRequestTokenLimit(resolveAgentContextBudget(budget));
+    const transcript = summarize.mock.calls.flatMap(([request]) => {
+      expect(request.maxOutputTokens).toBe(budget.outputReserveTokens);
+      expect(estimateAgentProviderTurnTokens({ ...request, tools: [] })).toBeLessThanOrEqual(limit);
+      return JSON.parse(request.messages[0].content).transcript.messages as Array<{ content: string }>;
+    });
+    expect(transcript.map(item => item.content).join('')).toBe('中文'.repeat(12_000) + '历史回答');
+    expect(completeContextCheckpoint).toHaveBeenCalledOnce();
+    expect(contextInput.messages).toEqual(originalMessages);
+  });
+
+  it.each(['cjk', 'escaped', 'surrogate'] as const)('keeps planning and rolling summaries within four real batches for %s', async kind => {
+    const largestSummary = largeSummary(kind);
+    expect(() => parseAgentConversationSummary(largestSummary)).not.toThrow();
+    const beginContextCheckpoint = vi.fn(async (_request: { throughMessageId: string }) => {
+      void _request;
+      return startedCheckpoint();
+    });
+    const completeContextCheckpoint = vi.fn();
+    const summarize = vi.fn(async (_request: {
+      maxOutputTokens: number; messages: Array<{ content: string; role: 'user' }>; systemPrompt: string;
+    }) => { void _request; return largestSummary; });
+    const store = storeWith({ beginContextCheckpoint, completeContextCheckpoint,
+      readContextCheckpointState: vi.fn(async () => ({ consecutiveFailureCount: 0 })),
+    });
+    const budget = { ...compactBudget(), contextWindowTokens: 32_000, outputReserveTokens: 4_096, effectiveContextWindowPercent: 95 };
+    const contextInput = { ...input(store), budget };
+    contextInput.messages[0].content = '中'.repeat(24_000);
+    contextInput.messages[1].content = '文'.repeat(24_000);
+    const manager = createAgentContextManager({ summarize: summarize as never });
+
+    await manager.prepare(contextInput);
+
+    expect(beginContextCheckpoint).toHaveBeenCalledOnce();
+    expect(summarize.mock.calls.length).toBeGreaterThan(1);
+    expect(summarize.mock.calls.length).toBeLessThanOrEqual(4);
+    expect(completeContextCheckpoint).toHaveBeenCalledOnce();
+    const limit = getAgentProviderRequestTokenLimit(resolveAgentContextBudget(budget));
+    for (const [request] of summarize.mock.calls) {
+      expect(estimateAgentProviderTurnTokens({ ...request, tools: [] })).toBeLessThanOrEqual(limit);
+    }
+    expect(beginContextCheckpoint.mock.calls[0]?.[0]).toMatchObject({ throughMessageId: 'm2' });
+  });
+
+  it.each(['cjk', 'surrogate'] as const)('rejects the 13,857-token eight-fragment planning counterexample for %s', async kind => {
+    const summarize = vi.fn(async () => largeSummary(kind));
+    const beginContextCheckpoint = vi.fn();
+    const store = storeWith({ beginContextCheckpoint,
+      readContextCheckpointState: vi.fn(async () => ({ consecutiveFailureCount: 0 })),
+    });
+    expect(() => parseAgentConversationSummary(largeSummary(kind))).not.toThrow();
+    const budget = { ...compactBudget(), contextWindowTokens: 13_857 + 4_096, outputReserveTokens: 4_096 };
+    const contextInput = { ...input(store), budget };
+    contextInput.messages[0].content = '甲'.repeat(12_000);
+    contextInput.messages[1].content = '乙'.repeat(12_000);
+    const originalMessages = structuredClone(contextInput.messages);
+    const fallback = createAgentContextProjection(contextInput);
+    const manager = createAgentContextManager({ summarize: summarize as never });
+
+    expect(await manager.prepare(contextInput)).toEqual(fallback);
+
+    expect(beginContextCheckpoint).not.toHaveBeenCalled();
+    expect(summarize).not.toHaveBeenCalled();
+    expect(contextInput.messages).toEqual(originalMessages);
+  });
+
+  it('keeps bounded history without calling the model when a single fragment cannot fit', async () => {
+    const beginContextCheckpoint = vi.fn();
+    const summarize = vi.fn();
+    const store = storeWith({ beginContextCheckpoint,
+      readContextCheckpointState: vi.fn(async () => ({ consecutiveFailureCount: 0 })),
+    });
+    const budget = { ...compactBudget(), contextWindowTokens: 4_096, outputReserveTokens: 1_024,
+      recentHistoryTokens: 100, summaryReserveTokens: 100, toolLoopReserveTokens: 256, effectiveContextWindowPercent: 95 };
+    const contextInput = { ...input(store), budget, fixedInputTokens: 500 };
+    contextInput.messages[0].content = '文'.repeat(3_000);
+    contextInput.messages[1].content = '历史回答';
+    const originalMessages = structuredClone(contextInput.messages);
+    const fallback = createAgentContextProjection(contextInput);
+    expect(estimateAgentProviderTurnTokens({ messages: [{ content: '文'.repeat(3_000), role: 'user' }],
+      systemPrompt: buildAgentSummarySystemPrompt(), tools: [] }))
+      .toBeGreaterThan(getAgentProviderRequestTokenLimit(resolveAgentContextBudget(budget)));
+    const manager = createAgentContextManager({ summarize: summarize as never });
+
+    expect(await manager.prepare(contextInput)).toEqual(fallback);
+
+    expect(beginContextCheckpoint).not.toHaveBeenCalled();
+    expect(summarize).not.toHaveBeenCalled();
+    expect(contextInput.messages).toEqual(originalMessages);
   });
 
   it('falls back to bounded recent history and records a failed summary attempt', async () => {

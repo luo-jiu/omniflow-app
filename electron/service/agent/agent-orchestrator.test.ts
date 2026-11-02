@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   streamAgentProviderTurn: vi.fn(),
   streamAIServiceProfile: vi.fn(),
   createAgentLibraryAccessGuard: vi.fn(),
+  fetchAgentModels: vi.fn(),
 }));
 
 vi.mock('./agent-provider-client', () => ({
@@ -30,6 +31,7 @@ vi.mock('./agent-provider-client', () => ({
 vi.mock('electron', async (importOriginal) => ({
   ...await importOriginal<typeof import('electron')>(),
   app: { getPath: () => '/isolated/orchestrator-no-filesystem-access' },
+  net: { fetch: mocks.fetchAgentModels },
 }));
 vi.mock('../aiServiceClient', () => ({
   streamAIServiceProfile: mocks.streamAIServiceProfile,
@@ -54,6 +56,7 @@ vi.mock('./capabilities/agent-capability-runtime', () => ({
 }));
 
 import { createAgentOrchestrator } from './agent-orchestrator';
+import { createAgentModelCatalog } from './agent-model-catalog';
 import { aiServiceModelDiscoveryCache } from '../aiServiceModelDiscoveryCache';
 import { buildAgentProviderRequestBody } from './agent-provider-model';
 import { createAgentToolBroker } from './agent-tool-broker';
@@ -66,6 +69,7 @@ import { agentComputerRuntime } from './computer/agent-computer-service-runtime'
 import { agentFileAuthorityBroker } from './agent-file-authority-broker';
 import { getBuiltInAgentComputerTools } from './tools/computer-tools';
 import { AGENT_ACTIVE_CONTEXT_SUMMARY_PREFIX } from './agent-active-context';
+import { AGENT_ACTIVE_CONTEXT_SUMMARY_SYSTEM_PROMPT, buildAgentActiveContextSummaryPayload } from './agent-active-context-summary';
 import { AGENT_COMPLETION_CHECK_PROMPT } from './agent-completion-check';
 import type { AgentProviderMessage, AgentProviderToolCall } from './agent-provider-model';
 import {
@@ -73,6 +77,7 @@ import {
   estimateAgentProviderTurnTokens,
   estimateAgentTextTokens,
   getAgentHistoryTokenBudget,
+  getAgentProviderRequestTokenLimit,
   resolveAgentContextBudget,
 } from './agent-context-projection';
 import { buildAgentSystemPrompt } from './agent-prompt-assembler';
@@ -265,6 +270,7 @@ describe('Agent orchestrator', () => {
     mocks.streamAgentProviderTurn.mockReset();
     mocks.streamAIServiceProfile.mockReset();
     mocks.createAgentLibraryAccessGuard.mockReset();
+    mocks.fetchAgentModels.mockReset();
     store = await createSQLiteAgentSessionStore(':memory:');
   });
 
@@ -3759,6 +3765,8 @@ describe('Agent orchestrator', () => {
   });
 
   it('sends a 27.5KB Chinese Markdown Shell result complete through a gpt-5.6-sol proxy', async () => {
+    mocks.fetchAgentModels.mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ id: 'gpt-5.6-sol' }] })));
+    const catalog = createAgentModelCatalog();
     const buildSection = (marker: string) => {
       const lines = [`## ${marker}`];
       let index = 0;
@@ -3857,6 +3865,7 @@ describe('Agent orchestrator', () => {
       });
     const webContents = sender();
     const orchestrator = createAgentOrchestrator({
+      getModelMetadata: (connection, model) => catalog.get(connection, model),
       getRuntimeProfile: () => ({
         apiKey: 'test-key',
         baseUrl: 'https://proxy.example.com/openai/v1',
@@ -4178,6 +4187,7 @@ describe('Agent orchestrator', () => {
       expect(input.messages).toHaveLength(1);
       expect(input.messages[0].content).toContain('第一次读取完成');
       expect(input.tools).toBeUndefined();
+      expect(input.maxOutputTokens).toBe(1_000);
       return activeSummary;
     });
     mocks.streamAgentProviderTurn
@@ -4217,7 +4227,8 @@ describe('Agent orchestrator', () => {
     const webContents = sender();
     const orchestrator = createAgentOrchestrator({
       contextBudget: {
-        contextWindowTokens: providerRequestLimit + 1_000,
+        contextWindowTokens: Math.ceil(providerRequestLimit / 0.95) + 1_000,
+        effectiveContextWindowPercent: 95,
         outputReserveTokens: 1_000,
         recentHistoryTokens: 100,
         summaryReserveTokens: 1,
@@ -4256,6 +4267,58 @@ describe('Agent orchestrator', () => {
     const activities = (await store.getSession(started.sessionId, OWNER_SCOPE, 3))?.toolActivities;
     expect((activities?.[0].result?.data as { text?: string })?.text).toBe(firstResultText);
     expect(activities?.[1].result).toEqual(secondResult);
+  });
+
+  it('rejects an Active Context summary outside the effective calibrated input limit before calling the model', async () => {
+    const currentRequest = { ...request(), userPrompt: '读取两次测试输出' };
+    const firstCall = { id: 'escaped-output-1', input: { command: 'fixture --read' }, name: 'shell.run' };
+    const result: AgentToolResult = { ok: true, data: { providerOutput: '\\'.repeat(30_000), status: 'completed' } };
+    const shellTool: AgentTool = { name: 'shell.run', description: 'read a synthetic test output', risk: 'read',
+      inputSchema: { type: 'object', additionalProperties: false, required: ['command'], properties: { command: { type: 'string' } } },
+      execute: vi.fn(async () => result),
+    };
+    const registry = createAgentToolRegistry([shellTool]);
+    const snapshotSpy = vi.spyOn(agentToolRegistry, 'createSnapshot').mockReturnValue(registry.createSnapshot());
+    const projected = projectAgentToolResultForProvider(result, 40_000, { mode: 'shell' });
+    const candidateMessages: AgentProviderMessage[] = [
+      { role: 'assistant', content: '', toolCalls: [firstCall] },
+      { role: 'tool', content: projected.content, name: firstCall.name, toolCallId: firstCall.id },
+    ];
+    const payload = buildAgentActiveContextSummaryPayload({ userPrompt: currentRequest.userPrompt,
+      candidate: { startIndex: 1, endIndex: 2, messages: candidateMessages, toolCallIds: [firstCall.id] },
+    });
+    const summaryTokens = estimateAgentProviderTurnTokens({ systemPrompt: AGENT_ACTIVE_CONTEXT_SUMMARY_SYSTEM_PROMPT,
+      tools: [], messages: [{ role: 'user', content: payload }],
+    });
+    const budget = resolveAgentContextBudget({ contextWindowTokens: summaryTokens + 2_048,
+      outputReserveTokens: 1_000, effectiveContextWindowPercent: 95, toolLoopReserveTokens: 1,
+    });
+    const inputLimit = getAgentProviderRequestTokenLimit(budget);
+    expect(summaryTokens).toBeLessThanOrEqual(budget.contextWindowTokens - 2_048);
+    expect(summaryTokens).toBeGreaterThan(inputLimit);
+    mocks.streamAgentProviderTurn.mockResolvedValueOnce({ content: '', toolCalls: [firstCall] })
+      .mockImplementationOnce(async (_connection, providerInput) => {
+        expect(providerInput.messages.at(-1)?.content).toBe(projected.content);
+        expect(estimateAgentProviderTurnTokens(providerInput)).toBeLessThan(inputLimit);
+        return { content: '', toolCalls: [{ ...firstCall, id: 'escaped-output-2' }],
+          usage: { inputTokens: inputLimit, outputTokens: 1 } };
+      });
+    const webContents = sender();
+    const orchestrator = createAgentOrchestrator({ contextBudget: budget,
+      getRuntimeProfile: () => ({ apiKey: 'test-key', baseUrl: 'https://ai.example.com/v1', providerType: 'openai' }),
+      getSessionStore: async () => store, runSessionRegistry: createAIServiceRunSessionRegistry(),
+    });
+    try {
+      const started = await orchestrator.start(webContents as never, currentRequest);
+      await vi.waitFor(() => expect(webContents.send).toHaveBeenCalledWith('agent:chat:event', expect.objectContaining({
+        type: 'error', message: expect.stringContaining('语义压缩超过模型上下文'),
+      })));
+      expect(mocks.streamAIServiceProfile).not.toHaveBeenCalled();
+      expect(shellTool.execute).toHaveBeenCalledOnce();
+      const session = await store.getSession(started.sessionId, OWNER_SCOPE, 3);
+      expect(session?.toolActivities).toHaveLength(1);
+      expect(session?.toolActivities[0].result).toEqual(result);
+    } finally { snapshotSpy.mockRestore(); await orchestrator.shutdown(); }
   });
 
   it('returns an invalid plan to the provider without inventing execution facts', async () => {
@@ -7804,16 +7867,75 @@ describe('Agent orchestrator', () => {
     { contextWindowTokens: 900_000, outputReserveTokens: 16_000 },
     { contextWindowTokens: -1 },
   ])('automatically resolves the model budget despite legacy renderer overrides: %j', async (modelBudget) => {
+    const model = 'gpt-6.1-sol';
+    mocks.fetchAgentModels.mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ id: model }] })));
+    const catalog = createAgentModelCatalog();
     mocks.streamAgentProviderTurn.mockImplementationOnce(async (_connection, input, onDelta) => {
       expect(input.maxOutputTokens).toBe(16_000);
       onDelta('完成。');
       return { content: '完成。', toolCalls: [] };
     });
     const webContents = sender();
-    const legacyRequest = { ...request(), model: 'gpt-5.4', modelBudget };
-    const started = await createOrchestrator({ contextBudget: undefined }).start(webContents as never, legacyRequest);
+    const legacyRequest = { ...request(), model, modelBudget };
+    const started = await createOrchestrator({ contextBudget: undefined,
+      getModelMetadata: (connection, selectedModel) => catalog.get(connection, selectedModel),
+    }).start(webContents as never, legacyRequest);
     await waitForCompletedFinal(webContents, '完成。', started);
     expect(mocks.streamAgentProviderTurn).toHaveBeenCalledTimes(1);
+    expect(mocks.fetchAgentModels).toHaveBeenCalledTimes(1);
+    expect((await store.getSession(started.sessionId, OWNER_SCOPE, 3))?.runs[0].contextUsage)
+      .toMatchObject({ windowTokens: 272_000, windowSource: 'catalog', outputReserveTokens: 16_000 });
+  });
+
+  it.each(['gpt-6.1-sol', 'gpt-6.1-sol-2026-10-23', 'GPT-6.1-SOL'])(
+    'runs %s with the fallback budget when the current catalog has no exact snapshot match', async model => {
+      mocks.fetchAgentModels.mockResolvedValueOnce(new Response(JSON.stringify({
+        data: [{ id: model === 'gpt-6.1-sol' ? 'other-model' : model }],
+      })));
+      const catalog = createAgentModelCatalog();
+      mocks.streamAgentProviderTurn.mockImplementationOnce(async (_connection, input, onDelta) => {
+        expect(input.maxOutputTokens).toBe(4_096);
+        onDelta('默认预算完成。'); return { content: '默认预算完成。', toolCalls: [] };
+      });
+      const webContents = sender();
+      const started = await createOrchestrator({ contextBudget: undefined,
+        getModelMetadata: (connection, selectedModel) => catalog.get(connection, selectedModel),
+      }).start(webContents as never, { ...request(), model });
+      await waitForCompletedFinal(webContents, '默认预算完成。', started);
+      expect((await store.getSession(started.sessionId, OWNER_SCOPE, 3))?.runs[0].contextUsage)
+        .toMatchObject({ windowTokens: 128_000, windowSource: 'fallback', outputReserveTokens: 4_096 });
+    },
+  );
+
+  it('freezes the Run budget from an ID-only catalog even if the directory is refreshed during a tool continuation', async () => {
+    const model = 'gpt-6.1-sol';
+    mocks.fetchAgentModels.mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ id: model }] })))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [] })));
+    const catalog = createAgentModelCatalog();
+    const getModelMetadata = vi.fn(catalog.get);
+    mocks.streamAgentProviderTurn.mockImplementationOnce(async (connection, input) => {
+      expect(input.maxOutputTokens).toBe(16_000);
+      const now = vi.spyOn(Date, 'now').mockReturnValue(Date.now() + 300_001);
+      try { expect(await catalog.get(connection, model)).toBeUndefined(); }
+      finally { now.mockRestore(); }
+      return { content: '', toolCalls: [{ id: 'frozen-budget-list', name: 'file.list', input: {} }] };
+    }).mockImplementationOnce(async (_connection, input, onDelta) => {
+      expect(input.maxOutputTokens).toBe(16_000);
+      onDelta('预算保持。'); return { content: '预算保持。', toolCalls: [] };
+    });
+    const webContents = sender();
+    const started = await createOrchestrator({ contextBudget: undefined, getModelMetadata })
+      .start(webContents as never, { ...request(), model });
+    await waitForCompletedFinal(webContents, '预算保持。', started);
+    expect(getModelMetadata).toHaveBeenCalledTimes(1);
+    expect(mocks.fetchAgentModels).toHaveBeenCalledTimes(2);
+    const usage = (await store.getSession(started.sessionId, OWNER_SCOPE, 3))?.runs[0].contextUsage;
+    expect(usage).toMatchObject({ windowTokens: 272_000, windowSource: 'catalog', responseCount: 2, outputReserveTokens: 16_000 });
+    const snapshots = webContents.send.mock.calls.map(call => call[1])
+      .filter(event => event.type === 'run-updated' && event.run.contextUsage)
+      .map(event => event.run.contextUsage);
+    expect(snapshots.length).toBeGreaterThan(0);
+    expect(snapshots.every(snapshot => snapshot.windowTokens === 272_000 && snapshot.windowSource === 'catalog')).toBe(true);
   });
 
   it('supports a configured small context window when the complete request fits', async () => {

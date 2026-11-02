@@ -12,7 +12,7 @@
 
 共享目录固定 Codex SHA，过滤 Ultra，OmniFlow 仍只运行单 Agent。`gpt-6.1-sol` 支持到 Max，`gpt-5.5` 支持到 xhigh；`auto` 继续省略字段，不采用 Codex 默认强度。新增档位不扩大输出 token 限额。菜单可离线解析档位，main 在每次 Run 冻结实际适配结果；远端明确能力可继续收紧，不依赖 renderer 校验。Run 同时保存 `requestedReasoningEffort`（用户请求）与 `reasoningEffort`（实际生效），兼容旧记录缺少请求值。
 
-OpenAI 推理模型的窗口与并行调用默认值参考本地 Codex 源码 `4b0d9669cc`（2026-09-08）的 models-manager/models.json，包含 gpt-6-astra 等精确 ID。它们是客户端默认值，不证明相同名称的中转模型具有相同服务规格。
+OpenAI 推理模型的执行适配参考本地 Codex 源码与 OmniFlow 已实现协议，包含 gpt-6-astra 等精确 ID。窗口已独立迁到固定 `d6817454d76885e9d0e118bbf82e507aed6f715a` 的 `src/shared/ai-model-catalog.json`，要求 OpenAI 服务商和当前连接目录精确 ID 匹配；执行适配原有日期后缀规则仍保留。它们是客户端策略，不证明相同名称的中转模型具有相同服务规格。窗口来源、默认 / 最大值与回退见[模型预算](agent-model-context-and-reliability.md)。
 
 模型匹配同时检查 Provider 类型；只允许精确 ID 和明确日期后缀，不用宽泛前缀把自定义别名归类成官方模型。其他已列出的 OpenAI、Claude 和 DeepSeek 配置为应用维护的协议适配，不凭空补写未知上下文规格。
 

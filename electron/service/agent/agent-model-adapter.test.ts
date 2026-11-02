@@ -12,10 +12,19 @@ describe('trusted model adaptation', () => {
     tools: [{ name: 'file.read', description: 'read', inputSchema: { type: 'object', properties: {} } }] };
   it('matches exact provider/model identities and explicit dated variants, not arbitrary prefixes', () => {
     expect(resolveAgentModelAdapter(openai, 'gpt-6-astra').source).toBe('builtin');
+    expect(resolveAgentModelAdapter(openai, 'gpt-6.1-sol')).toMatchObject({
+      profileId: 'gpt-6.1-sol', source: 'builtin', reasoningParameter: 'reasoning_effort', parallelToolCalls: true,
+    });
+    expect(resolveAgentModelAdapter(openai, 'gpt-6.1-sol', { supportsParallelToolCalls: false }).parallelToolCalls).toBe(false);
     expect(resolveAgentModelAdapter(openai, 'gpt-5.5-2026-09-01').profileId).toBe('gpt-5.5');
     expect(resolveAgentModelAdapter(openai, 'gpt-5.5-custom').source).toBe('protocol-fallback');
     expect(resolveAgentModelAdapter({ providerType: 'local' }, 'gpt-5.5').source).toBe('protocol-fallback');
-    expect(resolveAgentModelContextBudget({ ...openai, model: 'gpt-6-astra' })).toMatchObject({ contextWindowTokens: 1_050_000, maxContextWindowTokens: 1_050_000, source: 'catalog' });
+    expect(resolveAgentModelContextBudget({ ...openai, model: 'gpt-6-astra',
+      metadata: parseAgentModelMetadata({ data: [{ id: 'gpt-6-astra' }] }).get('gpt-6-astra') }))
+      .toMatchObject({ contextWindowTokens: 272_000, maxContextWindowTokens: 872_000, source: 'catalog' });
+    expect(resolveAgentModelContextBudget({ ...openai, model: 'gpt-5.5-2026-09-01',
+      metadata: parseAgentModelMetadata({ data: [{ id: 'gpt-5.5-2026-09-01' }] }).get('gpt-5.5-2026-09-01') }).source)
+      .toBe('fallback');
   });
   it('uses provider wire formats and omits unsupported effort fields', () => {
     expect(buildAgentProviderRequestBody(openai, input)).toMatchObject({ reasoning_effort: 'high', parallel_tool_calls: true });

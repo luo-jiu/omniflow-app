@@ -1,6 +1,6 @@
 import type { AIServiceModelMetadata as AgentModelMetadata } from '../aiServiceModelDiscoveryCache';
 import type { AIServiceProviderType } from '@/shared/ai-service-provider-types';
-import { findAgentModelProfile } from './agent-model-profiles';
+import { findBundledAIModelCatalogEntry } from '../../../src/shared/ai-model-catalog';
 import {
   MAX_AGENT_CONTEXT_TOKENS, MAX_AGENT_OUTPUT_TOKENS, normalizeAgentModelBudgetOverride,
   type AgentModelBudget, type AgentModelBudgetOverride,
@@ -37,16 +37,18 @@ export function resolveAgentModelContextBudget(
     validEndpoint = ['http:', 'https:'].includes(url.protocol)
       && !url.username && !url.password && !url.search && !url.hash;
   } catch { /* Unknown endpoints cannot establish model identity. */ }
-  const catalog = validEndpoint ? findAgentModelProfile(input.providerType, input.model)?.context : undefined;
   const metadata = validEndpoint ? input.metadata : undefined;
+  const modelId = input.model.trim();
+  const catalog = metadata?.listedModelId === modelId
+    ? findBundledAIModelCatalogEntry(input.providerType, modelId) : undefined;
   const remoteWindow = positiveLimit(metadata?.contextWindowTokens)
     ?? positiveLimit(metadata?.maxContextWindowTokens);
   // A gateway may report its own request cap instead of the underlying model window.
   // For known first-party models, keep the bundled catalog as the authoritative identity.
-  const knownCatalogWindow = catalog?.[0];
+  const knownCatalogWindow = catalog?.context_window;
   const maxContextWindowTokens = knownCatalogWindow
-    ? Math.max(catalog?.[1] ?? knownCatalogWindow, positiveLimit(metadata?.maxContextWindowTokens) ?? 0)
-    : positiveLimit(metadata?.maxContextWindowTokens) ?? remoteWindow ?? catalog?.[1];
+    ? catalog?.max_context_window ?? knownCatalogWindow
+    : positiveLimit(metadata?.maxContextWindowTokens) ?? remoteWindow;
   const contextWindowTokens = Math.min(
     override.contextWindowTokens ?? knownCatalogWindow ?? remoteWindow ?? 128_000,
     maxContextWindowTokens ?? MAX_AGENT_CONTEXT_TOKENS,

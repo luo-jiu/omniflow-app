@@ -6,6 +6,7 @@ vi.mock('./aiServiceStore', () => ({ getActiveAIServiceRuntimeProfile: mocks.get
 
 import { listActiveAIServiceModels } from './aiServiceClient';
 import { agentModelCatalog } from './agent/agent-model-catalog';
+import { resolveAgentModelContextBudget } from './agent/agent-model-context';
 
 const model = 'gpt-6.1-sol';
 let connectionOrdinal = 0;
@@ -60,12 +61,14 @@ describe('AI settings and Agent model discovery integration', () => {
     expect(mocks.fetch).toHaveBeenCalledTimes(3);
   });
 
-  it('reuses the actual UI listing in the production Agent singleton with one GET', async () => {
+  it('reuses the actual UI listing in the production Agent singleton with one GET and the 272K budget', async () => {
     const connection = setupConnection();
     mocks.fetch.mockResolvedValueOnce(directory([model]));
     expect(await listActiveAIServiceModels()).toEqual([model]);
     const metadata = await agentModelCatalog.get(connection, model);
     expect(metadata).toEqual({ listedModelId: model });
+    expect(resolveAgentModelContextBudget({ ...connection, model, metadata }))
+      .toMatchObject({ contextWindowTokens: 272_000, source: 'catalog' });
     expect(mocks.fetch).toHaveBeenCalledTimes(1);
   });
 

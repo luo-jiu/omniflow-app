@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({ fetch: vi.fn() }));
 vi.mock('electron', () => ({ net: { fetch: mocks.fetch } }));
 import { createAgentModelCatalog } from './agent-model-catalog';
+import { resolveAgentModelContextBudget } from './agent-model-context';
 import { createAIServiceModelDiscoveryCache } from '../aiServiceModelDiscoveryCache';
 
 describe('Agent model catalog', () => {
@@ -38,6 +39,31 @@ describe('Agent model catalog', () => {
     now.mockReturnValue(1_030_001);
     expect(await catalog.get(connection, 'gpt-6.1-sol')).toEqual({ listedModelId: 'gpt-6.1-sol' });
     expect(mocks.fetch).toHaveBeenCalledTimes(2);
+  });
+  it('keeps an ID-only listing as exact model identity for the bundled window snapshot', async () => {
+    const model = 'gpt-6.1-sol';
+    mocks.fetch.mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ id: model }] })));
+    const metadata = await createAgentModelCatalog().get(connection, model);
+    expect(metadata).toEqual({ listedModelId: model });
+    expect(resolveAgentModelContextBudget({ ...connection, model, metadata }))
+      .toMatchObject({ contextWindowTokens: 272_000, maxContextWindowTokens: 872_000, source: 'catalog' });
+  });
+  it('retains a connection listing through a failed refresh and removes it after a successful refresh omits the model', async () => {
+    const model = 'gpt-6.1-sol';
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1_000_000);
+    mocks.fetch.mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ id: model }] })))
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ id: 'other-model' }] })));
+    const catalog = createAgentModelCatalog();
+    expect(await catalog.get(connection, model)).toEqual({ listedModelId: model });
+    now.mockReturnValue(1_300_001);
+    const retained = await catalog.get(connection, model);
+    expect(resolveAgentModelContextBudget({ ...connection, model, metadata: retained }).source).toBe('catalog');
+    now.mockReturnValue(1_330_002);
+    const removed = await catalog.get(connection, model);
+    expect(removed).toBeUndefined();
+    expect(resolveAgentModelContextBudget({ ...connection, model, metadata: removed }).source).toBe('fallback');
+    expect(mocks.fetch).toHaveBeenCalledTimes(3);
   });
   it.each([
     { apiKey: 'other-key' }, { baseUrl: 'https://other.example/v1' }, { providerType: 'local' as const },

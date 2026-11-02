@@ -51,7 +51,7 @@ export function createAgentContextUsageLedger(budget: AgentContextBudget, window
     };
   }
   return { observe, snapshot,
-    requestLimit: () => Math.max(1, inputLimit - correction),
+    requestLimit: (inputTokenLimit = inputLimit) => Math.max(1, inputTokenLimit - correction),
     compacted: () => { anchor = undefined; compactions += 1; },
   };
 }

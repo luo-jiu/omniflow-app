@@ -2,10 +2,12 @@ import React from 'react';
 import TestRenderer, { act } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Popover } from '@douyinfe/semi-ui';
-import type { AgentAppContext, AgentSessionSummary } from '@/shared/agent/agent.types';
+import type { AgentAppContext, AgentRunSnapshot, AgentSessionSummary } from '@/shared/agent/agent.types';
 import type { SelectedTreeNode } from '@/features/file-explorer';
 import { resolveTreeSelection } from '@/features/file-explorer/components/directory-tree/utils/tree-selection';
 import AgentWorkspace from './AgentWorkspace';
+import AgentContextUsage from './components/AgentContextUsage';
+import AIModelSettingsControl from '@/features/ai-services/components/AIModelSettingsControl';
 
 const mocks = vi.hoisted(() => ({
   organize: vi.fn(), updateSessionInfo: vi.fn(), stop: vi.fn(),
@@ -105,7 +107,7 @@ function session(id: string) {
     sessionId: id as string | null, sessionInfo: summary(id) as AgentSessionSummary | null,
     isBusy: true, isStreaming: true, isPreparing: false,
     draft: '', attachments: { entries: [], ready: true },
-    messages: [], runs: [], toolActivities: [],
+    messages: [], runs: [] as AgentRunSnapshot[], toolActivities: [],
     approvalBusyIds: new Set(), interactionBusyIds: new Set(), receiptBusyIds: new Set(),
     resumableRunId: null, error: null, warning: null,
     restore: vi.fn(), reset: vi.fn(), submit: vi.fn(), continueTask: vi.fn(), stop: mocks.stop,
@@ -187,6 +189,33 @@ describe('AgentWorkspace', () => {
     renderer = undefined;
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it('projects the latest matching Run to the indicator before the model control and clears it on transitions', async () => {
+    const run = { id: 'run', sessionId: currentSession.sessionId!, profileId: 'profile', model: 'model',
+      reasoningEffort: 'auto', requestedReasoningEffort: 'medium', createdAt: '2026-10-23T00:00:00Z' } as AgentRunSnapshot;
+    currentSession.runs = [run];
+    await renderWorkspace();
+    const indicator = () => renderer!.root.findByType(AgentContextUsage);
+    expect(indicator().props.run).toBe(run);
+    const footer = renderer!.root.findByProps({ className: 'agent-composer-footer' });
+    const controls = footer.findAll(node => node.type === AgentContextUsage || node.type === AIModelSettingsControl);
+    expect(controls.map(node => node.type)).toEqual([AgentContextUsage, AIModelSettingsControl]);
+    act(() => renderer!.root.findByType(AIModelSettingsControl).props.onModelChange('other'));
+    expect(indicator().props.run).toBeUndefined();
+    act(() => renderer!.root.findByType(AIModelSettingsControl).props.onModelChange('model'));
+    expect(indicator().props.run).toBe(run);
+    act(() => renderer!.root.findByType(AIModelSettingsControl).props.onReasoningEffortChange('high'));
+    expect(indicator().props.run).toBeUndefined();
+    act(() => renderer!.root.findByType(AIModelSettingsControl).props.onReasoningEffortChange('medium'));
+    expect(indicator().props.run).toBe(run);
+    currentSession.isPreparing = true;
+    act(() => renderer!.update(<AgentWorkspace {...workspaceProps} />));
+    expect(indicator().props.run).toBeUndefined();
+    currentSession.isPreparing = false;
+    currentSession.sessionId = null;
+    act(() => renderer!.update(<AgentWorkspace {...workspaceProps} />));
+    expect(indicator().props.run).toBeUndefined();
   });
 
   it('allows a running session to change permissions, preserving current Run controls while saving', async () => {

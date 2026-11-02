@@ -132,6 +132,7 @@ import {
   estimateAgentProviderMessagesTokens,
   estimateAgentProviderTurnTokens,
   estimateAgentTextTokens,
+  getAgentProviderRequestTokenLimit,
   resolveAgentContextBudget,
   type AgentContextBudget,
 } from './agent-context-projection';
@@ -3391,6 +3392,10 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
       const loadedSkillIds = new Set<string>();
       let activeSkillId: string | undefined;
       const seenToolCallIds = new Set<string>();
+      const summaryMaxOutputTokens = Math.min(AGENT_ACTIVE_CONTEXT_SUMMARY_MAX_OUTPUT_TOKENS, contextBudget.outputReserveTokens);
+      const getSummaryRequestLimit = () => usageLedger.requestLimit(getAgentProviderRequestTokenLimit({
+        ...contextBudget, outputReserveTokens: summaryMaxOutputTokens,
+      }));
       const compactActiveContext = async (fitInput: {
         estimateTokens: (candidateMessages: readonly AgentProviderMessage[]) => number;
         preserveLatestToolResult?: boolean;
@@ -3404,7 +3409,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
               messages: [{ content: payload, role: 'user' }],
               systemPrompt: AGENT_ACTIVE_CONTEXT_SUMMARY_SYSTEM_PROMPT,
               tools: [],
-            }) + AGENT_ACTIVE_CONTEXT_SUMMARY_MAX_OUTPUT_TOKENS <= contextBudget.contextWindowTokens;
+            }) <= getSummaryRequestLimit();
           } catch { return false; }
         },
         onCompacted: () => usageLedger.compacted(),
@@ -3420,8 +3425,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
             tools: [],
           });
           if (
-            summaryRequestTokens + AGENT_ACTIVE_CONTEXT_SUMMARY_MAX_OUTPUT_TOKENS
-            > contextBudget.contextWindowTokens
+            summaryRequestTokens > getSummaryRequestLimit()
           ) {
             throw new Error('Agent 当前 Run 语义压缩超过模型上下文，无法安全继续');
           }
@@ -3431,7 +3435,7 @@ export function createAgentOrchestrator(options: AgentOrchestratorOptions = {}) 
             updatedAt: now(),
           });
           const output = await retryBufferedAgentTransport(() => streamAIServiceProfile({
-            maxOutputTokens: AGENT_ACTIVE_CONTEXT_SUMMARY_MAX_OUTPUT_TOKENS,
+            maxOutputTokens: summaryMaxOutputTokens,
             messages: [{ content: payload, role: 'user' }],
             model: input.model,
             profileId: input.profileId,

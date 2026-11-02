@@ -225,7 +225,8 @@ export function buildAgentSystemPrompt(
   const catalogBudgetNotice = omittedSkillCount > 0
     ? `Skill 摘要目录因上下文预算省略了 ${Math.floor(omittedSkillCount)} 个条目；未展示的 Skill 在本 Run 中不可激活。`
     : '';
-  return `${AGENT_POLICY_PROMPT}${agentFileRoutingPrompt(capabilities)}${agentComputerRoutingPrompt(capabilities)}\n\n当前安全上下文：\n${JSON.stringify(promptContext(context, capabilities))}\n\n${skillCatalog}${catalogBudgetNotice ? `\n${catalogBudgetNotice}` : ''}\n\n${perceptionScope}${selectionPerceptionScope(context, perception)}${agentModelAdapterPrompt(modelAdapter)}`;
+  // Keep Run-stable instructions before changing context so they can form a reusable Provider prefix.
+  return `${AGENT_POLICY_PROMPT}${agentFileRoutingPrompt(capabilities)}${agentComputerRoutingPrompt(capabilities)}${agentModelAdapterPrompt(modelAdapter)}\n\n${skillCatalog}${catalogBudgetNotice ? `\n${catalogBudgetNotice}` : ''}\n\n当前安全上下文：\n${JSON.stringify(promptContext(context, capabilities))}\n\n${perceptionScope}${selectionPerceptionScope(context, perception)}`;
 }
 
 export function buildAgentFallbackSystemPrompt(
@@ -236,5 +237,5 @@ export function buildAgentFallbackSystemPrompt(
   const scope = perception
     ? '本轮只读感知快照将作为单独的低权限消息提供。'
     : '本轮没有可用的文件感知快照。';
-  return `${AGENT_POLICY_PROMPT}\n\n当前安全上下文：\n${JSON.stringify(promptContext(context, []))}\n\n${scope}${selectionPerceptionScope(context, perception)} 当前连接按无工具兼容模式运行，只能依据明确提供的数据回答，不能把未列出的内容当作已知。${modelAdapter?.toolCalling === false ? agentModelAdapterPrompt(modelAdapter) : ''}`;
+  return `${AGENT_POLICY_PROMPT}\n\n当前连接按无工具兼容模式运行，只能依据明确提供的数据回答，不能把未列出的内容当作已知。${modelAdapter?.toolCalling === false ? agentModelAdapterPrompt(modelAdapter) : ''}\n\n当前安全上下文：\n${JSON.stringify(promptContext(context, []))}\n\n${scope}${selectionPerceptionScope(context, perception)}`;
 }

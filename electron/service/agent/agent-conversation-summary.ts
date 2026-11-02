@@ -74,8 +74,12 @@ export function sanitizeAgentMemoryText(value: string): string {
 }
 
 function normalizeSummaryItem(value: string): string {
+  const wellFormed = Array.from(value, character => {
+    const point = character.codePointAt(0)!;
+    return point >= 0xd800 && point <= 0xdfff ? '\uFFFD' : character;
+  }).join('');
   return truncateCodePoints(
-    replaceControlCharacters(sanitizeAgentMemoryText(value), false)
+    replaceControlCharacters(sanitizeAgentMemoryText(wellFormed), false)
       .replace(/\s+/g, ' ')
       .trim(),
     AGENT_CONVERSATION_SUMMARY_LIMITS.itemCharacters,

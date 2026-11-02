@@ -53,4 +53,11 @@ describe('context usage ledger', () => {
     expect(snapshot.safetyInputTokens).toBe(snapshot.localInputTokens);
     expect(ledger.requestLimit()).toBe(limit);
   });
+  it('applies the full observed correction to an auxiliary request with its own output reserve', () => {
+    const ledger = createAgentContextUsageLedger(budget);
+    const local = estimateAgentProviderTurnTokens(request);
+    ledger.observe(request, { inputTokens: 40_000, outputTokens: 1 });
+    expect(ledger.requestLimit()).toBe(1);
+    expect(ledger.requestLimit(50_000)).toBe(50_000 - (40_000 - local));
+  });
 });

@@ -101,6 +101,17 @@ describe('Agent conversation summary', () => {
     expect(totalLength).toBeLessThanOrEqual(AGENT_CONVERSATION_SUMMARY_LIMITS.totalCharacters);
   });
 
+  it('repairs lone surrogates only in derived summaries and preserves valid Unicode and raw transcript', () => {
+    const content = '合法😀中文\ud800尾部\udfff';
+    const parsed = parseAgentConversationSummary(JSON.stringify(summary({ taskContext: [content] })));
+    expect(parsed.taskContext).toEqual(['合法😀中文\uFFFD尾部\uFFFD']);
+    expect(serializeAgentConversationSummary(parsed)).not.toMatch(/\\u[dD][89a-fA-F][0-9a-fA-F]{2}/u);
+    expect(prepareAgentSummaryTranscript([{ role: 'user', content }])[0].content).toBe(content);
+    const controls = Array.from({ length: 32 }, (_, point) => String.fromCharCode(point)).join('') + '\u007f';
+    const controlled = parseAgentConversationSummary(JSON.stringify(summary({ taskContext: [`前${controls}后`] })));
+    expect(controlled.taskContext).toEqual(['前 后']);
+  });
+
   it('redacts auth schemes, env keys, provider credentials, OAuth data, PEM and signed URLs', () => {
     const jwt = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signaturevalue';
     const privateKey = '-----BEGIN PRIVATE KEY-----\nprivate-key-body\n-----END PRIVATE KEY-----';
